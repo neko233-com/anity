@@ -7,19 +7,29 @@
 - Core Object Model: `Object`, `Component`, `Behaviour`, `MonoBehaviour`, `Transform`, `GameObject`
 - 数学: `Vector2`, `Vector3`, `Quaternion`, `Mathf`
 - 运行时: `Time`, `Application`, `Debug`, `Random`
+- 工具化运行时: `PlayerPrefs`, `PlayerPrefsException`
 - 输入: `Input`, `KeyCode`
 - 场景: `Scene`, `SceneManager`, `LoadSceneMode`
 - 资源: `Resources`
 - 渲染: `Camera`
 - 可序列化对象: `ScriptableObject`
+- 编辑器层: `UnityEditor.EditorWindow`, `UnityEditor.EditorApplication`, `UnityEditor.EditorGUILayout`, `UnityEditor.EditorGUI`, `UnityEditor.GUILayout`, `UnityEditor.Selection`, `UnityEditor.AssetDatabase`, `UnityEditor.EditorUtility`, `UnityEditor.SerializedObject`, `UnityEditor.SerializedProperty`, `UnityEditor.Handles`, `UnityEditor.MenuItem`
+- 编辑器 shell 扩展: `UnityEditor.EditorPrefs`, `UnityEditor.EditorSceneManager`, `UnityEditor.GenericMenu`, `UnityEditor.AssetImporter`, `UnityEditor.Undo`, `UnityEditor.MenuCommand`
+- 编辑器构建: `UnityEditor.EditorBuildSettings`
 
 ## 进行中 / 计划（第二波）
 
 - `Prefab`/`Asset` 生命周期 API
 - `Physics`, `Physics2D`, `Collider`, `Rigidbody`
 - `Material`, `Texture2D`, `Shader`, `RenderTexture`
-- `UI` 与 `GUILayout` 基础层
-- `JsonUtility`、`PlayerPrefs`、`PlayerPrefsException`
+- `UI` 与 `IMGUI/UIToolkit` 深度层
+- `JsonUtility`
+
+本轮新增：
+- `AssetDatabase` 增强到更多查找/重命名/移动/复制与依赖接口骨架
+- `Undo`/`GenericMenu`/`EditorWindow`/`EditorUtility` 的编辑器壳方法补齐
+- `UnityEngine` 增加 `Physics`、`Physics2D`、`Collider`、`Rigidbody`、`Material`、`Texture2D`、`RenderTexture` 等运行时骨架
+- 继续补齐 `PrefabUtility`、`AssetPostprocessor`、`JsonUtility`、`AnimationCurve/LayerMask/Matrix4x4/Color32/TextAsset` 常用骨架
 
 ## 约定
 
