@@ -1,0 +1,46 @@
+name: anity-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout all modules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Prepare environment
+        run: |
+          echo "OS: $RUNNER_OS"
+
+      - name: Lint scripts (placeholder)
+        run: |
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            echo "No Windows lint configured yet"
+          else
+            echo "No Unix lint configured yet"
+          fi
+        shell: bash
+
+      - name: Run module checks (placeholder)
+        run: |
+          echo "Use module-specific pipelines for hub/editor/lib-core"
+          for mod in anity-hub anity-editor anity-lib-core; do
+            if [ -d "modules/$mod" ]; then
+              echo "Checking $mod"
+              ls "modules/$mod"
+            fi
+          done
+        shell: bash
+

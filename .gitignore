@@ -1,0 +1,12 @@
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.user
+*.log
+dist/
+build/
+artifacts/
+modules/**/.idea/
+modules/**/.vscode/
+

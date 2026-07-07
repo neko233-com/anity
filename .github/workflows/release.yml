@@ -1,0 +1,31 @@
+name: anity-release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          echo "name=Anity Release $GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          echo "body=Automated release for cross-platform anity stack." >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.notes.outputs.name }}
+          body: ${{ steps.notes.outputs.body }}
+

@@ -1,0 +1,23 @@
+﻿# Scripts
+
+## Bootstrap
+
+- `create-anity-org-repos.ps1` / `create-anity-org-repos.sh`
+  - Create 4 GitHub repositories:
+    - `anity`
+    - `anity-hub`
+    - `anity-editor`
+    - `anity-lib-core`
+- `bootstrap-workspace.ps1` / `bootstrap-workspace.sh`
+  - Initialize current folder as root workspace repo.
+  - Add module submodules under `modules/`.
+
+## Execution notes
+
+- PowerShell:
+  - `Set-ExecutionPolicy -Scope Process Bypass`
+  - `.\scripts\bootstrap-workspace.ps1 -Owner your-org`
+- Bash:
+  - `chmod +x scripts/*.sh`
+  - `bash ./scripts/create-anity-org-repos.sh your-org private`
+
