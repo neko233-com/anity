@@ -4,3 +4,6 @@
 [submodule "modules/anity-lib-core"]
 	path = modules/anity-lib-core
 	url = https://github.com/neko233-com/anity-lib-core.git
+[submodule "modules/anity-editor"]
+	path = modules/anity-editor
+	url = https://github.com/neko233-com/anity-editor.git
