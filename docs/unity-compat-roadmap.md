@@ -1,6 +1,6 @@
 # UnityCompat Roadmap
 
-目标：让项目可运行于 Unity 风格 API 上下文，先兼容“编辑器可迁移 API 外观”，后补行为精度。
+目标：让项目可运行于 Unity Pro 风格 API 上下文，先兼容“编辑器可迁移 API 外观”，后补行为精度。
 
 ## 已实现（第一波）
 
@@ -19,7 +19,7 @@
 
 ## 进行中 / 计划（第二波）
 
-- `Prefab`/`Asset` 生命周期 API
+- `Prefab`/`Asset` 生命周期 API（含 BuildPipeline/BuildPlayerWindow/Unity.Profiling）
 - `Physics`, `Physics2D`, `Collider`, `Rigidbody`
 - `Material`, `Texture2D`, `Shader`, `RenderTexture`
 - `UI` 与 `IMGUI/UIToolkit` 深度层
