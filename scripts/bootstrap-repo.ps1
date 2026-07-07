@@ -16,9 +16,11 @@ if (Test-Path $repoDir) {
   return
 }
 
-$protocol = gh auth status --hostname github.com --json protocol --jq .protocol
+$protocol = gh config get git_protocol
+if (-not $protocol) {
+  $protocol = gh config get git_protocol
+}
 if (-not $protocol) { $protocol = "https" }
 
 $url = if ($protocol -eq "ssh") { "git@github.com:$Owner/$RepoName.git" } else { "https://github.com/$Owner/$RepoName.git" }
 git submodule add -b $Branch $url $repoDir
-
