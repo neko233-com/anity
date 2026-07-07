@@ -20,6 +20,7 @@
 ## 进行中 / 计划（第二波）
 
 - `Prefab`/`Asset` 生命周期 API（含 BuildPipeline/BuildPlayerWindow/Unity.Profiling）
+- 脚本编译链路：`UnityEditor.Compilation` `AssemblyBuilder`/`CompilationPipeline`
 - `Physics`, `Physics2D`, `Collider`, `Rigidbody`
 - `Material`, `Texture2D`, `Shader`, `RenderTexture`
 - `UI` 与 `IMGUI/UIToolkit` 深度层
