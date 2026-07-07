@@ -38,7 +38,16 @@
 - 为 `anity-hub` 添加 `.gitattributes` 和 `.editorconfig` 配置 git VCS
 - 所有变更已推送到远程仓库
 
+- 第五波完成：UI & Editor Deep Dive
+  - UnityEngine.UI: Canvas, RectTransform, Graphic, MaskableGraphic, Text, Image, Button, Selectable, CanvasGroup
+  - UIToolkit: VisualElement, Label, Button, TextField, ListView, ScrollView, Toggle, Slider, VisualTreeAsset, StyleSheet
+  - AssetDatabase: LoadAssetByGUID, FindAssets(Type), GetMainObjectAtGUID, GetSubObjectsAtGUID, IsOpenForEdit, GetAvailableExtensions
+  - EditorBuildSettings: EditorBuildSettingsScene, scenes, AddScene, RemoveScene, MoveScene, GetSceneByPath/GUID
+  - SerializedProperty: enumValueIndex, managedReferenceValue, Copy, Next, NextVisible, ClearArray, depth, displayName
+  - CompilationPipeline: CompilationResult, AssemblyDefinition, GetAssemblyNames, GetAllAssemblyDefinitions, RequestScriptCompilation
+  - AssemblyBuilder: compilationFinished event, References, DefineConstraints, OutputPath, PlatformArchitecture
+
 ### 下一次要做（优先）
-1. `UI` 侧：补齐 `UnityEngine.UI` 命名空间（`Button`, `Text`, `Image`, `Canvas`, `RectTransform`）以及 `UIToolkit` 核心 API。
-2. `Editor` 侧：补齐 `AssetDatabase` 深度 API（`LoadAssetByGUID`, `FindAssets` with `SearchFilter`）、`EditorBuildSettings` 场景管理、`SerializedProperty` 高级迭代。
-3. `Compilation` 侧：补齐 `CompilationPipeline` 完整 API、`AssemblyBuilder` 编译回调。
+1. `PrefabUtility`/`AssetPostprocessor` 深度：补齐 Prefab 实例化、Apply/Revert、Prefab 格式兼容、Asset 后处理器回调。
+2. `BuildPipeline` 增强：`BuildAssetBundles`、`BuildPlayer` 完整签名、`BuildReport` 深度字段。
+3. `UnityEditor` 扩展：`SettingsProvider`、`PackageManager.Client` 深度、`InternalEditorUtility` 补齐。
