@@ -21,3 +21,9 @@
   - `chmod +x scripts/*.sh`
   - `bash ./scripts/create-anity-org-repos.sh your-org private`
 
+## Cross-platform daily sync
+
+- PowerShell:
+  - `.\scripts\sync-modules.ps1`
+- Bash:
+  - `bash ./scripts/sync-modules.sh`

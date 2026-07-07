@@ -5,6 +5,7 @@ Anity is a Unity-inspired, cross-platform open game/editor platform split into t
 - `anity-hub`: desktop launcher, account/login shell, project workspace management, and update bootstrap.
 - `anity-editor`: editor core application (project/session/assets graph, play loop orchestration, extension host).
 - `anity-lib-core`: shared runtime/runtime-less shared libs, serialization, package manifests, utility services.
+- `UnityCompat`: Unity-like compatibility layer located in `anity-lib-core` for API-parity migration.
 
 This repo is a **management repository** that coordinates versions, scripts, docs, and CI for the three code repositories.
 
@@ -46,6 +47,9 @@ bash ./scripts/bootstrap-workspace.sh YOUR_ORG_OR_USER
 - Release workflow scaffold with version tag + changelog hook points
 - Repo strategy, dependency policy, and versioning rules docs
 - GitHub project conventions for 3-repo architecture
+- Optional Unity compatibility shim in `anity-lib-core` (`UnityCompat`) for shared API migration
+
+Note: "Unity API一样" is achieved via staged compatibility, not vendor-equivalent source.
 
 ## Branch model
 
@@ -62,4 +66,3 @@ Add these repositories as submodules under `modules/`:
 - `modules/anity-lib-core`
 
 Then keep all three at compatible tags / commit pins.
-
