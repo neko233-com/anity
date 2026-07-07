@@ -44,6 +44,20 @@
 - PackageManager: `Request.completed` event, `GetEnumerator()`, `EmbedRequest`, `UpdateRequest`
 - BuildPipeline: Expanded enums with PS5, Xbox, Nintendo Switch, additional BuildOptions
 
+## 已实现（第四波 - Runtime & Physics Deep Dive）
+
+- Physics: BoxCast, CapsuleCast, OverlapSphereNonAlloc, OverlapBoxNonAlloc, ComputePenetration, ClosestPoint, SyncTransforms
+- Physics2D: BoxCast, CapsuleCast, OverlapCircleNonAlloc, OverlapPointNonAlloc, GetRayIntersection
+- LayerMask: NameToLayer, LayerToName, GetMask
+- Matrix4x4: inverse, operator *, Perspective, Transpose, Determinant, zero
+- AnimationCurve: AddKey, MoveKey, RemoveKey, SmoothTangents, SetKeys
+- Texture2D: TextureFormat enum, LoadImage, EncodeToPNG, EncodeToJPG, GetPixels32, SetPixels32
+- Material: SetVector/GetVector, SetInt/GetInt, SetMatrix/GetMatrix, EnableKeyword/DisableKeyword, IsKeywordEnabled
+- Collider Subtypes: BoxCollider, SphereCollider, CapsuleCollider, MeshCollider
+- Color32: implicit cast FROM Color, Lerp, LerpUnclamped
+- TextAsset: bytes property
+- RenderTexture: RenderTextureFormat enum, active property
+
 ## 约定
 
 - 所有 shim 文件仅作为兼容 API 外壳，优先保证签名可迁移。
