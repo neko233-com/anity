@@ -44,3 +44,7 @@ jobs:
           done
         shell: bash
 
+      - name: UnityCompat migration compatibility audit (best effort)
+        shell: bash
+        run: |
+          bash ./scripts/unity-compat-audit.sh modules 0

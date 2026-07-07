@@ -27,3 +27,10 @@
   - `.\scripts\sync-modules.ps1`
 - Bash:
   - `bash ./scripts/sync-modules.sh`
+
+## Unity API migration audit
+
+- PowerShell:
+  - `.\scripts\unity-compat-audit.ps1 -SourceRoot "." -FailOnUnsupported`
+- Bash:
+  - `bash ./scripts/unity-compat-audit.sh "."`
