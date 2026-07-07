@@ -34,6 +34,16 @@
 - 继续补齐 `PrefabUtility`、`AssetPostprocessor`、`JsonUtility`、`AnimationCurve/LayerMask/Matrix4x4/Color32/TextAsset` 常用骨架
 - 新增 `PlayerSettings`、`SettingsProvider`、`PackageManager`、`UnityEditorInternal.InternalEditorUtility` 兼容层
 
+## 已实现（第三波 - Unity Pro 2022 Full Compat）
+
+- Build Callbacks: `IPreprocessBuildWithReport`, `IPostprocessBuildWithReport`, `IProcessSceneWithReport`, `IOrderedCallback`
+- BuildReporting: `BuildFile`, `BuildStepMessage`, expanded `BuildSummary` with TimeSpan and buildGuid
+- SceneView: 7+ `LookAt` overloads, `orthographic` property, `duringSceneGui` event
+- Handles: `DrawArc`, `DrawCone`, `DrawDottedLine`, `Disc`, `RadiusHandle`, and 15+ new methods
+- PlayerSettings: `Windows` nested class, `StandaloneBuildSubtarget`, per-platform icons
+- PackageManager: `Request.completed` event, `GetEnumerator()`, `EmbedRequest`, `UpdateRequest`
+- BuildPipeline: Expanded enums with PS5, Xbox, Nintendo Switch, additional BuildOptions
+
 ## 约定
 
 - 所有 shim 文件仅作为兼容 API 外壳，优先保证签名可迁移。
