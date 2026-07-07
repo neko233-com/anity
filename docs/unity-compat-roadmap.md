@@ -25,12 +25,14 @@
 - `Material`, `Texture2D`, `Shader`, `RenderTexture`
 - `UI` 与 `IMGUI/UIToolkit` 深度层
 - `JsonUtility`
+- `PackageManager`/`PlayerSettings`/`SettingsProvider`/`InternalEditorUtility`
 
 本轮新增：
 - `AssetDatabase` 增强到更多查找/重命名/移动/复制与依赖接口骨架
 - `Undo`/`GenericMenu`/`EditorWindow`/`EditorUtility` 的编辑器壳方法补齐
 - `UnityEngine` 增加 `Physics`、`Physics2D`、`Collider`、`Rigidbody`、`Material`、`Texture2D`、`RenderTexture` 等运行时骨架
 - 继续补齐 `PrefabUtility`、`AssetPostprocessor`、`JsonUtility`、`AnimationCurve/LayerMask/Matrix4x4/Color32/TextAsset` 常用骨架
+- 新增 `PlayerSettings`、`SettingsProvider`、`PackageManager`、`UnityEditorInternal.InternalEditorUtility` 兼容层
 
 ## 约定
 
