@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -7,13 +8,19 @@ namespace UnityEngine;
 public static class Resources
 {
   private static readonly Dictionary<string, object> _resources = new(StringComparer.Ordinal);
+  private static readonly List<ResourceRequest> _loadingRequests = new();
 
   public static void RegisterAsset(string key, object value)
   {
     _resources[key] = value;
   }
 
-  public static T? Load<T>(string path) where T : class
+  public static void RegisterAsset<T>(string path, T asset) where T : Object
+  {
+    _resources[path] = asset;
+  }
+
+  public static T? Load<T>(string path) where T : Object
   {
     return Load(path, typeof(T)) as T;
   }
@@ -43,7 +50,7 @@ public static class Resources
     return type.IsAssignableFrom(value.GetType()) ? value as Object : null;
   }
 
-  public static T[] LoadAll<T>(string path) where T : class
+  public static T[] LoadAll<T>(string path) where T : Object
   {
     var prefix = path?.Trim('/') ?? string.Empty;
 
@@ -66,7 +73,7 @@ public static class Resources
       .ToArray();
   }
 
-  public static T? GetBuiltinResource<T>(string path) where T : class
+  public static T? GetBuiltinResource<T>(string path) where T : Object
   {
     return Load<T>(path);
   }
@@ -84,12 +91,14 @@ public static class Resources
       .ToArray();
   }
 
-  public static T[] FindObjectsOfTypeAll<T>() where T : class
+  public static T[] FindObjectsOfTypeAll<T>() where T : Object
   {
     return _resources.Values.OfType<T>().ToArray();
   }
 
-  public static void UnloadUnusedAssets() {}
+  public static void UnloadUnusedAssets()
+  {
+  }
 
   public static void UnloadAsset(Object? asset)
   {
@@ -109,10 +118,37 @@ public static class Resources
     }
   }
 
+  public static ResourceRequest LoadAsync<T>(string path) where T : Object
+  {
+    var request = new ResourceRequest();
+    var asset = Load<T>(path);
+    request.asset = asset;
+    request.isDone = true;
+    return request;
+  }
+
+  public static ResourceRequest LoadAsync(string path, Type type)
+  {
+    var request = new ResourceRequest();
+    var asset = Load(path, type);
+    request.asset = asset;
+    request.isDone = true;
+    return request;
+  }
+
+  public static void UnloadUnusedAssetsAsync()
+  {
+  }
+
   public static void Clear()
   {
     _resources.Clear();
   }
 
   public static IReadOnlyDictionary<string, object> AllLoaded => _resources;
+}
+
+public class ResourceRequest : AsyncOperation
+{
+  public Object? asset { get; set; }
 }

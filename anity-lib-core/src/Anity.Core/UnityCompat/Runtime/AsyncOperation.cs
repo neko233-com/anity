@@ -4,8 +4,8 @@ namespace UnityEngine;
 
 public class AsyncOperation
 {
-  public bool isDone { get; private set; } = true;
-  public float progress { get; private set; } = 1f;
+  public bool isDone { get; internal set; } = true;
+  public float progress { get; internal set; } = 1f;
   public bool allowSceneActivation { get; set; } = true;
   public event Action<AsyncOperation>? completed;
 
