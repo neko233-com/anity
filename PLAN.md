@@ -51,3 +51,83 @@
 1. `PrefabUtility`/`AssetPostprocessor` 深度：补齐 Prefab 实例化、Apply/Revert、Prefab 格式兼容、Asset 后处理器回调。
 2. `BuildPipeline` 增强：`BuildAssetBundles`、`BuildPlayer` 完整签名、`BuildReport` 深度字段。
 3. `UnityEditor` 扩展：`SettingsProvider`、`PackageManager.Client` 深度、`InternalEditorUtility` 补齐。
+
+## 2026-07-08（本次）
+
+### 已完成
+- **目录结构平铺**：将 `modules/anity-hub`、`modules/anity-editor`、`modules/anity-lib-core` 移至根目录，删除空的 `modules/` 目录
+- **新增 `anity-webgl` 模块**：WebGL 平台支持
+  - `WebGLRuntime`：WebGL 环境检测、初始化
+  - `WebGLAudio`：音频支持（需用户交互）
+  - `WebGLInput`：输入支持（触摸/鼠标/键盘/手柄）
+  - `WebGLStorage`：IndexedDB 持久化存储
+  - `WebGLUI`：Canvas 缩放、UI 事件处理
+  - `WebGLTextMeshPro`：TMP WebGL 支持
+  - `WebGLAssetBundle`：AssetBundle URL 加载
+  - `WebGLNetworking`：UnityWebRequest/WebSocket/HTTP 支持
+  - `WebGLVideo`：视频播放支持
+- **更新 `.gitmodules`**：4 个子模块平铺在根目录
+- **更新所有 `.csproj` 引用**：路径从 `../anity-lib-core` 改为 `../../anity-lib-core`
+- **更新 `README.md`**：反映新的 4 模块平铺结构
+- **增强 PrefabUtility**：
+  - `InstantiatePrefab` 多重载支持（parent、position、rotation）
+  - `ApplyPrefabInstance`/`RevertPrefabInstance` 实现
+  - `FindPrefabInstanceRoot`/`IsPropertyOverriddenByPrefabInstance` 方法
+  - `RecordPrefabInstancePropertyModifications` 方法
+- **增强 AssetPostprocessor**：
+  - `OnPostprocessTexture`/`OnPostprocessModel`/`OnPostprocessAnimation` 方法
+  - `OnPostprocessAudio`/`OnPostprocessHumanoid`/`OnPostprocessSpeedTree` 方法
+  - `OnPostprocessSprite`/`OnPostprocessMaterial`/`OnPostprocessGameObjectWithUserProperties` 方法
+  - `OnPostprocessRenderTexture`/`OnPostprocessCubemap`/`OnPostprocessFont` 方法
+  - `OnPostprocessLightmap`/`OnPostprocessMesh`/`OnPostprocessAvatar` 方法
+  - `OnPostprocessShader` 方法
+- **增强 BuildPipeline**：
+  - `GetUsedAssets`/`GetDirectDependencies`/`GetAllDependencies` 方法
+  - `IsBuildTargetSupported`/`IsSceneInBuildSettings`/`GetBuildTargetGroup` 方法
+  - 扩展 `BuildOptions`/`BuildAssetBundleOptions` 枚举
+  - 新增 `BuildPlayerOptions` 更多字段
+- **新增 Unity 运行时类型**：
+  - `AnimationClip`/`AnimationEvent`/`AnimatorStateInfo`/`AnimatorClipInfo`
+  - `AudioClip`/`ShaderCompilerPlatform`
+  - `AvatarMask`/`HumanBodyBones`
+  - `Cubemap`/`CubemapFace`
+  - `LightmapData`/`LightmapSettings`/`LightmapParameters`/`AmbientMode`
+  - `Mesh`/`BoneWeight`
+  - `Avatar`/`RawAvatar`/`HumanBone`/`SkeletonBone`/`HumanLimit`/`HumanDescription`
+- 升级所有项目到 .NET 10.0（net10.0）
+- 修复所有 .NET 10 编译错误：
+  - `Object` 歧义：添加 `GlobalUsings.cs` 全局别名 `global using Object = UnityEngine.Object`
+  - `Vector3.Cross`/`Dot` 缺失：补充静态方法
+  - `BuildSummary.totalTime` 类型：`long` → `TimeSpan`
+  - `PrefabUtility.InstantiatePrefab` 重复签名：移除冗余重载
+  - `Undo` 类名冲突：重命名方法为 `PerformUndoAction`
+  - `LoadSceneParameters` readonly struct：字段添加 `readonly`
+  - `EditorWindow._windowFactories` 类型修正：`Dictionary<string, EditorWindow>` → `Dictionary<string, Func<EditorWindow>>`
+  - `RectTransform.anchoredPosition3D` 类型转换：`Vector2` ↔ `Vector3` 显式转换
+  - `Physics` 重载签名：补充缺失的 `Raycast(origin, direction, out hitInfo, ...)` 重载
+  - `AssetDatabase.FindAssets` 歧义：显式转换为 `string[]?`
+  - `VisualElement.Q<T>` 方法：移除 `(T)` 强制转换，改用 `Query<T>().FirstOrDefault()`
+  - `VisualElement` UIElements 类型：补充 `IStyle`、`Style`、`ITransform`、`UIElementsTransform` 等
+- 新增 IL2CPP/AOT 支持：
+  - `[Preserve]`/`[Il2CppSetOption]`/`[AlwaysLinkAssembly]` 属性定义
+  - `[assembly: Preserve]` 全程序集标记
+- 新增 Roslyn Analyzer 项目 `Anity.Core.Analyzers`：
+  - `AotCompatibilityAnalyzer`（ANITY_AOT001）：检测反射 Emit、Activator.CreateInstance 等 AOT 不安全 API
+  - `UnityApiCompatibilityAnalyzer`（ANITY_API001/API002）：检测 Unity 命名空间类型兼容性、IL2CPP 安全性
+  - 构建成功并生成 NuGet 包
+- 新增 `HotUpdateContext`（AssemblyLoadContext 热更运行时）：
+  - `LoadAssembly` / `LoadAssemblyFromFile`：从字节或文件加载热更程序集
+  - `Unload` / `ReloadAssembly`：卸载与重载
+  - `CreateInstance`：从热更程序集创建类型实例
+  - 基于 `AssemblyLoadContext(isCollectible: true)` 实现
+- 新增 `Il2CppRuntime` 平台检测：
+  - `IsIl2Cpp` / `IsIos` / `IsAndroid` / `IsWebGL` / `Platform` 属性
+  - `Initialize()` 初始化方法
+- 新增 `PlatformConfig` 平台构建配置：
+  - 支持 iOS / Android / WebGL / Desktop 各平台默认配置
+  - IL2CPP 代码生成、GC、Strip、Metadata 等细粒度选项
+
+### 下一次要做（优先）
+1. `PrefabUtility`/`AssetPostprocessor` 深度：补齐 Prefab 实例化、Apply/Revert、Prefab 格式兼容、Asset 后处理器回调。
+2. `BuildPipeline` 增强：`BuildAssetBundles`、`BuildPlayer` 完整签名、`BuildReport` 深度字段。
+3. `UnityEditor` 扩展：`SettingsProvider`、`PackageManager.Client` 深度、`InternalEditorUtility` 补齐。

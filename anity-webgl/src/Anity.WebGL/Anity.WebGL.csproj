@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('../../../anity-lib-core/src/Anity.Core/Anity.Core.csproj')">
+    <ProjectReference Include="../../../anity-lib-core/src/Anity.Core/Anity.Core.csproj" />
+  </ItemGroup>
+</Project>

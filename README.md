@@ -1,22 +1,23 @@
 # anity
 
-Anity is a Unity-inspired, cross-platform open game/editor platform split into three functional workspaces:
+Anity is a Unity-inspired, cross-platform open game/editor platform split into four functional workspaces:
 
 - `anity-hub`: desktop launcher, account/login shell, project workspace management, and update bootstrap.
 - `anity-editor`: editor core application (project/session/assets graph, play loop orchestration, extension host).
 - `anity-lib-core`: shared runtime/runtime-less shared libs, serialization, package manifests, utility services.
-- `UnityCompat`: Unity-like compatibility layer located in `anity-lib-core` for API-parity migration.
-
-This repo is a **management repository** that coordinates versions, scripts, docs, and CI for the three code repositories.
+- `anity-webgl`: WebGL platform support (Unity WebGL compatibility layer).
 
 ## Repository Layout
 
-- `docs/` architecture and ops documents
-- `scripts/` bootstrap/bootstrap CI scripts
-- `.github/workflows/` cross-platform pipeline
-- `modules/` local mount point for checked-out sub-repositories
+- `anity-hub/` - desktop launcher and project management
+- `anity-editor/` - editor core application
+- `anity-lib-core/` - shared runtime and Unity API compatibility layer
+- `anity-webgl/` - WebGL platform support
+- `docs/` - architecture and ops documents
+- `scripts/` - bootstrap and CI scripts
+- `.github/workflows/` - cross-platform pipeline
 
-> Root repo is not the editor source itself. The real runtime code should live in `anity-hub`, `anity-editor`, and `anity-lib-core`.
+> All modules are at the root level for easy access and maintenance.
 
 ## Quick start (create GitHub repos + workspace)
 
@@ -33,7 +34,7 @@ gh auth status
 .\scripts\bootstrap-workspace.ps1 -Owner "YOUR_ORG_OR_USER"
 ```
 
-### 2) Run bootstrap script (bash/macOS/Linux)
+### 3) Run bootstrap script (bash/macOS/Linux)
 
 ```bash
 bash ./scripts/create-anity-org-repos.sh YOUR_ORG_OR_USER private
@@ -46,8 +47,9 @@ bash ./scripts/bootstrap-workspace.sh YOUR_ORG_OR_USER
 - Cross-platform CI (`ubuntu`, `windows`, `macos`)
 - Release workflow scaffold with version tag + changelog hook points
 - Repo strategy, dependency policy, and versioning rules docs
-- GitHub project conventions for 3-repo architecture
-- Optional Unity compatibility shim in `anity-lib-core` (`UnityCompat`) for shared API migration
+- GitHub project conventions for 4-repo architecture
+- Unity compatibility shim in `anity-lib-core` (`UnityCompat`) for API-parity migration
+- WebGL platform support in `anity-webgl`
 
 Note: "Unity API一样" is achieved via staged compatibility, not vendor-equivalent source.
 
@@ -59,10 +61,11 @@ Note: "Unity API一样" is achieved via staged compatibility, not vendor-equival
 
 ## Submodule map
 
-Add these repositories as submodules under `modules/`:
+Add these repositories as submodules:
 
-- `modules/anity-hub`
-- `modules/anity-editor`
-- `modules/anity-lib-core`
+- `anity-hub`
+- `anity-editor`
+- `anity-lib-core`
+- `anity-webgl`
 
-Then keep all three at compatible tags / commit pins.
+Then keep all four at compatible tags / commit pins.

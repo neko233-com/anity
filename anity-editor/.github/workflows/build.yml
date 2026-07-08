@@ -1,0 +1,23 @@
+name: anity-editor-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore src/Anity.Editor.Host/Anity.Editor.Host.csproj
+      - run: dotnet build src/Anity.Editor.Host/Anity.Editor.Host.csproj --no-restore

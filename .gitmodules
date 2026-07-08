@@ -1,9 +1,12 @@
-[submodule "modules/anity-hub"]
-	path = modules/anity-hub
+[submodule "anity-hub"]
+	path = anity-hub
 	url = https://github.com/neko233-com/anity-hub.git
-[submodule "modules/anity-lib-core"]
-	path = modules/anity-lib-core
+[submodule "anity-lib-core"]
+	path = anity-lib-core
 	url = https://github.com/neko233-com/anity-lib-core.git
-[submodule "modules/anity-editor"]
-	path = modules/anity-editor
+[submodule "anity-editor"]
+	path = anity-editor
 	url = https://github.com/neko233-com/anity-editor.git
+[submodule "anity-webgl"]
+	path = anity-webgl
+	url = https://github.com/neko233-com/anity-webgl.git

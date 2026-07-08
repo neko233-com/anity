@@ -1,0 +1,36 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# C# sources
+*.cs text diff=csharp
+*.csx text diff=csharp
+
+# Config files
+*.json text
+*.xml text
+*.config text
+*.props text
+*.targets text
+
+# Scripts
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.dll binary
+*.exe binary
+*.pdb binary
+*.cache binary
+*.nupkg binary
+
+# Unity specific (if any)
+*.unity merge=unityyamlmerge
+*.prefab merge=unityyamlmerge
+*.asset merge=unityyamlmerge
+*.meta merge=unityyamlmerge linguist-generated=true
+
+# Documentation
+*.md text diff=markdown
+*.txt text

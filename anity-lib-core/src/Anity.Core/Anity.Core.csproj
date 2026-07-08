@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>Anity.Core</PackageId>
+    <Authors>Anity Team</Authors>
+    <Description>Shared contracts and runtime primitives for Anity.</Description>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+</Project>
