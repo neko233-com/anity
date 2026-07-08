@@ -34,7 +34,7 @@ public class Avatar : Object
 public struct RawAvatar
 {
   public string name { get; set; }
-  public Transform skeleton { get; set; }
+  public Transform rootBone { get; set; }
   public HumanBone[] human { get; set; }
   public SkeletonBone[] skeleton { get; set; }
   public float humanScale { get; set; }

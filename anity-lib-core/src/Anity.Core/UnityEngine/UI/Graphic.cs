@@ -351,14 +351,6 @@ public enum BlockingObjects
   All = 3
 }
 
-public class CanvasGroup : Behaviour
-{
-  public float alpha { get; set; } = 1f;
-  public bool interactable { get; set; } = true;
-  public bool blocksRaycasts { get; set; } = true;
-  public bool ignoreParentGroups { get; set; }
-}
-
 public struct RaycastResult
 {
   public GameObject? gameObject;

@@ -82,7 +82,7 @@ public static class PrefabUtility
       return null;
     }
 
-    var clone = UnityEngine.Object.Instantiate(original);
+    var clone = (GameObject)UnityEngine.Object.Instantiate(original);
     clone.name = original.name;
     return clone;
   }
@@ -94,7 +94,7 @@ public static class PrefabUtility
       return new GameObject("PrefabInstance");
     }
 
-    var clone = UnityEngine.Object.Instantiate(original);
+    var clone = (GameObject)UnityEngine.Object.Instantiate(original);
     clone.name = original.name;
 
     if (parent is not null)
@@ -112,7 +112,7 @@ public static class PrefabUtility
       return new GameObject("PrefabInstance");
     }
 
-    var clone = UnityEngine.Object.Instantiate(original);
+    var clone = (GameObject)UnityEngine.Object.Instantiate(original);
     clone.name = original.name;
 
     if (parent is not null)
@@ -130,7 +130,7 @@ public static class PrefabUtility
       return new GameObject("PrefabInstance");
     }
 
-    var clone = UnityEngine.Object.Instantiate(original);
+    var clone = (GameObject)UnityEngine.Object.Instantiate(original);
     clone.name = original.name;
 
     if (parent is not null)
@@ -148,7 +148,11 @@ public static class PrefabUtility
       return new GameObject("PrefabInstance");
     }
 
-    var clone = UnityEngine.Object.Instantiate(original, position, rotation);
+    var clone = UnityEngine.Object.Instantiate(original, position, rotation) as GameObject;
+    if (clone is null)
+    {
+      return new GameObject("PrefabInstance");
+    }
     clone.name = original.name;
     return clone;
   }
@@ -160,7 +164,11 @@ public static class PrefabUtility
       return new GameObject("PrefabInstance");
     }
 
-    var clone = UnityEngine.Object.Instantiate(original, position, rotation);
+    var clone = UnityEngine.Object.Instantiate(original, position, rotation) as GameObject;
+    if (clone is null)
+    {
+      return new GameObject("PrefabInstance");
+    }
     clone.name = original.name;
 
     if (parent is not null)

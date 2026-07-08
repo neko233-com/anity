@@ -361,23 +361,6 @@ public enum SelectionState
   Disabled
 }
 
-public enum Transition
-{
-  None,
-  ColorTint,
-  SpriteSwap,
-  Animation
-}
-
-public enum NavigationMode
-{
-  None,
-  Horizontal,
-  Vertical,
-  Automatic,
-  Explicit
-}
-
 public struct Navigation
 {
   public NavigationMode mode;
@@ -387,6 +370,16 @@ public struct Navigation
   public Selectable? selectOnRight;
 
   public static Navigation defaultNavigation => new() { mode = NavigationMode.Automatic };
+
+  public static bool operator !=(Navigation a, Navigation b)
+  {
+    return !a.Equals(b);
+  }
+
+  public static bool operator ==(Navigation a, Navigation b)
+  {
+    return a.Equals(b);
+  }
 }
 
 public struct ColorBlock

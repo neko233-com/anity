@@ -43,7 +43,7 @@ public static class Il2CppRuntime
   /// <summary>
   /// Gets whether the current platform is Android.
   /// </summary>
-  public static bool IsAndroid => RuntimeInformation.IsOSPlatform(OSPlatform.Android);
+  public static bool IsAndroid => RuntimeInformation.IsOSPlatform(OSPlatform.Create("Android"));
 
   /// <summary>
   /// Gets whether the current platform is WebGL (no JIT, no threads).
@@ -65,7 +65,7 @@ public static class Il2CppRuntime
         return PlatformType.Linux;
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("IOS")))
         return PlatformType.IOS;
-      if (RuntimeInformation.IsOSPlatform(OSPlatform.Android))
+      if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("Android")))
         return PlatformType.Android;
       if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("WEBBROWSER")))
         return PlatformType.WebGL;

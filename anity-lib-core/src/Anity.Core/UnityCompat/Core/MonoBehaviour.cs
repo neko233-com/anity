@@ -126,4 +126,7 @@ public class MonoBehaviour : Behaviour
   protected virtual void OnApplicationPause(bool pauseStatus) {}
   protected virtual void OnApplicationFocus(bool focusStatus) {}
   protected virtual void OnGUI() {}
+  protected virtual void OnTransformParentChanged() {}
+  protected virtual void OnTransformChildrenChanged() {}
+  protected virtual void OnCanvasHierarchyChanged() {}
 }

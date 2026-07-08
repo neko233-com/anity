@@ -48,6 +48,31 @@ public class Object
     return original;
   }
 
+  public static Object Instantiate(Object original, Vector3 position, Quaternion rotation)
+  {
+    return original;
+  }
+
+  public static T Instantiate<T>(T original) where T : Object
+  {
+    return original;
+  }
+
+  public static T Instantiate<T>(T original, Vector3 position, Quaternion rotation) where T : Object
+  {
+    return original;
+  }
+
+  public static T Instantiate<T>(T original, Transform? parent) where T : Object
+  {
+    return original;
+  }
+
+  public static T Instantiate<T>(T original, Transform? parent, bool worldPositionStays) where T : Object
+  {
+    return original;
+  }
+
   public bool IsDestroyed => _destroyed;
 
   public string name
