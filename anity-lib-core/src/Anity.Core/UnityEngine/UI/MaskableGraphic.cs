@@ -185,15 +185,6 @@ public class RectMask2D : MonoBehaviour
   }
 }
 
-public interface IClippable
-{
-  Rect GetCanvasRect();
-  void Cull(Rect clipRect, bool validRect);
-  void SetClipRect(Rect value, bool validRect);
-  void SetClipSoftness(Vector2 clipSoftness);
-  void RecalculateMasking();
-}
-
 public class RectangularVertexClipper
 {
   public Rect GetCanvasRect(RectTransform t, Canvas c)
