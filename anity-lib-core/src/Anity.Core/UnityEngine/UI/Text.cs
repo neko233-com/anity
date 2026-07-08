@@ -1,8 +1,9 @@
 using System;
+using System.Collections.Generic;
 
 namespace UnityEngine.UI;
 
-public class Text : MaskableGraphic
+public class Text : MaskableGraphic, ILayoutElement, ICanvasRescale
 {
   private string _text = string.Empty;
   private Font? _font;
@@ -14,21 +15,30 @@ public class Text : MaskableGraphic
   private bool _resizeTextForBestFit;
   private int _resizeTextMinSize = 10;
   private int _resizeTextMaxSize = 40;
-  private float _horizontalOverflow;
-  private float _verticalOverflow;
+  private HorizontalWrapMode _horizontalOverflow;
+  private VerticalWrapMode _verticalOverflow;
   private float _preferredWidth;
   private float _preferredHeight;
   private float _flexibleWidth;
   private float _flexibleHeight;
   private int _layoutPriority;
+  private bool _alignByGeometry;
+  private bool _updateMeshLayout;
+  private bool _cplacedVerts;
+  private float _minWidth;
+  private float _minHeight;
 
   public string text
   {
     get => _text;
     set
     {
-      _text = value ?? string.Empty;
-      SetVerticesDirty();
+      if (_text != value)
+      {
+        _text = value ?? string.Empty;
+        SetVerticesDirty();
+        SetLayoutDirty();
+      }
     }
   }
 
@@ -37,9 +47,13 @@ public class Text : MaskableGraphic
     get => _font;
     set
     {
-      _font = value;
-      SetVerticesDirty();
-      SetMaterialDirty();
+      if (_font != value)
+      {
+        _font = value;
+        SetVerticesDirty();
+        SetMaterialDirty();
+        SetLayoutDirty();
+      }
     }
   }
 
@@ -48,8 +62,12 @@ public class Text : MaskableGraphic
     get => _fontSize;
     set
     {
-      _fontSize = value;
-      SetVerticesDirty();
+      if (_fontSize != value)
+      {
+        _fontSize = value;
+        SetVerticesDirty();
+        SetLayoutDirty();
+      }
     }
   }
 
@@ -58,8 +76,12 @@ public class Text : MaskableGraphic
     get => _alignment;
     set
     {
-      _alignment = value;
-      SetVerticesDirty();
+      if (_alignment != value)
+      {
+        _alignment = value;
+        SetVerticesDirty();
+        SetLayoutDirty();
+      }
     }
   }
 
@@ -68,27 +90,53 @@ public class Text : MaskableGraphic
     get => _fontStyle;
     set
     {
-      _fontStyle = value;
-      SetVerticesDirty();
+      if (_fontStyle != value)
+      {
+        _fontStyle = value;
+        SetVerticesDirty();
+      }
     }
   }
 
   public float lineSpacing
   {
     get => _lineSpacing;
-    set => _lineSpacing = value;
+    set
+    {
+      if (_lineSpacing != value)
+      {
+        _lineSpacing = value;
+        SetVerticesDirty();
+        SetLayoutDirty();
+      }
+    }
   }
 
   public bool supportRichText
   {
     get => _supportRichText;
-    set => _supportRichText = value;
+    set
+    {
+      if (_supportRichText != value)
+      {
+        _supportRichText = value;
+        SetVerticesDirty();
+      }
+    }
   }
 
   public bool resizeTextForBestFit
   {
     get => _resizeTextForBestFit;
-    set => _resizeTextForBestFit = value;
+    set
+    {
+      if (_resizeTextForBestFit != value)
+      {
+        _resizeTextForBestFit = value;
+        SetVerticesDirty();
+        SetLayoutDirty();
+      }
+    }
   }
 
   public int resizeTextMinSize
@@ -103,11 +151,54 @@ public class Text : MaskableGraphic
     set => _resizeTextMaxSize = value;
   }
 
+  public bool alignByGeometry
+  {
+    get => _alignByGeometry;
+    set
+    {
+      if (_alignByGeometry != value)
+      {
+        _alignByGeometry = value;
+        SetVerticesDirty();
+      }
+    }
+  }
+
+  public HorizontalWrapMode horizontalOverflow
+  {
+    get => _horizontalOverflow;
+    set
+    {
+      if (_horizontalOverflow != value)
+      {
+        _horizontalOverflow = value;
+        SetVerticesDirty();
+        SetLayoutDirty();
+      }
+    }
+  }
+
+  public VerticalWrapMode verticalOverflow
+  {
+    get => _verticalOverflow;
+    set
+    {
+      if (_verticalOverflow != value)
+      {
+        _verticalOverflow = value;
+        SetVerticesDirty();
+        SetLayoutDirty();
+      }
+    }
+  }
+
   public float preferredWidth => _preferredWidth;
   public float preferredHeight => _preferredHeight;
   public float flexibleWidth => _flexibleWidth;
   public float flexibleHeight => _flexibleHeight;
   public int layoutPriority => _layoutPriority;
+  public float minWidth => _minWidth;
+  public float minHeight => _minHeight;
 
   public virtual float GetPreferredWidth()
   {
@@ -119,8 +210,96 @@ public class Text : MaskableGraphic
     return _preferredHeight;
   }
 
+  public virtual float GetMinWidth()
+  {
+    return _minWidth;
+  }
+
+  public virtual float GetMinHeight()
+  {
+    return _minHeight;
+  }
+
   public virtual void OnRebuildVertices()
   {
     SetVerticesDirty();
   }
+
+  public virtual void OnPopulateMesh(Mesh mesh)
+  {
+    _ = mesh;
+  }
+
+  public virtual void CalculateLayoutInputHorizontal()
+  {
+  }
+
+  public virtual void CalculateLayoutInputVertical()
+  {
+  }
+
+  public void SetAllDirty()
+  {
+    SetLayoutDirty();
+    SetVerticesDirty();
+    SetMaterialDirty();
+  }
+}
+
+public enum TextAnchor
+{
+  UpperLeft,
+  UpperCenter,
+  UpperRight,
+  MiddleLeft,
+  MiddleCenter,
+  MiddleRight,
+  LowerLeft,
+  LowerCenter,
+  LowerRight
+}
+
+[Flags]
+public enum FontStyles
+{
+  Normal = 0,
+  Bold = 1,
+  Italic = 2,
+  Underline = 4,
+  LowerCase = 8,
+  UpperCase = 16,
+  SmallCaps = 32,
+  Strikethrough = 64,
+  Superscript = 128,
+  Subscript = 256,
+  Highlight = 512
+}
+
+public enum HorizontalWrapMode
+{
+  Wrap,
+  Overflow
+}
+
+public enum VerticalWrapMode
+{
+  Truncate,
+  Overflow
+}
+
+public interface ILayoutElement
+{
+  float minWidth { get; }
+  float preferredWidth { get; }
+  float flexibleWidth { get; }
+  float minHeight { get; }
+  float preferredHeight { get; }
+  float flexibleHeight { get; }
+  int layoutPriority { get; }
+  void CalculateLayoutInputHorizontal();
+  void CalculateLayoutInputVertical();
+}
+
+public interface ICanvasRescale
+{
 }

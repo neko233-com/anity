@@ -80,6 +80,11 @@ public class Component : Object
   {
     SendMessage(methodName, value, options);
   }
+
+  public bool IsActive()
+  {
+    return gameObject is not null && gameObject.activeInHierarchy;
+  }
 }
 
 public enum SendMessageOptions
