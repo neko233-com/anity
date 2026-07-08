@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Generic;
 
 namespace UnityEngine.UI;
 
-public class Selectable : MonoBehaviour
+public class Selectable : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
+  private static List<Selectable> _selectables = new();
+  private static Selectable? _currentSelection;
+
   private bool _interactable = true;
   private Navigation _navigation = new();
   private Transition _transition = Transition.ColorTint;
@@ -11,16 +15,22 @@ public class Selectable : MonoBehaviour
   private SpriteState _spriteState;
   private AnimationTriggers? _animationTriggers;
   private Graphic? _targetGraphic;
+  private bool _hasSelection;
+  private bool _isPointerInside;
+  private bool _isPointerDown;
+  private bool _hasSubmitted;
+  private bool _evaluateAndHighlightOnPointerEnter;
+  private bool _evaluateAndHighlightOnPointerExit;
 
   public bool interactable
   {
     get => _interactable;
     set
     {
-      _interactable = value;
-      if (!_interactable)
+      if (_interactable != value)
       {
-        OnPointerExit(null);
+        _interactable = value;
+        OnSetProperty();
       }
     }
   }
@@ -28,7 +38,14 @@ public class Selectable : MonoBehaviour
   public Navigation navigation
   {
     get => _navigation;
-    set => _navigation = value;
+    set
+    {
+      if (_navigation != value)
+      {
+        _navigation = value;
+        OnSetProperty();
+      }
+    }
   }
 
   public Transition transition
@@ -61,40 +78,304 @@ public class Selectable : MonoBehaviour
     set => _targetGraphic = value;
   }
 
+  public bool isPointerInside => _isPointerInside;
+  public bool isPointerDown => _isPointerDown;
+  public bool hasSubmitted => _hasSubmitted;
+
   public virtual bool IsInteractable()
   {
     return _interactable;
   }
 
+  public static Selectable? allSelectablesArray => _selectables.Count > 0 ? _selectables[0] : null;
+  public static int allSelectableCount => _selectables.Count;
+
+  public static List<Selectable> allSelectables => _selectables;
+
   public virtual void Select()
   {
-    if (!_interactable)
+    if (!_interactable || !IsActive())
     {
       return;
     }
 
-    OnSelect(null);
+    if (_currentSelection == this)
+    {
+      return;
+    }
+
+    if (_currentSelection is not null)
+    {
+      _currentSelection.OnDeselect(new BaseEventData(null));
+    }
+
+    _currentSelection = this;
+    _hasSelection = true;
+    OnSelect(new BaseEventData(null));
   }
 
-  protected new virtual void OnEnable()
+  public virtual void SelectOnEnable()
   {
-    OnPointerExit(null);
+    if (!_interactable || !IsActive())
+    {
+      return;
+    }
+
+    if (!_selectables.Contains(this))
+    {
+      _selectables.Add(this);
+    }
   }
 
-  protected new virtual void OnDisable()
+  public virtual void OnSelect(BaseEventData? eventData)
   {
-    OnPointerExit(null);
   }
 
-  protected virtual void OnPointerEnter(PointerEventData? eventData) {}
-  protected virtual void OnPointerExit(PointerEventData? eventData) {}
-  protected virtual void OnPointerDown(PointerEventData? eventData) {}
-  protected virtual void OnPointerUp(PointerEventData? eventData) {}
-  protected virtual void OnSelect(BaseEventData? eventData) {}
-  protected virtual void OnDeselect(BaseEventData? eventData) {}
-  protected virtual void OnMove(AxisEventData? eventData) {}
-  protected virtual void OnSubmit(BaseEventData? eventData) {}
-  protected virtual void OnCancel(BaseEventData? eventData) {}
+  public virtual void OnDeselect(BaseEventData? eventData)
+  {
+    _hasSelection = false;
+  }
+
+  protected override void OnEnable()
+  {
+    base.OnEnable();
+    OnPointerExit(null);
+    SelectOnEnable();
+  }
+
+  protected override void OnDisable()
+  {
+    base.OnDisable();
+    OnPointerExit(null);
+
+    if (_currentSelection == this)
+    {
+      _currentSelection = null;
+      _hasSelection = false;
+    }
+
+    _selectables.Remove(this);
+  }
+
+  protected virtual void OnSetProperty()
+  {
+    if (!IsActive() || !_interactable)
+    {
+      OnPointerExit(null);
+    }
+  }
+
+  public virtual void OnPointerDown(PointerEventData? eventData)
+  {
+    if (eventData is null || eventData.button != PointerEventData.InputButton.Left)
+    {
+      return;
+    }
+
+    if (!_interactable || !IsActive())
+    {
+      return;
+    }
+
+    _isPointerDown = true;
+    EvaluateAndTransitionToSelectionState();
+  }
+
+  public virtual void OnPointerUp(PointerEventData? eventData)
+  {
+    if (eventData is null || eventData.button != PointerEventData.InputButton.Left)
+    {
+      return;
+    }
+
+    if (!_interactable || !IsActive())
+    {
+      return;
+    }
+
+    _isPointerDown = false;
+    EvaluateAndTransitionToSelectionState();
+  }
+
+  public virtual void OnPointerEnter(PointerEventData? eventData)
+  {
+    if (!_interactable || !IsActive())
+    {
+      return;
+    }
+
+    _isPointerInside = true;
+    EvaluateAndTransitionToSelectionState();
+  }
+
+  public virtual void OnPointerExit(PointerEventData? eventData)
+  {
+    if (!_interactable || !IsActive())
+    {
+      return;
+    }
+
+    _isPointerInside = false;
+    _isPointerDown = false;
+    EvaluateAndTransitionToSelectionState();
+  }
+
+  public virtual void OnMove(AxisEventData? eventData)
+  {
+    if (eventData is null || !_interactable || !IsActive())
+    {
+      return;
+    }
+
+    var mode = _navigation.mode;
+    if (mode == NavigationMode.None)
+    {
+      return;
+    }
+
+    Selectable? target = null;
+
+    switch (eventData.moveDir)
+    {
+      case MoveDirection.Up:
+        target = _navigation.selectOnUp;
+        break;
+      case MoveDirection.Down:
+        target = _navigation.selectOnDown;
+        break;
+      case MoveDirection.Left:
+        target = _navigation.selectOnLeft;
+        break;
+      case MoveDirection.Right:
+        target = _navigation.selectOnRight;
+        break;
+    }
+
+    if (target is not null && target.IsActive())
+    {
+      target.Select();
+    }
+  }
+
+  public virtual void OnSubmit(BaseEventData? eventData)
+  {
+    if (!_interactable || !IsActive())
+    {
+      return;
+    }
+
+    _hasSubmitted = true;
+    EvaluateAndTransitionToSelectionState();
+  }
+
+  public virtual void OnCancel(BaseEventData? eventData)
+  {
+  }
+
+  public virtual void OnBeginDrag(PointerEventData eventData)
+  {
+  }
+
+  public virtual void OnDrag(PointerEventData eventData)
+  {
+  }
+
+  public virtual void OnEndDrag(PointerEventData eventData)
+  {
+  }
+
+  public void EvaluateAndTransitionToSelectionState()
+  {
+    if (!IsActive() || !_interactable)
+    {
+      return;
+    }
+
+    DoStateTransition(GetSelectionState(), false);
+  }
+
+  protected virtual void DoStateTransition(SelectionState state, bool instant)
+  {
+    _ = state;
+    _ = instant;
+  }
+
+  protected virtual SelectionState GetSelectionState()
+  {
+    if (!_interactable)
+    {
+      return SelectionState.Disabled;
+    }
+
+    if (_hasSelection)
+    {
+      return SelectionState.Selected;
+    }
+
+    if (_isPointerDown)
+    {
+      return SelectionState.Pressed;
+    }
+
+    if (_isPointerInside)
+    {
+      return SelectionState.Highlighted;
+    }
+
+    return SelectionState.Normal;
+  }
+
+  public virtual bool FindSelectable(Vector3 dir)
+  {
+    _ = dir;
+    return false;
+  }
+
+  public virtual bool FindSelectableOnLeft()
+  {
+    return false;
+  }
+
+  public virtual bool FindSelectableOnRight()
+  {
+    return false;
+  }
+
+  public virtual bool FindSelectableOnUp()
+  {
+    return false;
+  }
+
+  public virtual bool FindSelectableOnDown()
+  {
+    return false;
+  }
+}
+
+public enum SelectionState
+{
+  Normal,
+  Highlighted,
+  Pressed,
+  Selected,
+  Disabled
+}
+
+public enum Transition
+{
+  None,
+  ColorTint,
+  SpriteSwap,
+  Animation
+}
+
+public enum NavigationMode
+{
+  None,
+  Horizontal,
+  Vertical,
+  Automatic,
+  Explicit
 }
 
 public struct Navigation
@@ -136,6 +417,14 @@ public struct SpriteState
   public Sprite? pressedSprite;
   public Sprite? selectedSprite;
   public Sprite? disabledSprite;
+
+  public bool Equals(SpriteState other)
+  {
+    return highlightedSprite == other.highlightedSprite &&
+           pressedSprite == other.pressedSprite &&
+           selectedSprite == other.selectedSprite &&
+           disabledSprite == other.disabledSprite;
+  }
 }
 
 public class AnimationTriggers
@@ -147,10 +436,19 @@ public class AnimationTriggers
   public string disabledTrigger { get; set; } = string.Empty;
 }
 
-public class PointerEventData
+public class PointerEventData : BaseEventData
 {
+  public enum InputButton
+  {
+    Left,
+    Right,
+    Middle
+  }
+
   public Vector2 position { get; set; }
   public Vector2 delta { get; set; }
+  public Vector2 pressPosition { get; set; }
+  public Vector2 scrollDelta { get; set; }
   public bool eligibleForClick { get; set; }
   public int clickCount { get; set; }
   public float clickTime { get; set; }
@@ -161,17 +459,34 @@ public class PointerEventData
   public GameObject? pointerDrag { get; set; }
   public GameObject? pointerClick { get; set; }
   public bool dragging { get; set; }
+  public InputButton button { get; set; }
+  public bool useDragThreshold { get; set; } = true;
+  public bool eligibilityForClick => eligibleForClick;
+
+  public PointerEventData(EventSystem eventSystem) : base(eventSystem)
+  {
+  }
 }
 
 public class BaseEventData
 {
   public Selectable? currentSelectedGameObject { get; set; }
+  public EventSystem? eventSystem { get; }
+
+  public BaseEventData(EventSystem? eventSystem)
+  {
+    this.eventSystem = eventSystem;
+  }
 }
 
 public class AxisEventData : BaseEventData
 {
   public Vector2 moveVector { get; set; }
   public MoveDirection moveDir { get; set; }
+
+  public AxisEventData(EventSystem? eventSystem) : base(eventSystem)
+  {
+  }
 }
 
 public enum MoveDirection
@@ -181,4 +496,120 @@ public enum MoveDirection
   Right = 2,
   Down = 3,
   None = 4
+}
+
+public class EventSystem : MonoBehaviour
+{
+  private static EventSystem? _current;
+
+  public static EventSystem? current
+  {
+    get => _current;
+    set => _current = value;
+  }
+
+  public bool isApplicationActive { get; set; } = true;
+  public bool isInputModuleDisabled { get; set; }
+
+  public void SetSelectedGameObject(GameObject? selected)
+  {
+    _ = selected;
+  }
+
+  public void SetSelectedGameObject(GameObject? selected, BaseEventData? pointer)
+  {
+    _ = selected;
+    _ = pointer;
+  }
+
+  public GameObject? currentSelectedGameObject { get; set; }
+
+  public void Update()
+  {
+  }
+}
+
+public interface IBeginDragHandler
+{
+  void OnBeginDrag(PointerEventData eventData);
+}
+
+public interface IDragHandler
+{
+  void OnDrag(PointerEventData eventData);
+}
+
+public interface IEndDragHandler
+{
+  void OnEndDrag(PointerEventData eventData);
+}
+
+public interface IPointerClickHandler
+{
+  void OnPointerClick(PointerEventData eventData);
+}
+
+public interface IPointerDownHandler
+{
+  void OnPointerDown(PointerEventData eventData);
+}
+
+public interface IPointerUpHandler
+{
+  void OnPointerUp(PointerEventData eventData);
+}
+
+public interface IPointerEnterHandler
+{
+  void OnPointerEnter(PointerEventData eventData);
+}
+
+public interface IPointerExitHandler
+{
+  void OnPointerExit(PointerEventData eventData);
+}
+
+public interface ISelectHandler
+{
+  void OnSelect(BaseEventData eventData);
+}
+
+public interface IDeselectHandler
+{
+  void OnDeselect(BaseEventData eventData);
+}
+
+public interface ISubmitHandler
+{
+  void OnSubmit(BaseEventData eventData);
+}
+
+public interface ICancelHandler
+{
+  void OnCancel(BaseEventData eventData);
+}
+
+public interface IMoveHandler
+{
+  void OnMove(AxisEventData eventData);
+}
+
+public interface IScrollHandler
+{
+  void OnScroll(PointerEventData eventData);
+}
+
+public interface IUpdateSelectedHandler
+{
+  void OnUpdateSelected(BaseEventData eventData);
+}
+
+public interface IPointerHoverHandler
+{
+  void OnPointerHover(PointerEventData eventData);
+}
+
+public interface IDropHandler
+{
+  void OnDrop(PointerEventData eventData);
 }
