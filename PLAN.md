@@ -94,6 +94,11 @@
   - `LightmapData`/`LightmapSettings`/`LightmapParameters`/`AmbientMode`
   - `Mesh`/`BoneWeight`
   - `Avatar`/`RawAvatar`/`HumanBone`/`SkeletonBone`/`HumanLimit`/`HumanDescription`
+- **增强 PackageManager**：
+  - `Client`：`List`/`Search`/`Add`/`Remove`/`Embed`/`Update` 完整实现
+  - `PackageInfo`：完整属性（author、documentationUrl、changelogUrl、licensesUrl、path、depth、resolvedPath、sourceGitRevision、distribution、registry）
+  - `Requests`：新增 `ResolveRequest`/`PackRequest`/`DisposeRequest`/`EmbedAndAddRequest`/`DependencyResolveRequest`
+  - `PackageCollection`：新增 `Find`/`Contains` 方法
 - 升级所有项目到 .NET 10.0（net10.0）
 - 修复所有 .NET 10 编译错误：
   - `Object` 歧义：添加 `GlobalUsings.cs` 全局别名 `global using Object = UnityEngine.Object`

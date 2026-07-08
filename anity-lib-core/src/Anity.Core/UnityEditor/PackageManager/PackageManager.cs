@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace UnityEditor.PackageManager;
 
@@ -9,6 +10,8 @@ public static class Client
   {
     new("com.unity.textmeshpro", "3.0.6", PackageSource.Registry, "TextMesh Pro")
   };
+
+  private static readonly Dictionary<string, string> _packagePaths = new();
 
   public static event Action<PackageInfo[]>? registeredPackagesChanged;
   public static event Action? packagesChanged;
@@ -32,6 +35,14 @@ public static class Client
   {
     _ = includeIndirectDependencies;
     _ = includeNested;
+    return List();
+  }
+
+  public static Requests.ListRequest List(bool includeIndirectDependencies, bool includeNested, bool includeDependencies)
+  {
+    _ = includeIndirectDependencies;
+    _ = includeNested;
+    _ = includeDependencies;
     return List();
   }
 
@@ -72,10 +83,28 @@ public static class Client
     return request;
   }
 
+  public static Requests.AddRequest Add(string packageNameOrUrl, string version)
+  {
+    var request = new Requests.AddRequest
+    {
+      Result = new PackageInfo(packageNameOrUrl, version, PackageSource.Registry, packageNameOrUrl)
+    };
+    request.IsCompleted = true;
+    request.Status = Requests.StatusCode.Success;
+    _localPackages.Add(request.Result);
+    return request;
+  }
+
   public static Requests.AddRequest AddAndRemove(string packageNameOrUrl, string[]? packagesToRemove = null)
   {
     _ = packagesToRemove;
     return Add(packageNameOrUrl);
+  }
+
+  public static Requests.AddRequest AddAndRemove(string packageNameOrUrl, string version, string[]? packagesToRemove = null)
+  {
+    _ = packagesToRemove;
+    return Add(packageNameOrUrl, version);
   }
 
   public static Requests.RemoveRequest Remove(string packageNameOrUrl)
@@ -83,6 +112,7 @@ public static class Client
     var request = new Requests.RemoveRequest();
     request.IsCompleted = true;
     request.Status = Requests.StatusCode.Success;
+    _localPackages.RemoveAll(p => p.name == packageNameOrUrl);
     return request;
   }
 
@@ -110,6 +140,17 @@ public static class Client
     return request;
   }
 
+  public static Requests.UpdateRequest Update(string packageNameOrUrl, string version)
+  {
+    var request = new Requests.UpdateRequest
+    {
+      Result = new PackageInfo(packageNameOrUrl, version, PackageSource.Registry, packageNameOrUrl)
+    };
+    request.IsCompleted = true;
+    request.Status = Requests.StatusCode.Success;
+    return request;
+  }
+
   public static Requests.AddRequest Reinstall(string packageNameOrUrl)
   {
     return Add(packageNameOrUrl);
@@ -120,6 +161,26 @@ public static class Client
     return _localPackages.Find(p => p.name == packageName);
   }
 
+  public static PackageInfo[] GetAllPackages()
+  {
+    return _localPackages.ToArray();
+  }
+
+  public static bool IsPackageInstalled(string packageName)
+  {
+    return _localPackages.Exists(p => p.name == packageName);
+  }
+
+  public static string? GetPackagePath(string packageName)
+  {
+    return _packagePaths.TryGetValue(packageName, out var path) ? path : null;
+  }
+
+  public static void SetPackagePath(string packageName, string path)
+  {
+    _packagePaths[packageName] = path;
+  }
+
   public static Requests.UnityProjectRequest ClearCache()
   {
     return new Requests.UnityProjectRequest { IsCompleted = true, Status = Requests.StatusCode.Success };
@@ -128,6 +189,22 @@ public static class Client
   public static void RegisterPackageManagerWindow(object? window)
   {
     _ = window;
+  }
+
+  public static Requests.ListRequest ResolveDependencies(string packageName)
+  {
+    _ = packageName;
+    return List();
+  }
+
+  public static bool ValidatePackage(string packageName)
+  {
+    if (string.IsNullOrWhiteSpace(packageName))
+    {
+      return false;
+    }
+
+    return _localPackages.Exists(p => p.name == packageName);
   }
 
   internal static void InvokeRegisteredPackagesChanged(PackageInfo[] packages)
@@ -164,6 +241,16 @@ public sealed class PackageInfo
   public PackageInfo[]? dependencies { get; set; }
   public string[]? keywords { get; set; }
   public string? license { get; set; }
+  public string? author { get; set; }
+  public string? documentationUrl { get; set; }
+  public string? changelogUrl { get; set; }
+  public string? licensesUrl { get; set; }
+  public string? path { get; set; }
+  public string? depth { get; set; }
+  public string? resolvedPath { get; set; }
+  public string? sourceGitRevision { get; set; }
+  public string? distribution { get; set; }
+  public string? registry { get; set; }
 
   public static PackageInfo? FindForAssetPath(string assetPath)
   {
@@ -180,6 +267,16 @@ public sealed class PackageInfo
   public static PackageInfo[] GetAll()
   {
     return Array.Empty<PackageInfo>();
+  }
+
+  public static PackageInfo? Find(string packageName)
+  {
+    return Client.GetPackageInfo(packageName);
+  }
+
+  public override string ToString()
+  {
+    return $"{name}@{version}";
   }
 }
 
@@ -202,4 +299,15 @@ public enum PackageStatus
   InDevelopment,
   ReadyToInstall,
   Error
+}
+
+public enum ResolvePackageError
+{
+  None,
+  Unknown,
+  Unavailable,
+  IncompatibleVersion,
+  DependencyUnresolvable,
+  IncompatibleRequirements,
+  IntegrityCheckFailed
 }

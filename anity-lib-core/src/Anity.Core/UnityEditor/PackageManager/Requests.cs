@@ -59,6 +59,24 @@ public sealed class PackageCollection : IReadOnlyList<PackageInfo>
 
   public IEnumerator<PackageInfo> GetEnumerator() => ((IEnumerable<PackageInfo>)_items).GetEnumerator();
   IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+  public PackageInfo? Find(string packageName)
+  {
+    foreach (var item in _items)
+    {
+      if (item.name == packageName)
+      {
+        return item;
+      }
+    }
+
+    return null;
+  }
+
+  public bool Contains(string packageName)
+  {
+    return Find(packageName) is not null;
+  }
 }
 
 public sealed class ListRequest : Request
@@ -99,4 +117,28 @@ public sealed class RemoveRequest : Request
 
 public sealed class UnityProjectRequest : Request
 {
+}
+
+public sealed class ResolveRequest : Request
+{
+  public PackageCollection Result { get; set; } = new PackageCollection(Array.Empty<PackageInfo>());
+}
+
+public sealed class PackRequest : Request
+{
+  public string Result { get; set; } = string.Empty;
+}
+
+public sealed class DisposeRequest : Request
+{
+}
+
+public sealed class EmbedAndAddRequest : Request
+{
+  public PackageInfo Result { get; set; } = new PackageInfo(string.Empty, "0.0.0", PackageSource.Unknown, string.Empty);
+}
+
+public sealed class DependencyResolveRequest : Request
+{
+  public PackageCollection Result { get; set; } = new PackageCollection(Array.Empty<PackageInfo>());
 }
