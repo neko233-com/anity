@@ -151,6 +151,23 @@ public static class BuildPipeline
     return false;
   }
 
+  public static string GetPlayingPlayerDataPath()
+  {
+    return string.Empty;
+  }
+
+  public static void RebuildAssetBundleDependencies(string[] assetBundleNames)
+  {
+    _ = assetBundleNames;
+  }
+
+  public static void BuildStreams(BuildPlayerOptions options, string[] levels, string locationPathName)
+  {
+    _ = options;
+    _ = levels;
+    _ = locationPathName;
+  }
+
   public static int GetBuildTargetGroup(BuildTarget target)
   {
     return target switch
