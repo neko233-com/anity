@@ -406,18 +406,20 @@ public static class PrefabUtility
 
   public static PrefabAssetType GetPrefabAssetType(GameObject gameObject)
   {
-    if (gameObject == null) return PrefabAssetType.Missing;
+    if (gameObject is null) return PrefabAssetType.Missing;
     if (!IsPartOfPrefabInstance(gameObject)) return PrefabAssetType.NotAPrefab;
     return PrefabAssetType.Regular;
   }
 
   public static void ApplyPrefabInstance(GameObject instanceRoot, InteractionMode action)
   {
+    if (instanceRoot is null) return;
     ApplyPrefabInstance(instanceRoot);
   }
 
   public static void RevertPrefabInstance(GameObject instanceRoot, InteractionMode action)
   {
+    if (instanceRoot is null) return;
     RevertPrefabInstance(instanceRoot);
   }
 
