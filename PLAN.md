@@ -291,6 +291,20 @@
   - 添加 `PlayClipAtPoint(AudioClip, Vector3)` 静态方法
   - 添加 `PlayClipAtPoint(AudioClip, Vector3, float)` 静态方法
 
+## 2026-07-09（本次 - BuildPipeline 和 .asmdef）
+
+### 已完成
+- **实现 BuildPipeline 功能**
+  - 添加 `CompilationPipeline` 类：支持程序集定义文件处理
+  - 添加 `AssemblyDefinition` 类：.asmdef 文件处理
+  - 添加 `.asmdef` 文件示例：`Anity.Core.asmdef`
+  - 添加 `BuildPipeline` 方法：`GetPlayingPlayerDataPath`、`RebuildAssetBundleDependencies`、`BuildStreams`
+  - 添加 `CompilerMessage` 和 `CompilationResult` 类型
+  - 添加 `AssembliesType` 和 `RequestScriptCompilationOptions` 枚举
+- **.asmdef 支持**
+  - 创建 `Anity.Core.asmdef` 文件示例
+  - 支持程序集名称、命名空间、引用、平台等配置
+
 ### 下一次要做（优先）
 1. 准备 AssetBundle 测试资源并运行完整对照测试
 2. 继续增强 Unity 2022 API 兼容性
