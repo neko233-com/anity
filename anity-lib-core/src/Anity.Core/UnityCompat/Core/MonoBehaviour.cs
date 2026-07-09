@@ -114,6 +114,44 @@ public class MonoBehaviour : Behaviour
     return _invokes.ContainsKey(methodName) || _repeatingInvokes.ContainsKey(methodName);
   }
 
+  public void Invoke(Action action, float time)
+  {
+    if (action is null) return;
+    _invokes[action.Method.Name] = MathF.Max(0f, time);
+  }
+
+  public void InvokeRepeating(Action action, float time, float repeatRate)
+  {
+    if (action is null) return;
+    _invokes[action.Method.Name] = MathF.Max(0f, time);
+    _repeatingInvokes[action.Method.Name] = MathF.Max(0f, repeatRate);
+  }
+
+  public void CancelInvoke(Action action)
+  {
+    if (action is null) return;
+    _ = _invokes.Remove(action.Method.Name);
+    _ = _repeatingInvokes.Remove(action.Method.Name);
+  }
+
+  public bool IsInvoking(Action action)
+  {
+    if (action is null) return false;
+    return _invokes.ContainsKey(action.Method.Name) || _repeatingInvokes.ContainsKey(action.Method.Name);
+  }
+
+  public Coroutine StartCoroutine(Func<IEnumerator> routine)
+  {
+    if (routine is null) return new Coroutine(Task.CompletedTask, null, null);
+    return StartCoroutine(routine());
+  }
+
+  public new Coroutine StartCoroutine<T>(Func<T> routine) where T : IEnumerator
+  {
+    if (routine is null) return new Coroutine(Task.CompletedTask, null, null);
+    return StartCoroutine(routine());
+  }
+
   protected virtual void Awake() {}
   protected virtual void Reset() {}
   protected virtual void Start() {}
