@@ -202,3 +202,28 @@
 1. 继续增强 Unity 2022 API 兼容性
 2. 实现 WebGL 浏览器互操作功能
 3. 添加更多 Unity 2022 运行时类型
+
+## 2026-07-09（本次 - 双模式切换架构）
+
+### 已完成
+- **实现 Unity 官方 DLL 和 Anity 自研库的二选一切换**
+  - 创建 `Anity.Core.Unity` 项目：Unity 官方 DLL 引用包装器
+  - 修改 `Anity.Core.csproj`：支持条件编译，Unity 模式下排除自研实现
+  - 创建切换脚本 `scripts/switch-mode.ps1`：自动检测 Unity 安装并切换模式
+- **创建 AB 对照测试框架**
+  - 创建 `Anity.AB.Compare.Tests` 测试项目
+  - 实现二进制对比测试（AssetBundle 文件头验证）
+  - 实现行为空为对比测试（文件读取、并发访问等）
+- **Unity DLL 自动检测**
+  - 自动检测 Unity Hub 安装路径
+  - 优先选择 Unity 2022 LTS 版本
+  - 验证 DLL 完整性（必需和推荐 DLL）
+- **测试运行脚本**
+  - 创建 `scripts/run-compare-tests.ps1`：在两种模式下运行对照测试
+  - 支持生成对照报告
+  - 自动恢复到 Anity 模式
+
+### 下一次要做（优先）
+1. 准备 AssetBundle 测试资源并运行完整对照测试
+2. 继续增强 Unity 2022 API 兼容性
+3. 实现 WebGL 浏览器互操作功能

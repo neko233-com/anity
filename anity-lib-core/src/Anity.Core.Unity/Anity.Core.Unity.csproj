@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DefineConstants>UNITY_ENGINE</DefineConstants>
+    
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>Anity.Core.Unity</PackageId>
+    <Authors>Anity Team</Authors>
+    <Description>Unity 2022 official DLL reference wrapper for behavior comparison.</Description>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <!-- Unity 官方 DLL 引用路径（通过环境变量 UnityPath 配置） -->
+  <ItemGroup Condition="'$(UnityPath)' != '' AND Exists('$(UnityPath)')">
+    <Reference Include="UnityEngine">
+      <HintPath>$(UnityPath)\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityPath)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(UnityPath)\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(UnityPath)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(UnityPath)\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(UnityPath)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEditor">
+      <HintPath>$(UnityPath)\UnityEditor.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEditor.CoreModule">
+      <HintPath>$(UnityPath)\UnityEditor.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEditor.UI">
+      <HintPath>$(UnityPath)\UnityEditor.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEditor.VersionControl">
+      <HintPath>$(UnityPath)\UnityEditor.VersionControl.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 编译时提示 -->
+  <Target Name="ShowUnityPath" BeforeTargets="CoreCompile">
+    <Message Importance="high" 
+             Text="Unity DLL Path: $(UnityPath)" 
+             Condition="'$(UnityPath)' != ''" />
+    <Warning Text="Unity DLL Path not set. Use -p:UnityPath=path\to\Unity\Managed" 
+             Condition="'$(UnityPath)' == ''" />
+  </Target>
+</Project>

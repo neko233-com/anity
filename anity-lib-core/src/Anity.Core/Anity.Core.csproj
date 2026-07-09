@@ -7,6 +7,19 @@
     <Version>0.1.0</Version>
   </PropertyGroup>
 
+  <!-- Unity 模式：使用官方 DLL，排除自研实现 -->
+  <ItemGroup Condition="'$(UseUnityDll)' == 'true'">
+    <Compile Remove="UnityCompat\**\*.cs" />
+    <Compile Remove="UnityEngine\**\*.cs" />
+    <Compile Remove="UnityEditor\**\*.cs" />
+    <Compile Remove="UnityEditorInternal\**\*.cs" />
+    <Compile Remove="UnityProfiling\**\*.cs" />
+    <Reference Include="UnityEngine" />
+    <Reference Include="UnityEngine.CoreModule" />
+    <Reference Include="UnityEditor" />
+    <Reference Include="UnityEditor.CoreModule" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.0" />
     <PackageReference Include="System.Runtime.Loader" Version="4.3.0" />
