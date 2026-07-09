@@ -227,3 +227,26 @@
 1. 准备 AssetBundle 测试资源并运行完整对照测试
 2. 继续增强 Unity 2022 API 兼容性
 3. 实现 WebGL 浏览器互操作功能
+
+## 2026-07-09（本次 - Unity 2022 核心运行时类型）
+
+### 已完成
+- **添加 Unity 2022 核心运行时类型**
+  - Animator：动画控制器组件，支持 GetFloat/SetFloat、GetBool/SetBool、CrossFade、Play 等
+  - AudioSource：音频源组件，支持 Play/Stop/Pause、音量/音调控制、3D 音频
+  - Renderer：渲染器基类及派生类型（MeshRenderer、SkinnedMeshRenderer、CanvasRenderer）
+  - MeshFilter：网格过滤器组件
+  - YieldInstruction：协程支持类型（WaitForSeconds、WaitForEndOfFrame 等）
+  - ParticleSystem：粒子系统基础实现（MainModule、EmissionModule、ShapeModule）
+  - CharacterController：角色控制器组件
+  - Joint 系列：FixedJoint、HingeJoint、SpringJoint、ConfigurableJoint
+  - WheelCollider：车辆物理组件
+  - Gizmos：调试可视化绘制
+  - Gradient：颜色渐变类型
+  - PhysicsScene/PhysicsScene2D：物理场景查询
+  - TrailRenderer/LineRenderer：轨迹和线渲染器
+
+### 下一次要做（优先）
+1. 修复剩余编译错误（RemoveComponentMenu、RequireComponent 属性）
+2. 准备 AssetBundle 测试资源并运行完整对照测试
+3. 继续增强 Unity 2022 API 兼容性
