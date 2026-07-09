@@ -1,0 +1,270 @@
+using System;
+
+namespace UnityEngine;
+
+public static class GeometryUtility
+{
+    public static Plane[] CalculateFrustumPlanes(Camera camera)
+    {
+        return CalculateFrustumPlanes(camera.projectionMatrix * camera.worldToCameraMatrix);
+    }
+
+    public static Plane[] CalculateFrustumPlanes(Matrix4x4 worldToProjectionMatrix)
+    {
+        Plane[] planes = new Plane[6];
+        CalculateFrustumPlanes(worldToProjectionMatrix, planes);
+        return planes;
+    }
+
+    public static void CalculateFrustumPlanes(Matrix4x4 worldToProjectionMatrix, Plane[] planes)
+    {
+        if (planes == null || planes.Length < 6)
+            return;
+
+        Vector3 a = new Vector3(
+            worldToProjectionMatrix.m03 - worldToProjectionMatrix.m00,
+            worldToProjectionMatrix.m13 - worldToProjectionMatrix.m10,
+            worldToProjectionMatrix.m23 - worldToProjectionMatrix.m20);
+        planes[0] = new Plane(a, worldToProjectionMatrix.m33 - worldToProjectionMatrix.m30);
+
+        Vector3 b = new Vector3(
+            worldToProjectionMatrix.m03 + worldToProjectionMatrix.m00,
+            worldToProjectionMatrix.m13 + worldToProjectionMatrix.m10,
+            worldToProjectionMatrix.m23 + worldToProjectionMatrix.m20);
+        planes[1] = new Plane(b, worldToProjectionMatrix.m33 + worldToProjectionMatrix.m30);
+
+        Vector3 c = new Vector3(
+            worldToProjectionMatrix.m03 - worldToProjectionMatrix.m01,
+            worldToProjectionMatrix.m13 - worldToProjectionMatrix.m11,
+            worldToProjectionMatrix.m23 - worldToProjectionMatrix.m21);
+        planes[2] = new Plane(c, worldToProjectionMatrix.m33 - worldToProjectionMatrix.m31);
+
+        Vector3 d = new Vector3(
+            worldToProjectionMatrix.m03 + worldToProjectionMatrix.m01,
+            worldToProjectionMatrix.m13 + worldToProjectionMatrix.m11,
+            worldToProjectionMatrix.m23 + worldToProjectionMatrix.m21);
+        planes[3] = new Plane(d, worldToProjectionMatrix.m33 + worldToProjectionMatrix.m31);
+
+        Vector3 e = new Vector3(
+            worldToProjectionMatrix.m03 - worldToProjectionMatrix.m02,
+            worldToProjectionMatrix.m13 - worldToProjectionMatrix.m12,
+            worldToProjectionMatrix.m23 - worldToProjectionMatrix.m22);
+        planes[4] = new Plane(e, worldToProjectionMatrix.m33 - worldToProjectionMatrix.m32);
+
+        Vector3 f = new Vector3(
+            worldToProjectionMatrix.m03 + worldToProjectionMatrix.m02,
+            worldToProjectionMatrix.m13 + worldToProjectionMatrix.m12,
+            worldToProjectionMatrix.m23 + worldToProjectionMatrix.m22);
+        planes[5] = new Plane(f, worldToProjectionMatrix.m33 + worldToProjectionMatrix.m32);
+    }
+
+    public static bool TestPlanesAABB(Plane[] planes, Bounds bounds)
+    {
+        if (planes == null) return false;
+
+        Vector3 min = bounds.min;
+        Vector3 max = bounds.max;
+
+        for (int i = 0; i < planes.Length; i++)
+        {
+            Vector3 normal = planes[i].normal;
+            float dist = planes[i].distance;
+
+            Vector3 positive = min;
+            if (normal.x >= 0) positive.x = max.x;
+            if (normal.y >= 0) positive.y = max.y;
+            if (normal.z >= 0) positive.z = max.z;
+
+            float dot = Vector3.Dot(normal, positive);
+            if (dot + dist < 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    public static bool TryCreatePlaneFromPolygon(Vector3[] vertices, out Plane plane)
+    {
+        plane = default;
+        if (vertices == null || vertices.Length < 3)
+            return false;
+
+        plane = new Plane(vertices[0], vertices[1], vertices[2]);
+        return true;
+    }
+
+    public static bool IntersectRayMesh(Ray ray, Mesh mesh, Matrix4x4 matrix, out float distance)
+    {
+        distance = 0;
+        return false;
+    }
+}
+
+public sealed class LightmapSettings : Object
+{
+    public LightmapsMode lightmapsMode { get; set; }
+    public LightmapData[] lightmaps { get; set; } = Array.Empty<LightmapData>();
+    public LightProbes lightProbes { get; set; }
+    public bool useDirectionalMode { get; set; }
+
+    public static LightmapSettings current { get; set; } = new LightmapSettings();
+}
+
+public enum LightmapsMode
+{
+    NonDirectional = 0,
+    CombinedDirectional = 1,
+    SeparateDirectional = 2,
+}
+
+public sealed class LightProbes : Object
+{
+    public SphericalHarmonicsL2[] probes { get; } = Array.Empty<SphericalHarmonicsL2>();
+    public int count { get; }
+
+    public void GetPositions(Vector3[] outPositions) { }
+    public void GetProbes(SphericalHarmonicsL2[] outProbes) { }
+
+    public static LightProbes tetrahedralLattice { get; } = new LightProbes();
+}
+
+public struct SphericalHarmonicsL2
+{
+    private float[] _coefficients;
+
+    public float this[int coefficient, int row]
+    {
+        get
+        {
+            if (_coefficients == null)
+                _coefficients = new float[27];
+            return _coefficients[row * 9 + coefficient];
+        }
+        set
+        {
+            if (_coefficients == null)
+                _coefficients = new float[27];
+            _coefficients[row * 9 + coefficient] = value;
+        }
+    }
+
+    public void Clear()
+    {
+        if (_coefficients != null)
+            Array.Clear(_coefficients, 0, _coefficients.Length);
+    }
+
+    public void AddAmbientLight(Color color)
+    {
+    }
+
+    public void AddDirectionalLight(Vector3 direction, Color color, float intensity)
+    {
+    }
+
+    public static SphericalHarmonicsL2 operator +(SphericalHarmonicsL2 lhs, SphericalHarmonicsL2 rhs)
+    {
+        SphericalHarmonicsL2 result = new SphericalHarmonicsL2();
+        for (int i = 0; i < 9; i++)
+            for (int j = 0; j < 3; j++)
+                result[i, j] = lhs[i, j] + rhs[i, j];
+        return result;
+    }
+
+    public static SphericalHarmonicsL2 operator -(SphericalHarmonicsL2 lhs, SphericalHarmonicsL2 rhs)
+    {
+        SphericalHarmonicsL2 result = new SphericalHarmonicsL2();
+        for (int i = 0; i < 9; i++)
+            for (int j = 0; j < 3; j++)
+                result[i, j] = lhs[i, j] - rhs[i, j];
+        return result;
+    }
+}
+
+public struct Plane
+{
+    public Vector3 normal;
+    public float distance;
+
+    public Plane(Vector3 inNormal, Vector3 inPoint)
+    {
+        normal = inNormal.normalized;
+        distance = -Vector3.Dot(normal, inPoint);
+    }
+
+    public Plane(Vector3 inNormal, float d)
+    {
+        normal = inNormal.normalized;
+        distance = d;
+    }
+
+    public Plane(Vector3 a, Vector3 b, Vector3 c)
+    {
+        normal = Vector3.Cross(b - a, c - a).normalized;
+        distance = -Vector3.Dot(normal, a);
+    }
+
+    public void SetNormalAndPosition(Vector3 inNormal, Vector3 inPoint)
+    {
+        normal = inNormal.normalized;
+        distance = -Vector3.Dot(normal, inPoint);
+    }
+
+    public void Set3Points(Vector3 a, Vector3 b, Vector3 c)
+    {
+        normal = Vector3.Cross(b - a, c - a).normalized;
+        distance = -Vector3.Dot(normal, a);
+    }
+
+    public float GetDistanceToPoint(Vector3 point)
+    {
+        return Vector3.Dot(normal, point) + distance;
+    }
+
+    public Vector3 ClosestPointOnPlane(Vector3 point)
+    {
+        return point - normal * GetDistanceToPoint(point);
+    }
+
+    public bool GetSide(Vector3 point)
+    {
+        return Vector3.Dot(normal, point) + distance > 0f;
+    }
+
+    public bool SameSide(Vector3 inPt0, Vector3 inPt1)
+    {
+        float d0 = GetDistanceToPoint(inPt0);
+        float d1 = GetDistanceToPoint(inPt1);
+        return d0 * d1 >= 0;
+    }
+
+    public void Flip()
+    {
+        normal = -normal;
+        distance = -distance;
+    }
+
+    public Plane flipped => new Plane(-normal, -distance);
+
+    public void Translate(Vector3 translation)
+    {
+        distance -= Vector3.Dot(normal, translation);
+    }
+
+    public static Plane Translate(Plane plane, Vector3 translation)
+    {
+        return new Plane(plane.normal, plane.distance - Vector3.Dot(plane.normal, translation));
+    }
+
+    public bool Raycast(Ray ray, out float enter)
+    {
+        float num = Vector3.Dot(ray.direction, normal);
+        if (Mathf.Approximately(num, 0f))
+        {
+            enter = 0f;
+            return false;
+        }
+        enter = -(Vector3.Dot(ray.origin, normal) + distance) / num;
+        return enter >= 0f;
+    }
+}

@@ -11,17 +11,17 @@ public class Cubemap : Texture
 
   public Cubemap(int width, TextureFormat format, bool mipChain)
   {
-    _ = width;
-    _ = format;
-    _ = mipChain;
+    this.width = width;
+    this.height = width;
+    this.format = format;
+    this.mipChain = mipChain;
+    dimension = TextureDimension.Cube;
   }
 
   public Cubemap(int width, TextureFormat format, bool mipChain, bool linear)
+    : this(width, format, mipChain)
   {
-    _ = width;
-    _ = format;
-    _ = mipChain;
-    _ = linear;
+    this.linear = linear;
   }
 
   public Color GetPixel(CubemapFace face, int x, int y)
@@ -89,15 +89,4 @@ public class Cubemap : Texture
   {
     _ = mipLevel;
   }
-}
-
-public enum CubemapFace
-{
-  PositiveX,
-  NegativeX,
-  PositiveY,
-  NegativeY,
-  PositiveZ,
-  NegativeZ,
-  Unknown = -1
 }

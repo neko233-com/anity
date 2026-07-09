@@ -1,45 +1,25 @@
-namespace UnityEngine;
+using System;
 
-public enum RenderTextureFormat
-{
-  ARGB32 = 0,
-  Depth = 1,
-  Shadow = 2,
-  Alpha8 = 3,
-  RGB24 = 4,
-  RGB565 = 5,
-  ARGB1555 = 6,
-  Default = 7,
-  ARGB2101010 = 8,
-  ARGBHalf = 9,
-  RGFloat = 10,
-  RGHalf = 11,
-  RFloat = 12,
-  RHalf = 13,
-  R8 = 14,
-  RGInt = 15,
-  RInt = 16,
-  BGRA32 = 17,
-  RGB111110Float = 22,
-  RG32 = 23,
-  RGBAUShort = 24,
-  RG16 = 25,
-  BGRA10101010_XR = 26,
-  BGR101010_XR = 27,
-  R16 = 28,
-}
+namespace UnityEngine;
 
 public class RenderTexture : Texture
 {
-  public int width { get; set; }
-  public int height { get; set; }
+  public new int width { get; set; }
+  public new int height { get; set; }
   public int depth { get; }
   public int antiAliasing { get; set; }
   public RenderTextureFormat format { get; set; }
   public bool useMipMap { get; set; }
   public bool autoGenerateMips { get; set; }
-  public FilterMode filterMode { get; set; }
-  public TextureWrapMode wrapMode { get; set; }
+  public bool enableRandomWrite { get; set; }
+  public int volumeDepth { get; set; }
+  public TextureDimension dimension { get; set; }
+  public RenderTextureMemoryless memorylessMode { get; set; }
+  public VRTextureUsage vrUsage { get; set; }
+  public int msaaSamples { get; set; }
+  public float mipMapBias { get; set; }
+  public int anisoLevel { get; set; }
+  public RenderTextureReadWrite sRGB { get; set; }
 
   public static RenderTexture active { get; set; }
 
@@ -56,12 +36,82 @@ public class RenderTexture : Texture
     this.format = format;
     filterMode = FilterMode.Point;
     wrapMode = TextureWrapMode.Repeat;
+    antiAliasing = 1;
+    msaaSamples = 1;
+    volumeDepth = 1;
+    dimension = TextureDimension.Tex2D;
+    sRGB = RenderTextureReadWrite.Default;
+    memorylessMode = RenderTextureMemoryless.None;
+    vrUsage = VRTextureUsage.None;
   }
-}
 
-public class Texture : Object
-{
-  public virtual void Release() {}
-  public virtual bool IsCreated() => true;
-  public virtual void Create() {}
+  public RenderTexture(int width, int height, int depth, RenderTextureFormat format, RenderTextureReadWrite readWrite)
+    : this(width, height, depth, format)
+  {
+    sRGB = readWrite;
+  }
+
+  public RenderTexture(RenderTextureDescriptor desc)
+  {
+    width = desc.width;
+    height = desc.height;
+    depth = desc.depthBufferBits;
+    format = desc.colorFormat;
+    antiAliasing = desc.msaaSamples;
+    msaaSamples = desc.msaaSamples;
+    volumeDepth = desc.volumeDepth;
+    dimension = desc.dimension;
+    useMipMap = desc.useMipMap;
+    autoGenerateMips = desc.autoGenerateMips;
+    enableRandomWrite = desc.enableRandomWrite;
+    memorylessMode = desc.memoryless;
+    vrUsage = desc.vrUsage;
+    if (desc.sRGB)
+      sRGB = RenderTextureReadWrite.sRGB;
+    else
+      sRGB = RenderTextureReadWrite.Linear;
+  }
+
+  public bool IsCreated() => true;
+
+  public void Create()
+  {
+  }
+
+  public void Release()
+  {
+  }
+
+  public void DiscardContents()
+  {
+  }
+
+  public void DiscardContents(bool discardColor, bool discardDepth)
+  {
+    _ = discardColor;
+    _ = discardDepth;
+  }
+
+  public static bool SupportsStencil(RenderTexture rt)
+  {
+    return rt != null;
+  }
+
+  public IntPtr GetNativeTexturePtr()
+  {
+    return IntPtr.Zero;
+  }
+
+  public IntPtr GetDepthStencilNativeTexturePtr()
+  {
+    return IntPtr.Zero;
+  }
+
+  public void GenerateMips()
+  {
+  }
+
+  public void SetGlobalShaderProperty(string propertyName)
+  {
+  }
 }
