@@ -49,19 +49,19 @@ public static class EditorBuildSettings
 
   public static void AddScene(EditorBuildSettingsScene scene)
   {
-    ArgumentNullException.ThrowIfNull(scene);
+    if (scene is null) throw new ArgumentNullException(nameof(scene));
     _scenes.Add(scene);
   }
 
   public static bool RemoveScene(EditorBuildSettingsScene scene)
   {
-    ArgumentNullException.ThrowIfNull(scene);
+    if (scene is null) throw new ArgumentNullException(nameof(scene));
     return _scenes.Remove(scene);
   }
 
   public static void MoveScene(int index, EditorBuildSettingsScene scene)
   {
-    ArgumentNullException.ThrowIfNull(scene);
+    if (scene is null) throw new ArgumentNullException(nameof(scene));
     if (index < 0 || index > _scenes.Count)
       throw new ArgumentOutOfRangeException(nameof(index));
     _scenes.Remove(scene);

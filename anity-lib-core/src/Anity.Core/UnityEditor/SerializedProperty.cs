@@ -402,7 +402,9 @@ public sealed class SerializedProperty
     }
 
     var current = root;
-    var tokens = path.Split('.', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    var tokens = path.Split('.', StringSplitOptions.RemoveEmptyEntries)
+      .Select(t => t.Trim())
+      .ToArray();
     if (tokens.Length == 0)
     {
       return ResolvedPathNode.Invalid;

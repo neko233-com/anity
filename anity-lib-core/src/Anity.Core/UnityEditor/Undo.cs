@@ -164,5 +164,19 @@ public static class Undo
     return true;
   }
 
-  private readonly record struct UndoRecord(string Name, Object[] Targets, int Group, string GroupName);
+  private readonly struct UndoRecord
+  {
+    public string Name { get; }
+    public Object[] Targets { get; }
+    public int Group { get; }
+    public string GroupName { get; }
+
+    public UndoRecord(string name, Object[] targets, int group, string groupName)
+    {
+      Name = name;
+      Targets = targets;
+      Group = group;
+      GroupName = groupName;
+    }
+  }
 }

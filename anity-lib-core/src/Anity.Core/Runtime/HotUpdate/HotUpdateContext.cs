@@ -3,33 +3,21 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Loader;
 
 namespace Anity.Core.Runtime.HotUpdate;
 
 /// <summary>
-/// Manages hot-updatable assembly contexts using AssemblyLoadContext.
+/// Manages hot-updatable assembly contexts.
 /// This enables runtime code replacement without restarting the application.
+/// Note: Full AssemblyLoadContext support requires .NET Core 3.0+.
+/// This implementation provides a simplified version for .NET Standard 2.1.
 /// </summary>
 public sealed class HotUpdateContext : IDisposable
 {
-  private readonly Dictionary<string, ManagedLoadContext> _contexts = new(StringComparer.OrdinalIgnoreCase);
+  private readonly Dictionary<string, Assembly> _loadedAssemblies = new(StringComparer.OrdinalIgnoreCase);
+  private readonly Dictionary<string, byte[]> _assemblyBytes = new(StringComparer.OrdinalIgnoreCase);
   private readonly object _lock = new();
   private bool _disposed;
-
-  /// <summary>
-  /// Gets the number of loaded hot update contexts.
-  /// </summary>
-  public int Count
-  {
-    get
-    {
-      lock (_lock)
-      {
-        return _contexts.Count;
-      }
-    }
-  }
 
   /// <summary>
   /// Gets all loaded assembly names.
@@ -40,7 +28,7 @@ public sealed class HotUpdateContext : IDisposable
     {
       lock (_lock)
       {
-        return _contexts.Keys.ToArray();
+        return _loadedAssemblies.Keys.ToArray();
       }
     }
   }
@@ -59,34 +47,26 @@ public sealed class HotUpdateContext : IDisposable
     byte[]? symbolBytes = null,
     IEnumerable<(string Name, byte[] Bytes)>? dependencies = null)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
-    ArgumentException.ThrowIfNullOrWhiteSpace(assemblyName);
-    ArgumentNullException.ThrowIfNull(assemblyBytes);
+    if (_disposed) throw new ObjectDisposedException(nameof(HotUpdateContext));
+    if (string.IsNullOrWhiteSpace(assemblyName)) throw new ArgumentException("Assembly name cannot be null or empty.", nameof(assemblyName));
+    if (assemblyBytes is null) throw new ArgumentNullException(nameof(assemblyBytes));
 
     lock (_lock)
     {
-      if (_contexts.ContainsKey(assemblyName))
+      if (_loadedAssemblies.ContainsKey(assemblyName))
       {
         throw new InvalidOperationException($"Hot update assembly '{assemblyName}' is already loaded. Unload it first.");
       }
 
-      var context = new ManagedLoadContext(assemblyName);
+      // Store the assembly bytes for potential reload
+      _assemblyBytes[assemblyName] = assemblyBytes;
 
-      // Load dependencies first
-      if (dependencies is not null)
-      {
-        foreach (var (depName, depBytes) in dependencies)
-        {
-          context.LoadFromStream(new MemoryStream(depBytes));
-        }
-      }
+      // Load the assembly using Assembly.Load
+      // Note: This is a simplified implementation. For production use,
+      // consider using AssemblyLoadContext on .NET Core 3.0+
+      var assembly = Assembly.Load(assemblyBytes, symbolBytes);
 
-      // Load the main assembly
-      var assembly = symbolBytes is not null
-        ? context.LoadFromStream(new MemoryStream(assemblyBytes), new MemoryStream(symbolBytes))
-        : context.LoadFromStream(new MemoryStream(assemblyBytes));
-
-      _contexts[assemblyName] = context;
+      _loadedAssemblies[assemblyName] = assembly;
       return assembly;
     }
   }
@@ -103,9 +83,9 @@ public sealed class HotUpdateContext : IDisposable
     string assemblyPath,
     string? symbolPath = null)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
-    ArgumentException.ThrowIfNullOrWhiteSpace(assemblyName);
-    ArgumentException.ThrowIfNullOrWhiteSpace(assemblyPath);
+    if (_disposed) throw new ObjectDisposedException(nameof(HotUpdateContext));
+    if (string.IsNullOrWhiteSpace(assemblyName)) throw new ArgumentException("Assembly name cannot be null or empty.", nameof(assemblyName));
+    if (string.IsNullOrWhiteSpace(assemblyPath)) throw new ArgumentException("Assembly path cannot be null or empty.", nameof(assemblyPath));
 
     if (!File.Exists(assemblyPath))
     {
@@ -130,18 +110,18 @@ public sealed class HotUpdateContext : IDisposable
   /// <returns>True if the assembly was unloaded; false if it wasn't found.</returns>
   public bool Unload(string assemblyName)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
-    ArgumentException.ThrowIfNullOrWhiteSpace(assemblyName);
+    if (_disposed) throw new ObjectDisposedException(nameof(HotUpdateContext));
+    if (string.IsNullOrWhiteSpace(assemblyName)) throw new ArgumentException("Assembly name cannot be null or empty.", nameof(assemblyName));
 
     lock (_lock)
     {
-      if (!_contexts.TryGetValue(assemblyName, out var context))
+      if (!_loadedAssemblies.ContainsKey(assemblyName))
       {
         return false;
       }
 
-      context.Unload();
-      _contexts.Remove(assemblyName);
+      _loadedAssemblies.Remove(assemblyName);
+      _assemblyBytes.Remove(assemblyName);
       return true;
     }
   }
@@ -158,7 +138,7 @@ public sealed class HotUpdateContext : IDisposable
     byte[] assemblyBytes,
     byte[]? symbolBytes = null)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
+    if (_disposed) throw new ObjectDisposedException(nameof(HotUpdateContext));
 
     Unload(assemblyName);
     return LoadAssembly(assemblyName, assemblyBytes, symbolBytes);
@@ -171,17 +151,42 @@ public sealed class HotUpdateContext : IDisposable
   /// <returns>The loaded assembly, or null if not found.</returns>
   public Assembly? GetAssembly(string assemblyName)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
-    ArgumentException.ThrowIfNullOrWhiteSpace(assemblyName);
+    if (_disposed) throw new ObjectDisposedException(nameof(HotUpdateContext));
+    if (string.IsNullOrWhiteSpace(assemblyName)) throw new ArgumentException("Assembly name cannot be null or empty.", nameof(assemblyName));
 
     lock (_lock)
     {
-      if (_contexts.TryGetValue(assemblyName, out var context))
+      if (_loadedAssemblies.TryGetValue(assemblyName, out var assembly))
       {
-        return context.Assemblies.FirstOrDefault(a => !a.IsDynamic);
+        return assembly;
       }
 
       return null;
+    }
+  }
+
+  /// <summary>
+  /// Gets all loaded assembly names.
+  /// </summary>
+  public IEnumerable<string> GetLoadedAssemblyNames()
+  {
+    lock (_lock)
+    {
+      return _loadedAssemblies.Keys.ToList();
+    }
+  }
+
+  /// <summary>
+  /// Gets the count of loaded assemblies.
+  /// </summary>
+  public int Count
+  {
+    get
+    {
+      lock (_lock)
+      {
+        return _loadedAssemblies.Count;
+      }
     }
   }
 
@@ -192,12 +197,12 @@ public sealed class HotUpdateContext : IDisposable
   /// <returns>True if the assembly is loaded.</returns>
   public bool IsLoaded(string assemblyName)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
-    ArgumentException.ThrowIfNullOrWhiteSpace(assemblyName);
+    if (_disposed) throw new ObjectDisposedException(nameof(HotUpdateContext));
+    if (string.IsNullOrWhiteSpace(assemblyName)) throw new ArgumentException("Assembly name cannot be null or empty.", nameof(assemblyName));
 
     lock (_lock)
     {
-      return _contexts.ContainsKey(assemblyName);
+      return _loadedAssemblies.ContainsKey(assemblyName);
     }
   }
 
@@ -210,7 +215,7 @@ public sealed class HotUpdateContext : IDisposable
   /// <returns>The created instance, or null if not found.</returns>
   public object? CreateInstance(string assemblyName, string typeName, params object[] args)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
+    if (_disposed) throw new ObjectDisposedException(nameof(HotUpdateContext));
 
     var assembly = GetAssembly(assemblyName);
     if (assembly is null)
@@ -238,38 +243,9 @@ public sealed class HotUpdateContext : IDisposable
 
     lock (_lock)
     {
-      foreach (var context in _contexts.Values)
-      {
-        context.Unload();
-      }
-
-      _contexts.Clear();
+      _loadedAssemblies.Clear();
+      _assemblyBytes.Clear();
       _disposed = true;
     }
-  }
-}
-
-/// <summary>
-/// Custom AssemblyLoadContext for managing hot update assemblies.
-/// </summary>
-internal sealed class ManagedLoadContext : AssemblyLoadContext
-{
-  private readonly string _name;
-
-  public ManagedLoadContext(string name)
-    : base(name, isCollectible: true)
-  {
-    _name = name;
-  }
-
-  protected override Assembly? Load(AssemblyName assemblyName)
-  {
-    // Return null to use the default context for framework assemblies
-    return null;
-  }
-
-  public override string ToString()
-  {
-    return $"HotUpdateContext({_name})";
   }
 }

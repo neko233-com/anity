@@ -94,5 +94,21 @@ public sealed class GenericMenu
     }
   }
 
-  private readonly record struct MenuItemEntry(string Name, Action? Action, bool IsDisabled, bool IsOn = false, bool IsSeparator = false);
+  private readonly struct MenuItemEntry
+  {
+    public string Name { get; }
+    public Action? Action { get; }
+    public bool IsDisabled { get; }
+    public bool IsOn { get; }
+    public bool IsSeparator { get; }
+
+    public MenuItemEntry(string name, Action? action, bool isDisabled, bool isOn = false, bool isSeparator = false)
+    {
+      Name = name;
+      Action = action;
+      IsDisabled = isDisabled;
+      IsOn = isOn;
+      IsSeparator = isSeparator;
+    }
+  }
 }

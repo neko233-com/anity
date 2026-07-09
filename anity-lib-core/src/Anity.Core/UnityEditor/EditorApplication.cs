@@ -31,7 +31,7 @@ public static class EditorApplication
   public static int frameCount { get; private set; }
   public static double timeSinceStartup => (DateTime.UtcNow - _start).TotalSeconds;
   public static string applicationContentsPath => AppContext.BaseDirectory;
-  public static string applicationPath => Environment.ProcessPath ?? string.Empty;
+  public static string applicationPath => System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? string.Empty;
 
   public static void Update()
   {
