@@ -15,10 +15,35 @@ public static class EditorSceneManager
     return SceneManager.GetActiveScene();
   }
 
-  public static Scene OpenScene(string scenePath, OpenSceneMode mode, bool setActiveScene)
+  public static Scene OpenScene(string path, OpenSceneMode mode, bool outcastsInScene)
   {
-    _ = setActiveScene;
-    return OpenScene(scenePath, mode);
+    _ = outcastsInScene;
+    return OpenScene(path, mode);
+  }
+
+  public static bool SaveScene(Scene scene)
+  {
+    return true;
+  }
+
+  public static bool SaveScene(Scene scene, string path)
+  {
+    return true;
+  }
+
+  public static bool SaveScene(Scene scene, string path, bool saveAsCopy)
+  {
+    return true;
+  }
+
+  public static bool CloseScene(Scene scene, bool removeScene)
+  {
+    return true;
+  }
+
+  public static bool CloseAllScenes()
+  {
+    return true;
   }
 
   public static void SaveCurrentModifiedScenesIfUserWantsTo()
@@ -80,7 +105,8 @@ public enum NewSceneMode
 public enum OpenSceneMode
 {
   Single,
-  Additive
+  Additive,
+  AdditiveWithoutLoading
 }
 
 public readonly struct LoadSceneParameters
