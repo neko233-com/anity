@@ -277,6 +277,20 @@
   - 添加 `StartCoroutine(Func<IEnumerator>)` 方法
   - 添加 `StartCoroutine<T>(Func<T>)` 方法
 
+## 2026-07-09（本次 - Animator/AudioSource 增强）
+
+### 已完成
+- **增强 Animator**
+  - 添加 `SetLookAtPosition(Vector3)` 方法
+  - 添加 `SetLookAtWeight(float)` 系列方法（5个重载）
+  - 添加 `GetBoneTransform(HumanBodyBones)` 方法
+  - 添加 `SetBoneLocalRotation(HumanBodyBones, Quaternion)` 方法
+  - 添加 `HasState(int, int)` 方法
+  - 添加 `avatar` 属性
+- **增强 AudioSource**
+  - 添加 `PlayClipAtPoint(AudioClip, Vector3)` 静态方法
+  - 添加 `PlayClipAtPoint(AudioClip, Vector3, float)` 静态方法
+
 ### 下一次要做（优先）
 1. 准备 AssetBundle 测试资源并运行完整对照测试
 2. 继续增强 Unity 2022 API 兼容性
