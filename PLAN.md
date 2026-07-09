@@ -361,6 +361,105 @@
   - 添加 `MeshTopology` 枚举：网格拓扑类型
   - 添加支持类型：`ShaderPassName`、`RenderTargetIdentifier`、`ScriptableRenderContext` 等
 
+## 2026-07-09（本次 - 完整 URP + Job System + 代码裁切 + 编辑器窗口）
+
+### 已完成
+- **创建 AGENTS.md 项目规范文档**
+  - 明确：仅支持 URP 渲染管线（不支持 Built-in/HDRP）
+  - 明确：必须实现 Job System、代码裁切、IL2CPP
+  - 明确：完全对标 Unity 2022 LTS
+  - 明确：平台优先级 WebGL > Windows
+- **完整 URP 渲染管线实现**（UnityEngine.Rendering.Universal 命名空间）
+  - `UniversalRenderPipelineAsset`：URP 管线资产，完整 50+ 配置项
+    - HDR、SRP Batcher、动态批处理、自适应性能
+    - 阴影质量/级联/距离/分辨率/软阴影
+    - 主光/附加光阴影配置、级联分割
+    - 渲染器列表、默认渲染器索引
+  - `UniversalRenderPipeline`：URP 管线实例
+    - `RenderSingleCamera`、`beginCameraRendering`/`endCameraRendering` 事件
+    - `beginFrameRendering`/`endFrameRendering` 事件
+  - `ScriptableRenderer` / `ScriptableRendererFeature` / `ScriptableRenderPass`
+    - RenderPass 完整生命周期（Setup/Execute/OnCameraSetup/Cleanup）
+    - `RenderPassEvent` 枚举（16 个注入点：BeforeShadows→AfterRendering 全流程）
+  - `UniversalRendererData` / `UniversalRenderer`：前向渲染器数据与实现
+    - Forward/Deferred 模式、SRP Batcher、HDR、深度纹理
+    - 主光/附加光渲染配置、每对象附加光上限
+  - `ForwardRendererData` / `Renderer2DData`：前向和 2D 渲染器
+  - **Volume 系统完整实现**（UnityEngine.Rendering 命名空间）
+    - `Volume` 组件：全局/局部、混合距离、权重、优先级
+    - `VolumeProfile` 资产：Volume 组件集合、增删改查
+    - `VolumeComponent` / `VolumeParameter<T>` / 8 种参数类型
+      - MinFloatParameter、ClampedFloatParameter、FloatParameter、IntParameter、BoolParameter
+      - ColorParameter、Vector2Parameter、Vector3Parameter、Texture2DParameter、CubemapParameter
+    - `VolumeStack` / `VolumeManager`：Volume 栈与单例管理器
+  - **URP 后处理 Volume 组件（18 种）**
+    - Bloom、ColorAdjustments、ColorCurves、Vignette、FilmGrain
+    - Tonemapping、LensDistortion、DepthOfField、MotionBlur
+    - PaniniProjection、ScreenSpaceReflection、ShadowsMidtonesHighlights
+    - WhiteBalance、ChannelMixer、IPostProcessComponent 接口
+- **完整 C# Job System 实现**（Unity.Jobs 命名空间）
+  - 接口：`IJob`、`IJobParallelFor`、`IJobParallelForTransform`、`IJobParallelForBatch`、`IJobParallelForFilter`
+  - `JobHandle`：完整结构、`Complete()`、`CombineDependencies`（多个重载）
+  - `JobExtensions` / `IJobParallelForExtensions`：Schedule/Run 扩展方法
+  - `BurstCompileAttribute` / `FloatPrecision` 枚举
+  - `JobScheduler` 内部调度器、`TransformAccess` 结构体
+  - `Allocator` / `NativeArrayOptions` / `JobMode` 枚举
+  - `ReadOnlyAttribute` / `WriteOnlyAttribute` / `NativeContainerAttribute`
+- **完整 NativeContainer 集合**（Unity.Collections 命名空间）
+  - `NativeArray<T>`：完整实现（索引、Copy、Dispose JobHandle、枚举器）
+  - `NativeList<T>`：动态数组（Add/RemoveAt/Clear/Resize/TrimExcess）
+  - `NativeHashMap<TKey, TValue>`：哈希映射（TryAdd/TryGetValue/Remove/GetKeyValueArrays）
+  - `NativeQueue<T>`：队列（Enqueue/Dequeue/Peek/Clear）
+  - `NativeSlice<T>`：数组切片
+  - `NativeKeyValueArrays<TKey, TValue>`：键值对数组
+- **完整代码裁切 / Code Stripping 实现**（UnityEditor 命名空间）
+  - `ManagedStrippingLevel`：Disabled/Low/Medium/High 四级
+  - `ManagedStrippingEngineClass` / `StrippingUsedAsOption` 枚举
+  - `PreserveAttribute`：多目标（程序集/类/方法/字段/属性等）
+  - `UsedByNativeCodeAttribute`：原生代码引用标记
+  - `LinkXmlGenerator`：link.xml 生成器（程序集/类型/方法/字段）
+  - `ManagedStrippingInfo` / `CodeStrippingUtils`：裁切信息与工具
+- **核心编辑器窗口完整实现**（UnityEditor 命名空间）
+  - `HierarchyWindow`：层级窗口
+    - 工具栏（搜索、Create 按钮）、树状结构、展开/折叠
+    - 选择同步、`[MenuItem("Window/General/Hierarchy")]`
+  - `ProjectWindow`：项目窗口
+    - 双栏布局（文件夹树 + 资源列表）、单栏切换
+    - 搜索过滤、资源图标按类型显示、`SceneAsset` 类型
+    - `[MenuItem("Window/General/Project")]`
+  - `InspectorWindow`：检视器窗口
+    - 顶部工具栏（锁定、混合值、图层、菜单）
+    - 标题栏（图标、名称、Tag、Layer）
+    - 组件标题栏（折叠、展开）、Transform 编辑器
+    - 空选择提示、Add Component 按钮
+    - `[MenuItem("Window/General/Inspector")]`
+  - `ConsoleWindow`：控制台窗口
+    - 工具栏（Clear/Collapse/Clear on Play/Error Pause/搜索）
+    - 日志级别过滤（Info/Warning/Error 计数）
+    - 条目选择展开堆栈、状态栏统计
+    - `Application.logMessageReceived` 事件监听
+    - `[MenuItem("Window/General/Console")]`
+- **编辑器样式与工具增强**
+  - `EditorStyles`：从 10 个扩展到 70+ 样式
+    - 标签类（miniLabel/redLabel/yellowLabel/highlight/selected/centeredGreyMiniLabel）
+    - 工具栏类（toolbarButton/toolbarDropDown/toolbarSearchField/toolbarPopup）
+    - Inspector 类（inspectorDefaultMargins/inspectorTitlebar）
+    - ProjectBrowser 全套（headerBg/sidebar/gridLabel/iconDropShadow）
+    - TreeView 全套（item/selected/active/inactive/renamingField）
+    - SectionHeader、largeLabel、titleLabel、statusbar、notification
+  - `EditorGUIUtility`：完整工具类
+    - `FindTexture` / `IconContent` / `TrTextContent`
+    - `pixelsPerPoint` / `singleLineHeight` / `isProSkin` / `mainBackgroundColor`
+    - `GetAspectRect` / `GetControlID` / `PingObject`
+    - `ConvertToGammaSpace` / `ConvertToLinearSpace`
+    - 文件面板（SaveFilePanel/OpenFilePanel/GetSaveFolderPanel）
+- **Editor 类增强**
+  - 静态 `CreateEditor` 方法（4 个重载）
+  - `targets` 属性（多对象编辑）
+  - `DrawHeader()` / `Repaint()` 方法
+  - `GenericEditor` 内部默认编辑器实现
+
 ### 下一次要做（优先）
-1. 继续增强 Unity 2022 API 兼容性
-2. 实现 WebGL 浏览器互操作功能
+1. 完善 URP Shader 和材质系统（URP/Lit、URP/Unlit 等）
+2. 实现编辑器主窗口框架（菜单栏、工具栏、状态栏、Dock 布局）
+3. 实现 SceneView 场景绘制与 Gizmos 系统
