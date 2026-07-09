@@ -199,7 +199,7 @@ public abstract class EditorWindow
     FocusWindowIfItsOpen(typeof(T));
   }
 
-  internal static void RegisterWindowFactory(Type type, Func<EditorWindow> factory)
+  public static void RegisterWindowFactory(Type type, Func<EditorWindow> factory)
   {
     var key = KeyForType(type);
     lock (_sync)

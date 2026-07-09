@@ -364,33 +364,52 @@ public sealed class EditorHost
   {
     var state = session?.State ?? _state;
     return new EditorStatus(
-      IsRunning: _isRunning,
-      State: state,
-      SessionId: session?.SessionId,
-      StartedAtUtc: session?.StartedAtUtc,
-      Tick: _tick,
-      OpenWindows: session?.OpenWindows ?? Array.Empty<string>(),
-      RegisteredMenus: GetMenus()
+      _isRunning,
+      state,
+      session?.SessionId,
+      session?.StartedAtUtc,
+      _tick,
+      session?.OpenWindows ?? Array.Empty<string>(),
+      GetMenus()
     );
   }
 
   private EditorSession ToSession(EditorSessionState state)
   {
     return new EditorSession(
-      SessionId: state.SessionId,
-      ProjectPath: state.ProjectPath,
-      StartedAtUtc: state.StartedAtUtc,
-      State: state.State,
-      OpenWindows: state.OpenWindows.Keys.ToArray(),
-      ActiveWindow: state.OpenWindows.LastOrDefault().Key);
+      state.SessionId,
+      state.ProjectPath,
+      state.StartedAtUtc,
+      state.State,
+      state.OpenWindows.Keys.ToArray(),
+      state.OpenWindows.LastOrDefault().Key);
   }
 
-  private sealed class EditorSessionState(string SessionId, string ProjectPath, DateTime StartedAtUtc, string State)
+  private sealed class EditorSessionState
   {
     public Dictionary<string, EditorWindow> OpenWindows { get; set; } = new();
-    public string SessionId { get; } = SessionId;
-    public string ProjectPath { get; } = ProjectPath;
-    public DateTime StartedAtUtc { get; } = StartedAtUtc;
-    public string State { get; set; } = State;
+    public string SessionId { get; }
+    public string ProjectPath { get; }
+    public DateTime StartedAtUtc { get; }
+    public string State { get; set; }
+
+    public EditorSessionState(string sessionId, string projectPath, DateTime startedAtUtc, string state)
+    {
+      SessionId = sessionId;
+      ProjectPath = projectPath;
+      StartedAtUtc = startedAtUtc;
+      State = state;
+    }
+
+    public EditorSession ToSession()
+    {
+      return new EditorSession(
+        SessionId,
+        ProjectPath,
+        StartedAtUtc,
+        State,
+        OpenWindows.Keys.ToArray(),
+        OpenWindows.LastOrDefault().Key);
+    }
   }
 }
