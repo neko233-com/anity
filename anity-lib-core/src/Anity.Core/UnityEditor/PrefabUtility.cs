@@ -403,6 +403,38 @@ public static class PrefabUtility
   {
     _ = instanceRoot;
   }
+
+  public static PrefabAssetType GetPrefabAssetType(GameObject gameObject)
+  {
+    if (gameObject == null) return PrefabAssetType.Missing;
+    if (!IsPartOfPrefabInstance(gameObject)) return PrefabAssetType.NotAPrefab;
+    return PrefabAssetType.Regular;
+  }
+
+  public static void ApplyPrefabInstance(GameObject instanceRoot, InteractionMode action)
+  {
+    ApplyPrefabInstance(instanceRoot);
+  }
+
+  public static void RevertPrefabInstance(GameObject instanceRoot, InteractionMode action)
+  {
+    RevertPrefabInstance(instanceRoot);
+  }
+
+  public static bool HasPrefabInstanceAnyOverrides(GameObject instanceRoot, bool includeDefaultOverride)
+  {
+    return false;
+  }
+
+  public static GameObject[] GetRemovedGameObjects(GameObject instanceRoot)
+  {
+    return Array.Empty<GameObject>();
+  }
+
+  public static GameObject[] GetAddedGameObjects(GameObject instanceRoot)
+  {
+    return Array.Empty<GameObject>();
+  }
 }
 
 public enum PrefabInstanceStatus
@@ -418,4 +450,20 @@ public enum PrefabImportMode
 {
   Normal,
   Experimental
+}
+
+public enum PrefabAssetType
+{
+  Missing,
+  NotAPrefab,
+  Regular,
+  Model,
+  Variant,
+  MissingAsset
+}
+
+public enum InteractionMode
+{
+  AutomatedAction,
+  UserAction
 }
