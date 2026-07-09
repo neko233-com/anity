@@ -329,6 +329,29 @@
   - 所有 10 个测试通过
   - 测试覆盖二进制对比和行为对比
 
+## 2026-07-09（本次 - Unity 核心机制）
+
+### 已完成
+- **实现 Addressable 系统**
+  - 添加 `Addressables` 类：资产加载、实例化、释放
+  - 添加 `AssetReference` 类：资产引用
+  - 添加 `AsyncOperationHandle<T>` 结构：异步操作句柄
+  - 添加 `IResourceLocator` 接口：资源定位器
+- **实现 Terrain 地形系统**
+  - 添加 `Terrain` 组件：地形渲染
+  - 添加 `TerrainData` 资产：地形数据
+  - 添加 `TerrainLayer` 类：地形层
+  - 添加 `TreePrototype`/`TreeInstance` 结构：树木原型和实例
+- **实现 Tilemap 瓦片地图系统**
+  - 添加 `Tilemap` 组件：瓦片地图渲染
+  - 添加 `Tile`/`TileData`/`TileFlags` 类型：瓦片数据
+  - 添加 `ITilemap` 接口：瓦片地图接口
+  - 添加 `Vector3Int`/`BoundsInt` 类型：整数向量和边界
+- **实现 Burst 编译器支持**
+  - 添加 `BurstCompileAttribute`：Burst 编译属性
+  - 添加 `math` 静态类：Burst 兼容数学库
+  - 添加 `FixedPoint` 结构：定点数学
+
 ### 下一次要做（优先）
 1. 继续增强 Unity 2022 API 兼容性
 2. 实现 WebGL 浏览器互操作功能
