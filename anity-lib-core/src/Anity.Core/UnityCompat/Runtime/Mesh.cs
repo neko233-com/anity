@@ -30,6 +30,16 @@ public class Mesh : Object
     _triangles = new int[0];
     _normals = new Vector3[0];
     _uv = new Vector2[0];
+    tangents = new Vector4[0];
+    uv2 = new Vector2[0];
+    uv3 = new Vector2[0];
+    uv4 = new Vector2[0];
+    colors = new Color[0];
+    colors32 = new Color32[0];
+    bindposes = new Matrix4x4[0];
+    boneWeights = new BoneWeight[0];
+    subMeshCount = 1;
+    bounds = default;
   }
 
   public void RecalculateNormals()
@@ -38,7 +48,25 @@ public class Mesh : Object
 
   public void RecalculateBounds()
   {
-    bounds = new Bounds(Vector3.zero, Vector3.one);
+    if (_vertices.Length == 0)
+    {
+      bounds = new Bounds(Vector3.zero, Vector3.zero);
+      return;
+    }
+
+    var min = _vertices[0];
+    var max = _vertices[0];
+    for (int i = 1; i < _vertices.Length; i++)
+    {
+      var v = _vertices[i];
+      if (v.x < min.x) min.x = v.x;
+      if (v.y < min.y) min.y = v.y;
+      if (v.z < min.z) min.z = v.z;
+      if (v.x > max.x) max.x = v.x;
+      if (v.y > max.y) max.y = v.y;
+      if (v.z > max.z) max.z = v.z;
+    }
+    bounds = new Bounds((min + max) * 0.5f, max - min);
   }
 
   public void RecalculateTangents()
@@ -56,7 +84,7 @@ public class Mesh : Object
 
   public void SetTriangles(int[] triangles, int submesh)
   {
-    _triangles = triangles;
+    _triangles = triangles ?? new int[0];
   }
 
   public Vector3[] GetVertices()
@@ -66,7 +94,7 @@ public class Mesh : Object
 
   public void SetVertices(Vector3[] inVertices)
   {
-    _vertices = inVertices;
+    _vertices = inVertices ?? new Vector3[0];
   }
 
   public Vector3[] GetNormals()
@@ -76,7 +104,7 @@ public class Mesh : Object
 
   public void SetNormals(Vector3[] inNormals)
   {
-    _normals = inNormals;
+    _normals = inNormals ?? new Vector3[0];
   }
 
   public Vector4[] GetTangents()
@@ -86,7 +114,7 @@ public class Mesh : Object
 
   public void SetTangents(Vector4[] inTangents)
   {
-    tangents = inTangents;
+    tangents = inTangents ?? new Vector4[0];
   }
 
   public Vector2[] GetUVs(int channel)
@@ -96,17 +124,17 @@ public class Mesh : Object
 
   public void SetUVs(int channel, Vector2[] uvs)
   {
-    _uv = uvs;
+    _uv = uvs ?? new Vector2[0];
   }
 
   public Color[] GetColors()
   {
-    return new Color[0];
+    return colors;
   }
 
   public void SetColors(Color[] inColors)
   {
-    _ = inColors;
+    colors = inColors ?? new Color[0];
   }
 
   public void MarkDynamic()
