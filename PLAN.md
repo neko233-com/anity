@@ -247,6 +247,21 @@
   - TrailRenderer/LineRenderer：轨迹和线渲染器
 
 ### 下一次要做（优先）
-1. 修复剩余编译错误（RemoveComponentMenu、RequireComponent 属性）
-2. 准备 AssetBundle 测试资源并运行完整对照测试
-3. 继续增强 Unity 2022 API 兼容性
+1. 准备 AssetBundle 测试资源并运行完整对照测试
+2. 继续增强 Unity 2022 API 兼容性
+3. 实现 WebGL 浏览器互操作功能
+
+## 2026-07-09（本次 - 编译错误修复）
+
+### 已完成
+- **修复编译错误**
+  - 创建 `ComponentAttributes.cs`：添加 RequireComponent、AddComponentMenu、DisallowMultipleComponent、SerializeField、HideInInspector 等属性
+  - 删除重复类型定义：Coroutine、AnimatorStateInfo、AnimatorClipInfo、MeshColliderCookingOptions、CapsuleDirection2D
+  - 修复 Mathf.Infinity 使用：替换为 float.PositiveInfinity
+  - 修复类型转换错误：AudioSource.priority、WheelCollider.numCornerVertices/numCapVertices
+- **编译状态**：所有项目编译成功，0 个错误
+
+### 下一次要做（优先）
+1. 准备 AssetBundle 测试资源并运行完整对照测试
+2. 继续增强 Unity 2022 API 兼容性
+3. 实现 WebGL 浏览器互操作功能
