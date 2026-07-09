@@ -265,3 +265,19 @@
 1. 准备 AssetBundle 测试资源并运行完整对照测试
 2. 继续增强 Unity 2022 API 兼容性
 3. 实现 WebGL 浏览器互操作功能
+
+## 2026-07-09（本次 - MonoBehaviour 增强）
+
+### 已完成
+- **增强 MonoBehaviour**
+  - 添加 `Invoke(Action, float)` 方法
+  - 添加 `InvokeRepeating(Action, float, float)` 方法
+  - 添加 `CancelInvoke(Action)` 方法
+  - 添加 `IsInvoking(Action)` 方法
+  - 添加 `StartCoroutine(Func<IEnumerator>)` 方法
+  - 添加 `StartCoroutine<T>(Func<T>)` 方法
+
+### 下一次要做（优先）
+1. 准备 AssetBundle 测试资源并运行完整对照测试
+2. 继续增强 Unity 2022 API 兼容性
+3. 实现 WebGL 浏览器互操作功能
