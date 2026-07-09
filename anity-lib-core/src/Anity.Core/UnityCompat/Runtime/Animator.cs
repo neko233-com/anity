@@ -96,6 +96,20 @@ public class Animator : Behaviour
     public int GetLayerIndex(string layerName) => -1;
     public float GetLayerWeight(int layerIndex) => 0.0f;
     public void SetLayerWeight(int layerIndex, float weight) { }
+
+    public void SetLookAtPosition(Vector3 lookAtPosition) { }
+    public void SetLookAtWeight(float weight) { }
+    public void SetLookAtWeight(float weight, float bodyWeight) { }
+    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight) { }
+    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight, float eyesWeight) { }
+    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight, float eyesWeight, float clampWeight) { }
+
+    public Transform? GetBoneTransform(HumanBodyBones humanBoneId) => null;
+    public void SetBoneLocalRotation(HumanBodyBones humanBoneId, Quaternion rotation) { }
+
+    public bool HasState(int layerIndex, int stateID) => false;
+
+    public Avatar? avatar { get; set; }
 }
 
 /// <summary>

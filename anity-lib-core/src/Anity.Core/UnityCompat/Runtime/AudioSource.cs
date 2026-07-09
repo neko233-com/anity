@@ -166,6 +166,16 @@ public class AudioSource : Behaviour
         Array.Clear(samples, 0, samples.Length);
         return true;
     }
+
+    public static void PlayClipAtPoint(AudioClip clip, Vector3 position)
+    {
+        if (clip == null) return;
+    }
+
+    public static void PlayClipAtPoint(AudioClip clip, Vector3 position, float volumeScale)
+    {
+        PlayClipAtPoint(clip, position);
+    }
 }
 
 /// <summary>
