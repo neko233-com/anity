@@ -352,6 +352,15 @@
   - 添加 `math` 静态类：Burst 兼容数学库
   - 添加 `FixedPoint` 结构：定点数学
 
+## 2026-07-09（本次 - 渲染类型）
+
+### 已完成
+- **添加渲染相关类型**
+  - 添加 `CommandBuffer` 类：渲染命令缓冲区
+  - 添加 `Graphics` 类：图形渲染操作
+  - 添加 `MeshTopology` 枚举：网格拓扑类型
+  - 添加支持类型：`ShaderPassName`、`RenderTargetIdentifier`、`ScriptableRenderContext` 等
+
 ### 下一次要做（优先）
 1. 继续增强 Unity 2022 API 兼容性
 2. 实现 WebGL 浏览器互操作功能
