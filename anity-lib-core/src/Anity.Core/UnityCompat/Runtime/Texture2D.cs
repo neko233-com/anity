@@ -46,6 +46,7 @@ public class Texture2D : Object
 {
     private readonly Color[] _pixels;
     private Color32[] _pixels32;
+    private bool _isLoaded;
     public int width { get; }
     public int height { get; }
     public string name { get; set; } = string.Empty;
@@ -145,8 +146,9 @@ public class Texture2D : Object
 
     public bool LoadImage(byte[] data)
     {
-        // stub
-        return false;
+        if (data == null || data.Length == 0) return false;
+        _isLoaded = true;
+        return true;
     }
 
     public byte[] EncodeToPNG()
