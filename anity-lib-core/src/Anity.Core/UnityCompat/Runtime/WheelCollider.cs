@@ -241,7 +241,7 @@ public class LineRenderer : Renderer
     private float _endWidth = 0.1f;
     private bool _loop;
     private bool _useWorldSpace = true;
-    private bool _numCornerVertices;
+    private int _numCornerVertices;
     private int _numCapVertices;
     private LineAlignment _alignment;
     private AnimationCurve _widthCurve;
@@ -279,14 +279,14 @@ public class LineRenderer : Renderer
 
     public int numCornerVertices
     {
-        get => _numCapVertices ? 5 : 0;
-        set => _numCapVertices = value > 0;
+        get => _numCornerVertices;
+        set => _numCornerVertices = value;
     }
 
     public int numCapVertices
     {
-        get => _numCapVertices ? 5 : 0;
-        set => _numCapVertices = value > 0;
+        get => _numCapVertices;
+        set => _numCapVertices = value;
     }
 
     public LineAlignment alignment

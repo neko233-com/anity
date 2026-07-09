@@ -5,12 +5,11 @@ namespace UnityEngine;
 /// <summary>
 /// Unity MeshCollider component.
 /// </summary>
-[AddComponentMenu("Physics/Mesh Collider")]
 public class MeshCollider : Collider
 {
     private Mesh? _sharedMesh;
     private bool _convex;
-    private MeshColliderCookingOptions _cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning | MeshColliderCookingOptions.WeldColocatedVertices;
+    private MeshColliderCookingOptions _cookingOptions = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.WeldColocatedVertices;
 
     public Mesh? sharedMesh
     {
@@ -29,17 +28,4 @@ public class MeshCollider : Collider
         get => _cookingOptions;
         set => _cookingOptions = value;
     }
-}
-
-/// <summary>
-/// MeshCollider cooking options.
-/// </summary>
-[Flags]
-public enum MeshColliderCookingOptions
-{
-    None = 0,
-    CookForFasterSimulation = 1,
-    EnableMeshCleaning = 2,
-    WeldColocatedVertices = 4,
-    UseFastMidphase = 8
 }

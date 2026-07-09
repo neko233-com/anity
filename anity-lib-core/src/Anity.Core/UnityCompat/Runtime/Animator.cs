@@ -103,27 +103,3 @@ public class Animator : Behaviour
 /// </summary>
 public class RuntimeAnimatorController : Object { }
 
-/// <summary>
-/// Animator state information.
-/// </summary>
-public struct AnimatorStateInfo
-{
-    public int fullPathHash { get; }
-    public int shortNameHash { get; }
-    public int nameHash { get; }
-    public float normalizedTime { get; }
-    public float length { get; }
-    public float speed { get; }
-    public float speedMultiplier { get; }
-    public int tagHash { get; }
-    public bool loop { get; }
-}
-
-/// <summary>
-/// Animator clip information.
-/// </summary>
-public struct AnimatorClipInfo
-{
-    public AnimationClip clip { get; }
-    public float weight { get; }
-}

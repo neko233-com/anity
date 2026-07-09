@@ -49,15 +49,6 @@ public class WaitForAsyncOperation : YieldInstruction
 }
 
 /// <summary>
-/// Allows yielding a coroutine from a coroutine.
-/// </summary>
-public class Coroutine : YieldInstruction
-{
-    internal IntPtr ptr;
-    internal object? coroutineOwner;
-}
-
-/// <summary>
 /// Allows yielding a coroutine from a coroutine (managed version).
 /// </summary>
 public class ManagedCoroutine : YieldInstruction

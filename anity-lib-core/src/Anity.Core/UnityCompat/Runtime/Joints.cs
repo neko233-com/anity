@@ -176,7 +176,7 @@ public class SpringJoint : Joint
     private float _spring = 10.0f;
     private float _damper = 0.2f;
     private float _minDistance;
-    private float _maxDistance = Mathf.Infinity;
+    private float _maxDistance = float.PositiveInfinity;
 
     public float spring
     {

@@ -83,7 +83,7 @@ public class AudioSource : Behaviour
     public int priority
     {
         get => _priority;
-        set => _priority = Mathf.Clamp(value, 0, 256);
+        set => _priority = (int)Mathf.Clamp(value, 0, 256);
     }
 
     public float minDistance

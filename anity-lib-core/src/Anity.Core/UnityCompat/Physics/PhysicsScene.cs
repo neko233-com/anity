@@ -164,12 +164,3 @@ public struct PhysicsScene2D : IEquatable<PhysicsScene2D>
     public static bool operator ==(PhysicsScene2D left, PhysicsScene2D right) => left.Equals(right);
     public static bool operator !=(PhysicsScene2D left, PhysicsScene2D right) => !left.Equals(right);
 }
-
-/// <summary>
-/// Capsule direction for 2D physics.
-/// </summary>
-public enum CapsuleDirection2D
-{
-    Vertical,
-    Horizontal
-}
