@@ -166,3 +166,39 @@
 1. 完成 Editor.Host 项目的编译修复（添加缺失的 EditorSession 类型）
 2. 继续增强 Unity 2022 API 兼容性
 3. 实现 WebGL 浏览器互操作功能
+
+## 2026-07-09（本次）
+
+### 已完成
+- **切换到 .NET Standard 2.1**：完全对齐 Unity 2022 的 .NET 版本
+  - 修改所有项目的目标框架为 netstandard2.1
+  - 添加必要的 NuGet 包：System.Text.Json、System.Runtime.Loader、Microsoft.Bcl.HashCode
+  - 创建 IsExternalInit polyfill 支持 C# 9+ init 访问器
+  - 创建 RequiredMemberAttribute 和 CompilerFeatureRequiredAttribute polyfill 支持 C# 11+ required 成员
+- **修复 API 兼容性问题**：
+  - 替换 ArgumentNullException.ThrowIfNull、ObjectDisposedException.ThrowIf、ArgumentException.ThrowIfNullOrWhiteSpace 为传统检查方式
+  - 修复 StringSplitOptions.TrimEntries 问题
+  - 修复 Environment.ProcessPath 问题
+  - 修复 AssemblyLoadContext 相关问题
+  - 修复 record struct 问题
+  - 修复 CanvasScaler.ScaleMode 和 ScreenMatchMode 引用问题
+  - 修复项目引用路径问题
+- **简化 HotUpdateContext 实现**：
+  - 移除 AssemblyLoadContext 依赖，使用更简单的程序集加载方式
+  - 保留核心热更新功能：LoadAssembly、Unload、ReloadAssembly、GetAssembly
+- **修复所有项目编译错误**：
+  - anity-lib-core：核心库编译成功
+  - anity-webgl：WebGL 模块编译成功
+  - anity-hub：Hub 模块编译成功
+  - anity-editor：修复 Editor.Host 项目编译问题
+- **修复 Editor.Host 项目**：
+  - 将 EditorSession 和 EditorStatus 从 record 转换为 class（.NET Standard 2.1 兼容）
+  - 添加 LangVersion 设置到 Editor.Host 项目
+  - 修复 EditorWindow.RegisterWindowFactory 方法可见性（internal -> public）
+  - 修复 EditorSessionState 类以包含 ToSession 方法
+  - 修复构造函数调用以使用位置参数而不是命名参数
+
+### 下一次要做（优先）
+1. 继续增强 Unity 2022 API 兼容性
+2. 实现 WebGL 浏览器互操作功能
+3. 添加更多 Unity 2022 运行时类型
