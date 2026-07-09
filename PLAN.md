@@ -459,6 +459,79 @@
   - `DrawHeader()` / `Repaint()` 方法
   - `GenericEditor` 内部默认编辑器实现
 
+## 2026-07-09（本次 - Unity 2022 粒子系统完整实现）
+
+### 已完成
+- **完整粒子系统（ParticleSystem）实现**，完全对齐 Unity 2022 LTS API
+  - 位置：`UnityEngine/ParticleSystem/` 目录
+  - 删除旧的 `UnityCompat/Runtime/ParticleSystem.cs`（已被新实现取代）
+
+- **粒子系统枚举（35+ 枚举）** — [ParticleSystemEnums.cs](file:///workspace/anity-lib-core/src/Anity.Core/UnityEngine/ParticleSystem/ParticleSystemEnums.cs)
+  - 形状相关：`ParticleSystemShapeType`（20种）、`ParticleSystemShapeMultiModeValue`、`ParticleSystemMeshShapeType`
+  - 动画/模式：`ParticleSystemCurveMode`、`ParticleSystemGradientMode`、`ParticleSystemSimulationSpace`
+  - 渲染：`ParticleSystemRenderMode`、`ParticleSystemRenderSpace`、`ParticleSystemSortMode`、`ParticleSystemVertexStreams`
+  - 碰撞：`ParticleSystemCollisionType`、`ParticleSystemCollisionMode`、`ParticleSystemCollisionQuality`
+  - 拖尾：`ParticleSystemTrailMode`、`ParticleSystemTrailRibbonShape`
+  - 噪声：`ParticleSystemNoiseQuality`
+  - 子发射器：`ParticleSystemSubEmitterType`、`ParticleSystemSubEmitterProperties`
+  - 其他：`ParticleSystemStopBehavior`、`ParticleSystemEmitterVelocityMode`、`ParticleSystemCullingMode`、`ParticleSystemRingBufferMode`
+  - 力场：`ParticleSystemForceFieldShape`、`ParticleSystemForceFieldShapeType`
+  - 自定义数据：`ParticleSystemCustomData`、`ParticleSystemCustomDataMode`
+  - 纹理动画：`ParticleSystemAnimationMode`、`ParticleSystemAnimationTimeMode`、`ParticleSystemAnimationType`
+
+- **粒子数据结构** — [ParticleSystemDataStructs.cs](file:///workspace/anity-lib-core/src/Anity.Core/UnityEngine/ParticleSystem/ParticleSystemDataStructs.cs)
+  - `ParticleSystem.MinMaxCurve`：4 种模式（Constant/Curve/TwoCurves/TwoConstants）、Evaluate 方法
+  - `ParticleSystem.MinMaxGradient`：4 种模式（Color/Gradient/TwoColors/RandomColor）、Evaluate 方法
+  - `ParticleSystem.Particle`：完整字段（lifetime/position/velocity/rotation/scale/color/seed 等 20+ 字段）
+  - `ParticleSystem.Burst`：爆裂发射（time/count/minCount/maxCount/cycles/interval/probability）
+
+- **ParticleSystem 核心类** — [ParticleSystem.cs](file:///workspace/anity-lib-core/src/Anity.Core/UnityEngine/ParticleSystem/ParticleSystem.cs)
+  - 状态：`isPlaying`、`isStopped`、`isPaused`、`isEmitting`、`particleCount`、`time`
+  - 控制：`Play()`、`Stop()`、`Pause()`、`Resume()`、`Clear()`、`Simulate()`、`Emit()`
+  - 粒子读写：`GetParticles()`、`SetParticles()`
+  - 子系统：`GetChildParticleSystems()`、`TriggerSubEmitter()`、`ResetSimulation()`
+  - 18 个模块属性访问器（main/emission/shape/velocityOverLifetime 等）
+
+- **主模块 / 发射 / 形状模块** — [ParticleSystemModules1.cs](file:///workspace/anity-lib-core/src/Anity.Core/UnityEngine/ParticleSystem/ParticleSystemModules1.cs)
+  - `MainModule`：duration/loop/playOnAwake/startLifetime/startSpeed/startSize/startColor/gravityModifier/simulationSpeed/maxParticles 等 20+ 属性
+  - `EmissionModule`：rateOverTime/rateOverDistance/bursts（支持 GetBursts/SetBursts）
+  - `ShapeModule`：20 种形状类型、radius/angle/position/rotation/scale、mesh/meshRenderer/skinnedMeshRenderer、纹理采样、arc/donut 等高级参数
+
+- **速度 / 力 / 颜色 / 大小 / 旋转模块** — [ParticleSystemModules2.cs](file:///workspace/anity-lib-core/src/Anity.Core/UnityEngine/ParticleSystem/ParticleSystemModules2.cs)
+  - `VelocityOverLifetimeModule`：x/y/z + orbital + radial + speedModifier
+  - `LimitVelocityOverLifetimeModule`：limit/dampen/drag、separateAxes
+  - `InheritVelocityModule`：mode（Initial/Current）+ curve
+  - `ForceOverLifetimeModule`：x/y/z + space + randomize
+  - `ColorOverLifetimeModule` / `ColorBySpeedModule`
+  - `SizeOverLifetimeModule` / `SizeBySpeedModule`（支持 separateAxes）
+  - `RotationOverLifetimeModule` / `RotationBySpeedModule`（支持 separateAxes）
+
+- **外力 / 噪声 / 碰撞 / 触发 / 子发射器模块** — [ParticleSystemModules3.cs](file:///workspace/anity-lib-core/src/Anity.Core/UnityEngine/ParticleSystem/ParticleSystemModules3.cs)
+  - `ExternalForcesModule`：multiplier + influenceFilter + forceFields 增删改查
+  - `NoiseModule`：strength/frequency/scrollSpeed/octaves/quality + positionAmount/rotationAmount/sizeAmount + remap
+  - `CollisionModule`：type（World/Planes）+ quality + bounce/dampen/lifetimeLoss + collidesWith + planes
+  - `TriggerModule`：inside/outside/enter/exit + colliders
+  - `SubEmittersModule`：birth/collision/death/trigger/manual 子发射器 + Add/Remove/Get/Set
+
+- **纹理动画 / 灯光 / 拖尾 / 自定义数据模块** — [ParticleSystemModules4.cs](file:///workspace/anity-lib-core/src/Anity.Core/UnityEngine/ParticleSystem/ParticleSystemModules4.cs)
+  - `TextureSheetAnimationModule`：grid/sprites 模式 + frameOverTime + startFrame + cycles + flipU/V
+  - `LightsModule`：light/ratio + range/intensity 曲线 + useParticleColor/maxLights
+  - `TrailModule`：ratio/lifetime + widthOverTrail + colorOverTrail + ribbonCount
+  - `CustomDataModule`：Custom1/Custom2 两个流 + vector/color 模式
+
+- **ParticleSystemForceField**：力场组件（shape/startRange/endRange/strength/rotationSpeed/drag/gravity）
+
+- **ParticleSystemRenderer 渲染器** — [ParticleSystemRenderer.cs](file:///workspace/anity-lib-core/src/Anity.Core/UnityEngine/ParticleSystem/ParticleSystemRenderer.cs)
+  - 渲染模式：renderMode（Billboard/Stretch/Mesh/HorizontalBillboard/VerticalBillboard）
+  - 对齐与排序：renderAlignment、sortMode
+  - 拉伸：speedScale、lengthScale、cameraVelocityScale
+  - 尺寸控制：minParticleSize、maxParticleSize、flip、pivot
+  - 网格：meshCount、GetMesh/SetMesh/GetMeshes/SetMeshes
+  - 顶点流：activeVertexStreams、EnableVertexStreams/DisableVertexStreams
+  - 烘焙：BakeMesh、BakeTrailsMesh
+  - 排序：sortingOrder、sortingLayerID
+  - 拖尾材质：trailMaterial
+
 ### 下一次要做（优先）
 1. 完善 URP Shader 和材质系统（URP/Lit、URP/Unlit 等）
 2. 实现编辑器主窗口框架（菜单栏、工具栏、状态栏、Dock 布局）
