@@ -39,6 +39,23 @@ public struct Matrix4x4
     set => _m[row * 4 + column] = value;
   }
 
+  public float m00 { get => _m[0]; set => _m[0] = value; }
+  public float m01 { get => _m[1]; set => _m[1] = value; }
+  public float m02 { get => _m[2]; set => _m[2] = value; }
+  public float m03 { get => _m[3]; set => _m[3] = value; }
+  public float m10 { get => _m[4]; set => _m[4] = value; }
+  public float m11 { get => _m[5]; set => _m[5] = value; }
+  public float m12 { get => _m[6]; set => _m[6] = value; }
+  public float m13 { get => _m[7]; set => _m[7] = value; }
+  public float m20 { get => _m[8]; set => _m[8] = value; }
+  public float m21 { get => _m[9]; set => _m[9] = value; }
+  public float m22 { get => _m[10]; set => _m[10] = value; }
+  public float m23 { get => _m[11]; set => _m[11] = value; }
+  public float m30 { get => _m[12]; set => _m[12] = value; }
+  public float m31 { get => _m[13]; set => _m[13] = value; }
+  public float m32 { get => _m[14]; set => _m[14] = value; }
+  public float m33 { get => _m[15]; set => _m[15] = value; }
+
   public float determinant
   {
     get

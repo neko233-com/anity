@@ -37,6 +37,12 @@ public static class EditorGUILayout
     return GUILayout.TextField(text, options);
   }
 
+  public static string TextField(string text, GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    return GUILayout.TextField(text, options);
+  }
+
   public static string TextArea(string label, string text, params GUILayoutOption[]? options)
   {
     GUILayout.Label(label);
@@ -159,10 +165,23 @@ public static class EditorGUILayout
     return selectedTagIndex;
   }
 
+  public static string TagField(string tag, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    GUILayout.Label(tag);
+    return tag;
+  }
+
   public static int LayerField(string label, int layer, params GUILayoutOption[]? options)
   {
     _ = options;
     GUILayout.Label(label);
+    return layer;
+  }
+
+  public static int LayerField(int layer, params GUILayoutOption[]? options)
+  {
+    _ = options;
     return layer;
   }
 
@@ -317,6 +336,8 @@ public static class EditorGUILayout
 
   public static void Separator() {}
   public static void Space(int pixels) => GUILayout.Space(pixels);
+  public static void Space() => GUILayout.Space(0f);
+  public static void Space(float pixels) => GUILayout.Space(pixels);
 
   public static void HelpBox(string message, MessageType type)
   {

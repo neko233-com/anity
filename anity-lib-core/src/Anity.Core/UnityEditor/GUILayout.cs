@@ -12,7 +12,13 @@ public static class GUILayout
 
   public static void FlexibleSpace() {}
 
-  public static void Label(string text, GUIStyle? style = null, params GUILayoutOption[]? options)
+  public static void Label(string text, params GUILayoutOption[]? options)
+  {
+    _ = text;
+    _ = options;
+  }
+
+  public static void Label(string text, GUIStyle? style, params GUILayoutOption[]? options)
   {
     _ = text;
     _ = style;
@@ -24,6 +30,30 @@ public static class GUILayout
     _ = content;
     _ = style;
     _ = options;
+  }
+
+  public static void Box(string text, params GUILayoutOption[]? options)
+  {
+    _ = text;
+    _ = options;
+  }
+
+  public static void Box(string text, GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    Box(text, options);
+  }
+
+  public static void Box(Texture? image, params GUILayoutOption[]? options)
+  {
+    _ = image;
+    _ = options;
+  }
+
+  public static void Box(Texture? image, GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    Box(image, options);
   }
 
   public static bool Button(string text, params GUILayoutOption[]? options)
@@ -41,6 +71,27 @@ public static class GUILayout
     return false;
   }
 
+  public static bool Button(string text, GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    return Button(text, options);
+  }
+
+  public static bool Button(Texture? image, GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = image;
+    _ = style;
+    _ = options;
+    return false;
+  }
+
+  public static bool Button(Texture? image, params GUILayoutOption[]? options)
+  {
+    _ = image;
+    _ = options;
+    return false;
+  }
+
   public static string TextField(string text, params GUILayoutOption[]? options)
   {
     _ = options;
@@ -51,6 +102,12 @@ public static class GUILayout
   {
     _ = position;
     return text;
+  }
+
+  public static string TextField(string text, GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    return TextField(text, options);
   }
 
   public static string TextArea(string text, params GUILayoutOption[]? options)
@@ -97,6 +154,12 @@ public static class GUILayout
     _ = text;
     _ = options;
     return value;
+  }
+
+  public static bool Toggle(bool value, string text, GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    return Toggle(value, text, options);
   }
 
   public static int Popup(int selectedIndex, string[] displayedOptions, params GUILayoutOption[]? options)
@@ -189,10 +252,20 @@ public static class GUILayout
   {
     BeginScope();
   }
+  public static void BeginVertical(GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    BeginScope();
+  }
   public static void EndVertical() => EndScope();
 
   public static void BeginHorizontal(params GUILayoutOption[]? options)
   {
+    BeginScope();
+  }
+  public static void BeginHorizontal(GUIStyle? style, params GUILayoutOption[]? options)
+  {
+    _ = style;
     BeginScope();
   }
   public static void EndHorizontal() => EndScope();
@@ -248,12 +321,12 @@ public static class GUILayout
     Space((int)pixels);
   }
 
-  public static GUILayoutOption Width(int width) => new("width", width);
-  public static GUILayoutOption Height(int height) => new("height", height);
-  public static GUILayoutOption MinWidth(int minWidth) => new("minWidth", minWidth);
-  public static GUILayoutOption MaxWidth(int maxWidth) => new("maxWidth", maxWidth);
-  public static GUILayoutOption MinHeight(int minHeight) => new("minHeight", minHeight);
-  public static GUILayoutOption MaxHeight(int maxHeight) => new("maxHeight", maxHeight);
+  public static GUILayoutOption Width(float width) => new("width", width);
+  public static GUILayoutOption Height(float height) => new("height", height);
+  public static GUILayoutOption MinWidth(float minWidth) => new("minWidth", minWidth);
+  public static GUILayoutOption MaxWidth(float maxWidth) => new("maxWidth", maxWidth);
+  public static GUILayoutOption MinHeight(float minHeight) => new("minHeight", minHeight);
+  public static GUILayoutOption MaxHeight(float maxHeight) => new("maxHeight", maxHeight);
   public static GUILayoutOption ExpandHeight(bool value = true) => new("expandHeight", value);
   public static GUILayoutOption ExpandWidth(bool value = true) => new("expandWidth", value);
   public static GUILayoutOption ExpandSize(bool width = true, bool height = true) => new("expandSize", new Vector2(width ? 1f : 0f, height ? 1f : 0f));

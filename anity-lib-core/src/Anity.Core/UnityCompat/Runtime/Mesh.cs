@@ -1,6 +1,6 @@
 namespace UnityEngine;
 
-public class Mesh : Object
+public partial class Mesh : Object
 {
   private Vector3[] _vertices = new Vector3[0];
   private int[] _triangles = new int[0];

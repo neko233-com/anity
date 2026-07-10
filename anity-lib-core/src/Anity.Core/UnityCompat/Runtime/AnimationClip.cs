@@ -56,22 +56,3 @@ public struct AnimationEvent
   public AnimatorStateInfo animatorStateInfo { get; set; }
   public AnimatorClipInfo animatorClipInfo { get; set; }
 }
-
-public struct AnimatorStateInfo
-{
-  public int fullPathHash { get; set; }
-  public int nameHash { get; set; }
-  public int shortNameHash { get; set; }
-  public float normalizedTime { get; set; }
-  public float length { get; set; }
-  public float speed { get; set; }
-  public float speedMultiplier { get; set; }
-  public int tagHash { get; set; }
-  public bool loop { get; set; }
-}
-
-public struct AnimatorClipInfo
-{
-  public AnimationClip clip { get; set; }
-  public float weight { get; set; }
-}

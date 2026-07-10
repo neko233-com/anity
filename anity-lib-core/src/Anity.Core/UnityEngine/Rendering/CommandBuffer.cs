@@ -10,6 +10,13 @@ public class CommandBuffer : IDisposable
     private string _name = string.Empty;
     private bool _disposed;
 
+    public CommandBuffer() { }
+
+    public CommandBuffer(string name)
+    {
+        _name = name ?? string.Empty;
+    }
+
     public string name
     {
         get => _name;
@@ -151,25 +158,6 @@ public enum SortingCriteria
     RendererPriority = 64,
     CommonOpaque = 2194,
     CommonTransparent = 2338
-}
-
-/// <summary>
-/// Per-object data.
-/// </summary>
-[Flags]
-public enum PerObjectData
-{
-    None = 0,
-    LightProbe = 1,
-    ReflectionProbes = 2,
-    LightProbeProxyVolume = 4,
-    Lightmaps = 8,
-    LightData = 16,
-    LightIndices = 32,
-    ReflectionProbeData = 64,
-    OcclusionProbe = 128,
-    OcclusionProbeProxyVolume = 256,
-    ShadowMask = 512
 }
 
 /// <summary>

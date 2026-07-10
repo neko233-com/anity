@@ -2,30 +2,34 @@
 set -euo pipefail
 
 SOURCE_ROOT="${1:-.}"
-FAIL=${2:-1}
+FAIL="${2:-1}"
 
-declare -A UNSUPPORTED=(
-  ["AssetDatabase"]="Not in shim yet"
-  ["UnityEditor"]="Editor-only API"
-  ["EditorWindow"]="Editor-only API"
-  ["EditorGUI"]="Editor-only API"
-  ["EditorGUILayout"]="Editor-only API"
-  ["SerializedObject"]="Editor-only API"
-  ["SerializedProperty"]="Editor-only API"
-  ["Undo"]="Editor-only API"
-  ["Handles"]="Editor-only API"
-  ["MeshRenderer"]="Rendering component not shimmed"
-  ["Animator"]="Animation component not shimmed"
-  ["RenderTexture"]="Rendering API not shimmed"
-  ["Shader"]="Shader API not shimmed"
-  ["Texture2D"]="Texture API not shimmed"
+# Patterns considered "not yet shimmed". The associated reasons are kept
+# inline for documentation only; the audit prints the matching source lines.
+# Uses a plain indexed array (not declare -A) so the script stays compatible
+# with the bash 3.2 shipped on macOS runners.
+PATTERNS=(
+  AssetDatabase
+  UnityEditor
+  EditorWindow
+  EditorGUI
+  EditorGUILayout
+  SerializedObject
+  SerializedProperty
+  Undo
+  Handles
+  MeshRenderer
+  Animator
+  RenderTexture
+  Shader
+  Texture2D
 )
 
 status=0
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 
-for pattern in "${!UNSUPPORTED[@]}"; do
+for pattern in "${PATTERNS[@]}"; do
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     status=1
@@ -37,7 +41,8 @@ if [ -f "$tmp" ] && [ -s "$tmp" ]; then
   echo "compat audit: hits found"
   echo "--------------------------------"
   cat "$tmp"
-  if [ "$FAIL" = "1" ] || [ "${FAIL,,}" = "true" ]; then
+  fail_lc=$(printf "%s" "$FAIL" | tr '[:upper:]' '[:lower:]')
+  if [ "$FAIL" = "1" ] || [ "$fail_lc" = "true" ]; then
     exit 1
   fi
 fi
