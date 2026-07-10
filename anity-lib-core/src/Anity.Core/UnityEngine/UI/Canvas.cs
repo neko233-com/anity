@@ -29,12 +29,21 @@ public class Canvas : Behaviour
   public bool additionalShaderChannelsFlag { get; set; }
   public string sortingLayerName { get; set; } = string.Empty;
   public int sortingLayerID { get; set; }
+  public bool isRootCanvas { get; set; } = true;
+  public RectTransform? renderTransform { get; set; }
 
   public static event System.Action<bool>? preWillRenderCanvases;
   public static event System.Action? willRenderCanvases;
 
   public void ForceUpdateCanvases()
   {
+    preWillRenderCanvases?.Invoke(false);
+    willRenderCanvases?.Invoke();
+  }
+
+  public static void ForceUpdateCanvasesStatic()
+  {
+    preWillRenderCanvases?.Invoke(false);
     willRenderCanvases?.Invoke();
   }
 }

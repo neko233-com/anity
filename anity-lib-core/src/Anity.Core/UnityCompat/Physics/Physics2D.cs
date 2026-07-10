@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace UnityEngine;
 
@@ -8,6 +9,7 @@ public static class Physics2D
   private static float _defaultContactOffset = 0.01f;
   private static float _bounceThreshold = 2f;
   private static float _sleepThreshold = 0.005f;
+  private static readonly HashSet<(int, int)> _ignoredLayerCollisions = new();
 
   public static Vector2 gravity
   {
@@ -35,17 +37,12 @@ public static class Physics2D
 
   public static bool Raycast(Vector2 origin, Vector2 direction, float distance = 1000f, int layerMask = -1)
   {
-    _ = origin;
-    _ = direction;
-    _ = distance;
-    _ = layerMask;
-    return false;
+    return Physics2DWorld.Raycast(origin, direction, out _, distance, layerMask);
   }
 
   public static bool Raycast(Vector2 origin, Vector2 direction, out RaycastHit2D hitInfo, float distance = 1000f, int layerMask = -1)
   {
-    hitInfo = new RaycastHit2D();
-    return Raycast(origin, direction, distance, layerMask);
+    return Physics2DWorld.Raycast(origin, direction, out hitInfo, distance, layerMask);
   }
 
   public static bool Raycast(Vector2 origin, Vector2 direction, float distance, int layerMask, float minDepth, float maxDepth)
@@ -64,7 +61,22 @@ public static class Physics2D
 
   public static RaycastHit2D[] RaycastAll(Vector2 origin, Vector2 direction, float distance = 1000f, int layerMask = -1)
   {
-    return Raycast(origin, direction, distance, layerMask) ? new[] { new RaycastHit2D() } : Array.Empty<RaycastHit2D>();
+    var hits = new List<RaycastHit2D>();
+    var current = origin;
+    var remaining = distance;
+    while (Physics2DWorld.Raycast(current, direction, out var hit, remaining, layerMask))
+    {
+      hits.Add(hit);
+      var offset = direction.normalized * 1e-3f;
+      current = hit.point + offset;
+      remaining -= hit.distance;
+      if (remaining <= 1e-3f)
+      {
+        break;
+      }
+    }
+
+    return hits.ToArray();
   }
 
   public static RaycastHit2D[] RaycastAll(Vector2 origin, Vector2 direction, float distance, int layerMask, float minDepth, float maxDepth)
@@ -76,12 +88,18 @@ public static class Physics2D
 
   public static int RaycastNonAlloc(Vector2 origin, Vector2 direction, RaycastHit2D[] results, float distance = 1000f, int layerMask = -1)
   {
-    if (results is null)
+    if (results is null || results.Length == 0)
     {
       return 0;
     }
 
-    return Raycast(origin, direction, out var hitInfo, distance, layerMask) ? Fill(results, hitInfo) : 0;
+    if (!Physics2DWorld.Raycast(origin, direction, out var hitInfo, distance, layerMask))
+    {
+      return 0;
+    }
+
+    results[0] = hitInfo;
+    return 1;
   }
 
   public static int RaycastNonAlloc(Vector2 origin, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask, float minDepth, float maxDepth)
@@ -93,7 +111,7 @@ public static class Physics2D
 
   public static bool Linecast(Vector2 start, Vector2 end, int layerMask = -1)
   {
-    return Raycast(start, end - start, 1000f, layerMask);
+    return Raycast(start, end - start, Vector2Distance(start, end), layerMask);
   }
 
   public static bool Linecast(Vector2 start, Vector2 end, out RaycastHit2D hitInfo, int layerMask = -1)
@@ -111,104 +129,173 @@ public static class Physics2D
 
   public static RaycastHit2D[] LinecastAll(Vector2 start, Vector2 end, int layerMask = -1)
   {
-    return Linecast(start, end, out var hitInfo, layerMask) ? new[] { hitInfo } : Array.Empty<RaycastHit2D>();
+    return RaycastAll(start, end - start, Vector2Distance(start, end), layerMask);
   }
 
   public static RaycastHit2D[] LinecastAll(Vector2 start, Vector2 end, int layerMask, float minDepth, float maxDepth)
   {
-    return Linecast(start, end, out var hitInfo, layerMask, minDepth, maxDepth)
-      ? new[] { hitInfo }
-      : Array.Empty<RaycastHit2D>();
+    _ = minDepth;
+    _ = maxDepth;
+    return LinecastAll(start, end, layerMask);
   }
 
   public static int LinecastNonAlloc(Vector2 start, Vector2 end, RaycastHit2D[] results, int layerMask = -1)
   {
-    return Linecast(start, end, out var hitInfo, layerMask) ? Fill(results, hitInfo) : 0;
+    return RaycastNonAlloc(start, end - start, results, Vector2Distance(start, end), layerMask);
   }
 
   public static bool OverlapCircle(Vector2 point, float radius, int layerMask = -1)
   {
-    _ = point;
-    _ = radius;
-    _ = layerMask;
-    return false;
+    return Physics2DWorld.OverlapCircle(point, radius, layerMask, out _);
   }
 
   public static Collider2D[] OverlapCircleAll(Vector2 point, float radius, int layerMask = -1)
   {
-    _ = point;
-    _ = radius;
-    _ = layerMask;
-    return Array.Empty<Collider2D>();
+    Physics2DWorld.OverlapCircle(point, radius, layerMask, out var results);
+    return results ?? Array.Empty<Collider2D>();
+  }
+
+  public static int OverlapCircleNonAlloc(Vector2 point, float radius, Collider2D[] results, int layerMask = -1)
+  {
+    if (results is null || results.Length == 0)
+    {
+      return 0;
+    }
+
+    if (!Physics2DWorld.OverlapCircle(point, radius, layerMask, out var found))
+    {
+      return 0;
+    }
+
+    return FillCollider(results, found);
   }
 
   public static bool OverlapPoint(Vector2 point, int layerMask = -1)
   {
-    _ = point;
-    _ = layerMask;
-    return false;
+    return Physics2DWorld.OverlapPoint(point, layerMask, out _);
+  }
+
+  public static Collider2D[] OverlapPointAll(Vector2 point, int layerMask = -1)
+  {
+    Physics2DWorld.OverlapPoint(point, layerMask, out var results);
+    return results ?? Array.Empty<Collider2D>();
+  }
+
+  public static int OverlapPointNonAlloc(Vector2 point, Collider2D[] results, int layerMask = -1)
+  {
+    if (results is null || results.Length == 0)
+    {
+      return 0;
+    }
+
+    if (!Physics2DWorld.OverlapPoint(point, layerMask, out var found))
+    {
+      return 0;
+    }
+
+    return FillCollider(results, found);
   }
 
   public static Collider2D[] OverlapBoxAll(Vector2 point, Vector2 size, float angle, int layerMask = -1)
   {
-    _ = point;
-    _ = size;
-    _ = angle;
-    _ = layerMask;
-    return Array.Empty<Collider2D>();
+    Physics2DWorld.OverlapBox(point, size, angle, layerMask, out var results);
+    return results ?? Array.Empty<Collider2D>();
+  }
+
+  public static int OverlapBoxNonAlloc(Vector2 point, Vector2 size, float angle, Collider2D[] results, int layerMask = -1)
+  {
+    if (results is null || results.Length == 0)
+    {
+      return 0;
+    }
+
+    if (!Physics2DWorld.OverlapBox(point, size, angle, layerMask, out var found))
+    {
+      return 0;
+    }
+
+    return FillCollider(results, found);
   }
 
   public static Collider2D[] OverlapCapsuleAll(Vector2 point, float radius, CapsuleDirection2D direction, float size, int layerMask = -1)
   {
-    _ = point;
-    _ = radius;
     _ = direction;
     _ = size;
-    _ = layerMask;
-    return Array.Empty<Collider2D>();
+    Physics2DWorld.OverlapCircle(point, radius, layerMask, out var results);
+    return results ?? Array.Empty<Collider2D>();
+  }
+
+  public static int OverlapCapsuleNonAlloc(Vector2 point, float radius, CapsuleDirection2D direction, float size, Collider2D[] results, int layerMask = -1)
+  {
+    _ = direction;
+    _ = size;
+    if (results is null || results.Length == 0)
+    {
+      return 0;
+    }
+
+    if (!Physics2DWorld.OverlapCircle(point, radius, layerMask, out var found))
+    {
+      return 0;
+    }
+
+    return FillCollider(results, found);
   }
 
   public static bool CircleCast(Vector2 origin, float radius, Vector2 direction, float distance, int layerMask = -1)
   {
-    _ = origin;
-    _ = radius;
-    _ = direction;
-    _ = distance;
-    _ = layerMask;
-    return false;
+    return CircleCast(origin, radius, direction, out _, distance, layerMask);
   }
 
   public static bool CircleCast(Vector2 origin, float radius, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask = -1)
   {
     hitInfo = new RaycastHit2D();
-    return CircleCast(origin, radius, direction, distance, layerMask);
+    if (!Physics2DWorld.Raycast(origin, direction, out var hit, distance, layerMask))
+    {
+      return false;
+    }
+
+    hitInfo = hit;
+    hitInfo.point -= direction.normalized * radius;
+    return true;
   }
 
   public static RaycastHit2D[] CircleCastAll(Vector2 origin, float radius, Vector2 direction, float distance, int layerMask = -1)
   {
-    return CircleCast(origin, radius, direction, distance, layerMask)
-      ? new[] { new RaycastHit2D() }
-      : Array.Empty<RaycastHit2D>();
+    _ = radius;
+    return RaycastAll(origin, direction, distance, layerMask);
+  }
+
+  public static int CircleCastNonAlloc(Vector2 origin, float radius, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask = -1)
+  {
+    _ = radius;
+    return RaycastNonAlloc(origin, direction, results, distance, layerMask);
   }
 
   public static bool CheckCollisionLayers(int layer1, int layer2)
   {
-    return true;
+    return IsLayerCollisionEnabled(layer1, layer2);
   }
 
   public static bool IgnoreLayerCollision(int layer1, int layer2, bool ignore = true)
   {
-    _ = layer1;
-    _ = layer2;
-    _ = ignore;
+    var key = layer1 < layer2 ? (layer1, layer2) : (layer2, layer1);
+    if (ignore)
+    {
+      _ = _ignoredLayerCollisions.Add(key);
+    }
+    else
+    {
+      _ = _ignoredLayerCollisions.Remove(key);
+    }
+
     return true;
   }
 
   public static bool IsLayerCollisionEnabled(int layer1, int layer2)
   {
-    _ = layer1;
-    _ = layer2;
-    return false;
+    var key = layer1 < layer2 ? (layer1, layer2) : (layer2, layer1);
+    return !_ignoredLayerCollisions.Contains(key);
   }
 
   public static bool IgnoreCollision(Collider2D collider1, Collider2D collider2, bool ignore = true)
@@ -221,38 +308,27 @@ public static class Physics2D
 
   public static void Simulate(float deltaTime)
   {
-    _ = deltaTime;
+    Physics2DWorld.Simulate(deltaTime);
   }
 
   // --- BoxCast ---
 
   public static bool BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, int layerMask = -1)
   {
-    _ = origin;
-    _ = size;
     _ = angle;
-    _ = direction;
-    _ = distance;
-    _ = layerMask;
-    return false;
+    return Raycast(origin, direction, distance, layerMask);
   }
 
   public static bool BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask = -1)
   {
-    hitInfo = new RaycastHit2D();
-    return BoxCast(origin, size, angle, direction, distance, layerMask);
+    _ = angle;
+    return Raycast(origin, direction, out hitInfo, distance, layerMask);
   }
 
   public static int BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask = -1)
   {
-    _ = origin;
-    _ = size;
     _ = angle;
-    _ = direction;
-    _ = results;
-    _ = distance;
-    _ = layerMask;
-    return 0;
+    return RaycastNonAlloc(origin, direction, results, distance, layerMask);
   }
 
   public static bool BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, ContactFilter2D contactFilter, out RaycastHit2D hitInfo)
@@ -264,14 +340,8 @@ public static class Physics2D
 
   public static int BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, ContactFilter2D contactFilter, RaycastHit2D[] results)
   {
-    _ = origin;
-    _ = size;
-    _ = angle;
-    _ = direction;
-    _ = distance;
     _ = contactFilter;
-    _ = results;
-    return 0;
+    return BoxCast(origin, size, angle, direction, results, distance);
   }
 
   public static bool BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, int layerMask, float minDepth, float maxDepth)
@@ -283,8 +353,9 @@ public static class Physics2D
 
   public static bool BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask, float minDepth, float maxDepth)
   {
-    hitInfo = new RaycastHit2D();
-    return BoxCast(origin, size, angle, direction, distance, layerMask, minDepth, maxDepth);
+    _ = minDepth;
+    _ = maxDepth;
+    return BoxCast(origin, size, angle, direction, out hitInfo, distance, layerMask);
   }
 
   public static int BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask, float minDepth, float maxDepth)
@@ -298,9 +369,8 @@ public static class Physics2D
 
   public static RaycastHit2D[] BoxCastAll(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, int layerMask = -1)
   {
-    return BoxCast(origin, size, angle, direction, distance, layerMask)
-      ? new[] { new RaycastHit2D() }
-      : Array.Empty<RaycastHit2D>();
+    _ = angle;
+    return RaycastAll(origin, direction, distance, layerMask);
   }
 
   public static RaycastHit2D[] BoxCastAll(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, ContactFilter2D contactFilter)
@@ -313,12 +383,8 @@ public static class Physics2D
 
   public static int BoxCastNonAlloc(Vector2 origin, Vector2 size, float angle, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask = -1)
   {
-    if (results is null)
-    {
-      return 0;
-    }
-
-    return BoxCast(origin, size, angle, direction, out var hitInfo, distance, layerMask) ? Fill(results, hitInfo) : 0;
+    _ = angle;
+    return RaycastNonAlloc(origin, direction, results, distance, layerMask);
   }
 
   public static int BoxCastNonAlloc(Vector2 origin, Vector2 size, float angle, Vector2 direction, RaycastHit2D[] results, float distance, ContactFilter2D contactFilter)
@@ -334,28 +400,22 @@ public static class Physics2D
     _ = start;
     _ = end;
     _ = radius;
-    _ = direction;
-    _ = distance;
-    _ = layerMask;
-    return false;
+    return Raycast(start, direction, distance, layerMask);
   }
 
   public static bool CapsuleCast(Vector2 start, Vector2 end, float radius, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask = -1)
   {
     hitInfo = new RaycastHit2D();
-    return CapsuleCast(start, end, radius, direction, distance, layerMask);
+    _ = end;
+    _ = radius;
+    return Raycast(start, direction, out hitInfo, distance, layerMask);
   }
 
   public static int CapsuleCast(Vector2 start, Vector2 end, float radius, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask = -1)
   {
-    _ = start;
     _ = end;
     _ = radius;
-    _ = direction;
-    _ = results;
-    _ = distance;
-    _ = layerMask;
-    return 0;
+    return RaycastNonAlloc(start, direction, results, distance, layerMask);
   }
 
   public static bool CapsuleCast(Vector2 start, Vector2 end, float radius, Vector2 direction, float distance, ContactFilter2D contactFilter, out RaycastHit2D hitInfo)
@@ -367,14 +427,8 @@ public static class Physics2D
 
   public static int CapsuleCast(Vector2 start, Vector2 end, float radius, Vector2 direction, float distance, ContactFilter2D contactFilter, RaycastHit2D[] results)
   {
-    _ = start;
-    _ = end;
-    _ = radius;
-    _ = direction;
-    _ = distance;
     _ = contactFilter;
-    _ = results;
-    return 0;
+    return CapsuleCast(start, end, radius, direction, results, distance);
   }
 
   public static bool CapsuleCast(Vector2 start, Vector2 end, float radius, Vector2 direction, float distance, int layerMask, float minDepth, float maxDepth)
@@ -386,8 +440,9 @@ public static class Physics2D
 
   public static bool CapsuleCast(Vector2 start, Vector2 end, float radius, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask, float minDepth, float maxDepth)
   {
-    hitInfo = new RaycastHit2D();
-    return CapsuleCast(start, end, radius, direction, distance, layerMask, minDepth, maxDepth);
+    _ = minDepth;
+    _ = maxDepth;
+    return CapsuleCast(start, end, radius, direction, out hitInfo, distance, layerMask);
   }
 
   public static int CapsuleCast(Vector2 start, Vector2 end, float radius, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask, float minDepth, float maxDepth)
@@ -401,9 +456,9 @@ public static class Physics2D
 
   public static RaycastHit2D[] CapsuleCastAll(Vector2 start, Vector2 end, float radius, Vector2 direction, float distance, int layerMask = -1)
   {
-    return CapsuleCast(start, end, radius, direction, distance, layerMask)
-      ? new[] { new RaycastHit2D() }
-      : Array.Empty<RaycastHit2D>();
+    _ = end;
+    _ = radius;
+    return RaycastAll(start, direction, distance, layerMask);
   }
 
   public static RaycastHit2D[] CapsuleCastAll(Vector2 start, Vector2 end, float radius, Vector2 direction, float distance, ContactFilter2D contactFilter)
@@ -416,12 +471,9 @@ public static class Physics2D
 
   public static int CapsuleCastNonAlloc(Vector2 start, Vector2 end, float radius, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask = -1)
   {
-    if (results is null)
-    {
-      return 0;
-    }
-
-    return CapsuleCast(start, end, radius, direction, out var hitInfo, distance, layerMask) ? Fill(results, hitInfo) : 0;
+    _ = end;
+    _ = radius;
+    return RaycastNonAlloc(start, direction, results, distance, layerMask);
   }
 
   public static int CapsuleCastNonAlloc(Vector2 start, Vector2 end, float radius, Vector2 direction, RaycastHit2D[] results, float distance, ContactFilter2D contactFilter)
@@ -430,130 +482,78 @@ public static class Physics2D
     return CapsuleCastNonAlloc(start, end, radius, direction, results, distance);
   }
 
-  // --- OverlapCircleNonAlloc ---
-
-  public static int OverlapCircleNonAlloc(Vector2 point, float radius, Collider2D[] results, int layerMask = -1)
-  {
-    _ = point;
-    _ = radius;
-    _ = layerMask;
-    return results?.Length > 0 ? FillCollider(results) : 0;
-  }
-
-  // --- OverlapPointNonAlloc ---
-
-  public static int OverlapPointNonAlloc(Vector2 point, Collider2D[] results, int layerMask = -1)
-  {
-    _ = point;
-    _ = layerMask;
-    return results?.Length > 0 ? FillCollider(results) : 0;
-  }
-
-  // --- OverlapBoxNonAlloc ---
-
-  public static int OverlapBoxNonAlloc(Vector2 point, Vector2 size, float angle, Collider2D[] results, int layerMask = -1)
-  {
-    _ = point;
-    _ = size;
-    _ = angle;
-    _ = layerMask;
-    return results?.Length > 0 ? FillCollider(results) : 0;
-  }
-
-  // --- OverlapCapsuleNonAlloc ---
-
-  public static int OverlapCapsuleNonAlloc(Vector2 point, float radius, CapsuleDirection2D direction, float size, Collider2D[] results, int layerMask = -1)
-  {
-    _ = point;
-    _ = radius;
-    _ = direction;
-    _ = size;
-    _ = layerMask;
-    return results?.Length > 0 ? FillCollider(results) : 0;
-  }
-
   // --- GetRayIntersection ---
 
   public static RaycastHit2D GetRayIntersection(Ray ray, float distance = float.PositiveInfinity, int layerMask = -1)
   {
-    _ = ray;
-    _ = distance;
     _ = layerMask;
+    var origin = new Vector2(ray.origin.x, ray.origin.y);
+    var direction = new Vector2(ray.direction.x, ray.direction.y);
+    if (Raycast(origin, direction, out var hit, distance))
+    {
+      return hit;
+    }
+
     return new RaycastHit2D();
   }
 
   public static bool GetRayIntersection(Ray ray, out RaycastHit2D hitInfo, float distance = float.PositiveInfinity, int layerMask = -1)
   {
-    hitInfo = new RaycastHit2D();
-    return false;
+    hitInfo = GetRayIntersection(ray, distance, layerMask);
+    return hitInfo.collider is not null;
   }
 
   public static RaycastHit2D GetRayIntersection(Vector3 origin, Vector3 direction, float distance = float.PositiveInfinity, int layerMask = -1)
   {
-    _ = origin;
-    _ = direction;
-    _ = distance;
-    _ = layerMask;
-    return new RaycastHit2D();
+    return GetRayIntersection(new Ray(origin, direction), distance, layerMask);
   }
 
   // --- GetRayIntersectionAll ---
 
   public static RaycastHit2D[] GetRayIntersectionAll(Ray ray, float distance = float.PositiveInfinity, int layerMask = -1)
   {
-    _ = ray;
-    _ = distance;
-    _ = layerMask;
-    return Array.Empty<RaycastHit2D>();
+    var origin = new Vector2(ray.origin.x, ray.origin.y);
+    var direction = new Vector2(ray.direction.x, ray.direction.y);
+    return RaycastAll(origin, direction, distance, layerMask);
   }
 
   public static RaycastHit2D[] GetRayIntersectionAll(Vector3 origin, Vector3 direction, float distance = float.PositiveInfinity, int layerMask = -1)
   {
-    _ = origin;
-    _ = direction;
-    _ = distance;
-    _ = layerMask;
-    return Array.Empty<RaycastHit2D>();
+    var o = new Vector2(origin.x, origin.y);
+    var d = new Vector2(direction.x, direction.y);
+    return RaycastAll(o, d, distance, layerMask);
   }
 
   // --- GetRayIntersectionNonAlloc ---
 
   public static int GetRayIntersectionNonAlloc(Ray ray, RaycastHit2D[] results, float distance = float.PositiveInfinity, int layerMask = -1)
   {
-    _ = ray;
-    _ = distance;
-    _ = layerMask;
-    return results?.Length > 0 ? Fill(results, new RaycastHit2D()) : 0;
+    var origin = new Vector2(ray.origin.x, ray.origin.y);
+    var direction = new Vector2(ray.direction.x, ray.direction.y);
+    return RaycastNonAlloc(origin, direction, results, distance, layerMask);
   }
 
   public static int GetRayIntersectionNonAlloc(Vector3 origin, Vector3 direction, RaycastHit2D[] results, float distance = float.PositiveInfinity, int layerMask = -1)
   {
-    _ = origin;
-    _ = direction;
-    _ = distance;
-    _ = layerMask;
-    return results?.Length > 0 ? Fill(results, new RaycastHit2D()) : 0;
+    var o = new Vector2(origin.x, origin.y);
+    var d = new Vector2(direction.x, direction.y);
+    return RaycastNonAlloc(o, d, results, distance, layerMask);
   }
 
-  private static int Fill(RaycastHit2D[] results, RaycastHit2D hit)
+  private static int FillCollider(Collider2D[] results, Collider2D[] found)
   {
     if (results.Length == 0)
     {
       return 0;
     }
 
-    results[0] = hit;
-    return 1;
-  }
-
-  private static int FillCollider(Collider2D[] results)
-  {
-    if (results.Length == 0)
+    var count = Math.Min(results.Length, found.Length);
+    for (var i = 0; i < count; i++)
     {
-      return 0;
+      results[i] = found[i];
     }
 
-    return 0;
+    return count;
   }
 
   private static float Vector2Distance(Vector2 a, Vector2 b)

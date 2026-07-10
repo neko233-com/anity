@@ -1,5 +1,31 @@
 # PLAN
 
+## 2026-07-10（本次）
+
+### 已完成
+- **Git 分支整理**：当前仅有 `main` 分支，无其他待合并分支。
+- **Canvas 增强**：
+  - 新增 `isRootCanvas`、`renderTransform` 属性
+  - 新增静态 `ForceUpdateCanvasesStatic` 方法，完善 `preWillRenderCanvases` 调用
+- **2D 物理系统落地**：
+  - 新增 `Physics2DWorld` 内部世界管理器：统一注册/注销 `Collider2D` 与 `Rigidbody2D`
+  - 实现刚体积分（速度、重力、阻力、角速度）
+  - 实现 Box-Box、Circle-Circle、Box-Circle 碰撞检测与冲量/位置校正
+  - 实现触发器检测：`isTrigger` 只发消息不做物理响应
+  - 实现射线检测（Raycast）、圆形/矩形/点覆盖查询（OverlapCircle/Box/Point）
+  - 实现层碰撞忽略：`IgnoreLayerCollision`、`IsLayerCollisionEnabled`
+  - 新增 `BoxCollider2D`、`CircleCollider2D`
+  - 增强 `Rigidbody2D`：`bodyType`、`drag`、`angularDrag`、`freezeRotation`、`simulated`、多模式 `AddForce`/`AddTorque`、`MovePosition`/`MoveRotation`
+  - 新增 `RigidbodyType2D`、`ForceMode2D`、`Collision2D`、`ContactPoint2D`
+  - 增强 `Collider2D`：`IsTouching`、`IsTouchingLayers`，内部形状抽象
+  - 增强 `Vector2`：补充 `left`、`down` 常量
+- **编译状态**：`Anity.Core`、`Anity.WebGL`、`Anity.Hub`、`Anity.Editor.Host` 全部编译成功，0 个错误
+
+### 下一次要做（优先）
+1. 补齐 3D 物理基础实现：`Physics.Simulate`、简单 Sphere/Box 碰撞检测、Rigidbody 增强。
+2. 为 2D/3D 物理补充单元测试，验证碰撞、触发器、Raycast 行为。
+3. 补齐 CanvasScaler、GraphicRaycaster 等 UI 渲染管线类型。
+
 目标（规范）：
 - 每次代码落地后，必须先更新本文件，记录本次完成项并给出下一次要做的 1-3 项。
 - 统一优先保证 API 签名兼容性（Unity Pro 风格），行为逐步补齐。
