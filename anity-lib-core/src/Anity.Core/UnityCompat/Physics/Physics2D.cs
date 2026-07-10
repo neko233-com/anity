@@ -563,9 +563,3 @@ public static class Physics2D
     return MathF.Sqrt(x * x + y * y);
   }
 }
-
-public enum CapsuleDirection2D
-{
-  Horizontal,
-  Vertical
-}

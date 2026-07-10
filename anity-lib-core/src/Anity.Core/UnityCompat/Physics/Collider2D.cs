@@ -8,7 +8,7 @@ public class Collider2D : Component
   public bool isTrigger { get; set; }
   public Rigidbody2D? attachedRigidbody { get; set; }
   public Bounds? bounds { get; set; }
-  public object? sharedMaterial { get; set; }
+  public PhysicsMaterial2D? sharedMaterial { get; set; }
   public Vector2 offset { get; set; }
 
   public Collider2D()

@@ -57,7 +57,7 @@ public static class WebGLUI
     var scaler = canvas.GetComponent<CanvasScaler>();
     if (scaler is not null)
     {
-      scaler.uiScaleMode = ScaleMode.ScaleWithScreenSize;
+      scaler.uiScaleMode = UnityEngine.UI.ScaleMode.ScaleWithScreenSize;
       scaler.referenceResolution = referenceResolution;
       scaler.screenMatchMode = ScreenMatchMode.Shrink;
     }

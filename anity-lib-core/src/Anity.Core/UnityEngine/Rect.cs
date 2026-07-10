@@ -40,5 +40,29 @@ public struct Rect
     get => y + height;
     set => height = value - y;
   }
+
+  public Vector2 position
+  {
+    get => new Vector2(x, y);
+    set { x = value.x; y = value.y; }
+  }
+
+  public Vector2 size
+  {
+    get => new Vector2(width, height);
+    set { width = value.x; height = value.y; }
+  }
+
+  public Vector2 center => new Vector2(x + width * 0.5f, y + height * 0.5f);
+
+  public bool Contains(Vector2 point) => point.x >= x && point.x < x + width && point.y >= y && point.y < y + height;
+  public bool Contains(Vector3 point) => point.x >= x && point.x < x + width && point.y >= y && point.y < y + height;
+
+  public static bool operator ==(Rect lhs, Rect rhs) => lhs.x == rhs.x && lhs.y == rhs.y && lhs.width == rhs.width && lhs.height == rhs.height;
+  public static bool operator !=(Rect lhs, Rect rhs) => !(lhs == rhs);
+
+  public override bool Equals(object? obj) => obj is Rect other && this == other;
+  public override int GetHashCode() => HashCode.Combine(x, y, width, height);
+  public override string ToString() => $"(x:{x}, y:{y}, width:{width}, height:{height})";
 }
 
