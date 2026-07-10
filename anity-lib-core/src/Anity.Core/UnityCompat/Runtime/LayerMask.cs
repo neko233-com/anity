@@ -2,9 +2,9 @@ using System.Collections.Generic;
 
 namespace UnityEngine;
 
-public readonly struct LayerMask
+public struct LayerMask
 {
-  public readonly int value;
+  public int value { get; set; }
 
   public LayerMask(int value)
   {

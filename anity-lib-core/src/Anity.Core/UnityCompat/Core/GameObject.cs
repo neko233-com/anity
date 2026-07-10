@@ -37,7 +37,14 @@ public class GameObject : Object
   public bool activeSelf { get; private set; } = true;
   public bool activeInHierarchy => IsActiveInHierarchy();
   public string tag { get; set; } = "Untagged";
-  public int layer { get; set; }
+
+  private int _layer;
+  public int layer
+  {
+    get => _layer;
+    set => _layer = value & 31;
+  }
+
   public bool isStatic { get; set; }
 
   private bool IsActiveInHierarchy()

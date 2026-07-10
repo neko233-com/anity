@@ -47,6 +47,7 @@ namespace UnityEngine.Rendering
 
   public abstract class RenderPipeline : IDisposable
   {
+    public static RenderPipeline? current { get; internal set; }
     public bool disposed { get; private set; }
 
     public void Dispose()
@@ -74,6 +75,18 @@ namespace UnityEngine.Rendering
     {
       Render(context, cameras);
     }
+
+    protected static void BeginFrameRendering(ScriptableRenderContext context, Camera[] cameras)
+    {
+      RenderPipelineManager.InvokeBeginFrameRendering(context);
+      RenderPipelineManager.InvokeBeginCameraRendering(context, cameras);
+    }
+
+    protected static void EndFrameRendering(ScriptableRenderContext context, Camera[] cameras)
+    {
+      RenderPipelineManager.InvokeEndCameraRendering(context, cameras);
+      RenderPipelineManager.InvokeEndFrameRendering(context);
+    }
   }
 
   public struct RenderingData
@@ -82,7 +95,6 @@ namespace UnityEngine.Rendering
     public LightData lightData;
     public ShadowData shadowData;
     public PostProcessingData postProcessingData;
-    public PerObjectData perObjectData;
     public bool supportsDynamicBatching;
     public bool supportsInstancing;
     public bool postProcessingEnabled;
@@ -186,19 +198,6 @@ namespace UnityEngine.Rendering
     Disable = 0,
     HardShadows = 1,
     All = 2
-  }
-
-  [Flags]
-  public enum PerObjectData
-  {
-    None = 0,
-    LightProbe = 1 << 0,
-    ReflectionProbes = 1 << 1,
-    LightProbeProxyVolume = 1 << 2,
-    Lightmaps = 1 << 3,
-    MotionVectors = 1 << 4,
-    LightData = 1 << 5,
-    OcclusionProbe = 1 << 6
   }
 
   public enum LightCategory

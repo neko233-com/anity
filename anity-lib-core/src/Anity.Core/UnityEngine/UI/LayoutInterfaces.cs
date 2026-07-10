@@ -40,20 +40,6 @@ public interface ILayoutTransform
   Vector2 pivot { get; set; }
 }
 
-public interface IClipper
-{
-  void PerformClipping();
-}
-
-public interface IClippable
-{
-  Rect GetCanvasRect();
-  void Cull(Rect clipRect, bool validRect);
-  void SetClipRect(Rect value, bool validRect);
-  void SetClipSoftness(Vector2 clipSoftness);
-  void RecalculateMasking();
-}
-
 public struct RectOffset
 {
   public int left { get; set; }

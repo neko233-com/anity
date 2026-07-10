@@ -14,6 +14,8 @@ public static class Input
   private static readonly HashSet<int> _justPressedMouseButtons = new();
   private static readonly HashSet<int> _justReleasedMouseButtons = new();
   private static readonly Dictionary<string, float> _axes = new(StringComparer.Ordinal);
+  private static readonly List<Touch> _touches = new();
+  private static readonly List<Touch> _touchesBuffer = new();
 
   public static bool mousePresent => true;
   public static bool anyKey => _pressedKeys.Count > 0 || _pressedMouseButtons.Count > 0;
@@ -30,7 +32,9 @@ public static class Input
   public static float mouseScrollDeltaY => _mouseScrollDelta.y;
   public static bool simulateMouseWithTouches { get; set; } = true;
   public static bool touchPressureSupported => false;
-  public static int touchCount => 0;
+  public static bool multiTouchEnabled { get; set; } = true;
+  public static bool stylusTouchSupported => false;
+  public static int touchCount => _touches.Count;
   public static bool anyKeyWasPressedThisFrame => _justPressedKeys.Count > 0;
   public static bool anyKeyWasReleasedThisFrame => _justReleasedKeys.Count > 0;
   public static IMECompositionMode imeCompositionMode { get; set; } = IMECompositionMode.Auto;
@@ -42,6 +46,81 @@ public static class Input
     _ = _justPressedMouseButtons.RemoveWhere(_ => true);
     _ = _justReleasedMouseButtons.RemoveWhere(_ => true);
     _mouseScrollDelta = default;
+
+    for (var i = _touches.Count - 1; i >= 0; i--)
+    {
+      var touch = _touches[i];
+      if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+      {
+        _touches.RemoveAt(i);
+      }
+      else if (touch.phase == TouchPhase.Began)
+      {
+        touch.phase = TouchPhase.Stationary;
+        _touches[i] = touch;
+      }
+    }
+  }
+
+  public static Touch GetTouch(int index)
+  {
+    if (index < 0 || index >= _touches.Count)
+    {
+      throw new ArgumentOutOfRangeException(nameof(index));
+    }
+
+    return _touches[index];
+  }
+
+  public static Touch[] touches
+  {
+    get
+    {
+      _touchesBuffer.Clear();
+      _touchesBuffer.AddRange(_touches);
+      return _touchesBuffer.ToArray();
+    }
+  }
+
+  public static bool GetTouchSupported()
+  {
+    return true;
+  }
+
+  internal static void SetTouch(int fingerId, Vector2 position, TouchPhase phase, float pressure = 1f)
+  {
+    var existingIndex = _touches.FindIndex(t => t.fingerId == fingerId);
+    var touch = new Touch
+    {
+      fingerId = fingerId,
+      position = position,
+      rawPosition = position,
+      deltaPosition = Vector2.zero,
+      deltaTime = Time.deltaTime,
+      tapCount = 1,
+      phase = phase,
+      pressure = pressure,
+      maximumPossiblePressure = 1f,
+      type = TouchType.Direct
+    };
+
+    if (existingIndex >= 0)
+    {
+      var previous = _touches[existingIndex];
+      touch.deltaPosition = position - previous.position;
+      touch.tapCount = previous.tapCount;
+      _touches[existingIndex] = touch;
+    }
+    else if (phase != TouchPhase.Ended && phase != TouchPhase.Canceled)
+    {
+      touch.phase = TouchPhase.Began;
+      _touches.Add(touch);
+    }
+  }
+
+  internal static void ClearTouches()
+  {
+    _touches.Clear();
   }
 
   public static bool GetMouseButtonDown(int button)
@@ -207,4 +286,34 @@ public enum IMECompositionMode
   Auto,
   On,
   Off
+}
+
+public struct Touch
+{
+  public int fingerId;
+  public Vector2 position;
+  public Vector2 rawPosition;
+  public Vector2 deltaPosition;
+  public float deltaTime;
+  public int tapCount;
+  public TouchPhase phase;
+  public float pressure;
+  public float maximumPossiblePressure;
+  public TouchType type;
+}
+
+public enum TouchPhase
+{
+  Began,
+  Moved,
+  Stationary,
+  Ended,
+  Canceled
+}
+
+public enum TouchType
+{
+  Direct,
+  Indirect,
+  Stylus
 }

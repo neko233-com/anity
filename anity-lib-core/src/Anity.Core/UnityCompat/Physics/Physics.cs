@@ -5,6 +5,8 @@ namespace UnityEngine;
 public static class Physics
 {
   private static Vector3 _gravity = new Vector3(0f, -9.81f, 0f);
+  private static readonly HashSet<(int, int)> _ignoredLayerCollisions = new();
+  private static readonly Collider[] _emptyColliderArray = Array.Empty<Collider>();
 
   public static Vector3 gravity
   {
@@ -13,11 +15,19 @@ public static class Physics
   }
 
   public static bool autoSimulation { get; set; } = true;
+
   public static bool IgnoreLayerCollision(int layer1, int layer2, bool ignore = true)
   {
-    _ = layer1;
-    _ = layer2;
-    _ = ignore;
+    var key = layer1 < layer2 ? (layer1, layer2) : (layer2, layer1);
+    if (ignore)
+    {
+      _ = _ignoredLayerCollisions.Add(key);
+    }
+    else
+    {
+      _ = _ignoredLayerCollisions.Remove(key);
+    }
+
     return true;
   }
 
@@ -25,6 +35,27 @@ public static class Physics
   public static bool ignoreLayerCollision(int layer1, int layer2, bool ignore = true)
   {
     return IgnoreLayerCollision(layer1, layer2, ignore);
+  }
+
+  public static bool GetIgnoreLayerCollision(int layer1, int layer2)
+  {
+    var key = layer1 < layer2 ? (layer1, layer2) : (layer2, layer1);
+    return _ignoredLayerCollisions.Contains(key);
+  }
+
+  public static bool IsLayerCollisionEnabled(int layer1, int layer2)
+  {
+    return !GetIgnoreLayerCollision(layer1, layer2);
+  }
+
+  internal static bool LayerMatches(int layer, int layerMask)
+  {
+    if (layerMask == -1)
+    {
+      return true;
+    }
+
+    return (layerMask & (1 << layer)) != 0;
   }
 
   public static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
@@ -426,13 +457,6 @@ public static class Physics
   public static void StepSimulation(float deltaTime)
   {
     Simulate(deltaTime);
-  }
-
-  public static bool GetIgnoreLayerCollision(int layer1, int layer2)
-  {
-    _ = layer1;
-    _ = layer2;
-    return false;
   }
 
   public static bool IsSleeping()

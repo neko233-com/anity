@@ -99,6 +99,19 @@ public static class RenderPipelineManager
     public static event Action<ScriptableRenderContext, Camera[]> endCameraRendering;
     public static event Action<ScriptableRenderContext> beginFrameRendering;
     public static event Action<ScriptableRenderContext> endFrameRendering;
+
+    public static RenderPipeline? currentPipeline { get; private set; }
+
+    public static void SetCurrentPipeline(RenderPipeline? pipeline)
+    {
+        currentPipeline = pipeline;
+        RenderPipeline.current = pipeline;
+    }
+
+    internal static void InvokeBeginFrameRendering(ScriptableRenderContext context) => beginFrameRendering?.Invoke(context);
+    internal static void InvokeBeginCameraRendering(ScriptableRenderContext context, Camera[] cameras) => beginCameraRendering?.Invoke(context, cameras);
+    internal static void InvokeEndCameraRendering(ScriptableRenderContext context, Camera[] cameras) => endCameraRendering?.Invoke(context, cameras);
+    internal static void InvokeEndFrameRendering(ScriptableRenderContext context) => endFrameRendering?.Invoke(context);
 }
 
 /// <summary>

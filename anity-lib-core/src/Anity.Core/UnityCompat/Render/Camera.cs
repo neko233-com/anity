@@ -1,4 +1,5 @@
 using System;
+using UnityEngine.Rendering;
 
 namespace UnityEngine;
 
@@ -12,9 +13,16 @@ public class Camera : Behaviour
   public float orthographicSize = 5f;
   public bool orthographic;
   public float depth;
-  public int cullingMask;
+  public int cullingMask = -1;
   public int pixelWidth = 1920;
   public int pixelHeight = 1080;
+  public CameraType cameraType = CameraType.Game;
+  public bool useOcclusionCulling;
+  public bool allowHDR = true;
+  public bool allowMSAA = true;
+  public RenderingPath renderingPath = RenderingPath.UsePlayerSettings;
+  public CameraClearFlags clearFlags = CameraClearFlags.Skybox;
+  public Color backgroundColor = Color.black;
   public float aspect => pixelHeight == 0 ? 0f : (float)pixelWidth / pixelHeight;
   public Vector4 rect { get; set; } = Vector4.one;
   public Matrix4x4 worldToCameraMatrix => Matrix4x4.identity;
@@ -22,6 +30,35 @@ public class Camera : Behaviour
 
   public static Camera main { get; } = new();
   public static Camera? current { get; set; } = main;
+
+  public void Render()
+  {
+    var pipeline = RenderPipelineManager.currentPipeline;
+    if (pipeline is null)
+    {
+      return;
+    }
+
+    var previous = current;
+    current = this;
+    var context = new ScriptableRenderContext();
+    pipeline.Render(context, new[] { this });
+    current = previous;
+  }
+
+  public void RenderWithShader(Shader shader, string replacementTag)
+  {
+    _ = shader;
+    _ = replacementTag;
+    Render();
+  }
+
+  public bool RenderToCubemap(Cubemap cubemap)
+  {
+    _ = cubemap;
+    Render();
+    return true;
+  }
 
   public Vector3 WorldToScreenPoint(Vector3 worldPosition)
   {
@@ -96,4 +133,22 @@ public class Camera : Behaviour
   {
     return ViewportPointToRay(new Vector3(uv.x, uv.y, 0f));
   }
+
+  public class RenderRequest
+  {
+    public RenderTexture? destination;
+    public int mipLevel;
+    public CubemapFace face;
+    public int slice;
+    public bool isValid;
+  }
+}
+
+public enum RenderingPath
+{
+  UsePlayerSettings,
+  Forward,
+  DeferredLighting,
+  DeferredShading,
+  VertexLit
 }

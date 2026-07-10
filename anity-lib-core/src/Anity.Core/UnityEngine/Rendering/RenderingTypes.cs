@@ -4,16 +4,100 @@ namespace UnityEngine.Rendering;
 
 public static class GraphicsSettings
 {
-    public static RenderPipelineAsset currentRenderPipeline { get; set; }
-    public static Shader defaultShader { get; set; }
-    public static Material defaultSpatialMaterial { get; set; }
+    public static RenderPipelineAsset? currentRenderPipeline => QualitySettings.renderPipeline ?? defaultRenderPipeline;
+    public static RenderPipelineAsset? defaultRenderPipeline { get; set; }
+    public static Shader? defaultShader { get; set; }
+    public static Material? defaultSpatialMaterial { get; set; }
     public static bool useScriptableRenderPipeline => currentRenderPipeline != null;
+    public static bool useScriptableRenderPipelineBatching { get; set; }
+    public static bool logWhenShaderIsCompiled { get; set; }
+    public static bool disableBuiltinKeywordRenderPipeline { get; set; }
+    public static bool disableBuiltinKeywordAmbientObscurance { get; set; }
 
     public static int shaderRenderPipelineAssetCount { get; }
     public static int customRenderPipelineAssetCount { get; }
 
     public static void RegisterRenderPipelineSettings<T>(T settings) where T : RenderPipelineAsset { }
     public static void UnregisterRenderPipelineSettings<T>(T settings) where T : RenderPipelineAsset { }
+
+    public static bool HasShaderDefine(GraphicsDeviceType graphicsDeviceType, BuiltinShaderDefine define)
+    {
+        _ = graphicsDeviceType;
+        _ = define;
+        return false;
+    }
+}
+
+public static class QualitySettings
+{
+    public static RenderPipelineAsset? renderPipeline { get; set; }
+    public static int pixelLightCount { get; set; } = 4;
+    public static int shadowResolution { get; set; } = 1024;
+    public static int shadowCascades { get; set; } = 2;
+    public static float shadowDistance { get; set; } = 150f;
+    public static int vSyncCount { get; set; }
+    public static int antiAliasing { get; set; }
+    public static int desiredColorSpace { get; set; }
+}
+
+public enum GraphicsDeviceType
+{
+    Direct3D11,
+    Direct3D12,
+    Vulkan,
+    OpenGLCore,
+    OpenGLES2,
+    OpenGLES3,
+    Metal,
+    Null,
+    PlayStation4,
+    PlayStation5,
+    XboxOne,
+    XboxOneD3D12,
+    Switch,
+    WebGPU
+}
+
+public enum BuiltinShaderDefine
+{
+    UNITY_NO_DXT5NM,
+    UNITY_NO_RGBM,
+    UNITY_USE_NATIVE_HDR,
+    UNITY_ENABLE_REFLECTION_BUFFERS,
+    UNITY_FRAMEBUFFER_FETCH_AVAILABLE,
+    UNITY_ENABLE_NATIVE_SHADOW_LOOKUPS,
+    UNITY_METAL_SHADOWS_USE_POINT_FILTERING,
+    UNITY_NO_CUBEMAP_ARRAY,
+    UNITY_NO_SCREENSPACE_SHADOWS
+}
+
+public static class SupportedRenderingFeatures
+{
+    public static ReflectionProbeSupportFlags reflectionProbeSupportFlags { get; set; }
+    public static bool defaultMixedLightingMode { get; set; }
+    public static bool mixedLightingModes { get; set; }
+    public static bool lightProbeProxyVolumes { get; set; }
+    public static bool motionVectors { get; set; }
+    public static bool receiveShadows { get; set; }
+    public static bool reflectionProbes { get; set; }
+    public static bool rendererPriority { get; set; }
+    public static bool overridesEnvironmentLighting { get; set; }
+    public static bool overridesFog { get; set; }
+    public static bool editableMaterialRenderQueue { get; set; }
+}
+
+public enum ReflectionProbeSupportFlags
+{
+    None = 0
+}
+
+public static class RenderPipelineGlobalSettings
+{
+    public static RenderPipelineGlobalSettingsSO? instance { get; set; }
+}
+
+public class RenderPipelineGlobalSettingsSO : ScriptableObject
+{
 }
 
 [Flags]
@@ -93,6 +177,22 @@ public enum ShaderRenderPipeline
     BuiltIn = 0,
     Universal = 1,
     HD = 2,
+}
+
+[Flags]
+public enum PerObjectData
+{
+    None = 0,
+    LightProbe = 1,
+    ReflectionProbes = 2,
+    LightProbeProxyVolume = 4,
+    Lightmaps = 8,
+    LightData = 16,
+    LightIndices = 32,
+    ReflectionProbeData = 64,
+    OcclusionProbe = 128,
+    OcclusionProbeProxyVolume = 256,
+    ShadowMask = 512
 }
 
 public struct VolumePriority : IComparable<VolumePriority>, IEquatable<VolumePriority>
