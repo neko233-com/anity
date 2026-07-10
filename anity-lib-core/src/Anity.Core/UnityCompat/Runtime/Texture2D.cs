@@ -56,7 +56,6 @@ public enum TextureFormat
     RG32 = 78,
     RGB9E5 = 79,
     RG11B10 = 80,
-    RGB565 = 7,
     R8G8B8A8_UNorm = 81,
     B8G8R8A8_UNorm = 82,
     R10G10B10A2 = 83,

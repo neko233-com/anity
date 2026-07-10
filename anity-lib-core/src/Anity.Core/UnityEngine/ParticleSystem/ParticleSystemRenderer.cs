@@ -146,10 +146,3 @@ public class ParticleSystemRenderer : Renderer
         }
     }
 }
-
-public enum SpriteMaskInteraction
-{
-    None,
-    VisibleInsideMask,
-    VisibleOutsideMask
-}

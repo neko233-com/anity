@@ -1,6 +1,8 @@
 using System;
 using System.Threading;
 using System.Collections.Generic;
+using UnityEngine;
+using Unity.Collections;
 
 namespace Unity.Jobs
 {
@@ -138,16 +140,6 @@ namespace Unity.Jobs
     {
       dependsOn.Complete();
       jobData.Execute();
-      return new JobHandle { m_IsCompleted = true };
-    }
-
-    public static JobHandle Schedule<T>(this T jobData, int arrayLength, int innerloopBatchCount, JobHandle dependsOn = new JobHandle()) where T : struct, IJobParallelFor
-    {
-      dependsOn.Complete();
-      for (int i = 0; i < arrayLength; i++)
-      {
-        jobData.Execute(i);
-      }
       return new JobHandle { m_IsCompleted = true };
     }
 

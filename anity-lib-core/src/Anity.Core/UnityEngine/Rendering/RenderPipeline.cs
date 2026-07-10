@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering
 {
@@ -57,20 +58,17 @@ namespace UnityEngine.Rendering
 
     protected virtual void Dispose(bool disposing) { }
 
-    public void Render(ScriptableRenderContext context, Camera[] cameras)
+    public virtual void Render(ScriptableRenderContext context, Camera[] cameras)
     {
       if (cameras == null) throw new ArgumentNullException(nameof(cameras));
       Render(context, new List<Camera>(cameras));
     }
 
-    public void Render(ScriptableRenderContext context, List<Camera> cameras)
+    public virtual void Render(ScriptableRenderContext context, List<Camera> cameras)
     {
       if (disposed) throw new ObjectDisposedException(nameof(RenderPipeline));
       RenderInternal(context, cameras);
     }
-
-    protected abstract void Render(ScriptableRenderContext context, Camera[] cameras);
-    protected abstract void Render(ScriptableRenderContext context, List<Camera> cameras);
 
     internal virtual void RenderInternal(ScriptableRenderContext context, List<Camera> cameras)
     {

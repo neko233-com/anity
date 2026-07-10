@@ -11,6 +11,7 @@ public static class Application
   public static RuntimePlatform platform => RuntimePlatformFromOS();
   public static bool isPlaying => true;
   public static bool isEditor => false;
+  public static event Action<string, string, LogType>? logMessageReceived;
 
   private static RuntimePlatform RuntimePlatformFromOS()
   {

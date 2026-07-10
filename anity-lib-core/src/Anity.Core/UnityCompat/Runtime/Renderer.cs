@@ -20,6 +20,9 @@ public class Renderer : Component
     private bool _motionVectors = true;
     private int _lightmapIndex = -1;
     private Vector4 _lightmapScaleOffset = new Vector4(1, 1, 0, 0);
+    private bool _castShadows = true;
+    private bool _receiveShadows = true;
+    private float _shadowBias = 0f;
 
     public bool enabled
     {
@@ -28,6 +31,24 @@ public class Renderer : Component
     }
 
     public bool isVisible { get; private set; } = true;
+
+    public bool castShadows
+    {
+        get => _castShadows;
+        set => _castShadows = value;
+    }
+
+    public bool receiveShadows
+    {
+        get => _receiveShadows;
+        set => _receiveShadows = value;
+    }
+
+    public float shadowBias
+    {
+        get => _shadowBias;
+        set => _shadowBias = value;
+    }
 
     public Bounds bounds { get; private set; } = new Bounds(Vector3.zero, Vector3.one);
 

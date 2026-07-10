@@ -46,4 +46,15 @@ public struct Color
   {
     return HashCode.Combine(r, g, b, a);
   }
+
+  public static Color Lerp(Color a, Color b, float t)
+  {
+    t = Mathf.Clamp01(t);
+    return new Color(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
+  }
+
+  public static Color LerpUnclamped(Color a, Color b, float t)
+  {
+    return new Color(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
+  }
 }

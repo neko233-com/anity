@@ -41,5 +41,38 @@ public struct Vector3
   public static Vector3 operator *(float d, Vector3 a) => a * d;
   public static Vector3 operator /(Vector3 a, float d) => new(a.x / d, a.y / d, a.z / d);
 
+  public static bool operator ==(Vector3 a, Vector3 b) => a.x == b.x && a.y == b.y && a.z == b.z;
+  public static bool operator !=(Vector3 a, Vector3 b) => !(a == b);
+
+  public static Vector3 Lerp(Vector3 a, Vector3 b, float t) => new(
+    a.x + (b.x - a.x) * t,
+    a.y + (b.y - a.y) * t,
+    a.z + (b.z - a.z) * t);
+
+  public static Vector3 LerpUnclamped(Vector3 a, Vector3 b, float t) => new(
+    a.x + (b.x - a.x) * t,
+    a.y + (b.y - a.y) * t,
+    a.z + (b.z - a.z) * t);
+
+  public static float SqrMagnitude(Vector3 a) => a.x * a.x + a.y * a.y + a.z * a.z;
+  public float sqrMagnitude => x * x + y * y + z * z;
+
+  public static Vector3 Max(Vector3 a, Vector3 b) => new(MathF.Max(a.x, b.x), MathF.Max(a.y, b.y), MathF.Max(a.z, b.z));
+  public static Vector3 Min(Vector3 a, Vector3 b) => new(MathF.Min(a.x, b.x), MathF.Min(a.y, b.y), MathF.Min(a.z, b.z));
+
+  public static Vector3 ProjectOnPlane(Vector3 vector, Vector3 planeNormal)
+  {
+    return vector - Project(vector, planeNormal);
+  }
+
+  public static Vector3 Project(Vector3 vector, Vector3 onNormal)
+  {
+    float dot = Dot(vector, onNormal);
+    return new(onNormal.x * dot, onNormal.y * dot, onNormal.z * dot);
+  }
+
+  public override bool Equals(object? obj) => obj is Vector3 other && x == other.x && y == other.y && z == other.z;
+  public override int GetHashCode() => HashCode.Combine(x, y, z);
+
   public override string ToString() => $"({x:F2}, {y:F2}, {z:F2})";
 }

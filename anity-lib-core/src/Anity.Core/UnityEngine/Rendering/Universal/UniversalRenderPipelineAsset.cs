@@ -97,7 +97,7 @@ namespace UnityEngine.Rendering.Universal
 
     public UniversalRenderPipeline() { }
 
-    protected override void Render(ScriptableRenderContext context, Camera[] cameras)
+    public override void Render(ScriptableRenderContext context, Camera[] cameras)
     {
       BeginFrameRendering(context, cameras);
       foreach (var camera in cameras)
@@ -109,7 +109,7 @@ namespace UnityEngine.Rendering.Universal
       EndFrameRendering(context, cameras);
     }
 
-    protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
+    public override void Render(ScriptableRenderContext context, List<Camera> cameras)
     {
       BeginFrameRendering(context, cameras);
       foreach (var camera in cameras)
@@ -127,8 +127,8 @@ namespace UnityEngine.Rendering.Universal
 
     public static event Action<ScriptableRenderContext, Camera> beginCameraRendering;
     public static event Action<ScriptableRenderContext, Camera> endCameraRendering;
-    public static event Action<ScriptableRenderContext, Camera[]> beginFrameRendering;
-    public static event Action<ScriptableRenderContext, Camera[]> endFrameRendering;
+    public static event Action<ScriptableRenderContext, IList<Camera>> beginFrameRendering;
+    public static event Action<ScriptableRenderContext, IList<Camera>> endFrameRendering;
 
     private void BeginCameraRendering(ScriptableRenderContext context, Camera camera)
     {
@@ -140,12 +140,12 @@ namespace UnityEngine.Rendering.Universal
       endCameraRendering?.Invoke(context, camera);
     }
 
-    private void BeginFrameRendering(ScriptableRenderContext context, Camera[] cameras)
+    private void BeginFrameRendering(ScriptableRenderContext context, IList<Camera> cameras)
     {
       beginFrameRendering?.Invoke(context, cameras);
     }
 
-    private void EndFrameRendering(ScriptableRenderContext context, Camera[] cameras)
+    private void EndFrameRendering(ScriptableRenderContext context, IList<Camera> cameras)
     {
       endFrameRendering?.Invoke(context, cameras);
     }

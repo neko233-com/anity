@@ -16,6 +16,7 @@ public static class Selection
   public static Object? activeContext { get; set; }
   public static Object? activeGameObject => activeObject;
   public static Transform? activeTransform => activeObject as Transform;
+  public static int activeInstanceID { get; set; }
 
   public static void SetActiveObjectWithContext(Object? obj, Object? context = null)
   {

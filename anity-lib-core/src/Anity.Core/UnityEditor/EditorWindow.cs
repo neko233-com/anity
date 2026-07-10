@@ -145,6 +145,11 @@ public abstract class EditorWindow
     return (T)GetOrCreateWindow(type, title);
   }
 
+  public static T GetWindow<T>(string? title) where T : EditorWindow, new()
+  {
+    return GetWindow<T>(false, title);
+  }
+
   public static T GetWindow<T>(bool utility, string? title, bool focus) where T : EditorWindow, new()
   {
     _ = utility;

@@ -141,12 +141,7 @@ public class Shader
 
     public static int PropertyToID(string name)
     {
-        return Shader.PropertyToID(name);
-    }
-
-    public static int PropertyToID(string name)
-    {
-        return name.GetHashCode();
+        return name?.GetHashCode() ?? 0;
     }
 
     public static string IdToProperty(int id)

@@ -1,10 +1,11 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace UnityEngine;
 
-public class Transform : Component
+public class Transform : Component, IEnumerable<Transform>
 {
   private readonly List<Transform> _children = new();
   private Transform? _parent;
@@ -145,6 +146,9 @@ public class Transform : Component
   }
 
   public int childCount => _children.Count;
+
+  public IEnumerator<Transform> GetEnumerator() => _children.GetEnumerator();
+  IEnumerator IEnumerable.GetEnumerator() => _children.GetEnumerator();
 
   public Vector3 forward => Vector3.forward;
   public Vector3 up => Vector3.up;

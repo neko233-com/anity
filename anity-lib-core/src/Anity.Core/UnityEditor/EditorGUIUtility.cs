@@ -189,7 +189,7 @@ namespace UnityEditor
     public static float wideModeMinWidth => 600f;
     public static float contextWidth => 280f;
 
-    public static void SetShowModeForAllInspectors(EditorWindow.InspectorMode mode)
+    public static void SetShowModeForAllInspectors(int mode)
     {
       _ = mode;
     }

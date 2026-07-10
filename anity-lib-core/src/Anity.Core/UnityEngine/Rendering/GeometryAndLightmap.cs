@@ -100,23 +100,6 @@ public static class GeometryUtility
     }
 }
 
-public sealed class LightmapSettings : Object
-{
-    public LightmapsMode lightmapsMode { get; set; }
-    public LightmapData[] lightmaps { get; set; } = Array.Empty<LightmapData>();
-    public LightProbes lightProbes { get; set; }
-    public bool useDirectionalMode { get; set; }
-
-    public static LightmapSettings current { get; set; } = new LightmapSettings();
-}
-
-public enum LightmapsMode
-{
-    NonDirectional = 0,
-    CombinedDirectional = 1,
-    SeparateDirectional = 2,
-}
-
 public sealed class LightProbes : Object
 {
     public SphericalHarmonicsL2[] probes { get; } = Array.Empty<SphericalHarmonicsL2>();

@@ -259,13 +259,11 @@ namespace UnityEngine.Rendering
   public sealed class MinFloatParameter : VolumeParameter<float>
   {
     public float min;
-    public float max;
 
-    public MinFloatParameter(float value, float min, float max, bool overrideState = false)
+    public MinFloatParameter(float value, float min, bool overrideState = false)
       : base(value, overrideState)
     {
       this.min = min;
-      this.max = max;
     }
   }
 
@@ -362,6 +360,17 @@ namespace UnityEngine.Rendering
     }
   }
 
+  [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+  public sealed class VolumeComponentMenuAttribute : Attribute
+  {
+    public string menu { get; }
+
+    public VolumeComponentMenuAttribute(string menu)
+    {
+      this.menu = menu ?? string.Empty;
+    }
+  }
+
   public sealed class VolumeStack : IDisposable
   {
     private readonly Dictionary<Type, VolumeComponent> m_Components = new();
@@ -379,12 +388,12 @@ namespace UnityEngine.Rendering
       return component != null;
     }
 
-    public void IDisposable.Dispose()
+    void IDisposable.Dispose()
     {
     }
   }
 
-  public static class VolumeManager
+  public sealed class VolumeManager
   {
     private static readonly Lazy<VolumeManager> s_Instance = new(() => new VolumeManager());
     public static VolumeManager instance => s_Instance.Value;
@@ -409,7 +418,7 @@ namespace UnityEngine.Rendering
     {
     }
 
-    public void Update(Transform, LayerMask layerMask)
+    public void Update(Transform transform, LayerMask layerMask)
     {
     }
   }
