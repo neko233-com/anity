@@ -22,6 +22,8 @@ public struct Vector2
   public static Vector2 left => new Vector2(-1f, 0f);
 
   public float magnitude => MathF.Sqrt(x * x + y * y);
+  public float sqrMagnitude => x * x + y * y;
+
   public Vector2 normalized
   {
     get
@@ -29,6 +31,21 @@ public struct Vector2
       var m = magnitude;
       return m > 1e-6f ? this / m : zero;
     }
+  }
+
+  public static float Dot(Vector2 a, Vector2 b) => a.x * b.x + a.y * b.y;
+  public static float Distance(Vector2 a, Vector2 b) => (a - b).magnitude;
+  public static Vector2 Lerp(Vector2 a, Vector2 b, float t) => a + (b - a) * Math.Clamp(t, 0f, 1f);
+  public static Vector2 LerpUnclamped(Vector2 a, Vector2 b, float t) => a + (b - a) * t;
+  public static Vector2 ClampMagnitude(Vector2 vector, float maxLength)
+  {
+    var sqr = vector.sqrMagnitude;
+    if (sqr > maxLength * maxLength)
+    {
+      return vector.normalized * maxLength;
+    }
+
+    return vector;
   }
 
   public static Vector2 operator +(Vector2 a, Vector2 b) => new(a.x + b.x, a.y + b.y);

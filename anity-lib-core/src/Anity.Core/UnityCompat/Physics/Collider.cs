@@ -11,6 +11,11 @@ public class Collider : Component
   public object? sharedMaterial { get; set; }
   public PhysicMaterial? sharedMaterialInstance;
 
+  public Collider()
+  {
+    PhysicsWorld.Register(this);
+  }
+
   public virtual Vector3 ClosestPoint(Vector3 point)
   {
     return point;
@@ -31,4 +36,17 @@ public class Collider : Component
 public class PhysicMaterial
 {
   public string name { get; set; } = string.Empty;
+  public float dynamicFriction { get; set; } = 0.6f;
+  public float staticFriction { get; set; } = 0.6f;
+  public float bounciness { get; set; }
+  public PhysicMaterialCombine frictionCombine { get; set; } = PhysicMaterialCombine.Average;
+  public PhysicMaterialCombine bounceCombine { get; set; } = PhysicMaterialCombine.Average;
+}
+
+public enum PhysicMaterialCombine
+{
+  Average,
+  Minimum,
+  Maximum,
+  Multiply
 }

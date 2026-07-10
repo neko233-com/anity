@@ -62,6 +62,6 @@ public class PolygonCollider2D : Collider2D
 
     internal override ColliderShape2D GetShape()
     {
-        return new ColliderShape2D(ColliderShapeType2D.Polygon, offset, Vector2.one, 0f);
+        return new ColliderShape2D(ColliderShapeType2D.Polygon, offset, Vector2.one, 0f, _points);
     }
 }

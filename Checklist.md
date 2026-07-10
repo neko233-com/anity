@@ -35,9 +35,9 @@
 | `Random` | 🟡 | Range、insideUnitSphere 等 |
 | `Resources` | 🟡 | Load 壳 |
 | `JsonUtility` | 🟡 | ToJson/FromJson 壳 |
-| `Screen` | ❌ | 分辨率、全屏、DPI 等未实现 |
-| `SystemInfo` | ❌ | 设备信息未实现 |
-| `GL` | ❌ | 即时渲染未实现 |
+| `Screen` | 🟡 | 分辨率、全屏、DPI 等基础 API 已壳化 |
+| `SystemInfo` | 🟡 | 设备/操作系统/处理器信息已壳化 |
+| `GL` | 🟡 | 即时渲染命令已壳化 |
 | `AsyncOperation` | 🟡 | 基础壳 |
 | `ScriptableObject` | 🟡 | 基础壳 |
 
@@ -63,7 +63,7 @@
 | `ForceMode` | ✅ | 枚举 |
 | `QueryTriggerInteraction` | ✅ | 枚举 |
 | `Joint` 系列 | 🟡 | Hinge/Spring/Fixed/Configurable 等基础壳 |
-| `Physics.Simulate` 真实现 | ❌ | 当前为签名壳，无实际模拟 |
+| `Physics.Simulate` 真实现 | ✅ | PhysicsWorld 管理刚体积分、碰撞检测/响应、射线/体积查询 |
 
 ---
 
@@ -75,12 +75,13 @@
 | `Collider2D` | ✅ | isTrigger、IsTouching、GetShape 抽象 |
 | `BoxCollider2D` | ✅ | 形状实现 |
 | `CircleCollider2D` | ✅ | 形状实现 |
-| `CapsuleCollider2D` | ❌ | 缺失 |
-| `EdgeCollider2D` | ❌ | 缺失 |
-| `PolygonCollider2D` | ❌ | 缺失 |
-| `CompositeCollider2D` | ❌ | 缺失 |
-| `PhysicsMaterial2D` | ❌ | 缺失 |
-| `Effector2D` 系列 | ❌ | 各类 Effector 与 Joint2D 缺失 |
+| `CapsuleCollider2D` | ✅ | 形状实现（以 Box 近似参与碰撞） |
+| `EdgeCollider2D` | 🟡 | 边缘顶点壳 |
+| `PolygonCollider2D` | 🟡 | 多边形路径壳 |
+| `CompositeCollider2D` | 🟡 | 壳 |
+| `PhysicsMaterial2D` | 🟡 | friction/bounciness 壳 |
+| `Joint2D` 系列 | 🟡 | Fixed/Spring/Distance/Hinge/Slider/Wheel/Relative/Friction/Target 壳 |
+| `Effector2D` 系列 | 🟡 | Area/Point/Platform/Surface/Buoyancy 壳 |
 | `Physics2D` | ✅ | Raycast/Overlap/Cast 查询签名 |
 | `Physics2DWorld` | ✅ | 内部世界管理、积分、碰撞检测/响应、触发器 |
 | `RaycastHit2D` | ✅ | 完整结构 |
@@ -101,7 +102,7 @@
 | `MaskableGraphic` | 🟡 | RectMask2D / Mask 裁剪接口 |
 | `RectMask2D` | 🟡 | IClipper 实现 |
 | `Image` | 🟡 | 壳 |
-| `RawImage` | ❌ | 缺失 |
+| `RawImage` | 🟡 | texture/uvRect 壳 |
 | `Text` | 🟡 | 壳 |
 | `Button` | 🟡 | 壳 |
 | `Selectable` | 🟡 | 壳 |
@@ -109,9 +110,10 @@
 | `ToggleGroup` | 🟡 | 壳 |
 | `Slider` | 🟡 | 壳 |
 | `Scrollbar` | 🟡 | 壳 |
-| `Dropdown` | 🟡 | 壳 |
-| `InputField` | 🟡 | 壳 |
-| `ScrollRect` | 🟡 | 壳 |
+| `Dropdown` | 🟡 | 选项管理、value、事件已落地，下拉弹窗未完整 |
+| `InputField` | 🟡 | 文本/验证/激活/提交事件已落地，键盘输入未完整 |
+| `ScrollRect` | 🟡 | 拖拽/滚动/惯性/归一化位置已落地，完整布局未接 |
+| `Scrollbar` | 🟡 | value/size/方向/事件已落地 |
 | `RectTransform` | 🟡 | anchoredPosition、pivot、anchorMin/Max、sizeDelta |
 | `LayoutGroup` / `Horizontal/Vertical/Grid` | 🟡 | 壳 |
 | `LayoutElement` | 🟡 | 壳 |
@@ -121,7 +123,7 @@
 | `PointerEventData` | 🟡 | 壳 |
 | `GraphicRaycaster` | 🟡 | 壳 |
 | `CanvasGroup` | 🟡 | alpha、interactable、blocksRaycasts |
-| `Outline` / `Shadow` / `PositionAsUV1` | ❌ | 缺失 |
+| `Outline` / `Shadow` / `PositionAsUV1` | 🟡 | BaseMeshEffect + ModifyMesh 实现 |
 
 ---
 
@@ -177,9 +179,9 @@
 | `AnimationEvent` | 🟡 | 壳 |
 | `Avatar` / `AvatarMask` | 🟡 | 壳 |
 | `HumanBodyBones` | ✅ | 枚举 |
-| `StateMachineBehaviour` | ❌ | 缺失 |
-| `BlendTree` | ❌ | 缺失 |
-| `Animation`（Legacy） | ❌ | 缺失 |
+| `StateMachineBehaviour` | 🟡 | 状态机回调壳 |
+| `BlendTree` | 🟡 | 1D/2D/Simple/Direct 壳 |
+| `Animation`（Legacy） | 🟡 | Play/Stop/CrossFade/AnimationState 壳 |
 
 ---
 
@@ -189,8 +191,8 @@
 |------|------|------|
 | `AudioClip` | 🟡 | 壳 |
 | `AudioSource` | 🟡 | 播放控制壳 |
-| `AudioListener` | ❌ | 缺失 |
-| `AudioMixer/AudioMixerGroup` | ❌ | 缺失 |
+| `AudioListener` | 🟡 | volume/pause 静态壳 |
+| `AudioMixer/AudioMixerGroup` | 🟡 | Get/SetFloat、Group/Snapshot 壳 |
 
 ---
 
@@ -198,10 +200,10 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `AssetBundle` | ❌ | 缺失 |
-| `UnityWebRequest` | ❌ | 缺失 |
-| `WWW` | ❌ | 缺失 |
-| `DownloadHandler` / `UploadHandler` | ❌ | 缺失 |
+| `AssetBundle` | 🟡 | LoadFromFile/LoadAsset/Unload 壳 |
+| `UnityWebRequest` | 🟡 | Get/Post、DownloadHandlerBuffer 壳 |
+| `WWW` | 🟡 | 旧版网络请求壳 |
+| `DownloadHandler` / `UploadHandler` | 🟡 | Buffer/Texture/AudioClip 壳 |
 
 ---
 
@@ -214,7 +216,7 @@
 | `RenderTexture` | 🟡 | active、format 壳 |
 | `Cubemap` | 🟡 | 壳 |
 | `TextureFormat` / `RenderTextureFormat` | ✅ | 枚举 |
-| `ImageConversion` | ❌ | EncodeToTGA/LoadImage 等未单独成类 |
+| `ImageConversion` | 🟡 | EncodeToPNG/JPG/TGA、LoadImage 扩展壳 |
 
 ---
 
@@ -253,7 +255,7 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `Camera` | 🟡 | 渲染管线接入、Render、RenderWithShader、viewport |
+| `Camera` | ✅ | 渲染管线接入、Render、RenderWithShader、viewport |
 | `CameraType` / `CameraClearFlags` / `RenderingPath` | ✅ | 枚举 |
 | `SceneViewCamera` 等 | ❌ | 缺失 |
 
@@ -287,9 +289,9 @@
 | 类型 | 状态 | 备注 |
 |------|------|------|
 | `Terrain` | 🟡 | 基础属性壳 |
-| `TerrainData` | ❌ | 缺失 |
-| `TerrainCollider` | ❌ | 缺失 |
-| `Tree/Detail` 相关 | ❌ | 缺失 |
+| `TerrainData` | 🟡 | 高度图/alphamap/图层壳 |
+| `TerrainCollider` | 🟡 | 壳 |
+| `Tree/Detail` 相关 | 🟡 | TreePrototype/TreeInstance/TerrainLayer 壳 |
 
 ---
 
@@ -298,7 +300,7 @@
 | 类型 | 状态 | 备注 |
 |------|------|------|
 | `Tilemap` | 🟡 | 基础壳 |
-| `Tile` / `TileBase` / `TilemapCollider2D` | ❌ | 缺失 |
+| `Tile` / `TileBase` / `TilemapCollider2D` | 🟡 | TileBase/Tile/TileData/TileFlags 壳 |
 
 ---
 
@@ -306,8 +308,8 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `VideoPlayer` | ❌ | 缺失 |
-| `VideoClip` | ❌ | 缺失 |
+| `VideoPlayer` | 🟡 | source/clip/url/Play/Pause/Stop 壳 |
+| `VideoClip` | 🟡 | 属性壳 |
 | WebGL 侧 `WebGLVideo` | 🟡 | 仅支持声明壳 |
 
 ---
@@ -316,7 +318,7 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `NavMesh` / `NavMeshAgent` / `NavMeshPath` | ❌ | 缺失 |
+| `NavMesh` / `NavMeshAgent` / `NavMeshPath` | 🟡 | CalculatePath/SetDestination 壳 |
 
 ---
 
@@ -325,7 +327,7 @@
 | 类型 | 状态 | 备注 |
 |------|------|------|
 | `Font` | 🟡 | 见 UIModule |
-| `TextMeshPro` / `TMP_Text` / `FontAsset` | ❌ | 缺失 |
+| `TextMeshPro` / `TMP_Text` / `FontAsset` | 🟡 | TMP_Text 继承 Text，FontAsset 壳 |
 
 ---
 
@@ -412,6 +414,9 @@
 | `Addressables` | 🟡 | 异步句柄壳 |
 | `InternalEditorUtility` | 🟡 | 壳 |
 | `BuildCallbacks` | 🟡 | 接口定义 |
+| `EditorSettings` | 🟡 | 编辑器设置壳 |
+| `ProjectSettings` | 🟡 | 项目设置壳 |
+| `Lightmapping` | 🟡 | Bake/Clear/LightingSettings 壳 |
 
 ---
 
@@ -423,7 +428,7 @@
 | `Anity.Core.Unity` 编译 | ✅ | 0 错误 |
 | `Anity.WebGL` 编译 | ✅ | 0 错误 |
 | `Anity.Hub` 编译 | ✅ | 0 错误 |
-| `Anity.Editor.Host` 编译 | 🟡 | 0 错误（依赖 EditorSession 等） |
+| `Anity.Editor.Host` 编译 | ✅ | 0 错误 |
 | `Anity.Core.Analyzers` | ✅ | AOT/API 兼容分析器 |
 | `HotUpdateContext` | 🟡 | 程序集加载壳 |
 | `Il2CppRuntime` | 🟡 | 平台检测壳 |
@@ -431,17 +436,27 @@
 
 ---
 
-## 28. 高频缺失清单（下一步优先补齐）
+## 28. 高频缺失清单（本批次已补齐，下一步继续深实现）
 
-1. **运行时核心**：`Screen`、`SystemInfo`、`GL`
-2. **资源与网络**：`AssetBundle`、`UnityWebRequest`、`WWW`、`DownloadHandler`
-3. **音频**：`AudioListener`、`AudioMixer`、`AudioMixerGroup`
-4. **动画**：`Animation`（Legacy）、`StateMachineBehaviour`、`BlendTree`
-5. **AI**：`NavMesh` 基础导航 API
-6. **视频**：`VideoPlayer`、`VideoClip`
-7. **TextMeshPro**：`TMP_Text`、`FontAsset`
-8. **3D 物理真实现**：`Physics.Simulate`、球/盒扫掠与碰撞响应
-9. **2D 物理补全**：`CapsuleCollider2D`、`EdgeCollider2D`、`PolygonCollider2D`、`PhysicsMaterial2D`、各种 Joint2D/Effector2D
-10. **UI 补全**：`RawImage`、`Outline`、`Shadow`、`PositionAsUV1`
-11. **Renderer 补全**：真实 `Camera.Render`、阴影/光照探针
-12. **编辑器补全**：`EditorSettings`、`ProjectSettings`、`Lightmapping` 接口
+1. ~~运行时核心：`Screen`、`SystemInfo`、`GL`~~（已壳化）
+2. ~~资源与网络：`AssetBundle`、`UnityWebRequest`、`WWW`、`DownloadHandler`~~（已壳化）
+3. ~~音频：`AudioListener`、`AudioMixer`、`AudioMixerGroup`~~（已壳化）
+4. ~~动画：`Animation`（Legacy）、`StateMachineBehaviour`、`BlendTree`~~（已壳化）
+5. ~~AI：`NavMesh` 基础导航 API~~（已壳化）
+6. ~~视频：`VideoPlayer`、`VideoClip`~~（已壳化）
+7. ~~TextMeshPro：`TMP_Text`、`FontAsset`~~（已壳化）
+8. ~~3D 物理真实现：`Physics.Simulate`、球/盒扫掠与碰撞响应~~（核心实现完成，`RaycastAll`/`CheckSphere`/`CheckBox`/`CheckCapsule` 已接入，`Cast` 为步进扫掠近似）
+9. ~~2D 物理补全：`CapsuleCollider2D`、`EdgeCollider2D`、`PolygonCollider2D`、`PhysicsMaterial2D`、各种 Joint2D/Effector2D~~（核心实现完成，`Physics2D.Cast` 系列已接入）
+10. ~~UI 补全：`RawImage`、`Outline`、`Shadow`、`PositionAsUV1`~~（已实现）
+11. ~~Renderer 补全：真实 `Camera.Render`、阴影/光照探针~~（Camera.Render 已接入 SRP，探针已壳化）
+12. ~~编辑器补全：`EditorSettings`、`ProjectSettings`、`Lightmapping` 接口~~（已壳化）
+13. ~~UI 交互组件：`Dropdown`/`InputField`/`ScrollRect`/`Scrollbar`~~（核心交互已落地）
+
+### 仍待深实现（下一批）
+
+- 3D 物理：`SphereCast`/`BoxCast`/`CapsuleCast` 真实连续扫掠（当前为步进近似）、`OverlapCapsule` 填充结果
+- 2D 物理：多边形/边缘/胶囊碰撞器旋转与精确 SAT、`Physics2D.Cast` 多结果返回
+- 动画：`Animator` 基于 `RuntimeAnimatorController`/`AnimationClip` 的真正状态机与 BlendTree 驱动
+- 音频：`AudioMixer` 快照权重真正影响参数、Group 路由
+- UI：真实渲染回填（Text 网格、Image 填充、`Dropdown` 弹窗、`ScrollRect` 自动布局）
+- 输入：EventSystem 与 StandaloneInputModule 真正分发 Pointer/Submit 事件

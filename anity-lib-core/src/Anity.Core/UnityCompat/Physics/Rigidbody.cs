@@ -11,6 +11,11 @@ public class Rigidbody : Component
   public bool isKinematic { get; set; }
   public bool freezeRotation { get; set; }
 
+  public Rigidbody()
+  {
+    PhysicsWorld.Register(this);
+  }
+
   public void AddForce(Vector3 force)
   {
     AddForce(force, ForceMode.Force);

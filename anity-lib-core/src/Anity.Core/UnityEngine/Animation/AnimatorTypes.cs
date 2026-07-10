@@ -13,6 +13,18 @@ public struct AnimatorStateInfo
     public int tagHash { get; }
     public bool loop { get; }
 
+    public AnimatorStateInfo(int fullPathHash, int shortNameHash, float normalizedTime, float length, float speed, float speedMultiplier, int tagHash, bool loop)
+    {
+        this.fullPathHash = fullPathHash;
+        this.shortNameHash = shortNameHash;
+        this.normalizedTime = normalizedTime;
+        this.length = length;
+        this.speed = speed;
+        this.speedMultiplier = speedMultiplier;
+        this.tagHash = tagHash;
+        this.loop = loop;
+    }
+
     public bool IsName(string name)
     {
         return fullPathHash == Animator.StringToHash(name);

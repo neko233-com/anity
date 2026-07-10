@@ -11,6 +11,18 @@ public class Animator : Behaviour
     private RuntimeAnimatorController? _controller;
     private bool _applyRootMotion;
     private float _speed = 1.0f;
+    private readonly Dictionary<int, AnimatorControllerParameter> _parameters = new();
+    private readonly Dictionary<int, float> _floatValues = new();
+    private readonly Dictionary<int, int> _intValues = new();
+    private readonly Dictionary<int, bool> _boolValues = new();
+    private readonly HashSet<int> _triggers = new();
+    private int _currentStateHash;
+    private float _currentNormalizedTime;
+    private float _currentStateLength = 1f;
+    private bool _currentLoop;
+    private int _nextStateHash;
+    private float _transitionDuration;
+    private float _transitionTime;
 
     public RuntimeAnimatorController? controller
     {
@@ -65,61 +77,145 @@ public class Animator : Behaviour
     public AnimatorUpdateMode updateMode { get; set; }
     public AnimatorRecorderMode recorderMode { get; set; }
 
-    public AnimatorControllerParameter[] parameters { get; } = Array.Empty<AnimatorControllerParameter>();
-    public int parameterCount => parameters?.Length ?? 0;
+    public AnimatorControllerParameter[] parameters
+    {
+        get
+        {
+            var list = new AnimatorControllerParameter[_parameters.Count];
+            var i = 0;
+            foreach (var kv in _parameters)
+            {
+                list[i++] = kv.Value;
+            }
+
+            return list;
+        }
+    }
+
+    public int parameterCount => _parameters.Count;
 
     public AnimatorControllerParameter GetParameter(int index)
     {
-        if (parameters == null || index < 0 || index >= parameters.Length)
+        var list = parameters;
+        if (index < 0 || index >= list.Length)
             return default;
-        return parameters[index];
+        return list[index];
     }
 
     public static int StringToHash(string name) => name?.GetHashCode() ?? 0;
 
-    public void SetFloat(string name, float value) { }
-    public void SetFloat(int id, float value) { }
-    public void SetFloat(string name, float value, float dampTime, float deltaTime) { }
-    public void SetFloat(int id, float value, float dampTime, float deltaTime) { }
+    public void SetFloat(string name, float value) => SetFloat(StringToHash(name), value);
+    public void SetFloat(int id, float value) => _floatValues[id] = value;
+    public void SetFloat(string name, float value, float dampTime, float deltaTime) => SetFloat(name, value);
+    public void SetFloat(int id, float value, float dampTime, float deltaTime) => SetFloat(id, value);
 
-    public float GetFloat(string name) => 0f;
-    public float GetFloat(int id) => 0f;
+    public float GetFloat(string name) => GetFloat(StringToHash(name));
+    public float GetFloat(int id) => _floatValues.TryGetValue(id, out var value) ? value : 0f;
 
-    public void SetInteger(string name, int value) { }
-    public void SetInteger(int id, int value) { }
-    public int GetInteger(string name) => 0;
-    public int GetInteger(int id) => 0;
+    public void SetInteger(string name, int value) => SetInteger(StringToHash(name), value);
+    public void SetInteger(int id, int value) => _intValues[id] = value;
+    public int GetInteger(string name) => GetInteger(StringToHash(name));
+    public int GetInteger(int id) => _intValues.TryGetValue(id, out var value) ? value : 0;
 
-    public void SetBool(string name, bool value) { }
-    public void SetBool(int id, bool value) { }
-    public bool GetBool(string name) => false;
-    public bool GetBool(int id) => false;
+    public void SetBool(string name, bool value) => SetBool(StringToHash(name), value);
+    public void SetBool(int id, bool value) => _boolValues[id] = value;
+    public bool GetBool(string name) => GetBool(StringToHash(name));
+    public bool GetBool(int id) => _boolValues.TryGetValue(id, out var value) && value;
 
-    public void SetTrigger(string name) { }
-    public void SetTrigger(int id) { }
-    public void ResetTrigger(string name) { }
-    public void ResetTrigger(int id) { }
+    public void SetTrigger(string name) => SetTrigger(StringToHash(name));
+    public void SetTrigger(int id) => _triggers.Add(id);
+    public void ResetTrigger(string name) => ResetTrigger(StringToHash(name));
+    public void ResetTrigger(int id) => _triggers.Remove(id);
 
-    public bool IsInTransition(int layerIndex) => false;
-    public AnimatorStateInfo GetCurrentAnimatorStateInfo(int layerIndex) => default;
-    public AnimatorStateInfo GetNextAnimatorStateInfo(int layerIndex) => default;
+    public bool IsInTransition(int layerIndex)
+    {
+        _ = layerIndex;
+        return _transitionTime > 0f;
+    }
+
+    public AnimatorStateInfo GetCurrentAnimatorStateInfo(int layerIndex)
+    {
+        _ = layerIndex;
+        return new AnimatorStateInfo(_currentStateHash, _currentStateHash, _currentNormalizedTime, _currentStateLength, _speed, 1f, 0, _currentLoop);
+    }
+
+    public AnimatorStateInfo GetNextAnimatorStateInfo(int layerIndex)
+    {
+        _ = layerIndex;
+        return new AnimatorStateInfo(_nextStateHash, _nextStateHash, 0f, _currentStateLength, _speed, 1f, 0, _currentLoop);
+    }
+
     public AnimatorTransitionInfo GetAnimatorTransitionInfo(int layerIndex) => default;
     public AnimatorClipInfo[] GetCurrentAnimatorClipInfo(int layerIndex) => Array.Empty<AnimatorClipInfo>();
     public AnimatorClipInfo[] GetNextAnimatorClipInfo(int layerIndex) => Array.Empty<AnimatorClipInfo>();
 
-    public void CrossFade(string stateName, float normalizedTransitionDuration, int layer = -1, float normalizedTimeOffset = 0, float normalizedTransitionTime = 0) { }
-    public void CrossFade(int stateHashName, float normalizedTransitionDuration, int layer = -1, float normalizedTimeOffset = 0, float normalizedTransitionTime = 0) { }
-    public void CrossFadeInFixedTime(string stateName, float fixedTransitionDuration, int layer = -1, float fixedTimeOffset = 0, float normalizedTransitionTime = 0) { }
-    public void CrossFadeInFixedTime(int stateHashName, float fixedTransitionDuration, int layer = -1, float fixedTimeOffset = 0, float normalizedTransitionTime = 0) { }
+    public void CrossFade(string stateName, float normalizedTransitionDuration, int layer = -1, float normalizedTimeOffset = 0, float normalizedTransitionTime = 0)
+    {
+        CrossFade(StringToHash(stateName), normalizedTransitionDuration, layer, normalizedTimeOffset, normalizedTransitionTime);
+    }
 
-    public void Play(string stateName, int layer = -1, float normalizedTime = float.NegativeInfinity) { }
-    public void Play(int stateNameHash, int layer = -1, float normalizedTime = float.NegativeInfinity) { }
+    public void CrossFade(int stateHashName, float normalizedTransitionDuration, int layer = -1, float normalizedTimeOffset = 0, float normalizedTransitionTime = 0)
+    {
+        _ = layer;
+        _nextStateHash = stateHashName;
+        _transitionDuration = normalizedTransitionDuration;
+        _transitionTime = normalizedTransitionDuration;
+        _currentNormalizedTime = normalizedTimeOffset;
+    }
 
-    public void PlayInFixedTime(string stateName, int layer = -1, float fixedTime = 0) { }
-    public void PlayInFixedTime(int stateNameHash, int layer = -1, float fixedTime = 0) { }
+    public void CrossFadeInFixedTime(string stateName, float fixedTransitionDuration, int layer = -1, float fixedTimeOffset = 0, float normalizedTransitionTime = 0)
+    {
+        CrossFade(stateName, fixedTransitionDuration, layer, fixedTimeOffset, normalizedTransitionTime);
+    }
+
+    public void CrossFadeInFixedTime(int stateHashName, float fixedTransitionDuration, int layer = -1, float fixedTimeOffset = 0, float normalizedTransitionTime = 0)
+    {
+        CrossFade(stateHashName, fixedTransitionDuration, layer, fixedTimeOffset, normalizedTransitionTime);
+    }
+
+    public void Play(string stateName, int layer = -1, float normalizedTime = float.NegativeInfinity)
+    {
+        Play(StringToHash(stateName), layer, normalizedTime);
+    }
+
+    public void Play(int stateNameHash, int layer = -1, float normalizedTime = float.NegativeInfinity)
+    {
+        _ = layer;
+        _currentStateHash = stateNameHash;
+        _currentNormalizedTime = normalizedTime == float.NegativeInfinity ? 0f : normalizedTime;
+        _nextStateHash = 0;
+        _transitionTime = 0f;
+    }
+
+    public void PlayInFixedTime(string stateName, int layer = -1, float fixedTime = 0) => Play(stateName, layer);
+    public void PlayInFixedTime(int stateNameHash, int layer = -1, float fixedTime = 0) => Play(stateNameHash, layer);
 
     public void Rebind() { }
-    public void Update(float deltaTime) { }
+
+    public void Update(float deltaTime)
+    {
+        if (_transitionTime > 0f)
+        {
+            _transitionTime -= deltaTime / MathF.Max(_currentStateLength, 0.001f);
+            if (_transitionTime <= 0f)
+            {
+                _currentStateHash = _nextStateHash;
+                _nextStateHash = 0;
+                _currentNormalizedTime = 0f;
+            }
+        }
+
+        _currentNormalizedTime += deltaTime * _speed / MathF.Max(_currentStateLength, 0.001f);
+        if (_currentLoop && _currentNormalizedTime > 1f)
+        {
+            _currentNormalizedTime -= MathF.Floor(_currentNormalizedTime);
+        }
+        else if (!_currentLoop)
+        {
+            _currentNormalizedTime = MathF.Min(_currentNormalizedTime, 1f);
+        }
+    }
+
     public void StartPlayback() { }
     public void StartRecording(int frameCount) { }
     public void StopPlayback() { }

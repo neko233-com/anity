@@ -319,10 +319,10 @@ public sealed class EditorHost
   private void RegisterWindowFactories()
   {
     RegisterWindowFactory("Scene View", () => EditorWindow.RegisterWindowFactory(typeof(SceneViewWindow), () => new SceneViewWindow()));
-    RegisterWindowFactory("Hierarchy", () => EditorWindow.RegisterWindowFactory(typeof(HierarchyWindow), () => new HierarchyWindow()));
-    RegisterWindowFactory("Project", () => EditorWindow.RegisterWindowFactory(typeof(ProjectWindow), () => new ProjectWindow()));
-    RegisterWindowFactory("Console", () => EditorWindow.RegisterWindowFactory(typeof(ConsoleWindow), () => new ConsoleWindow()));
-    RegisterWindowFactory("Inspector", () => EditorWindow.RegisterWindowFactory(typeof(InspectorWindow), () => new InspectorWindow()));
+    RegisterWindowFactory("Hierarchy", () => EditorWindow.RegisterWindowFactory(typeof(Services.Windows.HierarchyWindow), () => new Services.Windows.HierarchyWindow()));
+    RegisterWindowFactory("Project", () => EditorWindow.RegisterWindowFactory(typeof(Services.Windows.ProjectWindow), () => new Services.Windows.ProjectWindow()));
+    RegisterWindowFactory("Console", () => EditorWindow.RegisterWindowFactory(typeof(Services.Windows.ConsoleWindow), () => new Services.Windows.ConsoleWindow()));
+    RegisterWindowFactory("Inspector", () => EditorWindow.RegisterWindowFactory(typeof(Services.Windows.InspectorWindow), () => new Services.Windows.InspectorWindow()));
   }
 
   private void RegisterWindowFactory(string alias, Action register)
@@ -333,10 +333,10 @@ public sealed class EditorHost
       var type = alias switch
       {
         "Scene View" => typeof(SceneViewWindow),
-        "Hierarchy" => typeof(HierarchyWindow),
-        "Project" => typeof(ProjectWindow),
-        "Console" => typeof(ConsoleWindow),
-        "Inspector" => typeof(InspectorWindow),
+        "Hierarchy" => typeof(Services.Windows.HierarchyWindow),
+        "Project" => typeof(Services.Windows.ProjectWindow),
+        "Console" => typeof(Services.Windows.ConsoleWindow),
+        "Inspector" => typeof(Services.Windows.InspectorWindow),
         _ => typeof(SceneViewWindow)
       };
       return EditorWindow.GetWindow(type, true);
