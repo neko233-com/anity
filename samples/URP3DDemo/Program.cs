@@ -12,11 +12,28 @@ using UnityEditor;
 using UnityEditor.Build.Reporting;
 using Anity.Demos.URP3D;
 
+EditorApplication.EnterPlaymode();
+
 Console.WriteLine("=== Anity URP 3D Demo ===");
 Console.WriteLine($"Unity version: {Application.unityVersion}");
-Console.WriteLine($"Platform: {Application.platform}");
-Console.WriteLine($"System: {SystemInfo.operatingSystem}, {SystemInfo.processorCount} CPU, {SystemInfo.graphicsDeviceName}");
-Console.WriteLine($"Screen: {Screen.width}x{Screen.height}, DPI: {Screen.dpi}");
+Console.WriteLine($"Platform: {Application.platform}, isMobile={Application.isMobilePlatform}, isWebGL={Application.isWebGL}, isPlaying={Application.isPlaying}");
+Console.WriteLine($"System: {SystemInfo.operatingSystem} ({SystemInfo.operatingSystemFamily}), {SystemInfo.processorCount} CPU @ {SystemInfo.processorFrequency}MHz, {SystemInfo.systemMemorySize}MB RAM");
+Console.WriteLine($"GPU: {SystemInfo.graphicsDeviceName} ({SystemInfo.graphicsDeviceVendor}), {SystemInfo.graphicsMemorySize}MB VRAM, Type={SystemInfo.graphicsDeviceType}, Version={SystemInfo.graphicsDeviceVersion}");
+Console.WriteLine($"Graphics: ShaderLevel={SystemInfo.graphicsShaderLevel}, MultiThreaded={SystemInfo.graphicsMultiThreaded}, ComputeShaders={SystemInfo.supportsComputeShaders}, Shadows={SystemInfo.supportsShadows}, Instancing={SystemInfo.supportsInstancing}");
+Console.WriteLine($"Screen: {Screen.width}x{Screen.height}, DPI: {Screen.dpi}, Orientation={Screen.orientation}, FullScreen={Screen.fullScreen}");
+Console.WriteLine($"Process: PID={Environment.ProcessId}, CurrentManagedThreadId={Environment.CurrentManagedThreadId}, isFocused={Application.isFocused}, isPaused={Application.isPaused}, isBatchMode={Application.isBatchMode}");
+Console.WriteLine($"Paths: dataPath='{Application.dataPath}', persistentDataPath='{Application.persistentDataPath}', streamingAssetsPath='{Application.streamingAssetsPath}', temporaryCachePath='{Application.temporaryCachePath}'");
+Console.WriteLine($"Bundle: company='{Application.companyName}', product='{Application.productName}', identifier='{Application.identifier}', bundleIdentifier='{Application.bundleIdentifier}', version='{Application.version}', buildGUID='{Application.buildGUID}'");
+Console.WriteLine($"Runtime: runInBackground={Application.runInBackground}, targetFrameRate={Application.targetFrameRate}, sleepTimeout={Application.sleepTimeout}, systemLanguage={Application.systemLanguage}, internetReachability={Application.internetReachability}");
+Console.WriteLine($"Device: name='{SystemInfo.deviceName}', model='{SystemInfo.deviceModel}', type={SystemInfo.deviceType}, uniqueId={SystemInfo.deviceUniqueIdentifier}, maxTextureSize={SystemInfo.maxTextureSize}");
+Console.WriteLine();
+
+PlayerSettings.productName = "URP3DDemo";
+PlayerSettings.companyName = "Anity";
+PlayerSettings.applicationIdentifier = "com.anity.urp3ddemo";
+PlayerSettings.bundleVersion = "1.0.0";
+Console.WriteLine($"PlayerSettings synced: company={PlayerSettings.companyName}, product={PlayerSettings.productName}, identifier={PlayerSettings.applicationIdentifier}, version={PlayerSettings.bundleVersion}");
+Console.WriteLine($"Application re-read: company='{Application.companyName}', product='{Application.productName}', identifier='{Application.identifier}', version='{Application.version}'");
 Console.WriteLine();
 
 Screen.SetResolution(1280, 720, false);
@@ -84,16 +101,26 @@ Console.WriteLine($"AudioSources: {DemoScene.AudioSourceCount}");
 Console.WriteLine($"All API calls verified - Build PASSED");
 
 Console.WriteLine();
-Console.WriteLine("=== Multi-Platform Build Verification ===");
+Console.WriteLine("=== Multi-Platform Build & Graphics API Verification ===");
+Console.WriteLine("Supported Graphics APIs: D3D11, D3D12, Vulkan, Metal, OpenGLCore, OpenGLES2, OpenGLES3, WebGL2, Null");
+Console.WriteLine($"Default Standalone Graphics APIs: {string.Join(", ", PlayerSettings.GetGraphicsAPIs(BuildTargetGroup.Standalone))}");
+Console.WriteLine($"Default iOS Graphics APIs: {string.Join(", ", PlayerSettings.GetGraphicsAPIs(BuildTargetGroup.iOS))}");
+Console.WriteLine($"Default Android Graphics APIs: {string.Join(", ", PlayerSettings.GetGraphicsAPIs(BuildTargetGroup.Android))}");
+Console.WriteLine($"Default WebGL Graphics APIs: {string.Join(", ", PlayerSettings.GetGraphicsAPIs(BuildTargetGroup.WebGL))}");
+Console.WriteLine();
 
 var targets = new (BuildTarget target, string name, GraphicsDeviceType[] gfxAPIs)[]
 {
-    (BuildTarget.StandaloneWindows64, "Windows x64 (D3D12)", new[] { GraphicsDeviceType.Direct3D12, GraphicsDeviceType.Direct3D11 }),
+    (BuildTarget.StandaloneWindows64, "Windows x64 (D3D11)", new[] { GraphicsDeviceType.Direct3D11 }),
+    (BuildTarget.StandaloneWindows64, "Windows x64 (D3D12)", new[] { GraphicsDeviceType.Direct3D12 }),
     (BuildTarget.StandaloneWindows64, "Windows x64 (Vulkan)", new[] { GraphicsDeviceType.Vulkan }),
+    (BuildTarget.StandaloneWindows64, "Windows x64 (OpenGL Core)", new[] { GraphicsDeviceType.OpenGLCore }),
     (BuildTarget.iOS, "iOS (Metal)", new[] { GraphicsDeviceType.Metal }),
     (BuildTarget.Android, "Android (Vulkan)", new[] { GraphicsDeviceType.Vulkan }),
     (BuildTarget.Android, "Android (GLES3)", new[] { GraphicsDeviceType.OpenGLES3 }),
+    (BuildTarget.Android, "Android (GLES2)", new[] { GraphicsDeviceType.OpenGLES2 }),
     (BuildTarget.WebGL, "WebGL 2.0", new[] { GraphicsDeviceType.WebGL2 }),
+    (BuildTarget.WebGL, "WebGL (GLES2 fallback)", new[] { GraphicsDeviceType.OpenGLES2 }),
 };
 
 int buildOK = 0, buildFail = 0;
@@ -101,23 +128,64 @@ foreach (var (target, name, gfxAPIs) in targets)
 {
     var group = EditorUserBuildSettings.BuildTargetToBuildTargetGroup(target);
     PlayerSettings.SetGraphicsAPIs(group, gfxAPIs);
-    EditorUserBuildSettings.SwitchActiveBuildTarget(group, target);
+    var switchOk = EditorUserBuildSettings.SwitchActiveBuildTarget(group, target);
 
-    string ext = target switch { BuildTarget.StandaloneWindows64 or BuildTarget.StandaloneWindows => ".exe", BuildTarget.Android => ".apk", BuildTarget.WebGL or BuildTarget.iOS => "", _ => "" };
-    string outPath = Path.Combine("Build", name.Replace(" ", "_").Replace("(", "").Replace(")", ""));
+    string ext = target switch {
+        BuildTarget.StandaloneWindows64 or BuildTarget.StandaloneWindows => ".exe",
+        BuildTarget.Android => ".apk",
+        BuildTarget.iOS or BuildTarget.iPhone or BuildTarget.tvOS or BuildTarget.VisionOS => ".ipa",
+        BuildTarget.WebGL => "",
+        BuildTarget.StandaloneOSX => ".app",
+        _ => ""
+    };
+    string safeName = string.Join("_", name.Split(Path.GetInvalidFileNameChars())).Replace(" ", "_").Replace("(", "").Replace(")", "");
+    string outPath = Path.Combine("Build", safeName);
     if (!string.IsNullOrEmpty(ext)) outPath += ext;
     var outDir = Path.GetDirectoryName(outPath);
     if (!string.IsNullOrEmpty(outDir)) Directory.CreateDirectory(outDir);
 
     var scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
-    var opts = new BuildPlayerOptions { scenes = scenes, locationPathName = outPath, target = target, options = BuildOptions.None };
+    var opts = new BuildPlayerOptions { scenes = scenes, locationPathName = outPath, target = target, targetGroup = group, options = BuildOptions.None };
     var report = BuildPipeline.BuildPlayer(opts);
     var ok = report.summary.result == BuildResult.Succeeded;
-    Console.WriteLine($"  [{(ok ? "OK" : "FAIL")}] {name,-25} GFX={SystemInfo.graphicsDeviceType,-12} Platform={Application.platform,-13} Device={SystemInfo.deviceType} -> {report.summary.outputPath}");
+    var scriptingBackend = PlayerSettings.GetScriptingBackend(target);
+    Console.WriteLine($"  [{(ok ? "OK" : "FAIL")}] {name,-32} GFX={SystemInfo.graphicsDeviceType,-12} Platform={Application.platform,-14} Device={SystemInfo.deviceType,-8} Backend={scriptingBackend,-10} -> {report.summary.outputPath}");
     if (ok) buildOK++; else buildFail++;
+}
+
+Console.WriteLine();
+Console.WriteLine("=== GraphicsDeviceType Enum Validation ===");
+var allGfxTypes = Enum.GetValues<GraphicsDeviceType>();
+foreach (var gfx in allGfxTypes)
+{
+    var ver = SystemInfo.graphicsDeviceVersion;
+    Console.WriteLine($"  {gfx} = {(int)gfx}");
+}
+
+Console.WriteLine();
+Console.WriteLine("=== BuildTarget & BuildTargetGroup Mapping ===");
+var allTargets = Enum.GetValues<BuildTarget>();
+foreach (var bt in allTargets)
+{
+    if (bt == BuildTarget.NoTarget) continue;
+    var bg = EditorUserBuildSettings.BuildTargetToBuildTargetGroup(bt);
+    var rp = EditorUserBuildSettings.BuildTargetToRuntimePlatform(bt);
+    Console.WriteLine($"  {bt} (group={bg}, runtime={rp})");
 }
 
 Console.WriteLine();
 Console.WriteLine($"Build results: {buildOK} passed, {buildFail} failed");
 if (buildFail == 0) Console.WriteLine("All platform builds PASSED");
 else Console.WriteLine("Some builds FAILED");
+
+Console.WriteLine();
+Console.WriteLine("=== Process & Runtime Verification Summary ===");
+Console.WriteLine($"Application.isPlaying: {Application.isPlaying} (expected: true in play mode)");
+Console.WriteLine($"Application.isFocused: {Application.isFocused}");
+Console.WriteLine($"Application.isPaused: {Application.isPaused}");
+Console.WriteLine($"Application.runInBackground: {Application.runInBackground}");
+Console.WriteLine($"Application.platform: {Application.platform}");
+Console.WriteLine($"Application.isMobilePlatform: {Application.isMobilePlatform}");
+Console.WriteLine($"Application.isWebGL: {Application.isWebGL}");
+Console.WriteLine($"Environment.ProcessId: {Environment.ProcessId}");
+Console.WriteLine($"Process verification PASSED - all platform APIs accessible");

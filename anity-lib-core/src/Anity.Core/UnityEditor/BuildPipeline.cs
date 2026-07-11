@@ -66,8 +66,11 @@ public static class BuildPipeline
   {
     BuildTarget.StandaloneWindows or BuildTarget.StandaloneWindows64 => ".exe",
     BuildTarget.Android => ".apk",
+    BuildTarget.iOS or BuildTarget.iPhone => ".ipa",
     BuildTarget.StandaloneOSX => ".app",
-    BuildTarget.StandaloneLinux64 => ".x86_64",
+    BuildTarget.StandaloneLinux64 or BuildTarget.StandaloneLinux or BuildTarget.StandaloneLinuxUniversal => ".x86_64",
+    BuildTarget.WebGL => "",
+    BuildTarget.WSAPlayer => ".appx",
     _ => ""
   };
 
@@ -75,7 +78,7 @@ public static class BuildPipeline
   {
     if (string.IsNullOrWhiteSpace(path)) return string.Empty;
     var normalized = NormalizePath(path);
-    if (target == BuildTarget.WebGL || target == BuildTarget.iOS) return normalized;
+    if (target == BuildTarget.WebGL || target == BuildTarget.iOS || target == BuildTarget.iPhone || target == BuildTarget.tvOS || target == BuildTarget.VisionOS) return normalized;
     if (!string.IsNullOrEmpty(ext) && !normalized.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
       normalized += ext;
     return normalized;
@@ -206,16 +209,8 @@ public static class BuildPipeline
 
   public static int GetBuildTargetGroup(BuildTarget target)
   {
-    return target switch
-    {
-      BuildTarget.StandaloneWindows64 or BuildTarget.StandaloneWindows => 1,
-      BuildTarget.StandaloneLinux64 => 6,
-      BuildTarget.StandaloneOSX => 1,
-      BuildTarget.Android => 3,
-      BuildTarget.iOS => 2,
-      BuildTarget.WebGL => 4,
-      _ => 0
-    };
+    var group = EditorUserBuildSettings.BuildTargetToBuildTargetGroup(target);
+    return (int)group;
   }
 
   private static string NormalizePath(string path)
@@ -260,41 +255,73 @@ public struct AssetBundleBuild
 
 public enum BuildTarget
 {
-  NoTarget = 0,
+  NoTarget = -2,
+  BB10 = -1,
+  MetroPlayer = -1,
+  iPhone = 9,
+  StandaloneOSX = 2,
+  StandaloneOSXUniversal = 2,
+  StandaloneOSXIntel = 4,
+  StandaloneWindows = 5,
+  WebPlayer = 6,
+  WebPlayerStreamed = 7,
+  iOS = 9,
   StandaloneWindows64 = 19,
-  StandaloneWindows = 13,
-  StandaloneLinux64 = 17,
-  StandaloneOSX = 9,
-  Android = 13 + 1,
-  iOS = 9 + 1,
+  OSXWebPlayer = 12,
+  OSXUniversal = 2,
+  OSXWebPlayerStreamed = 13,
+  Android = 13,
+  StandaloneLinux = 17,
+  StandaloneLinux64 = 24,
+  StandaloneLinuxUniversal = 17,
   WebGL = 20,
-  WSAPlayer = 24,
-  LinuxHeadlessSimulation = 30,
-  PS5 = 38,
-  GameCoreXboxSeries = 39,
-  GameCoreXboxOne = 38,
-  EmbeddedLinux = 57,
-  NintendoSwitch = 32
+  WSAPlayer = 21,
+  WiiU = 30,
+  tvOS = 37,
+  PSP2 = 25,
+  PS4 = 31,
+  PSM = 32,
+  XboxOne = 33,
+  N3DS = 35,
+  XboxOneD3D12 = 43,
+  Switch = 38,
+  Lumin = 44,
+  Stadia = 45,
+  CloudRendering = 46,
+  PS5 = 47,
+  GameCoreXboxSeries = 48,
+  GameCoreXboxOne = 49,
+  GameCoreScarlett = 48,
+  LinuxHeadlessSimulation = 50,
+  EmbeddedLinux = 53,
+  QNX = 57,
+  VisionOS = 56
 }
 
 public enum BuildTargetGroup
 {
   Unknown = 0,
   Standalone = 1,
-  iOS = 2,
-  Android = 3,
-  WebGL = 4,
-  WindowsStoreApps = 5,
-  LinuxStandalone = 6,
-  PS4 = 25,
-  PS5 = 38,
-  XboxOne = 27,
-  GameCoreXboxSeries = 39,
-  GameCoreXboxOne = 38,
-  NintendoSwitch = 32,
-  Lumin = 35,
-  SamsungTV = 63,
-  EmbeddedLinux = 57
+  iOS = 4,
+  AppleTV = 25,
+  tvOS = 25,
+  VisionOS = 39,
+  Android = 7,
+  WebGL = 13,
+  WSA = 14,
+  Metro = 14,
+  WindowsStoreApps = 14,
+  PS4 = 19,
+  XboxOne = 21,
+  Facebook = 22,
+  Switch = 24,
+  Lumin = 28,
+  Stadia = 29,
+  CloudRendering = 30,
+  PS5 = 36,
+  GameCoreXboxOne = 37,
+  GameCoreXboxSeries = 38,
+  EmbeddedLinux = 35
 }
 
 [Flags]

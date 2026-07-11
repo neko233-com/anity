@@ -1,4 +1,5 @@
 using System;
+using Unity.Collections;
 
 namespace UnityEngine;
 
@@ -217,15 +218,16 @@ public class ComputeBuffer : IDisposable
     private int _count;
     private int _stride;
     private ComputeBufferType _type;
+    private ComputeBufferMode _mode;
     private byte[] _data;
     private bool _released;
     private bool _disposed;
+    private uint _counterValue;
 
-    public ComputeBuffer(int count, int stride) : this(count, stride, ComputeBufferType.Default)
-    {
-    }
+    public ComputeBuffer(int count, int stride) : this(count, stride, ComputeBufferType.Default, ComputeBufferMode.Immutable) { }
+    public ComputeBuffer(int count, int stride, ComputeBufferType type) : this(count, stride, type, ComputeBufferMode.Immutable) { }
 
-    public ComputeBuffer(int count, int stride, ComputeBufferType type)
+    public ComputeBuffer(int count, int stride, ComputeBufferType type, ComputeBufferMode usage)
     {
         if (count <= 0) throw new ArgumentException("Count must be greater than zero.", nameof(count));
         if (stride <= 0) throw new ArgumentException("Stride must be greater than zero.", nameof(stride));
@@ -233,14 +235,17 @@ public class ComputeBuffer : IDisposable
         _count = count;
         _stride = stride;
         _type = type;
+        _mode = usage;
         _data = new byte[count * stride];
         _released = false;
         _disposed = false;
+        _counterValue = 0;
     }
 
     public int count => _count;
     public int stride => _stride;
     public ComputeBufferType type => _type;
+    public ComputeBufferMode usage => _mode;
 
     public void SetData(Array data)
     {
@@ -252,6 +257,28 @@ public class ComputeBuffer : IDisposable
         System.Buffer.BlockCopy(data, 0, _data, 0, bytesToCopy);
     }
 
+    public void SetData(Array data, int managedBufferStartIndex, int computeBufferStartIndex, int count)
+    {
+        if (_released) throw new InvalidOperationException("ComputeBuffer has been released.");
+        if (data == null) throw new ArgumentNullException(nameof(data));
+        int elementSize = System.Buffer.ByteLength(data) / Math.Max(1, data.Length);
+        int srcOffset = managedBufferStartIndex * elementSize;
+        int dstOffset = computeBufferStartIndex * _stride;
+        int byteCount = count * Math.Min(elementSize, _stride);
+        if (srcOffset + byteCount <= System.Buffer.ByteLength(data) && dstOffset + byteCount <= _data.Length)
+            System.Buffer.BlockCopy(data, srcOffset, _data, dstOffset, byteCount);
+    }
+
+    public void SetData<T>(List<T> data) where T : struct
+    {
+        if (data != null) SetData(data.ToArray());
+    }
+
+    public void SetData<T>(NativeArray<T> data) where T : struct
+    {
+        _ = data;
+    }
+
     public void GetData(Array data)
     {
         if (_released) throw new InvalidOperationException("ComputeBuffer has been released.");
@@ -261,6 +288,26 @@ public class ComputeBuffer : IDisposable
         int bytesToCopy = Math.Min(_data.Length, totalBytes);
         System.Buffer.BlockCopy(_data, 0, data, 0, bytesToCopy);
     }
+
+    public void GetData(Array data, int managedBufferStartIndex, int computeBufferStartIndex, int count)
+    {
+        if (_released) throw new InvalidOperationException("ComputeBuffer has been released.");
+        if (data == null) throw new ArgumentNullException(nameof(data));
+        int elementSize = System.Buffer.ByteLength(data) / Math.Max(1, data.Length);
+        int srcOffset = computeBufferStartIndex * _stride;
+        int dstOffset = managedBufferStartIndex * elementSize;
+        int byteCount = count * Math.Min(elementSize, _stride);
+        if (srcOffset + byteCount <= _data.Length && dstOffset + byteCount <= System.Buffer.ByteLength(data))
+            System.Buffer.BlockCopy(_data, srcOffset, data, dstOffset, byteCount);
+    }
+
+    public void GetData<T>(List<T> data) where T : struct { _ = data; }
+    public void GetData<T>(NativeArray<T> data) where T : struct { _ = data; }
+
+    public void SetCounterValue(uint counterValue) { _counterValue = counterValue; }
+    public static void CopyCount(ComputeBuffer src, ComputeBuffer dst, int dstOffsetBytes) { if (src != null && dst != null) dst._counterValue = src._counterValue; }
+    public IntPtr GetNativeBufferPtr() => IntPtr.Zero;
+    public bool IsValid() => !_released && _data != null;
 
     public void Release()
     {
@@ -285,12 +332,25 @@ public class ComputeBuffer : IDisposable
 
 public enum ComputeBufferType
 {
-    Default,
-    Raw,
-    Append,
-    Counter,
-    IndirectArguments,
-    Structured
+    Default = 0,
+    Raw = 1,
+    Append = 2,
+    Counter = 4,
+    IndirectArguments = 256,
+    Structured = 16,
+    DrawIndirect = IndirectArguments,
+    DrawIndirectArguments = IndirectArguments,
+    GPUMemory = 512,
+    Constant = 512
+}
+
+public enum ComputeBufferMode
+{
+    Immutable = 0,
+    Dynamic = 1,
+    Circular = 2,
+    StreamOut = 4,
+    SubUpdates = 8
 }
 
 public class ComputeShader : Object

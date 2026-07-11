@@ -41,21 +41,36 @@ public static class EditorUserBuildSettings
 
     public static BuildTargetGroup BuildTargetToBuildTargetGroup(BuildTarget target) => target switch
     {
-        BuildTarget.StandaloneWindows64 or BuildTarget.StandaloneWindows or BuildTarget.StandaloneLinux64 or BuildTarget.StandaloneOSX => BuildTargetGroup.Standalone,
-        BuildTarget.iOS => BuildTargetGroup.iOS,
+        BuildTarget.StandaloneWindows64 or BuildTarget.StandaloneWindows or BuildTarget.StandaloneLinux64 or BuildTarget.StandaloneLinux or BuildTarget.StandaloneLinuxUniversal or BuildTarget.StandaloneOSX or BuildTarget.StandaloneOSXIntel or BuildTarget.StandaloneOSXUniversal => BuildTargetGroup.Standalone,
+        BuildTarget.iOS or BuildTarget.iPhone => BuildTargetGroup.iOS,
+        BuildTarget.tvOS => BuildTargetGroup.tvOS,
+        BuildTarget.VisionOS => BuildTargetGroup.VisionOS,
         BuildTarget.Android => BuildTargetGroup.Android,
         BuildTarget.WebGL => BuildTargetGroup.WebGL,
+        BuildTarget.WSAPlayer => BuildTargetGroup.WSA,
+        BuildTarget.PS4 => BuildTargetGroup.PS4,
+        BuildTarget.PS5 => BuildTargetGroup.PS5,
+        BuildTarget.XboxOne or BuildTarget.XboxOneD3D12 or BuildTarget.GameCoreXboxOne => BuildTargetGroup.XboxOne,
+        BuildTarget.GameCoreXboxSeries => BuildTargetGroup.GameCoreXboxSeries,
+        BuildTarget.Switch => BuildTargetGroup.Switch,
+        BuildTarget.Lumin => BuildTargetGroup.Lumin,
+        BuildTarget.Stadia => BuildTargetGroup.Stadia,
+        BuildTarget.EmbeddedLinux or BuildTarget.LinuxHeadlessSimulation => BuildTargetGroup.EmbeddedLinux,
         _ => BuildTargetGroup.Unknown
     };
 
     public static RuntimePlatform BuildTargetToRuntimePlatform(BuildTarget target) => target switch
     {
         BuildTarget.StandaloneWindows64 or BuildTarget.StandaloneWindows => RuntimePlatform.WindowsPlayer,
-        BuildTarget.StandaloneOSX => RuntimePlatform.OSXPlayer,
-        BuildTarget.StandaloneLinux64 => RuntimePlatform.LinuxPlayer,
-        BuildTarget.iOS => RuntimePlatform.IPhonePlayer,
+        BuildTarget.StandaloneOSX or BuildTarget.StandaloneOSXIntel or BuildTarget.StandaloneOSXUniversal => RuntimePlatform.OSXPlayer,
+        BuildTarget.StandaloneLinux64 or BuildTarget.StandaloneLinux or BuildTarget.StandaloneLinuxUniversal => RuntimePlatform.LinuxPlayer,
+        BuildTarget.iOS or BuildTarget.iPhone or BuildTarget.tvOS or BuildTarget.VisionOS => RuntimePlatform.IPhonePlayer,
         BuildTarget.Android => RuntimePlatform.Android,
         BuildTarget.WebGL => RuntimePlatform.WebGLPlayer,
+        BuildTarget.WSAPlayer => RuntimePlatform.WindowsPlayer,
+        BuildTarget.Switch => RuntimePlatform.Switch,
+        BuildTarget.PS4 or BuildTarget.PS5 => RuntimePlatform.PS4,
+        BuildTarget.XboxOne or BuildTarget.XboxOneD3D12 or BuildTarget.GameCoreXboxOne or BuildTarget.GameCoreXboxSeries => RuntimePlatform.XboxOne,
         _ => RuntimePlatform.WindowsPlayer
     };
 

@@ -36,6 +36,9 @@ public struct Color
   public static Color operator *(Color c, float f) => new Color(c.r * f, c.g * f, c.b * f, c.a * f);
   public static Color operator *(float f, Color c) => c * f;
 
+  public static implicit operator Vector4(Color c) => new Vector4(c.r, c.g, c.b, c.a);
+  public static implicit operator Color(Vector4 v) => new Color(v.x, v.y, v.z, v.w);
+
   public override bool Equals(object obj)
   {
     if (obj is Color other)

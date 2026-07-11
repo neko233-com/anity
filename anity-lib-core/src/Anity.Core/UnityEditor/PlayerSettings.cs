@@ -168,14 +168,23 @@ public static class PlayerSettings
   {
     return target switch
     {
-      BuildTarget.StandaloneWindows or BuildTarget.StandaloneWindows64
+      BuildTarget.StandaloneWindows or BuildTarget.StandaloneWindows64 or BuildTarget.StandaloneLinux or BuildTarget.StandaloneLinux64 or BuildTarget.StandaloneLinuxUniversal or BuildTarget.StandaloneOSX or BuildTarget.StandaloneOSXIntel or BuildTarget.StandaloneOSXUniversal
         => BuildTargetGroup.Standalone,
       BuildTarget.Android => BuildTargetGroup.Android,
-      BuildTarget.iOS => BuildTargetGroup.iOS,
+      BuildTarget.iOS or BuildTarget.iPhone => BuildTargetGroup.iOS,
+      BuildTarget.tvOS => BuildTargetGroup.tvOS,
+      BuildTarget.VisionOS => BuildTargetGroup.VisionOS,
       BuildTarget.WebGL => BuildTargetGroup.WebGL,
-      BuildTarget.StandaloneOSX or BuildTarget.StandaloneLinux64
-        => BuildTargetGroup.Standalone,
-      _ => BuildTargetGroup.Standalone,
+      BuildTarget.WSAPlayer => BuildTargetGroup.WSA,
+      BuildTarget.PS4 => BuildTargetGroup.PS4,
+      BuildTarget.PS5 => BuildTargetGroup.PS5,
+      BuildTarget.XboxOne or BuildTarget.XboxOneD3D12 or BuildTarget.GameCoreXboxOne => BuildTargetGroup.XboxOne,
+      BuildTarget.GameCoreXboxSeries => BuildTargetGroup.GameCoreXboxSeries,
+      BuildTarget.Switch => BuildTargetGroup.Switch,
+      BuildTarget.Lumin => BuildTargetGroup.Lumin,
+      BuildTarget.Stadia => BuildTargetGroup.Stadia,
+      BuildTarget.EmbeddedLinux or BuildTarget.LinuxHeadlessSimulation => BuildTargetGroup.EmbeddedLinux,
+      _ => BuildTargetGroup.Unknown,
     };
   }
 
@@ -206,8 +215,14 @@ public static class PlayerSettings
     return targetGroup switch
     {
       BuildTargetGroup.iOS => new[] { GraphicsDeviceType.Metal },
-      BuildTargetGroup.Android => new[] { GraphicsDeviceType.Vulkan, GraphicsDeviceType.OpenGLES3 },
+      BuildTargetGroup.tvOS or BuildTargetGroup.VisionOS => new[] { GraphicsDeviceType.Metal },
+      BuildTargetGroup.Android => new[] { GraphicsDeviceType.Vulkan, GraphicsDeviceType.OpenGLES3, GraphicsDeviceType.OpenGLES2 },
       BuildTargetGroup.WebGL => new[] { GraphicsDeviceType.WebGL2 },
+      BuildTargetGroup.Standalone => new[] { GraphicsDeviceType.Direct3D11, GraphicsDeviceType.Direct3D12, GraphicsDeviceType.Vulkan, GraphicsDeviceType.OpenGLCore },
+      BuildTargetGroup.WSA => new[] { GraphicsDeviceType.Direct3D11 },
+      BuildTargetGroup.PS4 or BuildTargetGroup.PS5 => new[] { GraphicsDeviceType.Null },
+      BuildTargetGroup.XboxOne or BuildTargetGroup.GameCoreXboxOne or BuildTargetGroup.GameCoreXboxSeries => new[] { GraphicsDeviceType.Direct3D12 },
+      BuildTargetGroup.Switch => new[] { GraphicsDeviceType.Null },
       _ => new[] { GraphicsDeviceType.Direct3D11 }
     };
   }
@@ -231,8 +246,8 @@ public static class PlayerSettings
   public static string iOSLocationUsageDescription { get; set; } = "";
   public static string iOSMicrophoneUsageDescription { get; set; } = "";
 
-  public static AndroidSdkVersions AndroidMinSdkVersion { get; set; } = AndroidSdkVersions.AndroidApiLevel33;
-  public static AndroidSdkVersions AndroidTargetSdkVersion { get; set; } = AndroidSdkVersions.AndroidApiLevel33;
+  public static AndroidSdkVersions AndroidMinSdkVersion { get; set; } = AndroidSdkVersions.AndroidApiLevel24;
+  public static AndroidSdkVersions AndroidTargetSdkVersion { get; set; } = AndroidSdkVersions.AndroidApiLevel34;
   public static int AndroidBundleVersionCode { get; set; } = 1;
   public static string AndroidKeystoreName { get => _androidKeystoreName; set => _androidKeystoreName = value ?? ""; }
   private static string _androidKeystoreName = "";

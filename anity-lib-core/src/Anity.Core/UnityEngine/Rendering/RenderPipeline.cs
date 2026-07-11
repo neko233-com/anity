@@ -3,75 +3,12 @@ using System.Collections.Generic;
 
 namespace UnityEngine.Rendering;
 
-public enum BuiltinRenderTextureType
-{
-    PropertyName = -4,
-    BufferPtr = -3,
-    RenderTexture = -2,
-    BindableTexture = -1,
-    None = 0,
-    CurrentActive = 1,
-    CameraTarget = 2,
-    Depth = 3,
-    DepthNormals = 4,
-    ResolvedDepth = 5,
-    GBuffer0 = 10,
-    GBuffer1 = 11,
-    GBuffer2 = 12,
-    GBuffer3 = 13,
-    GBuffer4 = 14,
-    GBuffer5 = 15,
-    GBuffer6 = 16,
-    GBuffer7 = 17,
-}
-
-public enum RenderBufferLoadAction
-{
-    Load = 0,
-    Clear = 1,
-    DontCare = 2,
-}
-
-public enum RenderBufferStoreAction
-{
-    Store = 0,
-    Resolve = 1,
-    StoreAndResolve = 2,
-    DontCare = 3,
-}
-
 public enum CullingOptions
 {
     None = 0,
     ForceEvenIfCameraIsNotActive = 1,
     OcclusionCull = 2,
     NearestPortal = 4,
-}
-
-[Flags]
-public enum SortingCriteria
-{
-    None = 0,
-    SortByLayer = 0x20,
-    SortByQueue = 0x40,
-    SortByRendererPriority = 0x80,
-}
-
-[Flags]
-public enum PerObjectData
-{
-    None = 0,
-    LightProbe = 1,
-    ReflectionProbes = 2,
-    LightProbeProxyVolume = 4,
-    Lightmaps = 8,
-    LightData = 16,
-    MotionVectors = 32,
-    LightIndices = 64,
-    ReflectionProbeData = 128,
-    OcclusionProbe = 256,
-    OcclusionProbeProxyVolume = 512,
-    ShadowMask = 1024
 }
 
 public struct CullingParameters
@@ -86,27 +23,6 @@ public struct CullingParameters
     public Vector4[] shadowCascadeDistances;
     public CullingOptions cullingOptions;
     public float layerCullDistances;
-}
-
-public struct VisibleLight
-{
-    public Light light;
-    public LightType lightType;
-    public Color finalColor;
-    public Vector3 localToWorldMatrix0;
-    public Vector3 localToWorldMatrix1;
-    public Vector3 localToWorldMatrix2;
-    public float range;
-    public float spotAngle;
-}
-
-public struct VisibleReflectionProbe
-{
-    public ReflectionProbe probe;
-    public Bounds bounds;
-    public float blendDistance;
-    public int importance;
-    public int boxProjection;
 }
 
 public struct ShadowDrawingSettings
@@ -127,25 +43,6 @@ public struct ShadowSplitData
 {
     public Vector4 cullingSphere;
     public float shadowCascadeBlendCullingFactor;
-}
-
-public enum CullMode { Off = 0, Front = 1, Back = 2 }
-public enum CompareFunction { Disabled = 0, Never = 1, Less = 2, Equal = 3, LessEqual = 4, Greater = 5, NotEqual = 6, GreaterEqual = 7, Always = 8 }
-
-public struct BlendState { public bool separateMRTBlend; }
-public struct RasterState { public CullMode cullingMode; public float depthBias; }
-public struct DepthState { public bool writeEnabled; public CompareFunction compareFunction; }
-public struct StencilState { public bool enabled; public byte readMask; public byte writeMask; }
-
-[Flags]
-public enum RenderStateMask
-{
-    Nothing = 0,
-    Blend = 1,
-    Raster = 2,
-    Depth = 4,
-    Stencil = 8,
-    Everything = 15,
 }
 
 public struct RenderStateBlock

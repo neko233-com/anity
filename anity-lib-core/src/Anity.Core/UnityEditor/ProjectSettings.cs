@@ -356,5 +356,6 @@ public enum AndroidSdkVersions
     AndroidApiLevel31 = 31,
     AndroidApiLevel32 = 32,
     AndroidApiLevel33 = 33,
+    AndroidApiLevel34 = 34,
     AndroidApiLevelAuto = 0
 }

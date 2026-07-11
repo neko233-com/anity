@@ -24,6 +24,9 @@ public static class EditorGUI
   public static bool showMixedValue { get; set; }
   public static int indentLevel { get; set; }
   public static Utility.PrefixLabelMode PrefixLabelMode { get; set; }
+  public static float fieldWidth { get; set; } = -1f;
+  public static float labelWidth { get; set; } = -1f;
+  public static string delayedText { get; set; } = string.Empty;
 
   public static void BeginChangeCheck()
   {
@@ -530,9 +533,21 @@ public static class EditorGUI
     return value;
   }
 
+  public static Vector2 Vector2Field(Rect position, Vector2 value)
+  {
+    _ = position;
+    return value;
+  }
+
   public static Vector2 Vector2Field(string label, Vector2 value)
   {
     _ = label;
+    return value;
+  }
+
+  public static Vector3 Vector3Field(Rect position, Vector3 value)
+  {
+    _ = position;
     return value;
   }
 
@@ -559,6 +574,12 @@ public static class EditorGUI
   public static Vector3 Vector3Field(string label, Vector3 value)
   {
     _ = label;
+    return value;
+  }
+
+  public static Vector4 Vector4Field(Rect position, Vector4 value)
+  {
+    _ = position;
     return value;
   }
 
@@ -608,9 +629,21 @@ public static class EditorGUI
     return value;
   }
 
+  public static Rect RectField(Rect position, Rect value)
+  {
+    _ = position;
+    return value;
+  }
+
   public static Rect RectField(string label, Rect value)
   {
     _ = label;
+    return value;
+  }
+
+  public static Bounds BoundsField(Rect position, Bounds value)
+  {
+    _ = position;
     return value;
   }
 
@@ -660,12 +693,28 @@ public static class EditorGUI
     return value;
   }
 
+  public static Color ColorField(Rect position, Color value, bool showEyedropper = true, bool hdr = false, bool showAlpha = true)
+  {
+    _ = position;
+    _ = showEyedropper;
+    _ = hdr;
+    _ = showAlpha;
+    return value;
+  }
+
   public static Color ColorField(Color value, string label = "", bool showEyedropper = true, bool hdr = false, bool showAlpha = true)
   {
     _ = label;
     _ = showEyedropper;
     _ = hdr;
     _ = showAlpha;
+    return value;
+  }
+
+  public static Color ColorField(Rect position, GUIContent label, Color value)
+  {
+    _ = position;
+    _ = label;
     return value;
   }
 
@@ -683,9 +732,21 @@ public static class EditorGUI
     return value;
   }
 
+  public static AnimationCurve CurveField(Rect position, AnimationCurve value)
+  {
+    _ = position;
+    return value;
+  }
+
   public static AnimationCurve CurveField(string label, AnimationCurve value)
   {
     _ = label;
+    return value;
+  }
+
+  public static Gradient GradientField(Rect position, Gradient value)
+  {
+    _ = position;
     return value;
   }
 
@@ -756,6 +817,29 @@ public static class EditorGUI
     return obj;
   }
 
+  public static Object ObjectField(string label, Object obj, Type objType, bool allowSceneObjects = true)
+  {
+    _ = label;
+    _ = objType;
+    _ = allowSceneObjects;
+    return obj;
+  }
+
+  public static Object ObjectField(GUIContent label, Object obj, Type objType, bool allowSceneObjects = true)
+  {
+    _ = label;
+    _ = objType;
+    _ = allowSceneObjects;
+    return obj;
+  }
+
+  public static T ObjectField<T>(GUIContent label, T? obj, bool allowSceneObjects) where T : class
+  {
+    _ = label;
+    _ = allowSceneObjects;
+    return obj!;
+  }
+
   public static T EnumPopup<T>(Rect position, T selected) where T : struct, Enum
   {
     _ = position;
@@ -775,6 +859,79 @@ public static class EditorGUI
     return selected;
   }
 
+  public static Enum EnumPopup(Rect position, string label, Enum selected, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return selected;
+  }
+
+  public static Enum EnumPopup(Rect position, GUIContent label, Enum selected, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return selected;
+  }
+
+  public static Enum EnumPopup(string label, Enum selected, GUIStyle? style = null)
+  {
+    _ = label;
+    _ = style;
+    return selected;
+  }
+
+  public static Enum EnumPopup(GUIContent label, Enum selected, GUIStyle? style = null)
+  {
+    _ = label;
+    _ = style;
+    return selected;
+  }
+
+  public static string TagField(Rect position, string tag, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = style;
+    return tag;
+  }
+
+  public static string TagField(Rect position, string label, string tag, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return tag;
+  }
+
+  public static string TagField(Rect position, GUIContent label, string tag, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return tag;
+  }
+
+  public static string TagField(string tag, GUIStyle? style = null)
+  {
+    _ = style;
+    return tag;
+  }
+
+  public static string TagField(string label, string tag, GUIStyle? style = null)
+  {
+    _ = label;
+    _ = style;
+    return tag;
+  }
+
+  public static string TagField(GUIContent label, string tag, GUIStyle? style = null)
+  {
+    _ = label;
+    _ = style;
+    return tag;
+  }
+
   public static int TagField(Rect position, int selectedTagIndex, string[] displayedOptions, GUIStyle? style = null)
   {
     _ = position;
@@ -783,7 +940,32 @@ public static class EditorGUI
     return selectedTagIndex;
   }
 
+  public static int TagField(Rect position, string label, int selectedTagIndex, string[] displayedOptions, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = displayedOptions;
+    _ = style;
+    return selectedTagIndex;
+  }
+
+  public static int TagField(Rect position, GUIContent label, int selectedTagIndex, string[] displayedOptions, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = displayedOptions;
+    _ = style;
+    return selectedTagIndex;
+  }
+
   public static int TagField(string label, int selectedTagIndex, string[] displayedOptions)
+  {
+    _ = label;
+    _ = displayedOptions;
+    return selectedTagIndex;
+  }
+
+  public static int TagField(GUIContent label, int selectedTagIndex, string[] displayedOptions)
   {
     _ = label;
     _ = displayedOptions;
@@ -797,10 +979,85 @@ public static class EditorGUI
     return layer;
   }
 
+  public static int LayerField(Rect position, string label, int layer, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return layer;
+  }
+
+  public static int LayerField(Rect position, GUIContent label, int layer, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return layer;
+  }
+
+  public static int LayerField(int layer)
+  {
+    return layer;
+  }
+
   public static int LayerField(string label, int layer)
   {
     _ = label;
     return layer;
+  }
+
+  public static int LayerField(GUIContent label, int layer)
+  {
+    _ = label;
+    return layer;
+  }
+
+  public static int LayerMaskField(Rect position, int layerMask, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = style;
+    return layerMask;
+  }
+
+  public static int LayerMaskField(Rect position, string label, int layerMask, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return layerMask;
+  }
+
+  public static int LayerMaskField(Rect position, GUIContent label, int layerMask, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return layerMask;
+  }
+
+  public static int LayerMaskField(int layerMask)
+  {
+    return layerMask;
+  }
+
+  public static int LayerMaskField(string label, int layerMask)
+  {
+    _ = label;
+    return layerMask;
+  }
+
+  public static int LayerMaskField(GUIContent label, int layerMask)
+  {
+    _ = label;
+    return layerMask;
+  }
+
+  public static int MaskField(Rect position, int mask, string[] displayedOptions, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = displayedOptions;
+    _ = style;
+    return mask;
   }
 
   public static int MaskField(Rect position, string label, int mask, string[] displayedOptions, GUIStyle? style = null)
@@ -821,7 +1078,21 @@ public static class EditorGUI
     return mask;
   }
 
+  public static int MaskField(int mask, string[] displayedOptions, GUIStyle? style = null)
+  {
+    _ = displayedOptions;
+    _ = style;
+    return mask;
+  }
+
   public static int MaskField(string label, int mask, string[] displayedOptions)
+  {
+    _ = label;
+    _ = displayedOptions;
+    return mask;
+  }
+
+  public static int MaskField(GUIContent label, int mask, string[] displayedOptions)
   {
     _ = label;
     _ = displayedOptions;
@@ -1064,6 +1335,208 @@ public static class EditorGUI
   {
     _ = label;
     return Math.Clamp(value, leftValue, rightValue);
+  }
+
+  public static float FloatSlider(Rect position, float value, float leftValue, float rightValue, GUIStyle? style = null)
+  {
+    return Slider(position, value, leftValue, rightValue, style);
+  }
+
+  public static float FloatSlider(Rect position, string label, float value, float leftValue, float rightValue)
+  {
+    return Slider(position, label, value, leftValue, rightValue);
+  }
+
+  public static float FloatSlider(Rect position, GUIContent label, float value, float leftValue, float rightValue)
+  {
+    return Slider(position, label, value, leftValue, rightValue);
+  }
+
+  public static float FloatSlider(float value, float leftValue, float rightValue)
+  {
+    return Slider(value, leftValue, rightValue);
+  }
+
+  public static float FloatSlider(string label, float value, float leftValue, float rightValue)
+  {
+    return Slider(label, value, leftValue, rightValue);
+  }
+
+  public static Vector2Int Vector2IntField(Rect position, string label, Vector2Int value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static Vector2Int Vector2IntField(Rect position, GUIContent label, Vector2Int value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static Vector2Int Vector2IntField(Vector2Int value, string label = "")
+  {
+    _ = label;
+    return value;
+  }
+
+  public static Vector2Int Vector2IntField(Rect position, Vector2Int value)
+  {
+    _ = position;
+    return value;
+  }
+
+  public static Vector2Int Vector2IntField(string label, Vector2Int value)
+  {
+    _ = label;
+    return value;
+  }
+
+  public static Vector3Int Vector3IntField(Rect position, Vector3Int value)
+  {
+    _ = position;
+    return value;
+  }
+
+  public static Vector3Int Vector3IntField(Rect position, string label, Vector3Int value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static Vector3Int Vector3IntField(Rect position, GUIContent label, Vector3Int value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static Vector3Int Vector3IntField(Vector3Int value, string label = "")
+  {
+    _ = label;
+    return value;
+  }
+
+  public static Vector3Int Vector3IntField(string label, Vector3Int value)
+  {
+    _ = label;
+    return value;
+  }
+
+  public static RectInt RectIntField(Rect position, RectInt value)
+  {
+    _ = position;
+    return value;
+  }
+
+  public static RectInt RectIntField(Rect position, string label, RectInt value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static RectInt RectIntField(Rect position, GUIContent label, RectInt value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static RectInt RectIntField(RectInt value, string label = "")
+  {
+    _ = label;
+    return value;
+  }
+
+  public static RectInt RectIntField(string label, RectInt value)
+  {
+    _ = label;
+    return value;
+  }
+
+  public static BoundsInt BoundsIntField(Rect position, BoundsInt value)
+  {
+    _ = position;
+    return value;
+  }
+
+  public static BoundsInt BoundsIntField(Rect position, string label, BoundsInt value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static BoundsInt BoundsIntField(Rect position, GUIContent label, BoundsInt value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static BoundsInt BoundsIntField(BoundsInt value, string label = "")
+  {
+    _ = label;
+    return value;
+  }
+
+  public static BoundsInt BoundsIntField(string label, BoundsInt value)
+  {
+    _ = label;
+    return value;
+  }
+
+  public static Enum EnumFlagsField(Rect position, Enum enumValue, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = style;
+    return enumValue;
+  }
+
+  public static Enum EnumFlagsField(Rect position, string label, Enum enumValue, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return enumValue;
+  }
+
+  public static Enum EnumFlagsField(Rect position, GUIContent label, Enum enumValue, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = label;
+    _ = style;
+    return enumValue;
+  }
+
+  public static Enum EnumFlagsField(string label, Enum enumValue, GUIStyle? style = null)
+  {
+    _ = label;
+    _ = style;
+    return enumValue;
+  }
+
+  public static Enum EnumFlagsField(GUIContent label, Enum enumValue, GUIStyle? style = null)
+  {
+    _ = label;
+    _ = style;
+    return enumValue;
+  }
+
+  public static T EnumFlagsField<T>(Rect position, T enumValue) where T : struct, Enum
+  {
+    _ = position;
+    return enumValue;
+  }
+
+  public static T EnumFlagsField<T>(string label, T enumValue) where T : struct, Enum
+  {
+    _ = label;
+    return enumValue;
   }
 
   public static float Slider(Rect position, float value, float leftValue, float rightValue, GUIStyle? style = null)
@@ -1332,6 +1805,21 @@ public static class EditorGUI
   public static void DrawWireCube(Vector3 center, Vector3 size) { _ = center; _ = size; }
   public static void DrawSphere(Vector3 center, float radius) { _ = center; _ = radius; }
   public static void DrawWireSphere(Vector3 center, float radius) { _ = center; _ = radius; }
+
+  public static void Indent()
+  {
+    indentLevel++;
+  }
+
+  public static void Indent(int indent)
+  {
+    indentLevel += indent;
+  }
+
+  public static void Unindent()
+  {
+    indentLevel = Math.Max(0, indentLevel - 1);
+  }
 
   public static void ProgressBar(Rect position, float value, string text) { _ = position; _ = value; _ = text; }
 

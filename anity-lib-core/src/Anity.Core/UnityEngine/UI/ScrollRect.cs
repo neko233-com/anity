@@ -1,9 +1,11 @@
 using System;
+using UnityEngine.Events;
 using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI;
 
 [AddComponentMenu("UI/Scroll Rect", 37)]
+[RequireComponent(typeof(RectTransform))]
 public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IScrollHandler, ICanvasElement, ILayoutElement, ILayoutGroup
 {
     public enum MovementType
@@ -20,207 +22,194 @@ public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDr
         AutoHideAndExpandViewport
     }
 
-    private RectTransform? _content;
-    private RectTransform? _viewport;
-    private bool _horizontal = true;
-    private bool _vertical = true;
-    private MovementType _movementType = MovementType.Elastic;
-    private float _elasticity = 0.1f;
-    private bool _inertia = true;
-    private float _decelerationRate = 0.135f;
-    private float _scrollSensitivity = 1f;
-    private Scrollbar? _horizontalScrollbar;
-    private Scrollbar? _verticalScrollbar;
-    private ScrollbarVisibility _horizontalScrollbarVisibility;
-    private ScrollbarVisibility _verticalScrollbarVisibility;
-    private Vector2 _horizontalScrollbarSpacing;
-    private Vector2 _verticalScrollbarSpacing;
-    private bool _viewRectIsValid;
-    private Bounds _contentBounds;
-    private Bounds _viewBounds;
-    private Vector2 _velocity;
-    private Vector2 _normalizedPosition;
-    private bool _dragging;
-    private Vector2 _pointerStartLocalCursor;
-    private Vector2 _contentStartPosition;
-    private Vector2 _prevPosition;
-    private bool _horizontalScrollbarVisibilityNeedsToBeUpdated;
-    private bool _verticalScrollbarVisibilityNeedsToBeUpdated;
-    private bool _hasRebuiltLayout;
-    private bool _suppressOnScroll;
+    [SerializeField] private RectTransform? m_Content;
+    [SerializeField] private RectTransform? m_Viewport;
+    [SerializeField] private bool m_Horizontal = true;
+    [SerializeField] private bool m_Vertical = true;
+    [SerializeField] private MovementType m_MovementType = MovementType.Elastic;
+    [SerializeField] private float m_Elasticity = 0.1f;
+    [SerializeField] private bool m_Inertia = true;
+    [SerializeField] private float m_DecelerationRate = 0.135f;
+    [SerializeField] private float m_ScrollSensitivity = 1f;
+    [SerializeField] private Scrollbar? m_HorizontalScrollbar;
+    [SerializeField] private Scrollbar? m_VerticalScrollbar;
+    [SerializeField] private ScrollbarVisibility m_HorizontalScrollbarVisibility;
+    [SerializeField] private ScrollbarVisibility m_VerticalScrollbarVisibility;
+    [SerializeField] private float m_HorizontalScrollbarSpacing;
+    [SerializeField] private float m_VerticalScrollbarSpacing;
 
-    private ScrollRectEvent _onValueChanged = new();
+    private Bounds m_ContentBounds;
+    private Bounds m_ViewBounds;
+    private Vector2 m_Velocity;
+    private bool m_Dragging;
+    private Vector2 m_PointerStartLocalCursor;
+    private Vector2 m_ContentStartPosition;
+    private RectTransform? m_ViewRect;
+    private Vector3[] m_Corners = new Vector3[4];
+    private Vector2 m_PrevPosition = Vector2.zero;
+    private Bounds m_PrevContentBounds;
+    private Bounds m_PrevViewBounds;
+    private bool m_HasRebuiltLayout;
+    private bool m_SuppressOnScroll;
+    private bool m_VelocityDirty;
+    private int m_RebuildingLayoutCount;
+    private ScrollRect? m_ParentScrollRect;
+
+    [SerializeField] private ScrollRectEvent m_OnValueChanged = new();
 
     public RectTransform? content
     {
-        get => _content;
+        get => m_Content;
         set
         {
-            _content = value;
-            _hasRebuiltLayout = false;
+            m_Content = value;
+            m_HasRebuiltLayout = false;
+            m_ViewRect = null;
+            SetDirty();
         }
     }
 
     public RectTransform? viewport
     {
-        get => _viewport;
+        get => m_Viewport;
         set
         {
-            _viewport = value;
-            _viewRectIsValid = false;
+            m_Viewport = value;
             m_ViewRect = null;
+            SetDirty();
         }
     }
 
     public bool horizontal
     {
-        get => _horizontal;
-        set => _horizontal = value;
+        get => m_Horizontal;
+        set
+        {
+            m_Horizontal = value;
+            SetDirty();
+        }
     }
 
     public bool vertical
     {
-        get => _vertical;
-        set => _vertical = value;
+        get => m_Vertical;
+        set
+        {
+            m_Vertical = value;
+            SetDirty();
+        }
     }
 
     public MovementType movementType
     {
-        get => _movementType;
-        set => _movementType = value;
+        get => m_MovementType;
+        set
+        {
+            m_MovementType = value;
+            SetDirty();
+        }
     }
 
     public float elasticity
     {
-        get => _elasticity;
-        set => _elasticity = value;
+        get => m_Elasticity;
+        set => m_Elasticity = value;
     }
 
     public bool inertia
     {
-        get => _inertia;
-        set => _inertia = value;
+        get => m_Inertia;
+        set => m_Inertia = value;
     }
 
     public float decelerationRate
     {
-        get => _decelerationRate;
-        set => _decelerationRate = value;
+        get => m_DecelerationRate;
+        set => m_DecelerationRate = value;
     }
 
     public float scrollSensitivity
     {
-        get => _scrollSensitivity;
-        set => _scrollSensitivity = value;
+        get => m_ScrollSensitivity;
+        set => m_ScrollSensitivity = value;
     }
 
     public Scrollbar? horizontalScrollbar
     {
-        get => _horizontalScrollbar;
+        get => m_HorizontalScrollbar;
         set
         {
-            if (_horizontalScrollbar != null)
-                _horizontalScrollbar.onValueChanged.ValueChanged -= OnHorizontalScrollbarValueChanged;
-            _horizontalScrollbar = value;
-            if (_horizontalScrollbar != null && IsActive())
-            {
-                _horizontalScrollbar.onValueChanged.ValueChanged += OnHorizontalScrollbarValueChanged;
-            }
+            if (m_HorizontalScrollbar != null)
+                m_HorizontalScrollbar.onValueChanged.ValueChanged -= OnHorizontalScrollbarValueChanged;
+            m_HorizontalScrollbar = value;
+            if (m_HorizontalScrollbar != null && IsActive())
+                m_HorizontalScrollbar.onValueChanged.ValueChanged += OnHorizontalScrollbarValueChanged;
+            SetDirty();
         }
     }
 
     public Scrollbar? verticalScrollbar
     {
-        get => _verticalScrollbar;
+        get => m_VerticalScrollbar;
         set
         {
-            if (_verticalScrollbar != null)
-                _verticalScrollbar.onValueChanged.ValueChanged -= OnVerticalScrollbarValueChanged;
-            _verticalScrollbar = value;
-            if (_verticalScrollbar != null && IsActive())
-            {
-                _verticalScrollbar.onValueChanged.ValueChanged += OnVerticalScrollbarValueChanged;
-            }
+            if (m_VerticalScrollbar != null)
+                m_VerticalScrollbar.onValueChanged.ValueChanged -= OnVerticalScrollbarValueChanged;
+            m_VerticalScrollbar = value;
+            if (m_VerticalScrollbar != null && IsActive())
+                m_VerticalScrollbar.onValueChanged.ValueChanged += OnVerticalScrollbarValueChanged;
+            SetDirty();
         }
     }
 
     public ScrollbarVisibility horizontalScrollbarVisibility
     {
-        get => _horizontalScrollbarVisibility;
-        set => _horizontalScrollbarVisibility = value;
+        get => m_HorizontalScrollbarVisibility;
+        set
+        {
+            m_HorizontalScrollbarVisibility = value;
+            SetDirty();
+        }
     }
 
     public ScrollbarVisibility verticalScrollbarVisibility
     {
-        get => _verticalScrollbarVisibility;
-        set => _verticalScrollbarVisibility = value;
+        get => m_VerticalScrollbarVisibility;
+        set
+        {
+            m_VerticalScrollbarVisibility = value;
+            SetDirty();
+        }
     }
 
-    public Vector2 horizontalScrollbarSpacing
+    public float horizontalScrollbarSpacing
     {
-        get => _horizontalScrollbarSpacing;
-        set => _horizontalScrollbarSpacing = value;
+        get => m_HorizontalScrollbarSpacing;
+        set
+        {
+            m_HorizontalScrollbarSpacing = value;
+            SetDirty();
+        }
     }
 
-    public Vector2 verticalScrollbarSpacing
+    public float verticalScrollbarSpacing
     {
-        get => _verticalScrollbarSpacing;
-        set => _verticalScrollbarSpacing = value;
+        get => m_VerticalScrollbarSpacing;
+        set
+        {
+            m_VerticalScrollbarSpacing = value;
+            SetDirty();
+        }
     }
 
     public Vector2 velocity
     {
-        get => _velocity;
-        set => _velocity = value;
-    }
-
-    public RectTransform rectTransform => transform as RectTransform;
-    private RectTransform? m_ViewRect;
-    private RectTransform viewRect
-    {
-        get
-        {
-            if (!_viewRectIsValid)
-            {
-                m_ViewRect = _viewport == null ? GetComponent<RectTransform>() : _viewport;
-                _viewRectIsValid = true;
-            }
-            return m_ViewRect;
-        }
-    }
-
-    public Vector2 normalizedPosition
-    {
-        get
-        {
-            UpdateBounds();
-            return _normalizedPosition;
-        }
+        get => m_Velocity;
         set
         {
-            SetNormalizedPosition(value.x, 0);
-            SetNormalizedPosition(value.y, 1);
+            m_Velocity = value;
+            m_VelocityDirty = true;
         }
-    }
-
-    public float horizontalNormalizedPosition
-    {
-        get
-        {
-            UpdateBounds();
-            return _normalizedPosition.x;
-        }
-        set => SetNormalizedPosition(value, 0);
-    }
-
-    public float verticalNormalizedPosition
-    {
-        get
-        {
-            UpdateBounds();
-            return _normalizedPosition.y;
-        }
-        set => SetNormalizedPosition(value, 1);
     }
 
     public virtual float minWidth => -1f;
@@ -233,21 +222,119 @@ public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDr
 
     public ScrollRectEvent onValueChanged
     {
-        get => _onValueChanged;
-        set => _onValueChanged = value;
+        get => m_OnValueChanged;
+        set => m_OnValueChanged = value;
+    }
+
+    public RectTransform rectTransform => transform as RectTransform;
+
+    protected RectTransform viewRect
+    {
+        get
+        {
+            if (m_ViewRect == null)
+                m_ViewRect = m_Viewport;
+            if (m_ViewRect == null)
+                m_ViewRect = rectTransform;
+            return m_ViewRect;
+        }
+    }
+
+    public Bounds bounds
+    {
+        get
+        {
+            UpdateBounds();
+            return m_ContentBounds;
+        }
+    }
+
+    private bool hScrollingNeeded
+    {
+        get
+        {
+            if (Application.isPlaying)
+                return m_ContentBounds.size.x > m_ViewBounds.size.x + 0.01f;
+            return true;
+        }
+    }
+
+    private bool vScrollingNeeded
+    {
+        get
+        {
+            if (Application.isPlaying)
+                return m_ContentBounds.size.y > m_ViewBounds.size.y + 0.01f;
+            return true;
+        }
+    }
+
+    public Vector2 normalizedPosition
+    {
+        get => new Vector2(horizontalNormalizedPosition, verticalNormalizedPosition);
+        set
+        {
+            SetNormalizedPosition(value.x, 0);
+            SetNormalizedPosition(value.y, 1);
+        }
+    }
+
+    public float horizontalNormalizedPosition
+    {
+        get
+        {
+            UpdateBounds();
+            if (m_ContentBounds.size.x <= m_ViewBounds.size.x)
+                return (m_ViewBounds.min.x > m_ContentBounds.min.x) ? 1f : 0f;
+            return (m_ViewBounds.min.x - m_ContentBounds.min.x) / (m_ContentBounds.size.x - m_ViewBounds.size.x);
+        }
+        set => SetNormalizedPosition(value, 0);
+    }
+
+    public float verticalNormalizedPosition
+    {
+        get
+        {
+            UpdateBounds();
+            if (m_ContentBounds.size.y <= m_ViewBounds.size.y)
+                return (m_ViewBounds.min.y > m_ContentBounds.min.y) ? 1f : 0f;
+            return (m_ViewBounds.min.y - m_ContentBounds.min.y) / (m_ContentBounds.size.y - m_ViewBounds.size.y);
+        }
+        set => SetNormalizedPosition(value, 1);
+    }
+
+    private void OnHorizontalScrollbarValueChanged(float value)
+    {
+        if (m_SuppressOnScroll) return;
+        if (!m_Horizontal) return;
+        SetNormalizedPosition(value, 0);
+    }
+
+    private void OnVerticalScrollbarValueChanged(float value)
+    {
+        if (m_SuppressOnScroll) return;
+        if (!m_Vertical) return;
+        SetNormalizedPosition(value, 1);
     }
 
     protected override void OnEnable()
     {
         base.OnEnable();
-        if (_horizontalScrollbar != null)
+
+        if (m_HorizontalScrollbar != null)
         {
-            _horizontalScrollbar.onValueChanged.ValueChanged += OnHorizontalScrollbarValueChanged;
+            m_HorizontalScrollbar.onValueChanged.ValueChanged -= OnHorizontalScrollbarValueChanged;
+            m_HorizontalScrollbar.onValueChanged.ValueChanged += OnHorizontalScrollbarValueChanged;
         }
-        if (_verticalScrollbar != null)
+
+        if (m_VerticalScrollbar != null)
         {
-            _verticalScrollbar.onValueChanged.ValueChanged += OnVerticalScrollbarValueChanged;
+            m_VerticalScrollbar.onValueChanged.ValueChanged -= OnVerticalScrollbarValueChanged;
+            m_VerticalScrollbar.onValueChanged.ValueChanged += OnVerticalScrollbarValueChanged;
         }
+
+        m_ParentScrollRect = FindParentScrollRect();
+
         CanvasUpdateRegistry.RegisterCanvasElementForLayoutRebuild(this);
         SetDirty();
     }
@@ -255,16 +342,14 @@ public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDr
     protected override void OnDisable()
     {
         CanvasUpdateRegistry.UnRegisterCanvasElementForRebuild(this);
-        if (_horizontalScrollbar != null)
-        {
-            _horizontalScrollbar.onValueChanged.ValueChanged -= OnHorizontalScrollbarValueChanged;
-        }
-        if (_verticalScrollbar != null)
-        {
-            _verticalScrollbar.onValueChanged.ValueChanged -= OnVerticalScrollbarValueChanged;
-        }
-        _velocity = Vector2.zero;
-        _dragging = false;
+
+        if (m_HorizontalScrollbar != null)
+            m_HorizontalScrollbar.onValueChanged.ValueChanged -= OnHorizontalScrollbarValueChanged;
+        if (m_VerticalScrollbar != null)
+            m_VerticalScrollbar.onValueChanged.ValueChanged -= OnVerticalScrollbarValueChanged;
+
+        m_Dragging = false;
+        m_Velocity = Vector2.zero;
         base.OnDisable();
     }
 
@@ -272,254 +357,510 @@ public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDr
     {
         if (executing == CanvasUpdate.PostLayout)
         {
+            m_RebuildingLayoutCount++;
             UpdateBounds();
             UpdateScrollbars();
-            _hasRebuiltLayout = true;
-        }
-        if (executing == CanvasUpdate.PreRender)
-        {
             UpdateScrollbarVisibility();
+            m_HasRebuiltLayout = true;
+            m_RebuildingLayoutCount--;
         }
     }
 
     public virtual void LayoutComplete() { }
     public virtual void GraphicUpdateComplete() { }
+    public virtual bool IsDestroyed() => this == null;
 
     public virtual void CalculateLayoutInputHorizontal() { }
     public virtual void CalculateLayoutInputVertical() { }
     public virtual void SetLayoutHorizontal() { }
     public virtual void SetLayoutVertical() { }
 
-    private void OnHorizontalScrollbarValueChanged(float value)
+    protected void UpdateScrollbarVisibility()
     {
-        if (_suppressOnScroll) return;
-        if (!_horizontal) return;
-        SetNormalizedPosition(value, 0);
+        UpdateOneScrollbarVisibility(vScrollingNeeded, m_VerticalScrollbar, m_VerticalScrollbarVisibility);
+        UpdateOneScrollbarVisibility(hScrollingNeeded, m_HorizontalScrollbar, m_HorizontalScrollbarVisibility);
     }
 
-    private void OnVerticalScrollbarValueChanged(float value)
+    private void UpdateOneScrollbarVisibility(bool xScrollingNeeded, Scrollbar? scrollbar, ScrollbarVisibility visibility)
     {
-        if (_suppressOnScroll) return;
-        if (!_vertical) return;
-        SetNormalizedPosition(value, 1);
-    }
+        if (scrollbar == null)
+            return;
 
-    protected void SetNormalizedPosition(float value, int axis)
-    {
-        if (_content == null) return;
-        UpdateBounds();
-
-        var delta = axis == 0 ? _contentBounds.size.x - _viewBounds.size.x : _contentBounds.size.y - _viewBounds.size.y;
-        var newAnchoredPosition = _content.anchoredPosition;
-        if (delta > 0.01f)
+        if (visibility == ScrollbarVisibility.Permanent)
         {
-            if (axis == 0)
-                newAnchoredPosition.x = -value * delta;
-            else
-                newAnchoredPosition.y = value * delta;
+            scrollbar.gameObject.SetActive(true);
         }
-        _content.anchoredPosition = newAnchoredPosition;
-        UpdateBounds();
-        UpdatePrevData();
-        _onValueChanged?.Invoke(_normalizedPosition);
-    }
-
-    public void OnInitializePotentialDrag(PointerEventData eventData)
-    {
-        _ = eventData;
-        if (eventData.button != PointerEventData.InputButton.Left) return;
-        _velocity = Vector2.zero;
-    }
-
-    public void OnBeginDrag(PointerEventData eventData)
-    {
-        if (eventData.button != PointerEventData.InputButton.Left) return;
-        if (!IsActive()) return;
-
-        _dragging = true;
-        if (_content == null) return;
-
-        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(viewRect, eventData.pressPosition, eventData.pressEventCamera, out _pointerStartLocalCursor))
+        else
         {
-            _contentStartPosition = _content.anchoredPosition;
+            bool shouldBeVisible = xScrollingNeeded;
+            if (visibility == ScrollbarVisibility.AutoHideAndExpandViewport)
+            {
+                scrollbar.gameObject.SetActive(shouldBeVisible);
+            }
+            else if (visibility == ScrollbarVisibility.AutoHide)
+            {
+                scrollbar.gameObject.SetActive(shouldBeVisible || m_Dragging);
+            }
+        }
+    }
+
+    private void SetNormalizedPosition(float value, int axis)
+    {
+        if (m_Content == null)
+            return;
+
+        UpdateBounds();
+
+        float contentSize = axis == 0 ? m_ContentBounds.size.x : m_ContentBounds.size.y;
+        float viewSize = axis == 0 ? m_ViewBounds.size.x : m_ViewBounds.size.y;
+        float delta = contentSize - viewSize;
+
+        if (delta <= 0.01f)
+            return;
+
+        Vector2 newAnchoredPosition = m_Content.anchoredPosition;
+        float newPos = Mathf.Clamp01(value) * delta;
+        if (axis == 0)
+            newAnchoredPosition.x = -newPos;
+        else
+            newAnchoredPosition.y = newPos;
+
+        SetContentAnchoredPosition(newAnchoredPosition);
+    }
+
+    public virtual void OnInitializePotentialDrag(PointerEventData eventData)
+    {
+        if (eventData.button != PointerEventData.InputButton.Left)
+            return;
+
+        if (m_ParentScrollRect != null)
+            m_ParentScrollRect.OnInitializePotentialDrag(eventData);
+
+        m_Velocity = Vector2.zero;
+    }
+
+    public virtual void OnBeginDrag(PointerEventData eventData)
+    {
+        if (eventData.button != PointerEventData.InputButton.Left)
+            return;
+        if (!IsActive())
+            return;
+
+        if (m_HorizontalScrollbar != null && m_HorizontalScrollbar.IsActive() && m_HorizontalScrollbar.IsInteractable() && RectTransformUtility.RectangleContainsScreenPoint(m_HorizontalScrollbar.GetComponent<RectTransform>(), eventData.position, eventData.pressEventCamera))
+            return;
+        if (m_VerticalScrollbar != null && m_VerticalScrollbar.IsActive() && m_VerticalScrollbar.IsInteractable() && RectTransformUtility.RectangleContainsScreenPoint(m_VerticalScrollbar.GetComponent<RectTransform>(), eventData.position, eventData.pressEventCamera))
+            return;
+
+        if (m_Content != null)
+        {
             UpdateBounds();
+
+            if (!IsHorizontalScrollbarVisible())
+            {
+                if (m_ParentScrollRect != null && m_ParentScrollRect.IsActive())
+                {
+                    m_ParentScrollRect.OnBeginDrag(eventData);
+                }
+                return;
+            }
+            if (!IsVerticalScrollbarVisible())
+            {
+                if (m_ParentScrollRect != null && m_ParentScrollRect.IsActive())
+                {
+                    m_ParentScrollRect.OnBeginDrag(eventData);
+                }
+                return;
+            }
         }
-        _velocity = Vector2.zero;
+
+        m_Dragging = true;
+        m_Velocity = Vector2.zero;
+
+        if (m_Content == null)
+            return;
+
+        Vector2 localCursor;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(viewRect, eventData.pressPosition, eventData.pressEventCamera, out localCursor))
+            return;
+
+        m_PointerStartLocalCursor = localCursor;
+        m_ContentStartPosition = m_Content.anchoredPosition;
     }
 
-    public void OnDrag(PointerEventData eventData)
+    public virtual void OnDrag(PointerEventData eventData)
     {
-        if (!_dragging || _content == null) return;
-        if (eventData.button != PointerEventData.InputButton.Left) return;
-        if (!IsActive()) return;
+        if (eventData.button != PointerEventData.InputButton.Left)
+            return;
+        if (!IsActive())
+            return;
+        if (m_Content == null)
+            return;
+
+        if (!m_Dragging)
+        {
+            if (m_ParentScrollRect != null && m_ParentScrollRect.IsActive())
+                m_ParentScrollRect.OnDrag(eventData);
+            return;
+        }
 
         Vector2 localCursor;
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(viewRect, eventData.position, eventData.pressEventCamera, out localCursor))
             return;
 
-        var pointerDelta = localCursor - _pointerStartLocalCursor;
-        var position = _contentStartPosition + pointerDelta;
+        UpdateBounds();
 
-        if (!_horizontal)
-            position.x = _content.anchoredPosition.x;
-        if (!_vertical)
-            position.y = _content.anchoredPosition.y;
+        var pointerDelta = localCursor - m_PointerStartLocalCursor;
+        Vector2 position = m_ContentStartPosition + pointerDelta;
 
-        var offset = CalculateOffset(position - _content.anchoredPosition);
+        Vector2 offset = CalculateOffset(position - m_Content.anchoredPosition);
         position += offset;
 
-        if (_movementType == MovementType.Elastic)
+        if (m_MovementType == MovementType.Elastic)
         {
-            if (offset.x != 0f) position.x = position.x - RubberDelta(offset.x, _viewBounds.size.x);
-            if (offset.y != 0f) position.y = position.y - RubberDelta(offset.y, _viewBounds.size.y);
+            if (offset.x != 0)
+                position.x = position.x - RubberDelta(offset.x, m_ViewBounds.size.x);
+            if (offset.y != 0)
+                position.y = position.y - RubberDelta(offset.y, m_ViewBounds.size.y);
+        }
+
+        bool setX = m_Horizontal;
+        bool setY = m_Vertical;
+
+        if (m_Horizontal)
+        {
+            if (Mathf.Abs(offset.x) > 0.01f && m_ParentScrollRect != null && m_ParentScrollRect.IsActive())
+            {
+                if (offset.x > 0 && m_Content.anchoredPosition.x >= -0.01f)
+                {
+                    setX = false;
+                    position.x = m_Content.anchoredPosition.x;
+                }
+                else if (offset.x < 0 && m_Content.anchoredPosition.x <= -(m_ContentBounds.size.x - m_ViewBounds.size.x) + 0.01f)
+                {
+                    setX = false;
+                    position.x = m_Content.anchoredPosition.x;
+                }
+            }
+        }
+
+        if (m_Vertical)
+        {
+            if (Mathf.Abs(offset.y) > 0.01f && m_ParentScrollRect != null && m_ParentScrollRect.IsActive())
+            {
+                if (offset.y < 0 && m_Content.anchoredPosition.y <= 0.01f)
+                {
+                    setY = false;
+                    position.y = m_Content.anchoredPosition.y;
+                }
+                else if (offset.y > 0 && m_Content.anchoredPosition.y >= m_ContentBounds.size.y - m_ViewBounds.size.y - 0.01f)
+                {
+                    setY = false;
+                    position.y = m_Content.anchoredPosition.y;
+                }
+            }
+        }
+
+        if (!setX) position.x = m_Content.anchoredPosition.x;
+        if (!setY) position.y = m_Content.anchoredPosition.y;
+
+        if (!setX || !setY)
+        {
+            if (m_ParentScrollRect != null && m_ParentScrollRect.IsActive())
+                m_ParentScrollRect.OnDrag(eventData);
         }
 
         SetContentAnchoredPosition(position);
     }
 
-    public void OnEndDrag(PointerEventData eventData)
+    public virtual void OnEndDrag(PointerEventData eventData)
     {
-        _ = eventData;
-        if (eventData.button != PointerEventData.InputButton.Left) return;
-        _dragging = false;
+        if (eventData.button != PointerEventData.InputButton.Left)
+            return;
+
+        if (m_Dragging)
+        {
+            m_Dragging = false;
+        }
+        else
+        {
+            if (m_ParentScrollRect != null && m_ParentScrollRect.IsActive())
+                m_ParentScrollRect.OnEndDrag(eventData);
+        }
     }
 
-    public void OnScroll(PointerEventData data)
+    public virtual void OnScroll(PointerEventData data)
     {
-        if (!IsActive()) return;
-        if (_content == null) return;
+        if (!IsActive())
+            return;
+        if (m_Content == null)
+            return;
 
-        var delta = data.scrollDelta;
-        delta.y *= -1f;
-        if (!_horizontal) delta.x = 0f;
-        if (!_vertical) delta.y = 0f;
-
-        var position = _content.anchoredPosition;
-        if (_horizontal) position.x += delta.x * _scrollSensitivity;
-        if (_vertical) position.y += delta.y * _scrollSensitivity;
-        position += CalculateOffset(position - _content.anchoredPosition);
-        SetContentAnchoredPosition(position);
+        EnsureLayoutHasRebuilt();
         UpdateBounds();
+
+        Vector2 delta = data.scrollDelta;
+        delta.y *= -1f;
+
+        if (!m_Horizontal && m_Vertical)
+        {
+            float tmp = delta.x;
+            delta.x = delta.y;
+            delta.y = tmp;
+        }
+
+        if (!m_Horizontal) delta.x = 0f;
+        if (!m_Vertical) delta.y = 0f;
+
+        if (delta.sqrMagnitude < float.Epsilon)
+            return;
+
+        Vector2 position = m_Content.anchoredPosition;
+        position += delta * m_ScrollSensitivity;
+
+        Vector2 offset = Vector2.zero;
+        if (m_MovementType == MovementType.Clamped)
+        {
+            offset = CalculateOffset(position - m_Content.anchoredPosition);
+            position += offset;
+        }
+
+        bool shouldConsumeScroll = true;
+        if (m_ParentScrollRect != null && m_ParentScrollRect.IsActive())
+        {
+            if (m_Horizontal)
+            {
+                if ((delta.x > 0 && m_Content.anchoredPosition.x >= -0.01f) ||
+                    (delta.x < 0 && m_Content.anchoredPosition.x <= -(m_ContentBounds.size.x - m_ViewBounds.size.x) + 0.01f))
+                {
+                    position.x = m_Content.anchoredPosition.x;
+                    shouldConsumeScroll = false;
+                }
+            }
+            if (m_Vertical)
+            {
+                if ((delta.y < 0 && m_Content.anchoredPosition.y <= 0.01f) ||
+                    (delta.y > 0 && m_Content.anchoredPosition.y >= m_ContentBounds.size.y - m_ViewBounds.size.y - 0.01f))
+                {
+                    position.y = m_Content.anchoredPosition.y;
+                    shouldConsumeScroll = false;
+                }
+            }
+
+            if (!shouldConsumeScroll)
+                m_ParentScrollRect.OnScroll(data);
+        }
+
+        SetContentAnchoredPosition(position);
     }
 
     protected virtual void LateUpdate()
     {
-        if (_content == null) return;
+        if (m_Content == null)
+            return;
+
         EnsureLayoutHasRebuilt();
         UpdateBounds();
-        var deltaTime = Time.unscaledDeltaTime;
-        var offset = CalculateOffset(Vector2.zero);
 
-        if (!_dragging && (offset != Vector2.zero || _velocity != Vector2.zero))
+        float deltaTime = Time.unscaledDeltaTime;
+        if (deltaTime <= 0f)
+            return;
+
+        Vector2 offset = CalculateOffset(Vector2.zero);
+
+        if (!m_Dragging && (offset != Vector2.zero || m_Velocity != Vector2.zero))
         {
-            var position = _content.anchoredPosition;
+            Vector2 position = m_Content.anchoredPosition;
             for (int axis = 0; axis < 2; axis++)
             {
-                if (offset[axis] != 0f && _movementType == MovementType.Elastic)
+                if (m_MovementType == MovementType.Elastic)
                 {
-                    var speed = _velocity[axis];
-                    position[axis] = Mathf.SmoothDamp(_content.anchoredPosition[axis], _content.anchoredPosition[axis] + offset[axis], ref speed, _elasticity, Mathf.Infinity, deltaTime);
-                    _velocity[axis] = speed;
+                    if (offset[axis] != 0)
+                    {
+                        float speed = m_Velocity[axis];
+                        float targetPos = m_Content.anchoredPosition[axis] + offset[axis];
+                        position[axis] = Mathf.SmoothDamp(m_Content.anchoredPosition[axis], targetPos, ref speed, m_Elasticity, Mathf.Infinity, deltaTime);
+                        m_Velocity[axis] = speed;
+                    }
+                    else if (m_Inertia)
+                    {
+                        m_Velocity[axis] *= Mathf.Pow(m_DecelerationRate, deltaTime);
+                        if (Mathf.Abs(m_Velocity[axis]) < 1f)
+                            m_Velocity[axis] = 0;
+                        position[axis] += m_Velocity[axis] * deltaTime;
+                    }
+                    else
+                    {
+                        m_Velocity[axis] = 0;
+                    }
                 }
-                else if (_inertia)
+                else if (m_MovementType == MovementType.Clamped)
                 {
-                    _velocity[axis] *= Mathf.Pow(_decelerationRate, deltaTime);
-                    if (Mathf.Abs(_velocity[axis]) < 1f) _velocity[axis] = 0f;
-                    position[axis] += _velocity[axis] * deltaTime;
+                    if (offset[axis] != 0)
+                    {
+                        position[axis] += offset[axis];
+                        m_Velocity[axis] = 0;
+                    }
+                    else if (m_Inertia)
+                    {
+                        m_Velocity[axis] *= Mathf.Pow(m_DecelerationRate, deltaTime);
+                        if (Mathf.Abs(m_Velocity[axis]) < 1f)
+                            m_Velocity[axis] = 0;
+                        position[axis] += m_Velocity[axis] * deltaTime;
+                    }
+                    else
+                    {
+                        m_Velocity[axis] = 0;
+                    }
                 }
                 else
                 {
-                    _velocity[axis] = 0f;
+                    if (m_Inertia)
+                    {
+                        m_Velocity[axis] *= Mathf.Pow(m_DecelerationRate, deltaTime);
+                        if (Mathf.Abs(m_Velocity[axis]) < 1f)
+                            m_Velocity[axis] = 0;
+                        position[axis] += m_Velocity[axis] * deltaTime;
+                    }
+                    else
+                    {
+                        m_Velocity[axis] = 0;
+                    }
                 }
             }
 
-            if (_movementType != MovementType.Unrestricted)
+            if (m_MovementType != MovementType.Unrestricted)
             {
-                var offset2 = CalculateOffset(position - _content.anchoredPosition);
+                Vector2 offset2 = CalculateOffset(position - m_Content.anchoredPosition);
                 position += offset2;
-                for (int axis = 0; axis < 2; axis++)
-                {
-                    if (offset2[axis] != 0f && _movementType == MovementType.Clamped)
-                    {
-                        offset = CalculateOffset(position - _content.anchoredPosition);
-                        position += offset;
-                        _velocity[axis] = 0f;
-                    }
-                }
             }
 
             SetContentAnchoredPosition(position);
         }
 
-        if (_dragging && _inertia)
+        if (m_Dragging && m_Inertia)
         {
-            var newVelocity = (_content.anchoredPosition - _prevPosition) / deltaTime;
-            _velocity = Vector2.Lerp(_velocity, newVelocity, deltaTime * 10f);
+            Vector2 newVelocity = (m_Content.anchoredPosition - m_PrevPosition) / deltaTime;
+            m_Velocity = Vector2.Lerp(m_Velocity, newVelocity, deltaTime * 10f);
+        }
+
+        if (BoundsChanged() || PositionChanged())
+        {
+            UpdateScrollbars();
+            UpdateScrollbarVisibility();
+            m_OnValueChanged?.Invoke(normalizedPosition);
         }
 
         UpdatePrevData();
-        UpdateScrollbars();
+    }
+
+    private bool BoundsChanged()
+    {
+        return !Approximately(m_PrevViewBounds, m_ViewBounds) || !Approximately(m_PrevContentBounds, m_ContentBounds);
+    }
+
+    private bool PositionChanged()
+    {
+        return m_Content != null && (m_Content.anchoredPosition - m_PrevPosition).sqrMagnitude > 0.0001f;
+    }
+
+    private static bool Approximately(Bounds a, Bounds b)
+    {
+        return (a.center - b.center).sqrMagnitude < 0.0001f && (a.size - b.size).sqrMagnitude < 0.0001f;
+    }
+
+    public virtual void StopMovement()
+    {
+        m_Velocity = Vector2.zero;
+    }
+
+    private ScrollRect? FindParentScrollRect()
+    {
+        Transform? parent = transform.parent;
+        while (parent != null)
+        {
+            var scrollRect = parent.GetComponent<ScrollRect>();
+            if (scrollRect != null)
+                return scrollRect;
+            parent = parent.parent;
+        }
+        return null;
+    }
+
+    private bool IsHorizontalScrollbarVisible()
+    {
+        return m_Horizontal || !vScrollingNeeded;
+    }
+
+    private bool IsVerticalScrollbarVisible()
+    {
+        return m_Vertical || !hScrollingNeeded;
     }
 
     private void EnsureLayoutHasRebuilt()
     {
-        if (!_hasRebuiltLayout && !CanvasUpdateRegistry.instance.IsRebuildingLayout())
-        {
+        if (!m_HasRebuiltLayout && !CanvasUpdateRegistry.instance.IsRebuildingLayout())
             Canvas.ForceUpdateCanvases();
-        }
     }
 
     private void UpdatePrevData()
     {
-        if (_content == null)
-            _prevPosition = Vector2.zero;
+        if (m_Content == null)
+            m_PrevPosition = Vector2.zero;
         else
-            _prevPosition = _content.anchoredPosition;
+            m_PrevPosition = m_Content.anchoredPosition;
+        m_PrevViewBounds = m_ViewBounds;
+        m_PrevContentBounds = m_ContentBounds;
     }
 
-    private void SetContentAnchoredPosition(Vector2 position)
+    protected virtual void SetContentAnchoredPosition(Vector2 position)
     {
-        if (_content == null) return;
-        if (position != _content.anchoredPosition)
+        if (m_Content == null)
+            return;
+
+        if (!m_Horizontal)
+            position.x = m_Content.anchoredPosition.x;
+        if (!m_Vertical)
+            position.y = m_Content.anchoredPosition.y;
+
+        if ((position - m_Content.anchoredPosition).sqrMagnitude > 0.0001f)
         {
-            _content.anchoredPosition = position;
+            m_Content.anchoredPosition = position;
             UpdateBounds();
-            UpdateNormalizedPosition();
         }
     }
 
-    private Vector2 CalculateOffset(Vector2 delta)
+    protected Vector2 CalculateOffset(Vector2 delta)
     {
-        var offset = Vector2.zero;
-        if (_movementType == MovementType.Unrestricted) return offset;
-        if (_content == null) return offset;
+        return InternalCalculateOffset(ref m_ViewBounds, ref m_ContentBounds, m_Horizontal, m_Vertical, m_MovementType, delta);
+    }
 
-        var vMin = new Vector2(_contentBounds.min.x, _contentBounds.min.y);
-        var vMax = new Vector2(_contentBounds.max.x, _contentBounds.max.y);
-        var bounds = new Bounds(_viewBounds.center, _viewBounds.size);
-        var max = new Vector2(bounds.max.x, bounds.max.y);
-        var min = new Vector2(bounds.min.x, bounds.min.y);
+    private static Vector2 InternalCalculateOffset(ref Bounds viewBounds, ref Bounds contentBounds, bool horizontal, bool vertical, MovementType movementType, Vector2 delta)
+    {
+        Vector2 offset = Vector2.zero;
+        if (movementType == MovementType.Unrestricted)
+            return offset;
 
-        if (_horizontal)
+        Vector3 min = contentBounds.min;
+        Vector3 max = contentBounds.max;
+
+        if (horizontal)
         {
-            if (delta.x > 0f) vMin.x += delta.x;
-            if (delta.x < 0f) vMax.x += delta.x;
-            offset.x = vMin.x > min.x ? min.x - vMin.x : (vMax.x < max.x ? max.x - vMax.x : 0f);
-        }
-        else
-        {
-            offset.x = _content.anchoredPosition.x + offset.x;
+            min.x += delta.x;
+            max.x += delta.x;
+            if (min.x > viewBounds.min.x)
+                offset.x = viewBounds.min.x - min.x;
+            else if (max.x < viewBounds.max.x)
+                offset.x = viewBounds.max.x - max.x;
         }
 
-        if (_vertical)
+        if (vertical)
         {
-            if (delta.y > 0f) vMin.y += delta.y;
-            if (delta.y < 0f) vMax.y += delta.y;
-            offset.y = vMin.y > min.y ? min.y - vMin.y : (vMax.y < max.y ? max.y - vMax.y : 0f);
-        }
-        else
-        {
-            offset.y = _content.anchoredPosition.y + offset.y;
+            min.y += delta.y;
+            max.y += delta.y;
+            if (max.y < viewBounds.max.y)
+                offset.y = viewBounds.max.y - max.y;
+            else if (min.y > viewBounds.min.y)
+                offset.y = viewBounds.min.y - min.y;
         }
 
         return offset;
@@ -530,97 +871,107 @@ public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDr
         return (1f - (1f / ((Mathf.Abs(overStretching) * 0.55f / viewSize) + 1f))) * viewSize * Mathf.Sign(overStretching);
     }
 
-    private void UpdateBounds()
+    protected void UpdateBounds()
     {
-        if (_content == null || viewRect == null) return;
-        var vMin = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
-        var vMax = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
-        var cMin = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
-        var cMax = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
-        for (int i = 0; i < viewRect.childCount; i++)
-        {
-            _ = viewRect.GetChild(i);
-        }
-        var viewSize = viewRect.rect.size;
-        var contentSize = _content.rect.size;
-        var contentPos = _content.anchoredPosition;
-        _viewBounds = new Bounds(new Vector3(0, 0, 0), new Vector3(viewSize.x, viewSize.y, 0f));
-        _contentBounds = new Bounds(new Vector3(contentPos.x + contentSize.x * _content.pivot.x, contentPos.y + contentSize.y * _content.pivot.y, 0f), new Vector3(contentSize.x, contentSize.y, 0f));
-        UpdateNormalizedPosition();
+        if (m_Content == null || viewRect == null)
+            return;
+
+        m_ViewBounds = GetViewBounds();
+        m_ContentBounds = GetContentBounds();
     }
 
-    private void UpdateNormalizedPosition()
+    private Bounds GetViewBounds()
     {
-        float hDelta = _contentBounds.size.x - _viewBounds.size.x;
-        float vDelta = _contentBounds.size.y - _viewBounds.size.y;
-        if (hDelta > 0.01f)
+        if (viewRect == null)
+            return new Bounds();
+
+        var vMin = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        var vMax = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+
+        var corners = m_Corners;
+        viewRect.GetWorldCorners(corners);
+
+        Matrix4x4 worldToLocalMatrix = viewRect.worldToLocalMatrix;
+        for (int i = 0; i < 4; i++)
         {
-            _normalizedPosition.x = Mathf.Clamp01(-_content.anchoredPosition.x / hDelta);
+            Vector3 v = worldToLocalMatrix.MultiplyPoint3x4(corners[i]);
+            vMin = Vector3.Min(v, vMin);
+            vMax = Vector3.Max(v, vMax);
         }
-        else
+
+        var bounds = new Bounds(vMin, Vector3.zero);
+        bounds.Encapsulate(vMax);
+        return bounds;
+    }
+
+    private Bounds GetContentBounds()
+    {
+        if (m_Content == null || viewRect == null)
+            return new Bounds();
+
+        var vMin = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        var vMax = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+
+        var corners = m_Corners;
+        Matrix4x4 worldToLocalMatrix = viewRect.worldToLocalMatrix;
+
+        GetChildBounds(m_Content, ref vMin, ref vMax, corners, worldToLocalMatrix);
+
+        var bounds = new Bounds(vMin, Vector3.zero);
+        bounds.Encapsulate(vMax);
+        return bounds;
+    }
+
+    private void GetChildBounds(RectTransform rect, ref Vector3 vMin, ref Vector3 vMax, Vector3[] corners, Matrix4x4 worldToLocalMatrix)
+    {
+        rect.GetWorldCorners(corners);
+        for (int i = 0; i < 4; i++)
         {
-            _normalizedPosition.x = (_contentBounds.min.x > _viewBounds.min.x) ? 1f : 0f;
+            Vector3 v = worldToLocalMatrix.MultiplyPoint3x4(corners[i]);
+            vMin = Vector3.Min(v, vMin);
+            vMax = Vector3.Max(v, vMax);
         }
-        if (vDelta > 0.01f)
+
+        for (int i = 0; i < rect.childCount; i++)
         {
-            _normalizedPosition.y = Mathf.Clamp01(_content.anchoredPosition.y / vDelta);
+            var child = rect.GetChild(i);
+            if (child is RectTransform childRect)
+            {
+                GetChildBounds(childRect, ref vMin, ref vMax, corners, worldToLocalMatrix);
+            }
         }
-        else
-        {
-            _normalizedPosition.y = (_contentBounds.min.y > _viewBounds.min.y) ? 1f : 0f;
-        }
-        _onValueChanged?.Invoke(_normalizedPosition);
-        _suppressOnScroll = true;
-        _horizontalScrollbar?.SetValueWithoutNotify(_normalizedPosition.x);
-        _verticalScrollbar?.SetValueWithoutNotify(_normalizedPosition.y);
-        _suppressOnScroll = false;
     }
 
     private void UpdateScrollbars()
     {
-        if (_content == null || viewRect == null) return;
-        float hDelta = _contentBounds.size.x - _viewBounds.size.x;
-        float vDelta = _contentBounds.size.y - _viewBounds.size.y;
-        var hSize = hDelta > 0f ? Mathf.Clamp01(_viewBounds.size.x / _contentBounds.size.x) : 1f;
-        var vSize = vDelta > 0f ? Mathf.Clamp01(_viewBounds.size.y / _contentBounds.size.y) : 1f;
+        if (m_Content == null || viewRect == null)
+            return;
 
-        _suppressOnScroll = true;
-        if (_horizontalScrollbar != null)
-        {
-            _horizontalScrollbar.size = hSize;
-            _horizontalScrollbar.SetValueWithoutNotify(_normalizedPosition.x);
-        }
-        if (_verticalScrollbar != null)
-        {
-            _verticalScrollbar.size = vSize;
-            _verticalScrollbar.SetValueWithoutNotify(_normalizedPosition.y);
-        }
-        _suppressOnScroll = false;
-    }
+        m_SuppressOnScroll = true;
 
-    private void UpdateScrollbarVisibility()
-    {
-        _horizontalScrollbarVisibilityNeedsToBeUpdated = true;
-        _verticalScrollbarVisibilityNeedsToBeUpdated = true;
-        if (_horizontalScrollbar != null && _horizontalScrollbarVisibility != ScrollbarVisibility.Permanent)
+        if (m_HorizontalScrollbar != null)
         {
-            _horizontalScrollbar.gameObject.SetActive(true);
+            m_HorizontalScrollbar.size = hScrollingNeeded ? Mathf.Clamp01(m_ViewBounds.size.x / m_ContentBounds.size.x) : 1f;
+            m_HorizontalScrollbar.SetValueWithoutNotify(horizontalNormalizedPosition);
         }
-        if (_verticalScrollbar != null && _verticalScrollbarVisibility != ScrollbarVisibility.Permanent)
-        {
-            _verticalScrollbar.gameObject.SetActive(true);
-        }
-    }
 
-    public void StopMovement()
-    {
-        _velocity = Vector2.zero;
+        if (m_VerticalScrollbar != null)
+        {
+            m_VerticalScrollbar.size = vScrollingNeeded ? Mathf.Clamp01(m_ViewBounds.size.y / m_ContentBounds.size.y) : 1f;
+            m_VerticalScrollbar.SetValueWithoutNotify(verticalNormalizedPosition);
+        }
+
+        m_SuppressOnScroll = false;
     }
 
     private void SetDirty()
     {
-        if (!IsActive()) return;
-        LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
+        if (!IsActive())
+            return;
+        if (m_RebuildingLayoutCount > 0)
+            return;
+        if (!CanvasUpdateRegistry.instance.IsRebuildingLayout())
+            LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
     }
 
     protected override void OnRectTransformDimensionsChange()
@@ -632,22 +983,18 @@ public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDr
     protected override void OnTransformParentChanged()
     {
         base.OnTransformParentChanged();
-        if (viewRect != null) _viewRectIsValid = false;
+        m_ViewRect = null;
+        m_ParentScrollRect = FindParentScrollRect();
+        SetDirty();
     }
 
-    public bool IsActive()
+    protected override void OnDidApplyAnimationProperties()
     {
-        return gameObject != null && gameObject.activeInHierarchy && enabled;
+        UpdateBounds();
     }
 }
 
 [Serializable]
-public class ScrollRectEvent
+public class ScrollRectEvent : UnityEvent<Vector2>
 {
-    public event Action<Vector2>? ValueChanged;
-
-    public void Invoke(Vector2 value)
-    {
-        ValueChanged?.Invoke(value);
-    }
 }

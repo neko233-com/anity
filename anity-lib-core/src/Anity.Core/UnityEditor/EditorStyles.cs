@@ -6,6 +6,8 @@ public static class EditorStyles
   public static GUIStyle boldLabel { get; } = new() { name = "boldLabel", fontSize = 12 };
   public static GUIStyle miniLabel { get; } = new() { name = "miniLabel", fontSize = 10 };
   public static GUIStyle whiteLabel { get; } = new() { name = "whiteLabel" };
+  public static GUIStyle whiteBoldLabel { get; } = new() { name = "whiteBoldLabel", fontStyle = FontStyle.Bold };
+  public static GUIStyle whiteMiniLabel { get; } = new() { name = "whiteMiniLabel", fontSize = 10 };
   public static GUIStyle redLabel { get; } = new() { name = "redLabel" };
   public static GUIStyle yellowLabel { get; } = new() { name = "yellowLabel" };
   public static GUIStyle greyLabel { get; } = new() { name = "greyLabel" };
@@ -13,6 +15,7 @@ public static class EditorStyles
   public static GUIStyle highlightLabel { get; } = new() { name = "highlightLabel" };
   public static GUIStyle selectedLabel { get; } = new() { name = "selectedLabel" };
   public static GUIStyle wordWrappedLabel { get; } = new() { name = "wordWrappedLabel", wordWrap = true };
+  public static GUIStyle miniBoldLabel { get; } = new() { name = "miniBoldLabel", fontSize = 10, fontStyle = FontStyle.Bold };
 
   public static GUIStyle toolbar { get; } = new() { name = "toolbar" };
   public static GUIStyle toolbarButton { get; } = new() { name = "toolbarButton" };
@@ -30,9 +33,11 @@ public static class EditorStyles
   public static GUIStyle inspectorTitlebarText { get; } = new() { name = "inspectorTitlebarText" };
 
   public static GUIStyle textField { get; } = new() { name = "textField" };
+  public static GUIStyle boldTextField { get; } = new() { name = "boldTextField", fontStyle = FontStyle.Bold };
   public static GUIStyle textArea { get; } = new() { name = "textArea" };
   public static GUIStyle numberField { get; } = new() { name = "numberField" };
   public static GUIStyle toggle { get; } = new() { name = "toggle" };
+  public static GUIStyle radiobutton { get; } = new() { name = "radiobutton" };
   public static GUIStyle popup { get; } = new() { name = "popup" };
   public static GUIStyle enumPopup { get; } = new() { name = "enumPopup" };
   public static GUIStyle layerField { get; } = new() { name = "layerField" };
@@ -103,5 +108,7 @@ public static class EditorStyles
   public static GUIStyle sectionHeaderLabel { get; } = new() { name = "sectionHeaderLabel" };
   public static GUIStyle boldLabelOnDark { get; } = new() { name = "boldLabelOnDark" };
   public static GUIStyle largeLabel { get; } = new() { name = "largeLabel", fontSize = 16 };
+  public static GUIStyle largeBoldLabel { get; } = new() { name = "largeBoldLabel", fontSize = 16, fontStyle = FontStyle.Bold };
   public static GUIStyle titleLabel { get; } = new() { name = "titleLabel", fontSize = 18 };
+  public static GUIStyle header { get; } = new() { name = "header", fontStyle = FontStyle.Bold, fontSize = 14 };
 }

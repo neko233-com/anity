@@ -7,33 +7,43 @@ namespace UnityEngine;
 public static class Application
 {
   private static RuntimePlatform? _overridePlatform;
+  private static bool _isPaused;
+  private static int _loadedLevel;
   public static string dataPath => AppContext.BaseDirectory;
   public static string streamingAssetsPath => Path.Combine(AppContext.BaseDirectory, "StreamingAssets");
-  public static string persistentDataPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Anity");
+  public static string persistentDataPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), UnityEditor.PlayerSettings.companyName, UnityEditor.PlayerSettings.productName);
   public static string temporaryCachePath => Path.GetTempPath();
   public static RuntimePlatform platform
   {
     get => _overridePlatform ?? GetRuntimePlatform();
     set => _overridePlatform = value;
   }
-  public static bool isPlaying => true;
+  public static bool isPlaying => UnityEditor.EditorApplication.isPlaying;
   public static bool isEditor => false;
   public static bool isFocused { get; set; } = true;
+  public static bool isPaused => _isPaused;
   public static bool isBatchMode => false;
   public static bool isMobilePlatform => platform is RuntimePlatform.Android or RuntimePlatform.IPhonePlayer;
   public static bool isConsolePlatform => false;
-  public static bool runInBackground { get; set; }
+  public static bool runInBackground { get; set; } = true;
   public static int targetFrameRate { get; set; } = -1;
-  public static int sleepTimeout { get; set; }
+  public static int sleepTimeout { get; set; } = -1;
   public static bool genuine => true;
   public static bool genuineCheckAvailable => true;
   public static string absoluteURL { get; set; } = string.Empty;
-  public static string identifier => string.Empty;
-  public static string companyName => "Anity";
-  public static string productName => "Anity";
-  public static string version => "1.0.0";
-  public static string buildGUID => Guid.NewGuid().ToString("N");
+  public static string identifier => UnityEditor.PlayerSettings.applicationIdentifier;
+  public static string bundleIdentifier => UnityEditor.PlayerSettings.applicationIdentifier;
+  public static string companyName => UnityEditor.PlayerSettings.companyName;
+  public static string productName => UnityEditor.PlayerSettings.productName;
+  public static string version => UnityEditor.PlayerSettings.bundleVersion;
+  public static string buildGUID => UnityEditor.PlayerSettings.buildGUID;
   public static string unityVersion => "2022.3.61f1";
+  public static int loadedLevel => _loadedLevel;
+  public static string loadedLevelName => _loadedLevel.ToString();
+  public static bool isLoadingLevel => false;
+  public static int levelCount => 1;
+  public static bool isWebGL => platform == RuntimePlatform.WebGLPlayer;
+  public static string installerName => string.Empty;
   public static SystemLanguage systemLanguage { get; set; } = SystemLanguage.ChineseSimplified;
   public static NetworkReachability internetReachability { get; set; } = NetworkReachability.ReachableViaLocalAreaNetwork;
   public static bool backgroundLoadingPriority { get; set; }

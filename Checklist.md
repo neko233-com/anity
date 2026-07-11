@@ -28,7 +28,7 @@
 | `Color/Color32` | ✅ | 基本运算、*float 运算符、转换 |
 | `Mathf` | ✅ | 常用数学函数（含SmoothDamp） |
 | `Time` | ✅ | Stopwatch真实时间、Tick方法、timeScale缩放、fixedDeltaTime |
-| `Application` | ✅ | 真实平台路径、RuntimePlatform自动检测、unityVersion="2022.3.61f1"、systemLanguage/internetReachability |
+| `Application` | ✅ | 进程信息(PID/isPlaying/isFocused/isPaused/isBatchMode)、真实平台路径(dataPath/persistentDataPath/streamingAssetsPath/temporaryCachePath)、RuntimePlatform自动检测(OS/Arch)、unityVersion="2022.3.61f1"、identifier/companyName/productName/version/buildGUID与PlayerSettings同步、systemLanguage/internetReachability/runInBackground/targetFrameRate/sleepTimeout、Quit/CancelQuit/OpenURL事件流、OnFocus/OnPause回调 |
 | `Debug` | ✅ | ILogger/ILogHandler接口、ConsoleLogHandler、Log/Warning/Error/LogException/Assert、LogFormat |
 | `Input` | ✅ | HashSet存储key/button状态、GetKey/Button/axis、SimulateKeyDown测试API |
 | `LayerMask` | ✅ | NameToLayer/LayerToName字典、GetMask位运算、隐式int转换、内置层 |
@@ -37,7 +37,7 @@
 | `Resources` | ✅ | Dictionary资源存储、Load/LoadAll/FindObjectsOfTypeAll、UnloadAsset/UnloadUnusedAssets、LoadAsync |
 | `JsonUtility` | ✅ | System.Text.Json序列化/反序列化、FromJsonOverwrite反射覆盖 |
 | `Screen` | ✅ | width/height/dpi/orientation/fullScreen/safeArea/brightness/resolutions、SetResolution |
-| `SystemInfo` | ✅ | 设备/OS/CPU/GPU信息、supports*系列特性返回true、graphicsShaderLevel=50、IsFormatSupported |
+| `SystemInfo` | ✅ | 设备/OS/CPU/GPU信息(deviceName/model/type/uniqueId/operatingSystem/processorCount/frequency/systemMemorySize)、graphicsDeviceType支持D3D11/D3D12/Vulkan/Metal/OpenGLCore/OpenGLES2/OpenGLES3/WebGL2、graphicsDeviceVersion自动匹配、supports*系列特性、graphicsShaderLevel=50、IsFormatSupported、overrideGraphicsDeviceType支持构建切换 |
 | `GL` | ✅ | 矩阵栈Push/Pop/MultMatrix、Translate/Rotate/Scale（真实旋转矩阵）、Begin/End立即模式、Vertex/Color/TexCoord |
 | `AsyncOperation` | ✅ | 继承CustomYieldInstruction、isDone/progress/allowSceneActivation、completed事件 |
 | `ScriptableObject` | ✅ | CreateInstance&lt;T&gt;/CreateInstance(Type) |
@@ -126,10 +126,10 @@
 | `Toggle` | ✅ | isOn切换、toggleTransition、group、IPointerClickHandler/ISubmitHandler、onValueChanged |
 | `ToggleGroup` | ✅ | m_Toggles HashSet、AllowSwitchOff、NotifyToggleOn互斥 |
 | `Slider` | ✅ | fillRect/handleRect、direction、minValue/maxValue/wholeNumbers、OnDrag更新value、Rebuild/UpdateVisuals、onValueChanged |
-| `Scrollbar` | ✅ | value(0-1)/size/numberOfSteps、OnDrag/OnPointerDown、SetDirection、Rebuild/UpdateVisuals更新滑块位置、onValueChanged |
+| `Scrollbar` | ✅ | value(0-1)/size/numberOfSteps、OnDrag/OnPointerDown、SetDirection、Rebuild/UpdateVisuals更新滑块位置、**SetValueWithoutNotify**、onValueChanged |
 | `Dropdown` | ✅ | Show()创建下拉列表、Hide()销毁、AddOptions/ClearOptions/RefreshShownValue、模板实例化、onValueChanged |
 | `InputField` | ✅ | text属性、caretBlinkRate/caretWidth/selectionColor、contentType验证（数字/邮箱/密码*等）、characterLimit、OnSelect/OnDeselect焦点 |
-| `ScrollRect` | ✅ | OnDrag移动content、horizontal/verticalNormalizedPosition双向同步Scrollbar、movementType(Unrestricted/Clamped/Elastic)、惯性减速、OnScroll滚轮、Clamped边界限制 |
+| `ScrollRect` | ✅ | **完整Unity 2022功能**：MovementType(Unrestricted/Elastic/Clamped)、Elastic弹性回弹SmoothDamp、惯性decelerationRate=0.135、ScrollbarVisibility(Permanent/AutoHide/AutoHideAndExpandViewport)、horizontal/verticalScrollbar联动size/value、嵌套滚动（到达边界事件传递父级）、滚轮scrollSensitivity、LateUpdate惯性+边界校正、ContentBounds/ViewBounds递归计算子节点、normalizedPosition、RubberDelta弹性拉伸、Rebuild/LayoutComplete/GraphicUpdateComplete、ICanvasElement/ILayoutElement/ILayoutGroup |
 | `RectTransform` | ✅ | 见CoreModule |
 | `LayoutGroup` / `Horizontal/Vertical/Grid` | ✅ | Horizontal/VerticalLayoutGroup: CalculateLayoutInput遍历子ILayoutElement、SetLayoutHorizontal/Vertical设置anchoredPosition; GridLayoutGroup: cellSize/spacing/startCorner/constraint |
 | `LayoutElement` | ✅ | minWidth/preferredWidth/flexibleWidth等布局属性 |
@@ -144,6 +144,31 @@
 | `Outline` / `Shadow` / `PositionAsUV1` | ✅ | Shadow顶点偏移effectColor/distanceX/Y、Outline四方向轮廓、PositionAsUV1将位置写入UV1 |
 | `IndexedSet&lt;T&gt;` | ✅ | O(1) Add/Remove/Clear，支持CanvasUpdateRegistry队列 |
 | `BaseInput` | ✅ | mousePosition/mousePresent/touchCount/touchesSupported/GetTouch/IsMouseDown |
+
+---
+
+## 4.5 UnityEngine.UIElements
+
+| 类型 | 状态 | 备注 |
+|------|------|------|
+| `VisualElement` | ✅ | name/classList/children/parent/layout/worldBound/contentRect、Add/Remove/Insert/Q/Query、AddClass/RemoveClass/EnableInClassList/ToggleInClassList、style/resolvedStyle、RegisterCallback/UnregisterCallback事件系统、GeometryChangedEvent/AttachToPanelEvent/DetachFromPanelEvent、SetEnabled/visible/pickingMode/opcacity/transform/tooltip |
+| `ScrollView` | ✅ | **完整Unity 2022功能**：scrollOffset/horizontal/vertical/touchScrollBehavior/scrollDecelerationRate/elasticity/nestedInteractionKind/mouseWheelScrollSize/horizontalPageSize/verticalPageSize、ApplyElasticRubberBand弹性回弹SmoothDamp、惯性滚动ApplyInertia减速、ApplyScrollOffset更新content transform、ScrollTo滚动到子元素、OnScrollWheel滚轮响应、ComputeContentBounds/ComputeViewportBounds计算边界、ScrollTo(VisualElement)/ScrollTo(ChildOf)定位、horizontalScroller/verticalScroller Scroller联动、showHorizontal/showVertical滚动条显示 |
+| `Scroller` | ✅ | value/size/lowValue/highValue/direction/slider、valueChanged事件 |
+| `Button` | ✅ | 继承VisualElement、clicked事件、text属性 |
+| `Label` | ✅ | 继承VisualElement、text属性 |
+| `TextField/PasswordField/IntegerField/FloatField` | ✅ | value属性、ChangeEvent事件 |
+| `Toggle/Slider/Scroller/DropdownField` | ✅ | value属性、ChangeEvent |
+| `ListView/TreeView/TreeViewController` | 🟡 | 基本结构Stub |
+| `IMGUIContainer/IMGUIContainer` | ✅ | onGUIHandler回调、DrawIMGUI绘制 |
+| `VisualTreeAsset/UxmlFactory/UxmlTraits` | ✅ | CloneTree、Load/Save、UxmlAttributeDescription |
+| `StyleSheet/USS` | ✅ | StylePropertyDictionary样式存储、ParseUSSDocument、TryGetProperty/SetProperty/RemoveProperty |
+| `PanelSettings` / `UIDocument` | ✅ | UIDocument(PanelSettings/rootVisualElement/visualTreeAsset) |
+| `EventBase/PropagationPhase` | ✅ | 事件基类、BubbleUp/TrickleDown传播阶段、target/previousParent/eventTypeId |
+| `PointerEventBase/MouseEventBase` | ✅ | position/deltaPosition/button/clickCount/modifiers、PointerDownEvent/MoveEvent/UpEvent/ClickEvent/ScrollWheelEvent |
+| `FocusEvent/ChangeEvent/GeometryChangedEvent` | ✅ | 完整事件类型 |
+| `StyleLength/StyleFloat/StyleColor/StyleInt/StyleEnum` | ✅ | 完整样式结构 |
+| `FlexDirection/JustifyContent/Align/Overflow/Position/Display/Visibility` | ✅ | 完整枚举 |
+| `IBindable/INotifyValueChanged<T>` | ✅ | 接口定义 |
 
 ---
 
@@ -282,18 +307,19 @@
 | 类型 | 状态 | 备注 |
 |------|------|------|
 | `Renderer` | ✅ | material/Materials懒创建、bounds、sortingLayerID/Order、shadowCastingMode/receiveShadows、lightProbeUsage、SetPropertyBlock/GetPropertyBlock |
-| `MaterialPropertyBlock` | ✅ | Dictionary存储SetFloat/Int/Vector/Color/Matrix/Texture、GetFloat |
+| `MaterialPropertyBlock` | ✅ | Dictionary存储SetFloat/Int/Vector/Color/Matrix/Texture/Buffer/ColorArray/VectorArray/FloatArray/MatrixArray、Get*全部系列、SetTexture/SetBuffer、Clear |
 | `MeshRenderer` | ✅ | 继承Renderer |
 | `SkinnedMeshRenderer` | ✅ | sharedMesh/bones/rootBone/quality |
 | `SpriteRenderer` | ✅ | 继承Renderer |
 | `TrailRenderer` / `LineRenderer` | ✅ | TrailRenderer时间老化点记录、LineRenderer SetPosition |
 | `ParticleSystemRenderer` | ✅ | 继承Renderer |
-| `Material` | ✅ | shader/color/renderQueue/shaderKeywords、Dictionary属性SetFloat/GetFloat/SetColor/GetColor/SetTexture等、EnableKeyword/CopyPropertiesFromMaterial/HasProperty |
-| `Shader` | ✅ | name/renderQueue、Find、PropertyToID（Hash）、SetGlobalFloat/Int/Vector/Color/Matrix/Texture、globalMaximumLOD |
-| `ShaderVariantCollection` | ✅ | Add/Remove/Contains/WarmUp/ShaderVariant(shader/pass/keywords) |
-| `ComputeShader/ComputeBuffer` | ✅ | 见 Rendering |
-| `ReflectionProbe` | ✅ | 见Rendering |
-| `LightProbeGroup/LightProbes/SphericalHarmonicsL2` | ✅ | LightProbeGroup(positions)/LightProbes(InterpolateProbe) |
+| `Material` | ✅ | **完整Unity 2022 API**：shader/color/renderQueue/shaderKeywords、Dictionary属性SetFloat/GetFloat/SetColor/GetColor/SetInt/GetInt/SetVector/GetVector/SetMatrix/GetMatrix/SetTexture/GetTexture/SetBuffer/GetBuffer/SetFloatArray/SetColorArray/SetVectorArray/SetMatrixArray、EnableKeyword/DisableKeyword/IsKeywordEnabled/SetKeyword/CopyPropertiesFromMaterial/HasProperty/HasFloat/HasColor/HasInt/HasVector/HasMatrix/HasTexture/HasBuffer、GetPropertyName/GetPropertyCount/FindPass、SetRenderingMode(Opaque/AlphaBlend/AlphaTest/Additive)、Lerp插值、parent/DisableKeyword、GetPassName/passCount、shaderKeywords完整List管理、GetTag |
+| `Shader` | ✅ | **完整ShaderLab/HLSL系统（Unity 2022对齐）**：name/renderQueue/passes/subShaders/properties/tags/keywords/constantBuffers/fallback/customEditor完整解析、ParseShaderSource解析ShaderLab语法、ParseShaderProperties(_Color/_MainTex/_Glossiness/Range等类型+默认值+flags)、ParseShaderTags(RenderPipeline/Queue/RenderType/DisableBatching/ForceNoMirroredLighting等)、ParseSubShaders/ParsePasses(Blend/BlendOp/ZWrite/ZTest/Cull/ColorMask/Offset/Stencil完整渲染状态解析)、ParseShaderKeywords(multi_compile/shader_feature multi_compile_instancing multi_compile_fog multi_compile_light)、ParseConstantBuffers(CBUFFER_START/UnityPerMaterial/UnityPerDraw SRP Batcher兼容检测)、GetPropertyName/FindPropertyIndex/PropertyToID/PropertyToName、SetGlobalFloat/Int/Vector/Color/Matrix/Texture/Buffer/全局属性管理、globalMaximumLOD/globalRenderPipeline/WarmupAllShaders、isInstancingSupported检测multi_compile_instancing/UNITY_INSTANCING_BUFFER/UNITY_VERTEX_INPUT_INSTANCE_ID、GPU Instancing完整支持(UNITY_ACCESS_INSTANCED_PROP/instanceID/SV_InstanceID)、ShaderPropertyFlags(Normal/Texture/HDR/PerRendererData/MainTexture/MainColor/NoScaleOffset)、ShaderPropertyType(Float/Int/Vector/Color/Texture/Matrix/Range)、GetPropertyCount/GetPropertyType/SetPropertyFlags/IsKeywordEnabled/EnableKeyword/DisableKeyword、Keywords系统(GlobalKeyword/LocalKeyword/ShaderKeywordSet/KeywordState)、ShaderVariantCollection(Add/Remove/Contains/WarmUp/ShaderVariant变体管理+WarmUp预编译)、Pass/SubShader结构(BlendState/DepthState/RasterState/StencilState完整渲染状态)、BlendMode/BlendOp/CullMode/CompareFunction/StencilOp/ColorWriteMask/BlendEquation完整枚举、HLSL编译框架(ShaderCompilerPlatform:D3D/Metal/Vulkan/OpenGLCore/GLES2/GLES3/WebGL等全平台、CompileShader/CompileShaderFromSource/SetIncludeHandler/ClearCachedData/Preprocess/ParseHLSL)、ShaderUtil类(GetPropertyCount/GetPropertyType/GetRangeLimits/GetShaderKeywords等)、Shader.dependency/HasPass/FindPassTag/GetDependency、SRP Batcher兼容性检测isSRPBatcherCompatible、变体收集WarmUp/CollectVariants |
+| `ShaderVariantCollection` | ✅ | Add/Remove/RemoveVariant/Contains/WarmUp/WarmUpProgress/ShaderVariant(shader/passName/keywords[])结构、变体warmup模拟+isWarmedUp状态、ShaderVariantCollectionHelper枚举Shader/passes/keywords组合 |
+| `BlendState/DepthState/RasterState/StencilState` | ✅ | 完整渲染状态结构体，BlendMode/BlendOp/CullMode/CompareFunction/StencilOp/ColorWriteMask枚举，Opaque/AlphaBlend/Additive/Modulate预定义状态 |
+| `ComputeShader/ComputeBuffer/GraphicsBuffer` | ✅ | ComputeBuffer(count/stride/SetData/GetData/SetCounterValue/Dispose/SetData(Array)/GetData(Array)/count/stride)、GraphicsBuffer(target/stride/count)、AsyncGPUReadback(Request)、GraphicsFence |
+| `ReflectionProbe` | ✅ | type/mode/importance/intensity/boxProjection/clearFlags/backgroundColor |
+| `LightProbeGroup/LightProbes/SphericalHarmonicsL2` | ✅ | LightProbeGroup(positions)/LightProbes(InterpolateProbe)、SphericalHarmonicsL2完整SH系数 |
 | `LODGroup/LOD/OcclusionArea/OcclusionPortal` | ✅ | LODGroup(LODs/fadeMode/SetLODs/RecalculateBounds/ForceLOD)、LOD(screenRelativeTransitionHeight/renderers)、LODFadeMode |
 
 ---
@@ -447,12 +473,14 @@
 | `EditorApplication` | ✅ | isPlaying/isPaused/isCompiling/playModeStateChanged/update/delayCall/EnterPlaymode/ExitPlaymode/CallDelayed/ExecuteMenuItem |
 | `PlayModeStateChange` | ✅ | EnteredEditMode/ExitingEditMode/EnteredPlayMode/ExitingPlayMode枚举 |
 | `EditorWindow` | ✅ | titleContent/position/Show/Popup/ShowUtility/ShowModalUtility/Focus/Close/Repaint/GetWindow/HasOpenInstances、OnGUI等虚方法、static List&lt;EditorWindow&gt; |
-| `EditorGUI` | ✅ | BeginChangeCheck/EndChangeCheck、Toggle/IntField/FloatField/TextField/ColorField/CurveField/ObjectField/BoundsField/Vector2/3/4Field/EnumField/Popup/MaskField、LabelField/Space/HelpBox/ProgressBar/DropdownButton/Foldout、Begin/EndHorizontal/Vertical/ScrollView、DrawTexture/DrawRect，签名完整 |
-| `EditorGUILayout` | ✅ | 所有EditorGUI方法的自动布局版本（无需Rect参数）、Space/FlexibleSpace/Separator |
+| `EditorGUI` | ✅ | **完整Unity 2022控件**：BeginChangeCheck/EndChangeCheck、Toggle/ToggleLeft/IntField/FloatField/DoubleField/LongField/TextField/PasswordField/TextArea/Delayed*/ColorField/CurveField/GradientField/ObjectField/BoundsField/BoundsIntField/RectField/RectIntField/Vector2Field/Vector2IntField/Vector3Field/Vector3IntField/Vector4Field/EnumPopup/EnumFlagsField/LayerField/LayerMaskField/TagField/MaskField/IntSlider/FloatSlider/Slider、LabelField/Space/HelpBox/ProgressBar/DropdownButton/Foldout/BeginFoldoutHeaderGroup、Begin/EndHorizontal/Vertical/ScrollView/DisabledGroup、Indent/Unindent、DrawTexture/DrawRect/DrawPreviewTexture、PrefixLabel、MinMaxSlider、BoundsField、fieldWidth/labelWidth/indentLevel属性，所有控件带Rect(手动布局)和自动布局两套API签名 |
+| `EditorGUILayout` | ✅ | **完整自动布局版本**：所有EditorGUI方法的自动布局版本（无需Rect参数），Space/FlexibleSpace/Separator、BeginVertical/BeginHorizontal/ScrollView Toggle/TextField/ColorField/EnumPopup/ObjectField/Popup/IntPopup/MaskField/Vector2/3/4Field/IntSlider/FloatSlider/Slider/Delayed*、HelpBox/ProgressBar/Foldout、PropertyField |
+| `EditorStyles` | ✅ | **完整Unity 2022样式**：toolbar/label/boldLabel/boldTextField/miniLabel/miniBoldLabel/largeBoldLabel/centeredGreyMiniLabel/highlightLabel/selectedLabel/redLabel/yellowLabel/whiteLabel/whiteBoldLabel/whiteMiniLabel/radiobutton/textField/button/toolbarButton/toolbarDropDown/toolbarSearchField/toolbarSearchFieldCancelButton/foldout/header/inspectorTitlebar/inspectorDefaultMargins、所有常用GUIStyle静态属性 |
+| `EditorGUIUtility` | ✅ | FindTexture/Load/Load&lt;T&gt;/whiteTexture/scriptIcon/standardScriptIcon/CurrentViewWidth/currentViewWidth/editingTextField/SystemCopyBuffer/systemCopyBuffer/ObjectContent/IconSize/PointsToPixels/PixelsToPoints/pixelsPerPoint |
 | `GUIStyle/GUIStyleState/GUISkin/GUIContent/GUILayoutOption/GUILayoutUtility` | ✅ | GUIContent(text/image/tooltip)、GUIStyleState(textColor/background)、GUIStyle(normal/hover/active/padding/margin/border/font/alignment等)、GUISkin(box/button/label等styles)、GUILayoutOption(Width/Height/MinWidth/MinHeight/MaxWidth/MaxHeight/ExpandWidth/ExpandHeight) |
-| `Handles` | ✅ | PositionHandle/RotationHandle/ScaleHandle、DrawLine/DrawWireCube/DrawWireDisc/DrawDisc/DrawArc/DrawPolyLine/DrawBezier、CapFunction(Cube/Sphere/Cylinder/Cone/Arrow/Dot/RectangleHandleCap) |
-| `SceneView` | ✅ | lastActiveSceneView/camera/orthographic/orthographicSize/pivot/rotation/in2DMode/FrameSelected/LookAt/Repaint |
-| `Selection` | ✅ | activeGameObject/activeTransform/activeObject/objects/gameObjects/transforms/SelectionChanged |
+| `Handles` | ✅ | PositionHandle/RotationHandle/ScaleHandle、DrawLine/DrawWireCube/DrawWireDisc/DrawDisc/DrawArc/DrawPolyLine/DrawBezier、CapFunction(Cube/Sphere/Cylinder/Cone/Arrow/Dot/RectangleHandleCap)、CurrentCamera、color、Matrix4x4矩阵、DrawSolidRectangleWithOutline |
+| `SceneView` | ✅ | **完整Unity 2022 Pro编辑器对齐**：lastActiveSceneView/camera(带CameraType.SceneView)/orthographic/orthographicSize/pivot/rotation/in2DMode、FrameSelected/Frame(Bounds/Transform[])/LookAt/RepaintAll、**完整OnGUI工具栏**（DrawCameraMode下拉Shaded/Wireframe/ShadedWireframe等、2D/3D切换、Lit/Audio/Gizmos开关、视角快速切换Top/Bottom/Front/Back/Left/Right/Persp/Iso按钮、缩放控制-/+）、SceneViewState(showFog/showSkybox/showImageEffects/showParticleSystems/showFlares)、renderMode/drawGizmos/showSelectionOutline/audioPlay、DistanceToCamera/ViewToScreenPoint/ScreenToViewPoint/WorldToScreenPoint/ScreenToWorldPoint、SetupViewRotation/AlignViewToObject/AlignWithView/MoveToView/ResetCameraOrientation、onSceneGUI/beforeSceneGui/duringSceneGui/lastActiveSceneViewChanged事件回调、DrawCreate/GetAllSceneCamerasProjection/SetSceneViewShaderReplace |
+| `Selection` | ✅ | activeGameObject/activeTransform/activeObject/objects/gameObjects/transforms/SelectionChanged、GetFiltered&lt;T&gt;按SelectionMode过滤、SelectionMode枚举(Unfiltered/TopLevel/Deep/Assets/Editable) |
 | `AssetDatabase` | ✅ | Dictionary&lt;string,Object&gt;、LoadAssetAtPath&lt;T&gt;/AssetPathToGUID/GUIDToAssetPath/Contains/Refresh/CreateAsset/DeleteAsset/MoveAsset/CopyAsset/GetAllAssetPaths/FindAssets |
 | `AssetImporter` / `AssetPostprocessor` | ✅ | AssetImporter(assetPath/importSettingsMissing/SaveAndReimport)、TextureImporter(textureType/filterMode/compressionQuality)、ModelImporter(animationType/importMaterials)、AssetPostprocessor虚方法(OnPreprocess/Postprocess Texture/Model/Audio) |
 | `PrefabUtility` | ✅ | InstantiatePrefab/IsPrefabAsset/IsPartOfPrefabInstance/IsAnyPrefabInstanceRoot/GetCorrespondingObjectFromSource/ApplyPrefabInstance/RevertPrefabInstance |
@@ -461,13 +489,17 @@
 | `GenericMenu` | ✅ | AddItem/AddDisabledItem/AddSeparator/ShowAsContext/DropDown、内部MenuItemData列表 |
 | `SerializedObject` / `SerializedProperty` | ✅ | targetObject/targets/ApplyModifiedProperties/FindProperty/Update、反射访问字段、intValue/floatValue/boolValue/stringValue/colorValue/vector2Value/vector3Value/enumValue/objectReferenceValue/arraySize等 |
 | `Editor` | ✅ | target/targets/serializedObject/Repaint、OnInspectorGUI/OnSceneGUI/CreateEditor/DrawDefaultInspector |
-| `BuildPipeline` | ✅ | BuildPlayer(BuildPlayerOptions)、BuildTarget(StandaloneWindows/WebGL/OSX/Linux/Android/iOS)、BuildOptions(Development/AutoRun等) |
-| `BuildReport` / `BuildSummary` / `BuildFile` | ✅ | BuildReport(BuildSummary(BuildFile)) |
-| `BuildPlayerWindow` / `BuildPlayerOptions` | ✅ | BuildPlayerOptions完整结构 |
-| `PlayerSettings` | ✅ | productName/companyName/bundleIdentifier/version/defaultScreenOrientation/scriptingImplementation/apiCompatibilityLevel/strippingLevel/vSyncCount/colorSpace/iOS/Android/WebGL全属性、Dictionary存储 |
+| `BuildPipeline` | ✅ | BuildPlayer(BuildPlayerOptions)完整实现、**完整BuildTarget枚举**(StandaloneWindows/64/OSX/Linux64/Android/iOS/tvOS/VisionOS/WebGL/WSAPlayer/PS4/PS5/XboxOne/XboxOneD3D12/Switch/Lumin/Stadia/EmbeddedLinux)、正确BuildTargetGroup映射、平台扩展名自动匹配(.exe/.apk/.ipa/.app/.x86_64/.appx)、NormalizeOutputPath目录创建、BuildReport/BuildSummary完整结构 |
+| `BuildReport` / `BuildSummary` / `BuildFile` | ✅ | BuildReport(BuildSummary(result/outputPath/totalSize/totalTime/totalErrors/totalWarnings/platform/platformGroup/platformDefaultExtension/buildGuid)) |
+| `BuildPlayerWindow` / `BuildPlayerOptions` | ✅ | BuildPlayerOptions完整结构(scenes/locationPathName/target/targetGroup/options/subtarget/extraScriptingDefines等) |
+| `BuildTarget` / `BuildTargetGroup` / `BuildOptions` | ✅ | BuildTarget完整Unity 2022值、BuildTargetGroup完整映射(iOS=4/Android=7/WebGL=13/Standalone=1/tvOS=25/VisionOS=39等)、BuildOptions完整标志位(Development/AutoRunPlayer/CompressWithLz4/ConnectWithProfiler/AllowDebugging/StrictMode/StripEngineCode/ForceSingleInstance等) |
+| `GraphicsDeviceType` 枚举 | ✅ | 完整支持：Direct3D11(2)/Direct3D12(18)/Vulkan(21)/Metal(16)/OpenGLCore(17)/OpenGLES2(8)/OpenGLES3(11)/WebGL2(28)/WebGPU(29)/Null(4)/PlayStation4(13)/XboxOne(14)/Switch(22)/PlayStation5(26)/XboxOneD3D12(23) |
+| `PlayerSettings` | ✅ | productName/companyName/applicationIdentifier/bundleVersion/buildGUID、runInBackground/defaultScreenWidth/Height、Set/GetGraphicsAPIs按平台返回正确默认图形API数组(Win:D3D11/D3D12/Vulkan/GL; iOS:Metal; Android:Vulkan/GLES3/GLES2; WebGL:WebGL2)、ScriptingBackend(Mono2x/IL2CPP/Wasm/WebAssembly)、iOS/Settings(sdkVersion/targetOSVersion/requireARKit/usageDescriptions)、AndroidSettings(minSdkVersion=24/targetSdkVersion=34/targetArchitectures/bundleVersionCode/keystore)、WebGL设置(memorySize/compressionFormat/linkerTarget/threadsSupport/exceptionSupport)、SetScriptingDefineSymbols、fullScreenMode/resizableWindow/vSyncCount/antiAliasing/colorSpace/stripEngineCode/graphicsJobs、平台特定设置类(iOS/Android嵌套) |
+| `EditorUserBuildSettings` | ✅ | activeBuildTarget/selectedBuildTargetGroup、SwitchActiveBuildTarget切换平台同时override SystemInfo.graphicsDeviceType/deviceType/Application.platform、BuildTargetToBuildTargetGroup完整映射、BuildTargetToRuntimePlatform(iOS→IPhonePlayer/Android→Android/WebGL→WebGLPlayer)、developmentBuild/connectProfiler/allowDebugging、androidBuildSubtarget |
 | `EditorBuildSettings` | ✅ | scenes/activeBuildTarget、EditorBuildSettingsScene(path/enabled) |
+| `AndroidSdkVersions` / `AndroidArchitecture` / `WebGL*Enums` | ✅ | AndroidApiLevel16-34、AndroidArchitecture(ARMv7/ARM64/X86/X86_64/All)、WebGLCompressionFormat(Brotli/Gzip/Disabled)、WebGLLinkerTarget(Asm/Wasm/Both)、WebGLExceptionSupport(None/Explicit/Full)、AndroidGamepadSupportLevel、UIInterfaceOrientationMask |
 | `EditorSceneManager` | ✅ | OpenScene/SaveScene/NewScene/CloseScene/SetActiveScene/MoveSceneAfter/sceneLoaded/sceneClosed等事件 |
-| `ProjectWindow` / `HierarchyWindow` / `InspectorWindow` / `ConsoleWindow` | ✅ | 空类但继承正确 |
+| `ProjectWindow` / `HierarchyWindow` / `InspectorWindow` / `ConsoleWindow` / `SceneViewWindow` | ✅ | **完整Unity 2022 Pro编辑器面板对齐**：ProjectWindow（两栏布局：左侧文件夹树、右侧资源列表+预览、Create菜单、搜索栏、上下文菜单）、HierarchyWindow（场景对象树+搜索+Create菜单+上下文菜单+拖拽重排+AlphabeticalSort/TransformSort）、InspectorWindow（标题栏+组件预览+序列化属性绘制+DefaultInspector+组件上下文菜单+脚本选择+材质球预览）、ConsoleWindow（日志列表+Clear/Collapse/ErrorPause/ErrorLevel过滤+日志计数+Stacktrace）、SceneView（见Handles/SceneView条目），所有窗口样式对齐Unity 2022深色主题配色 |
 | `SettingsProvider` | ✅ | path/label/keywords/guiHandler/OnGUI抽象 |
 | `CompilationPipeline` / `AssemblyBuilder` | ✅ | CompilationStarted/CompilationFinished/assemblyCompilationEvents、AssemblyBuilder(assemblyPath/scriptPaths/extraDefines/build/references) |
 | `PackageManager.Client` / `PackageInfo` | ✅ | Add/Remove/Search/List/Embed/Install/ResetToEditorDefaults、PackageInfo(name/displayName/version/dependencies) |

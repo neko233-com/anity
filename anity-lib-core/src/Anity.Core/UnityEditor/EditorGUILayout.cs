@@ -195,8 +195,7 @@ public static class EditorGUILayout
   {
     _ = options;
     var rect = GetRect();
-    EditorGUI.LabelField(rect, tag);
-    return tag;
+    return EditorGUI.TagField(rect, tag);
   }
 
   public static int LayerField(string label, int layer, params GUILayoutOption[]? options)
@@ -759,5 +758,469 @@ public static class EditorGUILayout
   {
     var rect = GetRect(label);
     return EditorGUI.DelayedDoubleField(rect, value);
+  }
+
+  public static string DelayedTextField(string text, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.DelayedTextField(rect, text);
+  }
+
+  public static int DelayedIntField(int value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.DelayedIntField(rect, value);
+  }
+
+  public static float DelayedFloatField(float value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.DelayedFloatField(rect, value);
+  }
+
+  public static double DelayedDoubleField(double value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.DelayedDoubleField(rect, value);
+  }
+
+  public static string PasswordField(string label, string password, char maskChar = '*', params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.PasswordField(rect, password, maskChar);
+  }
+
+  public static string PasswordField(GUIContent label, string password, char maskChar = '*', params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.PasswordField(rect, password, maskChar);
+  }
+
+  public static float FloatSlider(string label, float value, float leftValue, float rightValue, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.FloatSlider(rect, label, value, leftValue, rightValue);
+  }
+
+  public static float Slider(float value, float leftValue, float rightValue, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Slider(rect, value, leftValue, rightValue);
+  }
+
+  public static float FloatSlider(GUIContent label, float value, float leftValue, float rightValue, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.FloatSlider(rect, label.text, value, leftValue, rightValue);
+  }
+
+  public static int IntSlider(int value, int leftValue, int rightValue, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.IntSlider(rect, value, leftValue, rightValue);
+  }
+
+  public static Vector2Int Vector2IntField(string label, Vector2Int value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Vector2IntField(rect, label, value);
+  }
+
+  public static Vector2Int Vector2IntField(GUIContent label, Vector2Int value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.Vector2IntField(rect, label.text, value);
+  }
+
+  public static Vector3Int Vector3IntField(string label, Vector3Int value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Vector3IntField(rect, label, value);
+  }
+
+  public static Vector3Int Vector3IntField(GUIContent label, Vector3Int value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.Vector3IntField(rect, label.text, value);
+  }
+
+  public static RectInt RectIntField(string label, RectInt value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(18f * 2f);
+    return EditorGUI.RectIntField(rect, label, value);
+  }
+
+  public static RectInt RectIntField(GUIContent label, RectInt value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label, 18f * 2f);
+    return EditorGUI.RectIntField(rect, label.text, value);
+  }
+
+  public static BoundsInt BoundsIntField(string label, BoundsInt value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(18f * 2f);
+    return EditorGUI.BoundsIntField(rect, label, value);
+  }
+
+  public static BoundsInt BoundsIntField(GUIContent label, BoundsInt value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label, 18f * 2f);
+    return EditorGUI.BoundsIntField(rect, label.text, value);
+  }
+
+  public static Enum EnumFlagsField(string label, Enum enumValue, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.EnumFlagsField(rect, label, enumValue);
+  }
+
+  public static Enum EnumFlagsField(GUIContent label, Enum enumValue, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.EnumFlagsField(rect, label, enumValue);
+  }
+
+  public static T EnumFlagsField<T>(string label, T enumValue) where T : struct, Enum
+  {
+    var rect = GetRect();
+    return (T)EditorGUI.EnumFlagsField(rect, label, enumValue);
+  }
+
+  public static T EnumFlagsField<T>(GUIContent label, T enumValue) where T : struct, Enum
+  {
+    var rect = GetRect(label);
+    return (T)EditorGUI.EnumFlagsField(rect, label, enumValue);
+  }
+
+  public static int LayerMaskField(string label, int layerMask, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.LayerMaskField(rect, label, layerMask);
+  }
+
+  public static int LayerMaskField(GUIContent label, int layerMask, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.LayerMaskField(rect, label, layerMask);
+  }
+
+  public static int LayerMaskField(int layerMask, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.LayerMaskField(rect, layerMask);
+  }
+
+  public static string TagField(string label, string tag, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.TagField(rect, label, tag);
+  }
+
+  public static string TagField(GUIContent label, string tag, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.TagField(rect, label, tag);
+  }
+
+  public static Color ColorField(Color value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.ColorField(rect, string.Empty, value);
+  }
+
+  public static Color ColorField(GUIContent label, Color value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.ColorField(rect, label, value);
+  }
+
+  public static Object ObjectField(Object? obj, Type objType, bool allowSceneObjects, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.ObjectField(rect, obj!, objType, allowSceneObjects);
+  }
+
+  public static T ObjectField<T>(T? obj, bool allowSceneObjects, params GUILayoutOption[]? options) where T : class
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.ObjectField<T>(rect, obj, allowSceneObjects);
+  }
+
+  public static AnimationCurve CurveField(AnimationCurve value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.CurveField(rect, string.Empty, value);
+  }
+
+  public static Gradient GradientField(Gradient value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.GradientField(rect, string.Empty, value);
+  }
+
+  public static Bounds BoundsField(Bounds value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(18f * 2f);
+    return EditorGUI.BoundsField(rect, string.Empty, value);
+  }
+
+  public static Rect RectField(Rect value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(18f * 2f);
+    return EditorGUI.RectField(rect, string.Empty, value);
+  }
+
+  public static Vector2 Vector2Field(Vector2 value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Vector2Field(rect, string.Empty, value);
+  }
+
+  public static Vector3 Vector3Field(Vector3 value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Vector3Field(rect, string.Empty, value);
+  }
+
+  public static Vector4 Vector4Field(Vector4 value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Vector4Field(rect, string.Empty, value);
+  }
+
+  public static Vector2Int Vector2IntField(Vector2Int value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Vector2IntField(rect, string.Empty, value);
+  }
+
+  public static Vector3Int Vector3IntField(Vector3Int value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Vector3IntField(rect, string.Empty, value);
+  }
+
+  public static RectInt RectIntField(RectInt value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(18f * 2f);
+    return EditorGUI.RectIntField(rect, string.Empty, value);
+  }
+
+  public static BoundsInt BoundsIntField(BoundsInt value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(18f * 2f);
+    return EditorGUI.BoundsIntField(rect, string.Empty, value);
+  }
+
+  public static int IntField(int value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.IntField(rect, value);
+  }
+
+  public static float FloatField(float value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.FloatField(rect, value);
+  }
+
+  public static double DoubleField(double value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.DoubleField(rect, value);
+  }
+
+  public static long LongField(long value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.LongField(rect, value);
+  }
+
+  public static string TextField(string text, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.TextField(rect, text);
+  }
+
+  public static string TextArea(string text, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(3 * 18f);
+    return EditorGUI.TextArea(rect, text);
+  }
+
+  public static bool Toggle(bool value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Toggle(rect, value);
+  }
+
+  public static bool ToggleLeft(bool value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.ToggleLeft(rect, GUIContent.none, value);
+  }
+
+  public static int Popup(int selectedIndex, string[] displayedOptions, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Popup(rect, selectedIndex, displayedOptions);
+  }
+
+  public static int Popup(int selectedIndex, GUIContent[] displayedOptions, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.Popup(rect, selectedIndex, displayedOptions);
+  }
+
+  public static int IntPopup(int selectedValue, string[] displayedOptions, int[] optionValues, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    var contents = displayedOptions.Select(s => new GUIContent(s)).ToArray();
+    return EditorGUI.IntPopup(rect, selectedValue, contents, optionValues);
+  }
+
+  public static int MaskField(int mask, string[] displayedOptions, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.MaskField(rect, mask, displayedOptions);
+  }
+
+  public static void ProgressBar(Rect position, float value, string text)
+  {
+    EditorGUI.ProgressBar(position, value, text);
+  }
+
+  public static void HelpBox(Rect position, string message, MessageType type)
+  {
+    EditorGUI.HelpBox(position, message, type);
+  }
+
+  public static bool Foldout(bool foldout, GUIContent content, Action action)
+  {
+    _ = action;
+    return Foldout(foldout, content);
+  }
+
+  public static T EnumPopup<T>(T selected) where T : struct, Enum
+  {
+    var rect = GetRect();
+    return EditorGUI.EnumPopup(rect, selected);
+  }
+
+  public static Enum EnumPopup(Enum selected)
+  {
+    var rect = GetRect();
+    return EditorGUI.EnumPopup(rect, selected);
+  }
+
+  public static void Indent()
+  {
+    EditorGUI.Indent();
+  }
+
+  public static void Indent(int indent)
+  {
+    EditorGUI.Indent(indent);
+  }
+
+  public static void Unindent()
+  {
+    EditorGUI.Unindent();
+  }
+
+  public static void LabelField(string label)
+  {
+    var rect = GetRect();
+    EditorGUI.LabelField(rect, label);
+  }
+
+  public static void LabelField(GUIContent label)
+  {
+    var rect = GetRect(label);
+    EditorGUI.LabelField(rect, label);
+  }
+
+  public static void LabelField(string label, GUIStyle style)
+  {
+    var rect = GetRect();
+    EditorGUI.LabelField(rect, label, style);
+  }
+
+  public static void LabelField(GUIContent label, GUIStyle style)
+  {
+    var rect = GetRect(label);
+    EditorGUI.LabelField(rect, label, style);
+  }
+
+  public static void PrefixLabel(GUIContent label, GUIStyle? style = null)
+  {
+    var rect = GetRect(label);
+    EditorGUI.PrefixLabel(rect, 0, label, style);
+  }
+
+  public static bool Button(GUIContent content, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(content);
+    return EditorGUI.Button(rect, content);
+  }
+
+  public static bool Button(GUIContent content, GUIStyle style, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(content);
+    return EditorGUI.Button(rect, content, style);
   }
 }

@@ -264,30 +264,37 @@ public class Renderer : Component
 public class MaterialPropertyBlock
 {
     private readonly Dictionary<int, object> _properties = new();
+    private readonly Dictionary<int, Array> _arrays = new();
     private float[] _shCoefficients = Array.Empty<float>();
     private float[] _occlusionProbes = Array.Empty<float>();
+    private Vector4[] _lightProbeUsage = Array.Empty<Vector4>();
 
-    public bool isEmpty => _properties.Count == 0;
+    public bool isEmpty => _properties.Count == 0 && _arrays.Count == 0;
 
     public void SetFloat(string name, float value) => _properties[Shader.PropertyToID(name)] = value;
     public void SetFloat(int nameID, float value) => _properties[nameID] = value;
     public float GetFloat(string name) => GetFloat(Shader.PropertyToID(name));
-    public float GetFloat(int nameID) => _properties.TryGetValue(nameID, out var v) && v is float f ? f : 0f;
+    public float GetFloat(int nameID) => _properties.TryGetValue(nameID, out var v) ? v switch { float f => f, int i => i, double d => (float)d, _ => 0f } : 0f;
 
     public void SetInt(string name, int value) => _properties[Shader.PropertyToID(name)] = value;
     public void SetInt(int nameID, int value) => _properties[nameID] = value;
     public int GetInt(string name) => GetInt(Shader.PropertyToID(name));
-    public int GetInt(int nameID) => _properties.TryGetValue(nameID, out var v) && v is int i ? i : 0;
+    public int GetInt(int nameID) => _properties.TryGetValue(nameID, out var v) ? v switch { int i => i, float f => (int)f, double d => (int)d, _ => 0 } : 0;
+
+    public bool GetBool(string name) => GetInt(name) != 0;
+    public bool GetBool(int nameID) => GetInt(nameID) != 0;
+    public void SetBool(string name, bool value) => SetInt(name, value ? 1 : 0);
+    public void SetBool(int nameID, bool value) => SetInt(nameID, value ? 1 : 0);
 
     public void SetVector(string name, Vector4 value) => _properties[Shader.PropertyToID(name)] = value;
     public void SetVector(int nameID, Vector4 value) => _properties[nameID] = value;
     public Vector4 GetVector(string name) => GetVector(Shader.PropertyToID(name));
-    public Vector4 GetVector(int nameID) => _properties.TryGetValue(nameID, out var v) && v is Vector4 vec ? vec : Vector4.zero;
+    public Vector4 GetVector(int nameID) => _properties.TryGetValue(nameID, out var v) ? v switch { Vector4 vec => vec, Color c => (Vector4)c, Vector3 v3 => new Vector4(v3.x, v3.y, v3.z, 0), Vector2 v2 => new Vector4(v2.x, v2.y, 0, 0), _ => Vector4.zero } : Vector4.zero;
 
     public void SetColor(string name, Color value) => _properties[Shader.PropertyToID(name)] = value;
     public void SetColor(int nameID, Color value) => _properties[nameID] = value;
     public Color GetColor(string name) => GetColor(Shader.PropertyToID(name));
-    public Color GetColor(int nameID) => _properties.TryGetValue(nameID, out var v) && v is Color c ? c : Color.clear;
+    public Color GetColor(int nameID) => _properties.TryGetValue(nameID, out var v) ? v switch { Color c => c, Vector4 vec => new Color(vec.x, vec.y, vec.z, vec.w), _ => Color.clear } : Color.clear;
 
     public void SetMatrix(string name, Matrix4x4 value) => _properties[Shader.PropertyToID(name)] = value;
     public void SetMatrix(int nameID, Matrix4x4 value) => _properties[nameID] = value;
@@ -300,25 +307,77 @@ public class MaterialPropertyBlock
     public Texture? GetTexture(int nameID) => _properties.TryGetValue(nameID, out var v) && v is Texture t ? t : null;
 
     public void SetBuffer(string name, ComputeBuffer value) => _properties[Shader.PropertyToID(name)] = value;
-    public void SetBuffer(int nameID, ComputeBuffer value) => _properties[nameID] = value;
+    public void SetBuffer(int nameID, ComputeBuffer value) { if (value != null) _properties[nameID] = value; else _properties.Remove(nameID); }
+    public ComputeBuffer GetBuffer(string name) => GetBuffer(Shader.PropertyToID(name));
+    public ComputeBuffer GetBuffer(int nameID) => _properties.TryGetValue(nameID, out var v) && v is ComputeBuffer b ? b : null;
+
+    public void SetBuffer(string name, GraphicsBuffer value) => _properties[Shader.PropertyToID(name)] = value;
+    public void SetBuffer(int nameID, GraphicsBuffer value) { if (value != null) _properties[nameID] = value; else _properties.Remove(nameID); }
+    public GraphicsBuffer GetGraphicsBuffer(string name) => GetGraphicsBuffer(Shader.PropertyToID(name));
+    public GraphicsBuffer GetGraphicsBuffer(int nameID) => _properties.TryGetValue(nameID, out var v) && v is GraphicsBuffer gb ? gb : null;
+
+    public void SetFloatArray(string name, float[] values) { var id = Shader.PropertyToID(name); if (values != null) _arrays[id] = (float[])values.Clone(); else _arrays.Remove(id); }
+    public void SetFloatArray(int nameID, float[] values) { if (values != null) _arrays[nameID] = (float[])values.Clone(); else _arrays.Remove(nameID); }
+    public void SetFloatArray(string name, List<float> values) { var id = Shader.PropertyToID(name); if (values != null) _arrays[id] = values.ToArray(); else _arrays.Remove(id); }
+    public void SetFloatArray(int nameID, List<float> values) { if (values != null) _arrays[nameID] = values.ToArray(); else _arrays.Remove(nameID); }
+    public float[] GetFloatArray(string name) => GetFloatArray(Shader.PropertyToID(name));
+    public float[] GetFloatArray(int nameID) => _arrays.TryGetValue(nameID, out var arr) && arr is float[] f ? (float[])f.Clone() : Array.Empty<float>();
+    public void GetFloatArray(string name, List<float> values) => GetFloatArray(Shader.PropertyToID(name), values);
+    public void GetFloatArray(int nameID, List<float> values) { values?.Clear(); var arr = GetFloatArray(nameID); values?.AddRange(arr); }
+
+    public void SetVectorArray(string name, Vector4[] values) { var id = Shader.PropertyToID(name); if (values != null) _arrays[id] = (Vector4[])values.Clone(); else _arrays.Remove(id); }
+    public void SetVectorArray(int nameID, Vector4[] values) { if (values != null) _arrays[nameID] = (Vector4[])values.Clone(); else _arrays.Remove(nameID); }
+    public void SetVectorArray(string name, List<Vector4> values) { var id = Shader.PropertyToID(name); if (values != null) _arrays[id] = values.ToArray(); else _arrays.Remove(id); }
+    public void SetVectorArray(int nameID, List<Vector4> values) { if (values != null) _arrays[nameID] = values.ToArray(); else _arrays.Remove(nameID); }
+    public Vector4[] GetVectorArray(string name) => GetVectorArray(Shader.PropertyToID(name));
+    public Vector4[] GetVectorArray(int nameID) => _arrays.TryGetValue(nameID, out var arr) && arr is Vector4[] v ? (Vector4[])v.Clone() : Array.Empty<Vector4>();
+    public void GetVectorArray(string name, List<Vector4> values) => GetVectorArray(Shader.PropertyToID(name), values);
+    public void GetVectorArray(int nameID, List<Vector4> values) { values?.Clear(); var arr = GetVectorArray(nameID); values?.AddRange(arr); }
+
+    public void SetColorArray(string name, Color[] values) => SetVectorArray(name, values?.Select(c => (Vector4)c).ToArray());
+    public void SetColorArray(int nameID, Color[] values) => SetVectorArray(nameID, values?.Select(c => (Vector4)c).ToArray());
+    public void SetColorArray(string name, List<Color> values) => SetVectorArray(name, values?.Select(c => (Vector4)c).ToList());
+    public void SetColorArray(int nameID, List<Color> values) => SetVectorArray(nameID, values?.Select(c => (Vector4)c).ToList());
+    public Color[] GetColorArray(string name) => GetColorArray(Shader.PropertyToID(name));
+    public Color[] GetColorArray(int nameID) => GetVectorArray(nameID).Select(v => (Color)v).ToArray();
+    public void GetColorArray(string name, List<Color> values) => GetColorArray(Shader.PropertyToID(name), values);
+    public void GetColorArray(int nameID, List<Color> values) { values?.Clear(); var arr = GetVectorArray(nameID); foreach (var v in arr) values.Add((Color)v); }
+
+    public void SetMatrixArray(string name, Matrix4x4[] values) { var id = Shader.PropertyToID(name); if (values != null) _arrays[id] = (Matrix4x4[])values.Clone(); else _arrays.Remove(id); }
+    public void SetMatrixArray(int nameID, Matrix4x4[] values) { if (values != null) _arrays[nameID] = (Matrix4x4[])values.Clone(); else _arrays.Remove(nameID); }
+    public void SetMatrixArray(string name, List<Matrix4x4> values) { var id = Shader.PropertyToID(name); if (values != null) _arrays[id] = values.ToArray(); else _arrays.Remove(id); }
+    public void SetMatrixArray(int nameID, List<Matrix4x4> values) { if (values != null) _arrays[nameID] = values.ToArray(); else _arrays.Remove(nameID); }
+    public Matrix4x4[] GetMatrixArray(string name) => GetMatrixArray(Shader.PropertyToID(name));
+    public Matrix4x4[] GetMatrixArray(int nameID) => _arrays.TryGetValue(nameID, out var arr) && arr is Matrix4x4[] m ? (Matrix4x4[])m.Clone() : Array.Empty<Matrix4x4>();
+    public void GetMatrixArray(string name, List<Matrix4x4> values) => GetMatrixArray(Shader.PropertyToID(name), values);
+    public void GetMatrixArray(int nameID, List<Matrix4x4> values) { values?.Clear(); var arr = GetMatrixArray(nameID); values?.AddRange(arr); }
+
+    public void SetIntArray(string name, int[] values) { var id = Shader.PropertyToID(name); if (values != null) _arrays[id] = values.Select(v => (float)v).ToArray(); else _arrays.Remove(id); }
+    public void SetIntArray(int nameID, int[] values) { if (values != null) _arrays[nameID] = values.Select(v => (float)v).ToArray(); else _arrays.Remove(nameID); }
+    public void SetIntArray(string name, List<int> values) { var id = Shader.PropertyToID(name); if (values != null) _arrays[id] = values.Select(v => (float)v).ToArray(); else _arrays.Remove(id); }
+    public void SetIntArray(int nameID, List<int> values) { if (values != null) _arrays[nameID] = values.Select(v => (float)v).ToArray(); else _arrays.Remove(nameID); }
 
     public bool HasProperty(string name) => HasProperty(Shader.PropertyToID(name));
-    public bool HasProperty(int nameID) => _properties.ContainsKey(nameID);
+    public bool HasProperty(int nameID) => _properties.ContainsKey(nameID) || _arrays.ContainsKey(nameID);
 
-    public void Clear() => _properties.Clear();
+    public void Clear() { _properties.Clear(); _arrays.Clear(); _shCoefficients = Array.Empty<float>(); _occlusionProbes = Array.Empty<float>(); }
 
-    public void CopySHCoefficientArraysFrom(float[]? coefficients) { if (coefficients != null) _shCoefficients = coefficients; }
+    public void CopySHCoefficientArraysFrom(float[]? coefficients) { if (coefficients != null) _shCoefficients = (float[])coefficients.Clone(); }
     public void CopySHCoefficientArraysFrom(List<float>? coefficients) { if (coefficients != null) _shCoefficients = coefficients.ToArray(); }
-    public void CopyProbeOcclusionArrayFrom(float[]? occlusionProbes) { if (occlusionProbes != null) _occlusionProbes = occlusionProbes; }
+    public void CopySHCoefficientArraysFrom(SphericalHarmonicsL2[] lightProbes) { if (lightProbes != null) { var coeffs = new float[lightProbes.Length * 7 * 4]; _shCoefficients = coeffs; } }
+    public void CopyProbeOcclusionArrayFrom(float[]? occlusionProbes) { if (occlusionProbes != null) _occlusionProbes = (float[])occlusionProbes.Clone(); }
     public void CopyProbeOcclusionArrayFrom(List<float>? occlusionProbes) { if (occlusionProbes != null) _occlusionProbes = occlusionProbes.ToArray(); }
+    public void CopyProbeOcclusionArrayFrom(Vector4[] occlusionProbes) { if (occlusionProbes != null) _lightProbeUsage = (Vector4[])occlusionProbes.Clone(); }
 
     internal void CopyFrom(MaterialPropertyBlock other)
     {
         _properties.Clear();
-        foreach (var kvp in other._properties)
-        {
-            _properties[kvp.Key] = kvp.Value;
-        }
+        _arrays.Clear();
+        foreach (var kvp in other._properties) _properties[kvp.Key] = kvp.Value;
+        foreach (var kvp in other._arrays) _arrays[kvp.Key] = (Array)kvp.Value.Clone();
+        _shCoefficients = (float[])other._shCoefficients.Clone();
+        _occlusionProbes = (float[])other._occlusionProbes.Clone();
+        _lightProbeUsage = (Vector4[])other._lightProbeUsage.Clone();
     }
 }
 

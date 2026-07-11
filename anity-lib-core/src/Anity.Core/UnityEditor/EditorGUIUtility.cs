@@ -6,10 +6,15 @@ namespace UnityEditor
   public static class EditorGUIUtility
   {
     private static readonly System.Collections.Generic.Dictionary<string, Texture2D> _icons = new();
+    private static Texture2D? _whiteTexture;
+    private static Texture2D? _scriptIcon;
+    private static Texture2D? _standardScriptIcon;
     private static int _controlID;
     private static float _pixelsPerPoint = 1f;
     private static Vector2 _mousePosition;
     private static GUIContent _tempContent = new GUIContent();
+    private static string _systemCopyBuffer = string.Empty;
+    private static bool _editingTextField;
 
     public static float pixelsPerPoint
     {
@@ -21,9 +26,47 @@ namespace UnityEditor
     public static float standardVerticalSpacing => 6f;
     public static float inspectorWidth => 330f;
     public static float currentViewWidth { get; set; }
+    public static float CurrentViewWidth { get => currentViewWidth; set => currentViewWidth = value; }
     public static Vector2 currentMousePosition => _mousePosition;
     public static bool isProSkin { get; set; }
+    public static bool editingTextField { get => _editingTextField; set => _editingTextField = value; }
+    public static string systemCopyBuffer { get => _systemCopyBuffer; set => _systemCopyBuffer = value ?? string.Empty; }
+    public static string SystemCopyBuffer { get => systemCopyBuffer; set => systemCopyBuffer = value; }
     public static Color mainBackgroundColor => isProSkin ? new Color(0.22f, 0.22f, 0.22f, 1f) : new Color(0.76f, 0.76f, 0.76f, 1f);
+
+    public static Texture2D whiteTexture
+    {
+      get
+      {
+        if (_whiteTexture == null)
+        {
+          _whiteTexture = new Texture2D(1, 1);
+          _whiteTexture.SetPixel(0, 0, Color.white);
+          _whiteTexture.Apply();
+        }
+        return _whiteTexture;
+      }
+    }
+
+    public static Texture2D scriptIcon
+    {
+      get
+      {
+        if (_scriptIcon == null)
+          _scriptIcon = FindTexture("cs Script Icon");
+        return _scriptIcon;
+      }
+    }
+
+    public static Texture2D standardScriptIcon
+    {
+      get
+      {
+        if (_standardScriptIcon == null)
+          _standardScriptIcon = FindTexture("dll Script Icon");
+        return _standardScriptIcon;
+      }
+    }
 
     public static Texture2D FindTexture(string name)
     {
@@ -39,6 +82,23 @@ namespace UnityEditor
     {
       _ = type;
       return FindTexture(name);
+    }
+
+    public static UnityEngine.Object? Load(string path)
+    {
+      if (string.IsNullOrEmpty(path))
+        return null;
+
+      if (path.EndsWith(".png") || path.EndsWith(".jpg") || path.EndsWith(".gif") || path.EndsWith(".bmp"))
+        return FindTexture(System.IO.Path.GetFileNameWithoutExtension(path));
+
+      return FindTexture(path);
+    }
+
+    public static T Load<T>(string path) where T : UnityEngine.Object
+    {
+      var obj = Load(path);
+      return obj as T;
     }
 
     public static Texture2D IconContent(string name)

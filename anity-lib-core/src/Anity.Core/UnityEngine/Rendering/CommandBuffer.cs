@@ -88,24 +88,6 @@ public struct CommandBufferCommand
     public Matrix4x4[] matrixArrayValue;
 }
 
-public struct RenderTargetIdentifier
-{
-    public int nameID;
-    public Texture texture;
-    public RenderTexture renderTexture;
-    public BuiltinRenderTextureType builtin;
-
-    public RenderTargetIdentifier(BuiltinRenderTextureType type) { nameID = 0; texture = null; renderTexture = null; builtin = type; }
-    public RenderTargetIdentifier(string name) { nameID = Shader.PropertyToID(name); texture = null; renderTexture = null; builtin = BuiltinRenderTextureType.PropertyName; }
-    public RenderTargetIdentifier(int nameID) { this.nameID = nameID; texture = null; renderTexture = null; builtin = BuiltinRenderTextureType.PropertyName; }
-    public RenderTargetIdentifier(Texture tex) { nameID = tex?.GetInstanceID() ?? 0; texture = tex; renderTexture = null; builtin = BuiltinRenderTextureType.RenderTexture; }
-    public RenderTargetIdentifier(RenderTexture rt) { nameID = rt?.GetInstanceID() ?? 0; texture = rt; renderTexture = rt; builtin = BuiltinRenderTextureType.RenderTexture; }
-    public static implicit operator RenderTargetIdentifier(BuiltinRenderTextureType type) => new RenderTargetIdentifier(type);
-    public static implicit operator RenderTargetIdentifier(string name) => new RenderTargetIdentifier(name);
-    public static implicit operator RenderTargetIdentifier(Texture tex) => new RenderTargetIdentifier(tex);
-    public static implicit operator RenderTargetIdentifier(RenderTexture rt) => new RenderTargetIdentifier(rt);
-}
-
 public struct ShaderPassName
 {
     private int _id;
