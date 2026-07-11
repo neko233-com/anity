@@ -283,6 +283,8 @@ public class Dropdown : Selectable, IPointerClickHandler, ISubmitHandler, ICance
     viewportRt.anchorMin = Vector2.zero;
     viewportRt.anchorMax = Vector2.one;
     viewportRt.sizeDelta = Vector2.zero;
+    var viewportImg = viewportGo.AddComponent<Image>();
+    viewportImg.color = new Color(1f, 1f, 1f, 0f);
     var mask = viewportGo.AddComponent<RectMask2D>();
     contentRt.SetParent(viewportRt, false);
     scrollRect.viewport = viewportRt;

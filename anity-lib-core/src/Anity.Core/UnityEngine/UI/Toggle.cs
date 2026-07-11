@@ -7,8 +7,21 @@ public class Toggle : Selectable, IPointerClickHandler, ISubmitHandler, ICanvasE
 {
   [SerializeField] private bool m_IsOn;
   private ToggleEvent _onValueChanged = new();
+  private ToggleGroup? _group;
 
-  public ToggleGroup group;
+  public ToggleGroup? group
+  {
+    get => _group;
+    set
+    {
+      if (_group == value) return;
+      if (IsActive() && _group != null)
+        _group.UnregisterToggle(this);
+      _group = value;
+      if (IsActive() && _group != null)
+        _group.RegisterToggle(this);
+    }
+  }
 
   public bool isOn
   {
@@ -20,10 +33,10 @@ public class Toggle : Selectable, IPointerClickHandler, ISubmitHandler, ICanvasE
   {
     if (m_IsOn == value) return;
     m_IsOn = value;
-    if (sendToGroup && group != null && group.isActiveAndEnabled && IsActive())
+    if (sendToGroup && _group != null && _group.isActiveAndEnabled && IsActive())
     {
-      if (value || !group.allowSwitchOff)
-        group.NotifyToggleOn(this, sendCallback);
+      if (value || !_group.allowSwitchOff)
+        _group.NotifyToggleOn(this, sendCallback);
     }
     PlayEffect();
     if (sendCallback)
@@ -42,15 +55,15 @@ public class Toggle : Selectable, IPointerClickHandler, ISubmitHandler, ICanvasE
   protected override void OnEnable()
   {
     base.OnEnable();
-    if (group != null)
-      group.RegisterToggle(this);
+    if (_group != null)
+      _group.RegisterToggle(this);
     PlayEffect();
   }
 
   protected override void OnDisable()
   {
-    if (group != null)
-      group.UnregisterToggle(this);
+    if (_group != null)
+      _group.UnregisterToggle(this);
     base.OnDisable();
   }
 

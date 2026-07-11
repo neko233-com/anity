@@ -266,7 +266,7 @@ public class Transform : Component, IEnumerable<Transform>
     if (_parent is not null)
     {
       _parent._children.Remove(this);
-      try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged"); } catch { }
+      try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged", null, SendMessageOptions.DontRequireReceiver); } catch { }
     }
 
     Transform? oldParent = _parent;
@@ -298,7 +298,7 @@ public class Transform : Component, IEnumerable<Transform>
     }
 
     _hasChanged = true;
-    try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged"); } catch { }
+    try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged", null, SendMessageOptions.DontRequireReceiver); } catch { }
     for (int i = 0; i < childCount; i++)
     {
       _children[i].OnParentTransformChanged();
@@ -308,7 +308,7 @@ public class Transform : Component, IEnumerable<Transform>
   private void OnParentTransformChanged()
   {
     _hasChanged = true;
-    try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged"); } catch { }
+    try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged", null, SendMessageOptions.DontRequireReceiver); } catch { }
     for (int i = 0; i < childCount; i++)
     {
       _children[i].OnParentTransformChanged();

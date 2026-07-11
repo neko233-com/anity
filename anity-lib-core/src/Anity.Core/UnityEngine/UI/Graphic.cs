@@ -153,6 +153,10 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
       if (_canvasRenderer is null)
       {
         _canvasRenderer = GetComponent<CanvasRenderer>();
+        if (_canvasRenderer is null && gameObject is not null)
+        {
+          _canvasRenderer = gameObject.AddComponent<CanvasRenderer>();
+        }
       }
       return _canvasRenderer;
     }

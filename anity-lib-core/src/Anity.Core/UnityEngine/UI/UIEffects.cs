@@ -208,7 +208,7 @@ public class VertexHelper : IDisposable
 [AddComponentMenu("UI/Effects/Outline")]
 public class Outline : Shadow
 {
-    protected Outline() { }
+    public Outline() { }
 
     public override void ModifyMesh(VertexHelper vh)
     {
