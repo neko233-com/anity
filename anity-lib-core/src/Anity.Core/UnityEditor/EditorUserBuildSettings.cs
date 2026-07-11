@@ -98,3 +98,53 @@ public enum MobileTextureSubtarget
     ETC2,
     ASTC
 }
+
+[Flags]
+public enum AndroidArchitecture
+{
+    None = 0,
+    ARMv7 = 1,
+    ARM64 = 2,
+    X86 = 4,
+    X86_64 = 8,
+    All = ARMv7 | ARM64 | X86 | X86_64
+}
+
+public enum AndroidGamepadSupportLevel
+{
+    Disabled = 0,
+    SupportsDPad = 1,
+    SupportsGamepad = 2
+}
+
+public enum WebGLCompressionFormat
+{
+    Brotli,
+    Gzip,
+    Disabled
+}
+
+public enum WebGLLinkerTarget
+{
+    Asm,
+    Wasm,
+    Both
+}
+
+public enum WebGLExceptionSupport
+{
+    None,
+    ExplicitlyThrownExceptionsOnly,
+    FullWithStacktrace
+}
+
+[Flags]
+public enum UIInterfaceOrientationMask
+{
+    Portrait = 1,
+    PortraitUpsideDown = 2,
+    LandscapeLeft = 4,
+    LandscapeRight = 8,
+    AllButUpsideDown = Portrait | LandscapeLeft | LandscapeRight,
+    All = AllButUpsideDown | PortraitUpsideDown
+}

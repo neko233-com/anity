@@ -217,6 +217,71 @@ public static class PlayerSettings
 
   public static bool IsMobilePlatform(BuildTarget target) => target == BuildTarget.iOS || target == BuildTarget.Android;
   public static bool IsBuildTargetSupported(BuildTargetGroup group) { _ = group; return true; }
+
+  public static string iPhoneSplashScreen { get; set; } = "";
+  public static string iOSSdkVersion { get; set; } = "Device SDK";
+  public static string iOSTargetOSVersionString { get; set; } = "15.0";
+  public static bool iOSRequireARKit { get; set; }
+  public static bool iosShowActivityIndicatorOnLoading { get; set; } = true;
+  public static int iOSScriptCallOptimization { get; set; }
+  public static bool iosUseCustomAppBackgroundBehavior { get; set; }
+  public static bool iosAllowHTTPDownload { get; set; } = true;
+  public static string iOSURLSchemes { get; set; } = "";
+  public static string iOSCameraUsageDescription { get; set; } = "";
+  public static string iOSLocationUsageDescription { get; set; } = "";
+  public static string iOSMicrophoneUsageDescription { get; set; } = "";
+
+  public static AndroidSdkVersions AndroidMinSdkVersion { get; set; } = AndroidSdkVersions.AndroidApiLevel33;
+  public static AndroidSdkVersions AndroidTargetSdkVersion { get; set; } = AndroidSdkVersions.AndroidApiLevel33;
+  public static int AndroidBundleVersionCode { get; set; } = 1;
+  public static string AndroidKeystoreName { get => _androidKeystoreName; set => _androidKeystoreName = value ?? ""; }
+  private static string _androidKeystoreName = "";
+  public static string AndroidKeyAliasName { get; set; } = "";
+  public static bool AndroidUseAPKExpansionFiles { get; set; }
+  public static bool AndroidIsGame { get; set; } = true;
+  public static AndroidGamepadSupportLevel AndroidGamepadSupportLevel { get; set; } = AndroidGamepadSupportLevel.SupportsDPad;
+  public static bool AndroidEnableArmv9SecurityFeatures { get; set; }
+  public static AndroidArchitecture AndroidTargetArchitectures { get; set; } = AndroidArchitecture.ARM64 | AndroidArchitecture.ARMv7;
+  public static MobileTextureSubtarget AndroidTargetSubtarget { get; set; } = MobileTextureSubtarget.Generic;
+  public static bool AndroidValidateAppBundleSize { get; set; } = true;
+
+  public static string WebGLMemorySize { get; set; } = "512";
+  public static WebGLCompressionFormat WebGLCompressionFormat { get; set; } = WebGLCompressionFormat.Brotli;
+  public static WebGLLinkerTarget WebGLLinkerTarget { get; set; } = WebGLLinkerTarget.Wasm;
+  public static bool WebGLThreadsSupport { get; set; }
+  public static bool WebGLDecompressionFallback { get; set; }
+  public static WebGLExceptionSupport WebGLExceptionSupport { get; set; } = WebGLExceptionSupport.None;
+
+  public static string WSMetadataApplicationDescription { get; set; } = "";
+  public static string WSHubPackageName { get; set; } = "";
+
+  public static int defaultScreenOrientationPortrait { get; set; } = 1;
+  public static UIInterfaceOrientationMask defaultInterfaceOrientation { get; set; } = UIInterfaceOrientationMask.AllButUpsideDown;
+  public static bool allowedAutorotateToPortrait { get; set; } = true;
+  public static bool allowedAutorotateToPortraitUpsideDown { get; set; }
+  public static bool allowedAutorotateToLandscapeRight { get; set; } = true;
+  public static bool allowedAutorotateToLandscapeLeft { get; set; } = true;
+  public static bool defaultScreenOrientationLandscape { get; set; } = true;
+
+  public static readonly iOSSettings iOS = new();
+  public static readonly AndroidSettings Android = new();
+}
+
+public class iOSSettings
+{
+  public string sdkVersion { get => PlayerSettings.iOSSdkVersion; set => PlayerSettings.iOSSdkVersion = value; }
+  public string targetOSVersionString { get => PlayerSettings.iOSTargetOSVersionString; set => PlayerSettings.iOSTargetOSVersionString = value; }
+  public bool requireARKit { get => PlayerSettings.iOSRequireARKit; set => PlayerSettings.iOSRequireARKit = value; }
+}
+
+public class AndroidSettings
+{
+  public AndroidSdkVersions minSdkVersion { get => PlayerSettings.AndroidMinSdkVersion; set => PlayerSettings.AndroidMinSdkVersion = value; }
+  public AndroidSdkVersions targetSdkVersion { get => PlayerSettings.AndroidTargetSdkVersion; set => PlayerSettings.AndroidTargetSdkVersion = value; }
+  public int bundleVersionCode { get => PlayerSettings.AndroidBundleVersionCode; set => PlayerSettings.AndroidBundleVersionCode = value; }
+  public string keystoreName { get => PlayerSettings.AndroidKeystoreName; set => PlayerSettings.AndroidKeystoreName = value; }
+  public AndroidArchitecture targetArchitectures { get => PlayerSettings.AndroidTargetArchitectures; set => PlayerSettings.AndroidTargetArchitectures = value; }
+  public bool isGame { get => PlayerSettings.AndroidIsGame; set => PlayerSettings.AndroidIsGame = value; }
 }
 
 public enum StandaloneBuildSubtarget
