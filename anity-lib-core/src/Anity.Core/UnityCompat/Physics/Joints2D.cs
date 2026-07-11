@@ -198,7 +198,8 @@ public sealed class BuoyancyEffector2D : Effector2D
 
 public sealed class CompositeCollider2D : Collider2D
 {
-    public CompositeCollider2D.GenerationType geometryType { get; set; } = CompositeCollider2D.GenerationType.Polygons;
+    public CompositeCollider2DGeometryType geometryType { get; set; } = CompositeCollider2DGeometryType.Polygons;
+    public CompositeCollider2DGenerationType generationType { get; set; } = CompositeCollider2DGenerationType.Synchronous;
     public float vertexDistance { get; set; } = 0.0005f;
     public float offsetDistance { get; set; } = 0.005f;
     private List<Vector2[]> _paths = new();
@@ -206,10 +207,22 @@ public sealed class CompositeCollider2D : Collider2D
 
     public int pathCount => _paths.Count;
 
+    public int vertexCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (var p in _paths) count += p.Length;
+            return count;
+        }
+    }
+
+    public Vector2[] vertices => _generatedPoints;
+
     public void GenerateGeometry()
     {
         _paths.Clear();
-        if (transform == null)
+        if (transform == null || gameObject == null)
         {
             _generatedPoints = new Vector2[]
             {
@@ -222,28 +235,10 @@ public sealed class CompositeCollider2D : Collider2D
             return;
         }
 
-        var colliders = GetComponents<Collider2D>();
         var allPoints = new List<Vector2>();
-        foreach (var col in colliders)
-        {
-            if (col == this || col == null || !col.enabled) continue;
-            var shape = col.GetShape();
-            switch (shape.type)
-            {
-                case ColliderShapeType2D.Box:
-                    var half = shape.size * 0.5f;
-                    allPoints.Add(shape.offset + new Vector2(-half.x, -half.y));
-                    allPoints.Add(shape.offset + new Vector2(half.x, -half.y));
-                    allPoints.Add(shape.offset + new Vector2(half.x, half.y));
-                    allPoints.Add(shape.offset + new Vector2(-half.x, half.y));
-                    break;
-                case ColliderShapeType2D.Polygon:
-                case ColliderShapeType2D.Edge:
-                    if (shape.points != null && shape.points.Length > 0)
-                        allPoints.AddRange(shape.points);
-                    break;
-            }
-        }
+        CollectColliderPoints(gameObject, allPoints);
+        foreach (Transform child in transform)
+            CollectColliderPoints(child.gameObject, allPoints);
 
         if (allPoints.Count < 3)
         {
@@ -257,10 +252,84 @@ public sealed class CompositeCollider2D : Collider2D
         }
         else
         {
-            _generatedPoints = allPoints.ToArray();
+            _generatedPoints = ComputeConvexHull(allPoints.ToArray());
         }
         _paths.Add(_generatedPoints);
     }
+
+    private void CollectColliderPoints(GameObject go, List<Vector2> points)
+    {
+        if (go == null) return;
+        foreach (var col in go.GetComponents<Collider2D>())
+        {
+            if (col == this || col == null || !col.enabled) continue;
+            var shape = col.GetShape();
+            var t = col.transform;
+            switch (shape.type)
+            {
+                case ColliderShapeType2D.Box:
+                    var half = shape.size * 0.5f;
+                    var corners = new[]
+                    {
+                        shape.offset + new Vector2(-half.x, -half.y),
+                        shape.offset + new Vector2(half.x, -half.y),
+                        shape.offset + new Vector2(half.x, half.y),
+                        shape.offset + new Vector2(-half.x, half.y)
+                    };
+                    foreach (var c in corners) points.Add(t != transform ? TransformPoint2D(t, c) : c);
+                    break;
+                case ColliderShapeType2D.Polygon:
+                case ColliderShapeType2D.Edge:
+                    if (shape.points != null)
+                        foreach (var p in shape.points) points.Add(t != transform ? TransformPoint2D(t, p) : p);
+                    break;
+                case ColliderShapeType2D.Circle:
+                    int segments = 16;
+                    float r = shape.size.x * 0.5f;
+                    for (int i = 0; i < segments; i++)
+                    {
+                        float a = (float)i / segments * MathF.PI * 2f;
+                        var pt = shape.offset + new Vector2(MathF.Cos(a) * r, MathF.Sin(a) * r);
+                        points.Add(t != transform ? TransformPoint2D(t, pt) : pt);
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static Vector2 TransformPoint2D(Transform t, Vector2 p)
+    {
+        var pos = t.position;
+        var rot = t.rotation;
+        var scl = t.lossyScale;
+        var scaled = new Vector2(p.x * scl.x, p.y * scl.y);
+        var rotated = rot * new Vector3(scaled.x, scaled.y, 0f);
+        return new Vector2(pos.x + rotated.x, pos.y + rotated.y);
+    }
+
+    private static Vector2[] ComputeConvexHull(Vector2[] points)
+    {
+        if (points.Length < 3) return points;
+        var sorted = new List<Vector2>(points);
+        sorted.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+        var hull = new List<Vector2>();
+        foreach (var p in sorted)
+        {
+            while (hull.Count >= 2 && Cross(hull[hull.Count - 2], hull[hull.Count - 1], p) <= 0) hull.RemoveAt(hull.Count - 1);
+            hull.Add(p);
+        }
+        int lowerCount = hull.Count + 1;
+        for (int i = sorted.Count - 1; i >= 0; i--)
+        {
+            var p = sorted[i];
+            while (hull.Count >= lowerCount && Cross(hull[hull.Count - 2], hull[hull.Count - 1], p) <= 0) hull.RemoveAt(hull.Count - 1);
+            hull.Add(p);
+        }
+        hull.RemoveAt(hull.Count - 1);
+        return hull.Count >= 3 ? hull.ToArray() : points;
+    }
+
+    private static float Cross(Vector2 o, Vector2 a, Vector2 b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
 
     public int GetPath(int index, List<Vector2> points)
     {
@@ -276,17 +345,24 @@ public sealed class CompositeCollider2D : Collider2D
         return (Vector2[])_paths[index].Clone();
     }
 
-    public enum GenerationType
-    {
-        Polygons,
-        Outlines
-    }
-
     internal override ColliderShape2D GetShape()
     {
         if (_generatedPoints.Length == 0) GenerateGeometry();
         return new ColliderShape2D(ColliderShapeType2D.Polygon, offset, Vector2.one, 0f, _generatedPoints, CapsuleDirection2D.Vertical, _paths);
     }
+}
+
+public enum CompositeCollider2DGeometryType
+{
+    Outlines = 0,
+    Polygons = 1
+}
+
+public enum CompositeCollider2DGenerationType
+{
+    Synchronous = 0,
+    WhenTriggered = 1,
+    Manual = 2
 }
 
 public enum EffectorSelection2D

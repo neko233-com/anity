@@ -245,14 +245,9 @@ public class Text : MaskableGraphic, ILayoutElement
     if (_cachedPreferredHeight >= 0f && _cachedText == _text && _cachedFontSize == _fontSize)
       return _cachedPreferredHeight;
 
-    var lineHeight = _fontSize * 1.2f * _lineSpacing;
-    var lines = _text.Split('\n');
-    var numLines = lines.Length;
-    if (numLines == 0) numLines = 1;
-
     _cachedText = _text;
     _cachedFontSize = _fontSize;
-    _cachedPreferredHeight = numLines * lineHeight;
+    _cachedPreferredHeight = _fontSize;
     return _cachedPreferredHeight;
   }
 
@@ -268,45 +263,78 @@ public class Text : MaskableGraphic, ILayoutElement
   {
     vh.Clear();
 
-    if (string.IsNullOrEmpty(_text))
-      return;
-
     var rect = rectTransform != null ? rectTransform.rect : new Rect(0f, 0f, 100f, 100f);
-    var charWidth = _fontSize * 0.5f;
-    var lineHeight = _fontSize * 1.2f * _lineSpacing;
+    var color32 = (Color32)color;
     var actualFontSize = _fontSize;
 
     if (_resizeTextForBestFit)
     {
       actualFontSize = CalculateBestFitSize(rect.width, rect.height);
-      charWidth = actualFontSize * 0.5f;
-      lineHeight = actualFontSize * 1.2f * _lineSpacing;
     }
 
-    var color32 = (Color32)color;
-    var lines = _text.Split('\n');
-    var totalHeight = lines.Length * lineHeight;
-    var verticalStart = GetVerticalStartPosition(rect.height, totalHeight);
+    var charWidth = actualFontSize * 0.5f;
+    var textWidth = _text.Length * charWidth;
+    var textHeight = actualFontSize;
 
-    for (var lineIdx = 0; lineIdx < lines.Length; lineIdx++)
+    float xMin, yMin, xMax, yMax;
+
+    switch (_alignment)
     {
-      var line = lines[lineIdx];
-      var lineWidth = line.Length * charWidth;
-      var horizontalStart = GetHorizontalStartPosition(rect.width, lineWidth);
-      var y = verticalStart - lineIdx * lineHeight;
-
-      if (_verticalOverflow == VerticalWrapMode.Truncate && y < rect.yMin - lineHeight)
+      case TextAnchor.UpperLeft:
+      case TextAnchor.MiddleLeft:
+      case TextAnchor.LowerLeft:
+        xMin = rect.xMin;
+        xMax = rect.xMin + textWidth;
         break;
-
-      for (var charIdx = 0; charIdx < line.Length; charIdx++)
-      {
-        var x = horizontalStart + charIdx * charWidth;
-        if (_horizontalOverflow == HorizontalWrapMode.Wrap && x + charWidth > rect.xMax)
-          break;
-
-        AddCharacterQuad(vh, x, y, charWidth, lineHeight, color32, charIdx, line.Length);
-      }
+      case TextAnchor.UpperRight:
+      case TextAnchor.MiddleRight:
+      case TextAnchor.LowerRight:
+        xMin = rect.xMax - textWidth;
+        xMax = rect.xMax;
+        break;
+      default:
+        xMin = rect.xMin + (rect.width - textWidth) * 0.5f;
+        xMax = xMin + textWidth;
+        break;
     }
+
+    switch (_alignment)
+    {
+      case TextAnchor.UpperLeft:
+      case TextAnchor.UpperCenter:
+      case TextAnchor.UpperRight:
+        yMax = rect.yMax;
+        yMin = rect.yMax - textHeight;
+        break;
+      case TextAnchor.LowerLeft:
+      case TextAnchor.LowerCenter:
+      case TextAnchor.LowerRight:
+        yMin = rect.yMin;
+        yMax = rect.yMin + textHeight;
+        break;
+      default:
+        yMin = rect.yMin + (rect.height - textHeight) * 0.5f;
+        yMax = yMin + textHeight;
+        break;
+    }
+
+    if (_horizontalOverflow == HorizontalWrapMode.Overflow)
+    {
+      xMin = rect.xMin;
+      xMax = rect.xMax;
+    }
+    if (_verticalOverflow == VerticalWrapMode.Overflow)
+    {
+      yMin = rect.yMin;
+      yMax = rect.yMax;
+    }
+
+    vh.AddVert(new Vector3(xMin, yMin, 0f), color32, new Vector2(0f, 0f));
+    vh.AddVert(new Vector3(xMax, yMin, 0f), color32, new Vector2(1f, 0f));
+    vh.AddVert(new Vector3(xMax, yMax, 0f), color32, new Vector2(1f, 1f));
+    vh.AddVert(new Vector3(xMin, yMax, 0f), color32, new Vector2(0f, 1f));
+    vh.AddTriangle(0, 1, 2);
+    vh.AddTriangle(0, 2, 3);
   }
 
   private int CalculateBestFitSize(float availableWidth, float availableHeight)
@@ -314,55 +342,13 @@ public class Text : MaskableGraphic, ILayoutElement
     if (string.IsNullOrEmpty(_text)) return _resizeTextMinSize;
 
     var charWidthRatio = 0.5f;
-    var lineHeightRatio = 1.2f * _lineSpacing;
-    var lines = _text.Split('\n');
-    var maxLineLen = 0;
-    foreach (var line in lines)
-      if (line.Length > maxLineLen) maxLineLen = line.Length;
+    var maxLineLen = _text.Length;
 
     var sizeByWidth = availableWidth / (maxLineLen * charWidthRatio);
-    var sizeByHeight = availableHeight / (lines.Length * lineHeightRatio);
+    var sizeByHeight = availableHeight;
     var bestSize = Mathf.FloorToInt(Mathf.Min(sizeByWidth, sizeByHeight));
 
     return Mathf.Clamp(bestSize, _resizeTextMinSize, Mathf.Min(_resizeTextMaxSize, _fontSize));
-  }
-
-  private float GetHorizontalStartPosition(float rectWidth, float lineWidth)
-  {
-    return _alignment switch
-    {
-      TextAnchor.UpperLeft or TextAnchor.MiddleLeft or TextAnchor.LowerLeft => 0f,
-      TextAnchor.UpperCenter or TextAnchor.MiddleCenter or TextAnchor.LowerCenter => (rectWidth - lineWidth) * 0.5f,
-      TextAnchor.UpperRight or TextAnchor.MiddleRight or TextAnchor.LowerRight => rectWidth - lineWidth,
-      _ => 0f
-    };
-  }
-
-  private float GetVerticalStartPosition(float rectHeight, float totalHeight)
-  {
-    return _alignment switch
-    {
-      TextAnchor.UpperLeft or TextAnchor.UpperCenter or TextAnchor.UpperRight => rectHeight,
-      TextAnchor.MiddleLeft or TextAnchor.MiddleCenter or TextAnchor.MiddleRight => rectHeight - (rectHeight - totalHeight) * 0.5f,
-      TextAnchor.LowerLeft or TextAnchor.LowerCenter or TextAnchor.LowerRight => totalHeight,
-      _ => rectHeight
-    };
-  }
-
-  private void AddCharacterQuad(VertexHelper vh, float x, float y, float w, float h, Color32 color, int charIdx, int lineLen)
-  {
-    var uvOffsetX = (float)charIdx / Mathf.Max(1, lineLen);
-    var uvW = 1f / Mathf.Max(1, lineLen);
-
-    var startIndex = vh.currentVertCount;
-
-    vh.AddVert(new Vector3(x, y - h, 0f), color, new Vector4(uvOffsetX, 0f, 0f, 1f));
-    vh.AddVert(new Vector3(x, y, 0f), color, new Vector4(uvOffsetX, 1f, 0f, 1f));
-    vh.AddVert(new Vector3(x + w, y, 0f), color, new Vector4(uvOffsetX + uvW, 1f, 0f, 1f));
-    vh.AddVert(new Vector3(x + w, y - h, 0f), color, new Vector4(uvOffsetX + uvW, 0f, 0f, 1f));
-
-    vh.AddTriangle(startIndex, startIndex + 1, startIndex + 2);
-    vh.AddTriangle(startIndex, startIndex + 2, startIndex + 3);
   }
 
   public void SetNativeSize()
@@ -370,17 +356,6 @@ public class Text : MaskableGraphic, ILayoutElement
     if (rectTransform is null) return;
     rectTransform.anchorMin = rectTransform.anchorMax;
     rectTransform.sizeDelta = new Vector2(preferredWidth, preferredHeight);
-  }
-
-  protected override void UpdateGeometry()
-  {
-    if (canvasRenderer is null) return;
-    var vh = new VertexHelper();
-    OnPopulateMesh(vh);
-    var verts = new List<UIVertex>();
-    vh.GetUIVertexStream(verts);
-    canvasRenderer.SetVertices(verts);
-    vh.Dispose();
   }
 
   protected override void OnEnable()

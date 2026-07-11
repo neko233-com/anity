@@ -3,15 +3,14 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Threading.Tasks;
 
 namespace UnityEngine;
 
 public class MonoBehaviour : Behaviour
 {
-  private readonly HashSet<Coroutine> _coroutines = new();
-  private readonly Dictionary<string, InvokeInfo> _invokes = new();
-  private bool _started;
+  internal bool _started;
+  private readonly List<Coroutine> _coroutines = new();
+  private readonly Dictionary<string, InvokeCall> _invokeCalls = new();
 
   internal bool IsStarted => _started;
 
@@ -25,8 +24,10 @@ public class MonoBehaviour : Behaviour
   internal void InternalUpdate()
   {
     if (!isActiveAndEnabled) return;
+    if (!_started) InternalStart();
     try { Update(); } catch { }
     TickInvokes();
+    TickCoroutines();
   }
 
   internal void InternalFixedUpdate()
@@ -46,25 +47,25 @@ public class MonoBehaviour : Behaviour
     float currentTime = Time.time;
     var toInvoke = new List<string>();
 
-    foreach (var kvp in _invokes)
+    foreach (var kvp in _invokeCalls)
     {
       var info = kvp.Value;
-      if (info.TargetTime > 0f && currentTime >= info.TargetTime)
+      if (currentTime >= info.nextTime)
       {
         toInvoke.Add(kvp.Key);
-        if (info.RepeatRate > 0f)
+        if (info.repeatRate > 0f)
         {
-          info.TargetTime = currentTime + info.RepeatRate;
-          _invokes[kvp.Key] = info;
+          info.nextTime = currentTime + info.repeatRate;
+          _invokeCalls[kvp.Key] = info;
         }
       }
     }
 
     foreach (var methodName in toInvoke)
     {
-      if (_invokes.TryGetValue(methodName, out var info) && info.RepeatRate <= 0f)
+      if (_invokeCalls.TryGetValue(methodName, out var info) && info.repeatRate <= 0f)
       {
-        _invokes.Remove(methodName);
+        _invokeCalls.Remove(methodName);
       }
 
       var method = GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
@@ -75,61 +76,127 @@ public class MonoBehaviour : Behaviour
     }
   }
 
+  internal void TickCoroutines()
+  {
+    for (int i = _coroutines.Count - 1; i >= 0; i--)
+    {
+      var coroutine = _coroutines[i];
+      if (!TickCoroutine(coroutine))
+      {
+        _coroutines.RemoveAt(i);
+      }
+    }
+  }
+
+  private bool TickCoroutine(Coroutine coroutine)
+  {
+    if (coroutine.Routine == null || coroutine.Finished) return false;
+
+    if (coroutine.WaitTimeLeft > 0f)
+    {
+      coroutine.WaitTimeLeft -= Time.deltaTime;
+      if (coroutine.WaitTimeLeft > 0f) return true;
+      coroutine.WaitingForSeconds = false;
+    }
+
+    if (coroutine.WaitingForFixedUpdate)
+    {
+      return true;
+    }
+
+    if (coroutine.WaitingForEndOfFrame)
+    {
+      coroutine.WaitingForEndOfFrame = false;
+    }
+
+    bool moveNext;
+    try
+    {
+      moveNext = coroutine.Routine.MoveNext();
+    }
+    catch
+    {
+      return false;
+    }
+
+    if (!moveNext)
+    {
+      coroutine.Finished = true;
+      return false;
+    }
+
+    var current = coroutine.Routine.Current;
+    if (current == null)
+    {
+      return true;
+    }
+
+    if (current is WaitForSeconds wait)
+    {
+      coroutine.WaitingForSeconds = true;
+      coroutine.WaitTimeLeft = wait.seconds;
+      return true;
+    }
+
+    if (current is WaitForFixedUpdate)
+    {
+      coroutine.WaitingForFixedUpdate = true;
+      return true;
+    }
+
+    if (current is WaitForEndOfFrame)
+    {
+      coroutine.WaitingForEndOfFrame = true;
+      return true;
+    }
+
+    if (current is CustomYieldInstruction customYield)
+    {
+      coroutine.WaitingForCustomYield = customYield;
+      return true;
+    }
+
+    if (current is Coroutine nestedCoroutine)
+    {
+      coroutine.WaitingForCoroutine = nestedCoroutine;
+      return true;
+    }
+
+    if (current is float seconds)
+    {
+      coroutine.WaitingForSeconds = true;
+      coroutine.WaitTimeLeft = seconds;
+      return true;
+    }
+
+    return true;
+  }
+
+  internal void TickFixedUpdateCoroutines()
+  {
+    foreach (var coroutine in _coroutines)
+    {
+      if (coroutine.WaitingForFixedUpdate)
+      {
+        coroutine.WaitingForFixedUpdate = false;
+      }
+    }
+  }
+
+  internal void TickEndOfFrameCoroutines()
+  {
+  }
+
   public Coroutine StartCoroutine(IEnumerator routine)
   {
     if (routine is null)
     {
-      return new Coroutine(Task.CompletedTask, null, null);
+      return new Coroutine(null);
     }
 
-    var coroutine = new Coroutine(Task.CompletedTask, routine, routine.GetType().FullName);
+    var coroutine = new Coroutine(routine);
     _coroutines.Add(coroutine);
-    StartCoroutineInternal(routine);
     return coroutine;
-  }
-
-  private async void StartCoroutineInternal(IEnumerator routine)
-  {
-    try
-    {
-      while (routine.MoveNext())
-      {
-        var current = routine.Current;
-        if (current is YieldInstruction yield)
-        {
-          await WaitForYield(yield);
-        }
-        else if (current is float seconds)
-        {
-          await Task.Delay((int)(seconds * 1000f));
-        }
-        else
-        {
-          await Task.Yield();
-        }
-      }
-    }
-    catch { }
-  }
-
-  private async Task WaitForYield(YieldInstruction yield)
-  {
-    if (yield is WaitForSeconds wait)
-    {
-      await Task.Delay((int)(wait.seconds * 1000f));
-    }
-    else if (yield is WaitForEndOfFrame)
-    {
-      await Task.Yield();
-    }
-    else if (yield is WaitForFixedUpdate)
-    {
-      await Task.Delay((int)(Time.fixedDeltaTime * 1000f));
-    }
-    else
-    {
-      await Task.Yield();
-    }
   }
 
   public Coroutine StartCoroutine(string methodName)
@@ -139,7 +206,7 @@ public class MonoBehaviour : Behaviour
     {
       return StartCoroutine(enumerator);
     }
-    var coroutine = new Coroutine(Task.CompletedTask, null, methodName);
+    var coroutine = new Coroutine(null) { MethodName = methodName };
     _coroutines.Add(coroutine);
     return coroutine;
   }
@@ -157,12 +224,8 @@ public class MonoBehaviour : Behaviour
 
   public void StopCoroutine(Coroutine? coroutine)
   {
-    if (coroutine is null)
-    {
-      return;
-    }
-
-    coroutine.Cancel();
+    if (coroutine is null) return;
+    coroutine.Finished = true;
     _coroutines.Remove(coroutine);
   }
 
@@ -188,40 +251,39 @@ public class MonoBehaviour : Behaviour
   {
     foreach (var coroutine in _coroutines)
     {
-      coroutine.Cancel();
+      coroutine.Finished = true;
     }
-
     _coroutines.Clear();
   }
 
   public void Invoke(string methodName, float time)
   {
-    _invokes[methodName] = new InvokeInfo(Time.time + MathF.Max(0f, time), -1f);
+    _invokeCalls[methodName] = new InvokeCall(methodName, Time.time + MathF.Max(0f, time), -1f);
   }
 
   public void InvokeRepeating(string methodName, float time, float repeatRate)
   {
-    _invokes[methodName] = new InvokeInfo(Time.time + MathF.Max(0f, time), MathF.Max(0f, repeatRate));
+    _invokeCalls[methodName] = new InvokeCall(methodName, Time.time + MathF.Max(0f, time), MathF.Max(0f, repeatRate));
   }
 
   public void CancelInvoke()
   {
-    _invokes.Clear();
+    _invokeCalls.Clear();
   }
 
   public void CancelInvoke(string methodName)
   {
-    _ = _invokes.Remove(methodName);
+    _ = _invokeCalls.Remove(methodName);
   }
 
   public bool IsInvoking()
   {
-    return _invokes.Count > 0;
+    return _invokeCalls.Count > 0;
   }
 
   public bool IsInvoking(string methodName)
   {
-    return _invokes.ContainsKey(methodName);
+    return _invokeCalls.ContainsKey(methodName);
   }
 
   public void Invoke(Action action, float time)
@@ -250,7 +312,7 @@ public class MonoBehaviour : Behaviour
 
   public Coroutine StartCoroutine(Func<IEnumerator> routine)
   {
-    if (routine is null) return new Coroutine(Task.CompletedTask, null, null);
+    if (routine is null) return new Coroutine(null);
     return StartCoroutine(routine());
   }
 
@@ -289,21 +351,23 @@ public class MonoBehaviour : Behaviour
   protected virtual void OnBecameVisible() {}
   protected virtual void OnBecameInvisible() {}
 
-  internal void InternalAwake() { Awake(); }
-  internal void InternalOnEnable() { OnEnable(); }
-  internal void InternalOnDisable() { OnDisable(); }
-  internal void InternalOnDestroy() { OnDestroy(); }
+  internal void InternalAwake() { try { Awake(); } catch { } }
+  internal void InternalOnEnable() { try { OnEnable(); } catch { } }
+  internal void InternalOnDisable() { try { OnDisable(); } catch { } }
+  internal void InternalOnDestroy() { try { OnDestroy(); } catch { } }
 }
 
-internal struct InvokeInfo
+internal struct InvokeCall
 {
-  public float TargetTime;
-  public float RepeatRate;
+  public string methodName;
+  public float nextTime;
+  public float repeatRate;
 
-  public InvokeInfo(float targetTime, float repeatRate)
+  public InvokeCall(string methodName, float nextTime, float repeatRate)
   {
-    TargetTime = targetTime;
-    RepeatRate = repeatRate;
+    this.methodName = methodName;
+    this.nextTime = nextTime;
+    this.repeatRate = repeatRate;
   }
 }
 

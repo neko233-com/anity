@@ -34,66 +34,79 @@ internal readonly struct ColliderShape2D
   }
 }
 
-internal static class Physics2DWorld
+internal class Physics2DWorld
 {
-  private static readonly List<Collider2D> _colliders = new();
-  private static readonly List<Rigidbody2D> _rigidbodies = new();
-  private static readonly Dictionary<(Collider2D, Collider2D), CollisionState2D> _collisionStates = new();
-  private static readonly Dictionary<(Collider2D, Collider2D), TriggerState2D> _triggerStates = new();
+  internal readonly List<Collider2D> _colliders = new();
+  internal readonly List<Rigidbody2D> _rigidbodies = new();
+  internal readonly Dictionary<(Collider2D, Collider2D), CollisionState2D> _collisionStates = new();
+  internal readonly Dictionary<(Collider2D, Collider2D), TriggerState2D> _triggerStates = new();
 
-  private class CollisionState2D
+  internal class CollisionState2D
   {
     public bool stay;
   }
 
-  private class TriggerState2D
+  internal class TriggerState2D
   {
     public bool stay;
   }
 
-  public static bool queriesHitTriggers { get; set; } = true;
-  public static bool queriesStartInColliders { get; set; } = true;
-  public static int velocityIterations { get; set; } = 8;
-  public static int positionIterations { get; set; } = 3;
-  public static float defaultContactOffset { get; set; } = 0.01f;
-  public static float bounceThreshold { get; set; } = 2f;
-  public static float sleepThreshold { get; set; } = 0.005f;
+  public bool queriesHitTriggers { get; set; } = true;
+  public bool queriesStartInColliders { get; set; } = true;
+  public int velocityIterations { get; set; } = 8;
+  public int positionIterations { get; set; } = 3;
+  public float defaultContactOffset { get; set; } = 0.01f;
+  public float bounceThreshold { get; set; } = 2f;
+  public float sleepThreshold { get; set; } = 0.005f;
+  public Vector2 gravity { get; set; } = new Vector2(0f, -9.81f);
 
-  public static void Register(Collider2D collider)
+  public void Register(Collider2D collider)
   {
     if (collider is null || _colliders.Contains(collider)) return;
     _colliders.Add(collider);
   }
 
-  public static void Unregister(Collider2D collider)
+  public void Unregister(Collider2D collider)
   {
     if (collider is null) return;
     _ = _colliders.Remove(collider);
   }
 
-  public static void Register(Rigidbody2D rigidbody)
+  public void Register(Rigidbody2D rigidbody)
   {
     if (rigidbody is null || _rigidbodies.Contains(rigidbody)) return;
     _rigidbodies.Add(rigidbody);
   }
 
-  public static void Unregister(Rigidbody2D rigidbody)
+  public void Unregister(Rigidbody2D rigidbody)
   {
     if (rigidbody is null) return;
     _ = _rigidbodies.Remove(rigidbody);
   }
 
-  public static IReadOnlyList<Collider2D> GetColliders() => _colliders;
-  public static IReadOnlyList<Rigidbody2D> GetRigidbodies() => _rigidbodies;
+  public IReadOnlyList<Collider2D> GetColliders() => _colliders;
+  public IReadOnlyList<Rigidbody2D> GetRigidbodies() => _rigidbodies;
 
-  public static void Simulate(float deltaTime)
+  public void Simulate(float deltaTime)
   {
     CleanupDestroyed();
+    ApplyGravity(deltaTime);
     IntegrateRigidbodies(deltaTime);
     DetectAndResolveCollisions(deltaTime);
+    SleepCheck();
   }
 
-  private static void CleanupDestroyed()
+  private void ApplyGravity(float deltaTime)
+  {
+    foreach (var rb in _rigidbodies)
+    {
+      if (rb is null || rb.IsDestroyed || !rb.simulated) continue;
+      if (rb.bodyType == RigidbodyType2D.Static || rb.bodyType == RigidbodyType2D.Kinematic) continue;
+      rb.AddForce(gravity * rb.gravityScale * rb.mass * deltaTime, ForceMode2D.Impulse);
+    }
+  }
+
+  private void CleanupDestroyed()
   {
     for (var i = _colliders.Count - 1; i >= 0; i--)
     {
@@ -146,19 +159,18 @@ internal static class Physics2DWorld
     foreach (var key in staleTriggers) _triggerStates.Remove(key);
   }
 
-  private static void IntegrateRigidbodies(float deltaTime)
+  private void IntegrateRigidbodies(float deltaTime)
   {
     foreach (var rb in _rigidbodies)
     {
       if (rb is null || rb.IsDestroyed || !rb.simulated) continue;
       if (rb.bodyType == RigidbodyType2D.Static) continue;
 
-      rb.ApplyForces(deltaTime);
       rb.Integrate(deltaTime);
     }
   }
 
-  private static void DetectAndResolveCollisions(float deltaTime)
+  private void DetectAndResolveCollisions(float deltaTime)
   {
     _ = deltaTime;
     var count = _colliders.Count;
@@ -177,7 +189,7 @@ internal static class Physics2DWorld
       {
         var b = _colliders[j];
         if (b is null || b.IsDestroyed || !b.enabled) continue;
-        if (!CanLayersCollide(a.gameObject?.layer ?? 0, b.gameObject?.layer ?? 0)) continue;
+        if (!Physics2D.IsLayerCollisionEnabled(a.gameObject?.layer ?? 0, b.gameObject?.layer ?? 0)) continue;
 
         var key = MakePair(a, b);
 
@@ -230,17 +242,28 @@ internal static class Physics2DWorld
     }
   }
 
-  private static (Collider2D, Collider2D) MakePair(Collider2D a, Collider2D b)
+  private void SleepCheck()
+  {
+    foreach (var rb in _rigidbodies)
+    {
+      if (rb is null || rb.IsDestroyed || !rb.simulated) continue;
+      if (rb.bodyType != RigidbodyType2D.Dynamic) continue;
+      float kineticEnergy = rb.velocity.sqrMagnitude * rb.mass;
+      rb.isSleeping = kineticEnergy < sleepThreshold;
+    }
+  }
+
+  private (Collider2D, Collider2D) MakePair(Collider2D a, Collider2D b)
   {
     return a.GetHashCode() < b.GetHashCode() ? (a, b) : (b, a);
   }
 
-  public static bool Intersect(Collider2D a, Collider2D b)
+  public bool Intersect(Collider2D a, Collider2D b)
   {
     return Intersect(a, b, out _, out _);
   }
 
-  public static bool Intersect(Collider2D a, Collider2D b, out Vector2 normal, out float penetration)
+  public bool Intersect(Collider2D a, Collider2D b, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -284,7 +307,7 @@ internal static class Physics2DWorld
     return false;
   }
 
-  private static bool IntersectCapsuleAny(Collider2D a, ColliderShape2D shapeA, Vector2 posA, Collider2D b, ColliderShape2D shapeB, Vector2 posB, out Vector2 normal, out float penetration)
+  private bool IntersectCapsuleAny(Collider2D a, ColliderShape2D shapeA, Vector2 posA, Collider2D b, ColliderShape2D shapeB, Vector2 posB, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -316,7 +339,7 @@ internal static class Physics2DWorld
     return false;
   }
 
-  internal static void GetCapsuleTransform(ColliderShape2D shape, Vector2 pos, out Vector2 center, out Vector2 axis, out float radius, out float halfHeight)
+  internal void GetCapsuleTransform(ColliderShape2D shape, Vector2 pos, out Vector2 center, out Vector2 axis, out float radius, out float halfHeight)
   {
     center = pos;
     radius = shape.capsuleDirection == CapsuleDirection2D.Vertical ? shape.size.x * 0.5f : shape.size.y * 0.5f;
@@ -325,7 +348,7 @@ internal static class Physics2DWorld
     axis = shape.capsuleDirection == CapsuleDirection2D.Vertical ? Vector2.up : Vector2.right;
   }
 
-  private static bool IntersectCapsuleCircle(Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, Vector2 circleCenter, float circleRadius, out Vector2 normal, out float penetration)
+  private bool IntersectCapsuleCircle(Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, Vector2 circleCenter, float circleRadius, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -344,7 +367,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool IntersectCapsuleBox(Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, Vector2 boxCenter, Vector2 boxSize, out Vector2 normal, out float penetration)
+  private bool IntersectCapsuleBox(Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, Vector2 boxCenter, Vector2 boxSize, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -383,7 +406,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool IntersectCircleBox(Vector2 circleCenter, float radius, Vector2 boxCenter, Vector2 boxSize, out Vector2 normal, out float penetration)
+  private bool IntersectCircleBox(Vector2 circleCenter, float radius, Vector2 boxCenter, Vector2 boxSize, out Vector2 normal, out float penetration)
   {
     if (IntersectBoxCircle(boxCenter, boxSize, circleCenter, radius, out var n, out penetration))
     {
@@ -395,7 +418,7 @@ internal static class Physics2DWorld
     return false;
   }
 
-  private static bool IntersectCapsuleCapsule(Vector2 cA, Vector2 axisA, float rA, float hA, Vector2 cB, Vector2 axisB, float rB, float hB, out Vector2 normal, out float penetration)
+  private bool IntersectCapsuleCapsule(Vector2 cA, Vector2 axisA, float rA, float hA, Vector2 cB, Vector2 axisB, float rB, float hB, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -416,7 +439,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool IntersectCapsulePolygon(Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, Vector2[] polyPoints, out Vector2 normal, out float penetration)
+  private bool IntersectCapsulePolygon(Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, Vector2[] polyPoints, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -446,7 +469,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool IntersectEdge(Collider2D a, ColliderShape2D shapeA, Vector2 posA, Collider2D b, ColliderShape2D shapeB, Vector2 posB, out Vector2 normal, out float penetration)
+  private bool IntersectEdge(Collider2D a, ColliderShape2D shapeA, Vector2 posA, Collider2D b, ColliderShape2D shapeB, Vector2 posB, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -503,7 +526,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool SegmentIntersectCapsule(Vector2 a, Vector2 b, Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, out Vector2 normal, out float penetration)
+  private bool SegmentIntersectCapsule(Vector2 a, Vector2 b, Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -558,13 +581,13 @@ internal static class Physics2DWorld
     return false;
   }
 
-  private static float DistanceFromPointToSegment(Vector2 point, Vector2 a, Vector2 b)
+  private float DistanceFromPointToSegment(Vector2 point, Vector2 a, Vector2 b)
   {
     var closest = ClosestPointOnSegment(point, a, b);
     return (point - closest).magnitude;
   }
 
-  private static Vector2 GetWorldPosition(Collider2D collider, Vector2 offset)
+  private Vector2 GetWorldPosition(Collider2D collider, Vector2 offset)
   {
     var transform = collider.transform;
     if (transform is null) return offset;
@@ -572,7 +595,7 @@ internal static class Physics2DWorld
     return new Vector2(pos.x + offset.x, pos.y + offset.y);
   }
 
-  private static bool IntersectBoxBox(Vector2 a, Vector2 sizeA, Vector2 b, Vector2 sizeB, out Vector2 normal, out float penetration)
+  private bool IntersectBoxBox(Vector2 a, Vector2 sizeA, Vector2 b, Vector2 sizeB, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -601,7 +624,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool IntersectCircleCircle(Vector2 a, float radiusA, Vector2 b, float radiusB, out Vector2 normal, out float penetration)
+  private bool IntersectCircleCircle(Vector2 a, float radiusA, Vector2 b, float radiusB, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -614,7 +637,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool IntersectBoxCircle(Vector2 boxCenter, Vector2 boxSize, Vector2 circleCenter, float radius, out Vector2 normal, out float penetration)
+  private bool IntersectBoxCircle(Vector2 boxCenter, Vector2 boxSize, Vector2 circleCenter, float radius, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -637,7 +660,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool IntersectPolygonPolygon(Collider2D a, ColliderShape2D shapeA, Vector2 posA, Collider2D b, ColliderShape2D shapeB, Vector2 posB, out Vector2 normal, out float penetration)
+  private bool IntersectPolygonPolygon(Collider2D a, ColliderShape2D shapeA, Vector2 posA, Collider2D b, ColliderShape2D shapeB, Vector2 posB, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -654,7 +677,7 @@ internal static class Physics2DWorld
     return false;
   }
 
-  private static Vector2[] GetPolygonPoints(ColliderShape2D shape, Vector2 pos)
+  private Vector2[] GetPolygonPoints(ColliderShape2D shape, Vector2 pos)
   {
     if (shape.type == ColliderShapeType2D.Box)
     {
@@ -670,7 +693,7 @@ internal static class Physics2DWorld
     return TransformPoints(shape.points, pos);
   }
 
-  internal static Vector2[] TransformPoints(Vector2[] points, Vector2 offset)
+  internal Vector2[] TransformPoints(Vector2[] points, Vector2 offset)
   {
     if (points.Length == 0) return points;
     var result = new Vector2[points.Length];
@@ -679,7 +702,7 @@ internal static class Physics2DWorld
     return result;
   }
 
-  private static bool SegmentIntersectCircle(Vector2 a, Vector2 b, Vector2 center, float radius, out Vector2 normal, out float penetration)
+  private bool SegmentIntersectCircle(Vector2 a, Vector2 b, Vector2 center, float radius, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -692,7 +715,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool SegmentIntersectBox(Vector2 a, Vector2 b, Vector2 center, Vector2 size, out Vector2 normal, out float penetration)
+  private bool SegmentIntersectBox(Vector2 a, Vector2 b, Vector2 center, Vector2 size, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -740,7 +763,7 @@ internal static class Physics2DWorld
     return hit;
   }
 
-  private static bool SegmentsIntersect(Vector2 a1, Vector2 a2, Vector2 b1, Vector2 b2, out Vector2 normal, out float penetration)
+  private bool SegmentsIntersect(Vector2 a1, Vector2 a2, Vector2 b1, Vector2 b2, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0.01f;
@@ -758,7 +781,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  internal static Vector2 ClosestPointOnSegment(Vector2 point, Vector2 a, Vector2 b)
+  internal Vector2 ClosestPointOnSegment(Vector2 point, Vector2 a, Vector2 b)
   {
     var ab = b - a;
     var denom = Vector2.Dot(ab, ab);
@@ -768,7 +791,7 @@ internal static class Physics2DWorld
     return a + ab * t;
   }
 
-  private static (Vector2, Vector2) ClosestPointOnSegments(Vector2 a0, Vector2 a1, Vector2 b0, Vector2 b1)
+  private (Vector2, Vector2) ClosestPointOnSegments(Vector2 a0, Vector2 a1, Vector2 b0, Vector2 b1)
   {
     var u = a1 - a0;
     var v = b1 - b0;
@@ -798,7 +821,7 @@ internal static class Physics2DWorld
     return (a0 + u * s, b0 + v * t);
   }
 
-  private static bool PolygonIntersectPolygon(Vector2[] polyA, Vector2[] polyB, out Vector2 normal, out float penetration)
+  private bool PolygonIntersectPolygon(Vector2[] polyA, Vector2[] polyB, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = float.PositiveInfinity;
@@ -818,7 +841,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool PolygonIntersectBox(Vector2[] poly, Vector2 center, Vector2 size, out Vector2 normal, out float penetration)
+  private bool PolygonIntersectBox(Vector2[] poly, Vector2 center, Vector2 size, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = float.PositiveInfinity;
@@ -840,7 +863,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool PolygonIntersectCircle(Vector2[] poly, Vector2 center, float radius, out Vector2 normal, out float penetration)
+  private bool PolygonIntersectCircle(Vector2[] poly, Vector2 center, float radius, out Vector2 normal, out float penetration)
   {
     normal = Vector2.up;
     penetration = 0f;
@@ -866,7 +889,7 @@ internal static class Physics2DWorld
     return hit;
   }
 
-  private static void AddEdges(Vector2[] poly, List<Vector2> axes)
+  private void AddEdges(Vector2[] poly, List<Vector2> axes)
   {
     for (var i = 0; i < poly.Length; i++)
     {
@@ -878,7 +901,7 @@ internal static class Physics2DWorld
     }
   }
 
-  private static bool TestAxis(Vector2 axis, Vector2[] polyA, Vector2[] polyB, out float penetration)
+  private bool TestAxis(Vector2 axis, Vector2[] polyA, Vector2[] polyB, out float penetration)
   {
     penetration = 0f;
     Project(polyA, axis, out var minA, out var maxA);
@@ -888,7 +911,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static void Project(Vector2[] poly, Vector2 axis, out float min, out float max)
+  private void Project(Vector2[] poly, Vector2 axis, out float min, out float max)
   {
     min = float.PositiveInfinity;
     max = float.NegativeInfinity;
@@ -900,7 +923,7 @@ internal static class Physics2DWorld
     }
   }
 
-  public static bool PointInPolygon(Vector2 point, Vector2[] poly)
+  public bool PointInPolygon(Vector2 point, Vector2[] poly)
   {
     var inside = false;
     for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
@@ -914,14 +937,14 @@ internal static class Physics2DWorld
     return inside;
   }
 
-  private static Vector2 Centroid(Vector2[] poly)
+  private Vector2 Centroid(Vector2[] poly)
   {
     var c = Vector2.zero;
     foreach (var p in poly) c += p;
     return c / Math.Max(1, poly.Length);
   }
 
-  private static void ResolveCollision(Collider2D a, Collider2D b, Vector2 normal, float penetration)
+  private void ResolveCollision(Collider2D a, Collider2D b, Vector2 normal, float penetration)
   {
     var rbA = a.attachedRigidbody;
     var rbB = b.attachedRigidbody;
@@ -945,7 +968,7 @@ internal static class Physics2DWorld
     var friction = CombineFriction(matA?.friction ?? 0.4f, matB?.friction ?? 0.4f, matA?.frictionCombine ?? PhysicsMaterialCombine2D.Average, matB?.frictionCombine ?? PhysicsMaterialCombine2D.Average);
 
     var percent = 0.8f;
-    var slop = 0.01f;
+    var slop = defaultContactOffset;
     var correction = normal * (MathF.Max(penetration - slop, 0f) / totalInvMass * percent);
 
     if (transformA is not null && invMassA > 0f)
@@ -970,7 +993,6 @@ internal static class Physics2DWorld
 
     if (velAlongNormal > 0f) return;
 
-    var bounceThreshold = 2f;
     var bounceFactor = MathF.Abs(velAlongNormal) > bounceThreshold ? bounciness : 0f;
     var impulseScalar = -(1f + bounceFactor) * velAlongNormal / totalInvMass;
     var impulse = normal * impulseScalar;
@@ -998,7 +1020,7 @@ internal static class Physics2DWorld
       rbB.velocity -= frictionImpulse * invMassB;
   }
 
-  private static float CombineBounciness(float a, float b, PhysicsMaterialCombine2D ca, PhysicsMaterialCombine2D cb)
+  private float CombineBounciness(float a, float b, PhysicsMaterialCombine2D ca, PhysicsMaterialCombine2D cb)
   {
     var mode = ca > cb ? ca : cb;
     return mode switch
@@ -1011,7 +1033,7 @@ internal static class Physics2DWorld
     };
   }
 
-  private static float CombineFriction(float a, float b, PhysicsMaterialCombine2D ca, PhysicsMaterialCombine2D cb)
+  private float CombineFriction(float a, float b, PhysicsMaterialCombine2D ca, PhysicsMaterialCombine2D cb)
   {
     var mode = ca > cb ? ca : cb;
     return mode switch
@@ -1024,21 +1046,21 @@ internal static class Physics2DWorld
     };
   }
 
-  private static void DispatchCollisionEnter(Collider2D a, Collider2D b, Vector2 normal)
+  private void DispatchCollisionEnter(Collider2D a, Collider2D b, Vector2 normal)
   {
     var contact = new Collision2D(a, b, normal);
     DispatchMessage(a.gameObject, "OnCollisionEnter2D", contact);
     DispatchMessage(b.gameObject, "OnCollisionEnter2D", contact);
   }
 
-  private static void DispatchCollisionStay(Collider2D a, Collider2D b, Vector2 normal)
+  private void DispatchCollisionStay(Collider2D a, Collider2D b, Vector2 normal)
   {
     var contact = new Collision2D(a, b, normal);
     DispatchMessage(a.gameObject, "OnCollisionStay2D", contact);
     DispatchMessage(b.gameObject, "OnCollisionStay2D", contact);
   }
 
-  private static void DispatchMessage(GameObject? target, string methodName, object? arg)
+  private void DispatchMessage(GameObject? target, string methodName, object? arg)
   {
     if (target is null) return;
     var behaviours = target.GetComponents<MonoBehaviour>();
@@ -1050,9 +1072,10 @@ internal static class Physics2DWorld
         System.Reflection.BindingFlags.Public |
         System.Reflection.BindingFlags.NonPublic,
         null,
-        new[] { arg?.GetType() ?? typeof(object) },
+        System.Reflection.CallingConventions.Any,
+        new[] { arg != null ? arg.GetType() : typeof(object) },
         null);
-      if (method is not null)
+      if (method != null)
       {
         try { method.Invoke(behaviour, new[] { arg }); }
         catch { }
@@ -1060,18 +1083,13 @@ internal static class Physics2DWorld
     }
   }
 
-  public static bool CanLayersCollide(int layerA, int layerB)
-  {
-    return Physics2D.IsLayerCollisionEnabled(layerA, layerB);
-  }
-
-  public static bool LayerMatches(int layer, int layerMask)
+  public bool LayerMatches(int layer, int layerMask)
   {
     if (layerMask == -1) return true;
     return (layerMask & (1 << layer)) != 0;
   }
 
-  public static bool Raycast(Vector2 origin, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask)
+  public bool Raycast(Vector2 origin, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask)
   {
     hitInfo = new RaycastHit2D();
     direction = direction.normalized;
@@ -1111,7 +1129,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  public static List<RaycastHit2D> RaycastAll(Vector2 origin, Vector2 direction, float distance, int layerMask)
+  public List<RaycastHit2D> RaycastAll(Vector2 origin, Vector2 direction, float distance, int layerMask)
   {
     var hits = new List<RaycastHit2D>();
     direction = direction.normalized;
@@ -1142,7 +1160,7 @@ internal static class Physics2DWorld
     return hits;
   }
 
-  private static bool RaycastCollider(Vector2 origin, Vector2 direction, Collider2D col, out float distance, out Vector2 normal)
+  private bool RaycastCollider(Vector2 origin, Vector2 direction, Collider2D col, out float distance, out Vector2 normal)
   {
     distance = float.PositiveInfinity;
     normal = -direction;
@@ -1177,7 +1195,7 @@ internal static class Physics2DWorld
     return false;
   }
 
-  private static bool RaycastCapsule(Vector2 origin, Vector2 direction, Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, out float distance, out Vector2 normal)
+  private bool RaycastCapsule(Vector2 origin, Vector2 direction, Vector2 capCenter, Vector2 capAxis, float capRadius, float capHalfHeight, out float distance, out Vector2 normal)
   {
     distance = float.PositiveInfinity;
     normal = -direction;
@@ -1202,7 +1220,7 @@ internal static class Physics2DWorld
     return hit;
   }
 
-  private static bool RaycastPolygon(Vector2 origin, Vector2 direction, Vector2[] points, out float distance, out Vector2 normal)
+  private bool RaycastPolygon(Vector2 origin, Vector2 direction, Vector2[] points, out float distance, out Vector2 normal)
   {
     distance = float.PositiveInfinity;
     normal = -direction;
@@ -1219,7 +1237,7 @@ internal static class Physics2DWorld
     return hit;
   }
 
-  private static bool RaycastSegment(Vector2 origin, Vector2 direction, Vector2 a, Vector2 b, out float distance, out Vector2 normal)
+  private bool RaycastSegment(Vector2 origin, Vector2 direction, Vector2 a, Vector2 b, out float distance, out Vector2 normal)
   {
     distance = float.PositiveInfinity;
     normal = -direction;
@@ -1237,7 +1255,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool RaycastBox(Vector2 origin, Vector2 direction, Vector2 center, Vector2 size, out float distance, out Vector2 normal)
+  private bool RaycastBox(Vector2 origin, Vector2 direction, Vector2 center, Vector2 size, out float distance, out Vector2 normal)
   {
     distance = float.PositiveInfinity;
     normal = -direction;
@@ -1290,7 +1308,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static bool RaycastCircle(Vector2 origin, Vector2 direction, Vector2 center, float radius, out float distance, out Vector2 normal)
+  private bool RaycastCircle(Vector2 origin, Vector2 direction, Vector2 center, float radius, out float distance, out Vector2 normal)
   {
     distance = float.PositiveInfinity;
     normal = -direction;
@@ -1309,7 +1327,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  public static bool OverlapCircle(Vector2 point, float radius, int layerMask, out Collider2D[] results)
+  public bool OverlapCircle(Vector2 point, float radius, int layerMask, out Collider2D[] results)
   {
     var list = new List<Collider2D>();
     foreach (var col in _colliders)
@@ -1325,7 +1343,7 @@ internal static class Physics2DWorld
     return results.Length > 0;
   }
 
-  private static bool TryOverlapShapeCircle(ColliderShape2D shape, Vector2 center, Vector2 point, float radius)
+  private bool TryOverlapShapeCircle(ColliderShape2D shape, Vector2 center, Vector2 point, float radius)
   {
     if (shape.type == ColliderShapeType2D.Circle)
       return (center - point).magnitude <= radius + shape.radius;
@@ -1341,7 +1359,7 @@ internal static class Physics2DWorld
     return false;
   }
 
-  public static bool OverlapBox(Vector2 point, Vector2 size, float angle, int layerMask, out Collider2D[] results)
+  public bool OverlapBox(Vector2 point, Vector2 size, float angle, int layerMask, out Collider2D[] results)
   {
     _ = angle;
     var list = new List<Collider2D>();
@@ -1358,7 +1376,7 @@ internal static class Physics2DWorld
     return results.Length > 0;
   }
 
-  private static bool TryOverlapShapeBox(ColliderShape2D shape, Vector2 center, Vector2 point, Vector2 size)
+  private bool TryOverlapShapeBox(ColliderShape2D shape, Vector2 center, Vector2 point, Vector2 size)
   {
     if (shape.type == ColliderShapeType2D.Box)
       return IntersectBoxBox(point, size, center, shape.size, out _, out _);
@@ -1374,7 +1392,7 @@ internal static class Physics2DWorld
     return false;
   }
 
-  public static bool OverlapCapsule(Vector2 point, Vector2 size, CapsuleDirection2D dir, int layerMask, out Collider2D[] results)
+  public bool OverlapCapsule(Vector2 point, Vector2 size, CapsuleDirection2D dir, int layerMask, out Collider2D[] results)
   {
     var list = new List<Collider2D>();
     var shape = new ColliderShape2D(ColliderShapeType2D.Capsule, Vector2.zero, size, 0f, null, dir);
@@ -1391,7 +1409,7 @@ internal static class Physics2DWorld
     return results.Length > 0;
   }
 
-  public static bool OverlapPoint(Vector2 point, int layerMask, out Collider2D[] results)
+  public bool OverlapPoint(Vector2 point, int layerMask, out Collider2D[] results)
   {
     var list = new List<Collider2D>();
     foreach (var col in _colliders)
@@ -1425,7 +1443,7 @@ internal static class Physics2DWorld
     return results.Length > 0;
   }
 
-  public static bool OverlapArea(Vector2 pointA, Vector2 pointB, int layerMask, out Collider2D[] results)
+  public bool OverlapArea(Vector2 pointA, Vector2 pointB, int layerMask, out Collider2D[] results)
   {
     var min = new Vector2(MathF.Min(pointA.x, pointB.x), MathF.Min(pointA.y, pointB.y));
     var max = new Vector2(MathF.Max(pointA.x, pointB.x), MathF.Max(pointA.y, pointB.y));
@@ -1434,26 +1452,16 @@ internal static class Physics2DWorld
     return OverlapBox(center, size, 0f, layerMask, out results);
   }
 
-  public static bool BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, int layerMask, out RaycastHit2D hitInfo)
+  public bool CircleCast(Vector2 origin, float radius, Vector2 direction, float distance, int layerMask, out RaycastHit2D hitInfo)
   {
     hitInfo = new RaycastHit2D();
     direction = direction.normalized;
-    if (direction.magnitude < 1e-6f || distance <= 0f) return false;
-    _ = angle;
+    if (direction.magnitude < 1e-6f) return false;
 
     var closest = distance;
-    Collider2D? closestCol = null;
+    Collider2D closestCol = null;
     Vector2 closestNormal = -direction;
     Vector2 closestPoint = origin;
-
-    var half = size * 0.5f;
-    var corners = new[]
-    {
-      origin + new Vector2(-half.x, -half.y),
-      origin + new Vector2(half.x, -half.y),
-      origin + new Vector2(half.x, half.y),
-      origin + new Vector2(-half.x, half.y)
-    };
 
     foreach (var col in _colliders)
     {
@@ -1461,20 +1469,12 @@ internal static class Physics2DWorld
       if (!LayerMatches(col.gameObject?.layer ?? 0, layerMask)) continue;
       if (col.isTrigger && !queriesHitTriggers) continue;
 
-      if (TryOverlapShapeBox(col.GetShape(), GetWorldPosition(col, col.GetShape().offset), origin, size))
+      if (CircleCastCollider(origin, radius, direction, col, distance, out var t, out var n, out var pt) && t < closest && t >= -1e-4f)
       {
-        if (!queriesStartInColliders) continue;
-      }
-
-      foreach (var corner in corners)
-      {
-        if (RaycastCollider(corner, direction, col, out var t, out var n) && t < closest && t >= -1e-4f)
-        {
-          closest = t;
-          closestCol = col;
-          closestNormal = n;
-          closestPoint = corner + direction * MathF.Max(0f, t);
-        }
+        closest = t;
+        closestCol = col;
+        closestNormal = n;
+        closestPoint = pt;
       }
     }
 
@@ -1493,255 +1493,125 @@ internal static class Physics2DWorld
     return true;
   }
 
-  public static List<RaycastHit2D> BoxCastAll(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, int layerMask)
+  private bool CircleCastCollider(Vector2 origin, float radius, Vector2 direction, Collider2D col, float maxDist, out float distance, out Vector2 normal, out Vector2 point)
   {
-    var hits = new List<RaycastHit2D>();
-    direction = direction.normalized;
-    if (direction.magnitude < 1e-6f || distance <= 0f) return hits;
-    _ = angle;
+    distance = float.PositiveInfinity;
+    normal = -direction;
+    point = origin;
+    var shape = col.GetShape();
+    var center = GetWorldPosition(col, shape.offset);
 
-    var half = size * 0.5f;
-    var corners = new[]
+    if (shape.type == ColliderShapeType2D.Circle)
     {
-      origin + new Vector2(-half.x, -half.y), origin + new Vector2(half.x, -half.y),
-      origin + new Vector2(half.x, half.y), origin + new Vector2(-half.x, half.y)
-    };
-
-    foreach (var col in _colliders)
-    {
-      if (col is null || col.IsDestroyed || !col.enabled) continue;
-      if (!LayerMatches(col.gameObject?.layer ?? 0, layerMask)) continue;
-      if (col.isTrigger && !queriesHitTriggers) continue;
-
-      var bestT = float.PositiveInfinity;
-      var bestN = -direction;
-      var bestP = origin;
-
-      foreach (var corner in corners)
-      {
-        if (RaycastCollider(corner, direction, col, out var t, out var n) && t <= distance && t < bestT && t >= -1e-4f)
-        {
-          bestT = t; bestN = n; bestP = corner + direction * MathF.Max(0f, t);
-        }
-      }
-
-      if (bestT <= distance)
-      {
-        hits.Add(new RaycastHit2D
-        {
-          collider = col, rigidbody = col.attachedRigidbody, transform = col.transform,
-          point = bestP, normal = bestN, distance = MathF.Max(0f, bestT), fraction = MathF.Max(0f, bestT) / distance
-        });
-      }
+      return RaycastCircle(origin, direction, center, shape.radius + radius, out distance, out normal);
     }
-    hits.Sort((a, b) => a.distance.CompareTo(b.distance));
-    return hits;
-  }
-
-  public static bool CircleCast(Vector2 origin, float radius, Vector2 direction, float distance, int layerMask, out RaycastHit2D hitInfo)
-  {
-    hitInfo = new RaycastHit2D();
-    direction = direction.normalized;
-    if (direction.magnitude < 1e-6f || distance <= 0f) return false;
-
-    var closest = distance;
-    Collider2D? closestCol = null;
-    Vector2 closestNormal = -direction;
-
-    foreach (var col in _colliders)
+    if (shape.type == ColliderShapeType2D.Box)
     {
-      if (col is null || col.IsDestroyed || !col.enabled) continue;
-      if (!LayerMatches(col.gameObject?.layer ?? 0, layerMask)) continue;
-      if (col.isTrigger && !queriesHitTriggers) continue;
-
-      var shape = col.GetShape();
-      var center = GetWorldPosition(col, shape.offset);
-
-      float t;
-      Vector2 n;
-      bool hit;
-
-      if (shape.type == ColliderShapeType2D.Circle)
+      var expandedSize = shape.size + new Vector2(radius * 2f, radius * 2f);
+      if (RaycastBox(origin, direction, center, expandedSize, out var t, out var n))
       {
-        hit = RaycastCircle(origin, direction, center, shape.radius + radius, out t, out n);
-      }
-      else if (shape.type == ColliderShapeType2D.Box)
-      {
-        hit = RaycastBoxExpanded(origin, direction, center, shape.size, radius, out t, out n);
-      }
-      else if (shape.type == ColliderShapeType2D.Capsule)
-      {
-        GetCapsuleTransform(shape, center, out var cC, out var cA, out var cR, out var cH);
-        hit = RaycastCapsule(origin, direction, cC, cA, cR + radius, cH, out t, out n);
-      }
-      else
-      {
-        hit = false; t = float.PositiveInfinity; n = -direction;
-      }
-
-      if (hit && t < closest && t >= -1e-4f)
-      {
-        closest = t; closestCol = col; closestNormal = n;
-      }
-    }
-
-    if (closestCol is null) return false;
-
-    var pt = origin + direction * MathF.Max(0f, closest);
-    hitInfo = new RaycastHit2D
-    {
-      collider = closestCol, rigidbody = closestCol.attachedRigidbody, transform = closestCol.transform,
-      point = pt, normal = closestNormal, distance = MathF.Max(0f, closest), fraction = MathF.Max(0f, closest) / distance
-    };
-    return true;
-  }
-
-  private static bool RaycastBoxExpanded(Vector2 origin, Vector2 direction, Vector2 boxCenter, Vector2 boxSize, float expand, out float distance, out Vector2 normal)
-  {
-    var expandedSize = boxSize + new Vector2(expand * 2f, expand * 2f);
-    return RaycastBox(origin, direction, boxCenter, expandedSize, out distance, out normal);
-  }
-
-  public static List<RaycastHit2D> CircleCastAll(Vector2 origin, float radius, Vector2 direction, float distance, int layerMask)
-  {
-    var hits = new List<RaycastHit2D>();
-    direction = direction.normalized;
-    if (direction.magnitude < 1e-6f || distance <= 0f) return hits;
-
-    foreach (var col in _colliders)
-    {
-      if (col is null || col.IsDestroyed || !col.enabled) continue;
-      if (!LayerMatches(col.gameObject?.layer ?? 0, layerMask)) continue;
-      if (col.isTrigger && !queriesHitTriggers) continue;
-
-      var shape = col.GetShape();
-      var center = GetWorldPosition(col, shape.offset);
-      bool hit; float t; Vector2 n;
-
-      if (shape.type == ColliderShapeType2D.Circle)
-        hit = RaycastCircle(origin, direction, center, shape.radius + radius, out t, out n);
-      else if (shape.type == ColliderShapeType2D.Box)
-        hit = RaycastBoxExpanded(origin, direction, center, shape.size, radius, out t, out n);
-      else if (shape.type == ColliderShapeType2D.Capsule)
-      {
-        GetCapsuleTransform(shape, center, out var cC, out var cA, out var cR, out var cH);
-        hit = RaycastCapsule(origin, direction, cC, cA, cR + radius, cH, out t, out n);
-      }
-      else
-      { hit = false; t = float.PositiveInfinity; n = -direction; }
-
-      if (hit && t <= distance && t >= -1e-4f)
-      {
-        var pt = origin + direction * MathF.Max(0f, t);
-        hits.Add(new RaycastHit2D
-        {
-          collider = col, rigidbody = col.attachedRigidbody, transform = col.transform,
-          point = pt, normal = n, distance = MathF.Max(0f, t), fraction = MathF.Max(0f, t) / distance
-        });
-      }
-    }
-    hits.Sort((a, b) => a.distance.CompareTo(b.distance));
-    return hits;
-  }
-
-  public static bool CapsuleCast(Vector2 origin, Vector2 size, CapsuleDirection2D directionType, float angle, Vector2 castDirection, float distance, int layerMask, out RaycastHit2D hitInfo)
-  {
-    _ = angle;
-    hitInfo = new RaycastHit2D();
-    castDirection = castDirection.normalized;
-    if (castDirection.magnitude < 1e-6f || distance <= 0f) return false;
-
-    var radius = directionType == CapsuleDirection2D.Vertical ? size.x * 0.5f : size.y * 0.5f;
-    var height = directionType == CapsuleDirection2D.Vertical ? size.y : size.x;
-    var halfH = Math.Max(0f, height * 0.5f - radius);
-    var axis = directionType == CapsuleDirection2D.Vertical ? Vector2.up : Vector2.right;
-    var p0 = origin - axis * halfH;
-    var p1 = origin + axis * halfH;
-
-    var closest = distance;
-    Collider2D? closestCol = null;
-    Vector2 closestNormal = -castDirection;
-
-    bool TestPoint(Vector2 p)
-    {
-      foreach (var col in _colliders)
-      {
-        if (col is null || col.IsDestroyed || !col.enabled) continue;
-        if (!LayerMatches(col.gameObject?.layer ?? 0, layerMask)) continue;
-        if (col.isTrigger && !queriesHitTriggers) continue;
-        var shape = col.GetShape();
-        var c = GetWorldPosition(col, shape.offset);
-        bool hit; float t; Vector2 n;
-        if (shape.type == ColliderShapeType2D.Circle)
-          hit = RaycastCircle(p, castDirection, c, shape.radius + radius, out t, out n);
-        else if (shape.type == ColliderShapeType2D.Box)
-          hit = RaycastBoxExpanded(p, castDirection, c, shape.size, radius, out t, out n);
-        else if (shape.type == ColliderShapeType2D.Capsule)
-        {
-          GetCapsuleTransform(shape, c, out var cc, out var ca, out var cr, out var ch);
-          hit = RaycastCapsule(p, castDirection, cc, ca, cr + radius, ch, out t, out n);
-        }
-        else { hit = false; t = float.PositiveInfinity; n = -castDirection; }
-        if (hit && t < closest && t >= -1e-4f)
-        { closest = t; closestCol = col; closestNormal = n; return true; }
+        distance = t;
+        normal = n;
+        point = origin + direction * t - n * radius;
+        return true;
       }
       return false;
     }
-
-    TestPoint(p0);
-    TestPoint(p1);
-    var steps = Math.Max(4, (int)(halfH * 2f / Math.Max(radius * 0.25f, 0.01f)));
-    for (var i = 1; i < steps; i++)
+    if (shape.type == ColliderShapeType2D.Capsule)
     {
-      TestPoint(Vector2.Lerp(p0, p1, i / (float)steps));
+      GetCapsuleTransform(shape, center, out var cC, out var cA, out var cR, out var cH);
+      return RaycastCapsule(origin, direction, cC, cA, cR + radius, cH, out distance, out normal);
+    }
+    if (shape.type == ColliderShapeType2D.Polygon || shape.type == ColliderShapeType2D.Edge)
+    {
+      return RaycastPolygon(origin, direction, TransformPoints(shape.points, center), out distance, out normal);
+    }
+    return false;
+  }
+
+  public bool BoxCast(Vector2 origin, Vector2 size, float angle, Vector2 direction, float distance, int layerMask, out RaycastHit2D hitInfo)
+  {
+    hitInfo = new RaycastHit2D();
+    direction = direction.normalized;
+    if (direction.magnitude < 1e-6f) return false;
+
+    var closest = distance;
+    Collider2D closestCol = null;
+    Vector2 closestNormal = -direction;
+    Vector2 closestPoint = origin;
+
+    foreach (var col in _colliders)
+    {
+      if (col is null || col.IsDestroyed || !col.enabled) continue;
+      if (!LayerMatches(col.gameObject?.layer ?? 0, layerMask)) continue;
+      if (col.isTrigger && !queriesHitTriggers) continue;
+
+      if (BoxCastCollider(origin, size, angle, direction, col, distance, out var t, out var n, out var pt) && t < closest && t >= -1e-4f)
+      {
+        closest = t;
+        closestCol = col;
+        closestNormal = n;
+        closestPoint = pt;
+      }
     }
 
     if (closestCol is null) return false;
 
-    var pt = origin + castDirection * MathF.Max(0f, closest);
     hitInfo = new RaycastHit2D
     {
-      collider = closestCol, rigidbody = closestCol.attachedRigidbody, transform = closestCol.transform,
-      point = pt, normal = closestNormal, distance = MathF.Max(0f, closest), fraction = MathF.Max(0f, closest) / distance
+      collider = closestCol,
+      rigidbody = closestCol.attachedRigidbody,
+      transform = closestCol.transform,
+      point = closestPoint,
+      normal = closestNormal,
+      distance = MathF.Max(0f, closest),
+      fraction = MathF.Max(0f, closest) / distance
     };
     return true;
   }
 
-  public static int GetContacts(Collider2D collider, Collider2D[] results)
+  private bool BoxCastCollider(Vector2 origin, Vector2 size, float angle, Vector2 direction, Collider2D col, float maxDist, out float distance, out Vector2 normal, out Vector2 point)
   {
-    if (results is null || results.Length == 0) return 0;
-    var count = 0;
-    foreach (var col in _colliders)
+    distance = float.PositiveInfinity;
+    normal = -direction;
+    point = origin;
+    var shape = col.GetShape();
+    var center = GetWorldPosition(col, shape.offset);
+    _ = angle;
+
+    if (shape.type == ColliderShapeType2D.Box)
     {
-      if (col is null || col == collider || col.IsDestroyed || !col.enabled) continue;
-      if (!CanLayersCollide(collider.gameObject?.layer ?? 0, col.gameObject?.layer ?? 0)) continue;
-      if (Intersect(collider, col))
+      var expandedSize = shape.size + size;
+      if (RaycastBox(origin, direction, center, expandedSize, out var t, out var n))
       {
-        if (count < results.Length) results[count++] = col;
+        distance = t;
+        normal = n;
+        point = origin + direction * t;
+        return true;
       }
     }
-    return count;
+    else if (shape.type == ColliderShapeType2D.Circle)
+    {
+      var half = size * 0.5f;
+      if (RaycastBox(origin, direction, center, new Vector2(shape.radius * 2f + half.x * 2f, shape.radius * 2f + half.y * 2f), out var t, out var n))
+      {
+        distance = t;
+        normal = n;
+        point = origin + direction * t;
+        return true;
+      }
+    }
+    return false;
   }
 
-  public static int GetContacts(Vector2 point, Collider2D[] results)
+  public bool CapsuleCast(Vector2 origin, Vector2 size, CapsuleDirection2D directionType, float angle, Vector2 direction, float distance, int layerMask, out RaycastHit2D hitInfo)
   {
-    if (results is null || results.Length == 0) return 0;
-    var count = 0;
-    foreach (var col in _colliders)
-    {
-      if (col is null || col.IsDestroyed || !col.enabled) continue;
-      var shape = col.GetShape();
-      var c = GetWorldPosition(col, shape.offset);
-      bool overlap = false;
-      if (shape.type == ColliderShapeType2D.Circle)
-        overlap = (c - point).magnitude <= shape.radius;
-      else if (shape.type == ColliderShapeType2D.Box)
-      {
-        var h = shape.size * 0.5f;
-        overlap = point.x >= c.x - h.x && point.x <= c.x + h.x && point.y >= c.y - h.y && point.y <= c.y + h.y;
-      }
-      if (overlap && count < results.Length) results[count++] = col;
-    }
-    return count;
+    hitInfo = new RaycastHit2D();
+    direction = direction.normalized;
+    if (direction.magnitude < 1e-6f) return false;
+    _ = angle;
+
+    float radius = directionType == CapsuleDirection2D.Vertical ? size.x * 0.5f : size.y * 0.5f;
+    return CircleCast(origin, radius, direction, distance, layerMask, out hitInfo);
   }
 }

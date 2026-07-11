@@ -1,26 +1,30 @@
-using System.Threading.Tasks;
+using System;
+using System.Collections;
 
 namespace UnityEngine;
 
 public class Coroutine
 {
-  private bool _stopped;
+  internal bool Finished;
+  internal bool WaitingForSeconds;
+  internal float WaitTimeLeft;
+  internal bool WaitingForFixedUpdate;
+  internal bool WaitingForEndOfFrame;
+  internal CustomYieldInstruction WaitingForCustomYield;
+  internal Coroutine WaitingForCoroutine;
 
-  public Coroutine(Task task, object? routine = null, string? methodName = null)
+  public Coroutine(IEnumerator? routine)
   {
-    Task = task;
     Routine = routine;
-    MethodName = methodName;
   }
 
-  public Task Task { get; }
-  public object? Routine { get; }
-  public string? MethodName { get; }
+  public IEnumerator? Routine { get; }
+  public string? MethodName { get; internal set; }
 
-  public bool IsRunning => Task is not null && !Task.IsCompleted && !_stopped;
+  public bool IsRunning => Routine != null && !Finished;
 
   internal void Cancel()
   {
-    _stopped = true;
+    Finished = true;
   }
 }

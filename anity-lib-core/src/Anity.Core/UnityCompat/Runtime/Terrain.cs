@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace UnityEngine;
 
@@ -119,7 +120,7 @@ public class Terrain : Behaviour
 
     public void CollectDetailPatches(float height, int layer) { _ = height; _ = layer; }
 
-    public static Terrain activeTerrain { get; set; }
+    public static Terrain? activeTerrain { get; set; }
 }
 
 public class TerrainData : Object
@@ -131,6 +132,9 @@ public class TerrainData : Object
     private int _alphamapLayers;
     private Vector3 _size = new Vector3(500, 600, 500);
     private Vector3 _heightmapScale;
+    private List<TreePrototype> _treePrototypes = new();
+    private List<TreeInstance> _treeInstances = new();
+    private List<DetailPrototype> _detailPrototypes = new();
 
     public int heightmapWidth => _heightmapResolution;
     public int heightmapHeight => _heightmapResolution;
@@ -171,6 +175,24 @@ public class TerrainData : Object
     }
 
     public TerrainLayer[] terrainLayers { get; set; } = Array.Empty<TerrainLayer>();
+
+    public List<TreePrototype> treePrototypes
+    {
+        get => _treePrototypes;
+        set => _treePrototypes = value ?? new List<TreePrototype>();
+    }
+
+    public List<TreeInstance> treeInstances
+    {
+        get => _treeInstances;
+        set => _treeInstances = value ?? new List<TreeInstance>();
+    }
+
+    public List<DetailPrototype> detailPrototypes
+    {
+        get => _detailPrototypes;
+        set => _detailPrototypes = value ?? new List<DetailPrototype>();
+    }
 
     public TerrainData()
     {
@@ -269,6 +291,65 @@ public class TerrainData : Object
         _alphamapLayers = alphamaps.GetLength(2);
         _alphamaps = new float[_alphamapResolution, _alphamapResolution, _alphamapLayers];
     }
+
+    public void SetTreeInstances(TreeInstance[] instances, bool snapToGround)
+    {
+        _ = snapToGround;
+        _treeInstances = instances != null ? new List<TreeInstance>(instances) : new List<TreeInstance>();
+    }
+
+    public void AddTreeInstance(TreeInstance instance)
+    {
+        _treeInstances.Add(instance);
+    }
+
+    public TreeInstance[] GetTreeInstances()
+    {
+        return _treeInstances.ToArray();
+    }
+
+    public void RefreshPrototypes() { }
+}
+
+public class TreePrototype
+{
+    public GameObject? prefab { get; set; }
+    public float bendFactor { get; set; }
+    public Color navMeshColor { get; set; } = Color.white;
+}
+
+public struct TreeInstance
+{
+    public Vector3 position;
+    public float widthScale;
+    public float heightScale;
+    public float rotation;
+    public Color32 color;
+    public Color32 lightmapColor;
+    public int prototypeIndex;
+}
+
+public class DetailPrototype
+{
+    public GameObject? prototype { get; set; }
+    public Texture2D? prototypeTexture { get; set; }
+    public float minWidth { get; set; } = 1f;
+    public float maxWidth { get; set; } = 2f;
+    public float minHeight { get; set; } = 1f;
+    public float maxHeight { get; set; } = 2f;
+    public Color dryColor { get; set; } = new Color(0.855f, 0.737f, 0.494f);
+    public Color healthyColor { get; set; } = new Color(0.263f, 0.976f, 0.165f);
+    public DetailRenderMode renderMode { get; set; }
+    public bool usePrototypeMesh { get; set; }
+    public float noiseSpread { get; set; } = 0.1f;
+    public float bendFactor { get; set; } = 0.1f;
+}
+
+public enum DetailRenderMode
+{
+    GrassBillboard = 0,
+    VertexLit = 1,
+    Grass = 2
 }
 
 [Flags]

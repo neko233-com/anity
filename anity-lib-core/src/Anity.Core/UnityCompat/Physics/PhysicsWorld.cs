@@ -48,89 +48,89 @@ internal readonly struct CollisionPair : IEquatable<CollisionPair>
     public static bool operator !=(CollisionPair left, CollisionPair right) => !left.Equals(right);
 }
 
-internal static class PhysicsWorld
+internal class PhysicsWorld
 {
-    private static readonly List<Collider> _colliders = new();
-    private static readonly List<Rigidbody> _rigidbodies = new();
-    private static readonly List<Joint> _joints = new();
-    private static readonly List<WheelCollider> _wheels = new();
-    private static readonly HashSet<CollisionPair> _collisionStates = new();
-    private static readonly HashSet<CollisionPair> _triggerStates = new();
-    private static readonly Dictionary<(Collider, Collider), bool> _ignoreCollisionPairs = new();
-    private static bool[,] _layerMatrix = new bool[32, 32];
-    private static Vector3 _gravity = new(0f, -9.81f, 0f);
-    private static bool _autoSimulation = true;
-    private static float _bounceThreshold = 2f;
-    private static float _sleepThreshold = 0.005f;
-    private static float _defaultContactOffset = 0.01f;
-    private static int _defaultSolverIterations = 6;
+    internal readonly List<Collider> _colliders = new();
+    internal readonly List<Rigidbody> _rigidbodies = new();
+    internal readonly List<Joint> _joints = new();
+    internal readonly List<WheelCollider> _wheels = new();
+    internal readonly HashSet<CollisionPair> _collisionStates = new();
+    internal readonly HashSet<CollisionPair> _triggerStates = new();
+    internal readonly Dictionary<(Collider, Collider), bool> _ignoreCollisionPairs = new();
+    internal bool[,] _layerMatrix = new bool[32, 32];
+    internal Vector3 _gravity = new(0f, -9.81f, 0f);
+    internal bool _autoSimulation = true;
+    internal float _bounceThreshold = 2f;
+    internal float _sleepThreshold = 0.005f;
+    internal float _defaultContactOffset = 0.01f;
+    internal int _defaultSolverIterations = 6;
 
-    public static Vector3 gravity { get => _gravity; set => _gravity = value; }
-    public static bool autoSimulation { get => _autoSimulation; set => _autoSimulation = value; }
-    public static float bounceThreshold { get => _bounceThreshold; set => _bounceThreshold = value; }
-    public static float sleepThreshold { get => _sleepThreshold; set => _sleepThreshold = value; }
-    public static float defaultContactOffset { get => _defaultContactOffset; set => _defaultContactOffset = value; }
-    public static int defaultSolverIterations { get => _defaultSolverIterations; set => _defaultSolverIterations = value; }
+    public Vector3 gravity { get => _gravity; set => _gravity = value; }
+    public bool autoSimulation { get => _autoSimulation; set => _autoSimulation = value; }
+    public float bounceThreshold { get => _bounceThreshold; set => _bounceThreshold = value; }
+    public float sleepThreshold { get => _sleepThreshold; set => _sleepThreshold = value; }
+    public float defaultContactOffset { get => _defaultContactOffset; set => _defaultContactOffset = value; }
+    public int defaultSolverIterations { get => _defaultSolverIterations; set => _defaultSolverIterations = value; }
 
-    static PhysicsWorld()
+    public PhysicsWorld()
     {
         for (int i = 0; i < 32; i++)
             for (int j = 0; j < 32; j++)
                 _layerMatrix[i, j] = true;
     }
 
-    public static void Register(Collider c) => RegisterCollider(c);
+    public void Register(Collider c) => RegisterCollider(c);
 
-    public static void RegisterCollider(Collider c)
+    public void RegisterCollider(Collider c)
     {
         if (!_colliders.Contains(c)) _colliders.Add(c);
     }
 
-    public static void UnregisterCollider(Collider c)
+    public void UnregisterCollider(Collider c)
     {
         _colliders.Remove(c);
     }
 
-    public static void Register(Rigidbody rb) => RegisterRigidbody(rb);
+    public void Register(Rigidbody rb) => RegisterRigidbody(rb);
 
-    public static void RegisterRigidbody(Rigidbody rb)
+    public void RegisterRigidbody(Rigidbody rb)
     {
         if (!_rigidbodies.Contains(rb)) _rigidbodies.Add(rb);
     }
 
-    public static void UnregisterRigidbody(Rigidbody rb)
+    public void UnregisterRigidbody(Rigidbody rb)
     {
         _rigidbodies.Remove(rb);
     }
 
-    public static void RegisterJoint(Joint joint)
+    public void RegisterJoint(Joint joint)
     {
         if (!_joints.Contains(joint)) _joints.Add(joint);
     }
 
-    public static void UnregisterJoint(Joint joint)
+    public void UnregisterJoint(Joint joint)
     {
         _joints.Remove(joint);
     }
 
-    public static void RegisterWheel(WheelCollider wheel)
+    public void RegisterWheel(WheelCollider wheel)
     {
         if (!_wheels.Contains(wheel)) _wheels.Add(wheel);
     }
 
-    public static void UnregisterWheel(WheelCollider wheel)
+    public void UnregisterWheel(WheelCollider wheel)
     {
         _wheels.Remove(wheel);
     }
 
-    public static bool GetIgnoreLayerCollision(int layer1, int layer2)
+    public bool GetIgnoreLayerCollision(int layer1, int layer2)
     {
         layer1 = Math.Clamp(layer1, 0, 31);
         layer2 = Math.Clamp(layer2, 0, 31);
         return !_layerMatrix[layer1, layer2];
     }
 
-    public static void SetIgnoreLayerCollision(int layer1, int layer2, bool ignore)
+    public void SetIgnoreLayerCollision(int layer1, int layer2, bool ignore)
     {
         layer1 = Math.Clamp(layer1, 0, 31);
         layer2 = Math.Clamp(layer2, 0, 31);
@@ -138,36 +138,36 @@ internal static class PhysicsWorld
         _layerMatrix[layer2, layer1] = !ignore;
     }
 
-    public static bool GetIgnoreCollision(Collider a, Collider b)
+    public bool GetIgnoreCollision(Collider a, Collider b)
     {
         if (a == null || b == null) return false;
         return _ignoreCollisionPairs.TryGetValue((a, b), out var ignore) && ignore;
     }
 
-    public static void SetIgnoreCollision(Collider a, Collider b, bool ignore)
+    public void SetIgnoreCollision(Collider a, Collider b, bool ignore)
     {
         if (a == null || b == null) return;
         _ignoreCollisionPairs[(a, b)] = ignore;
         _ignoreCollisionPairs[(b, a)] = ignore;
     }
 
-    private static Vector3 TransformPoint(Vector3 localPos, Transform t)
+    private Vector3 TransformPoint(Vector3 localPos, Transform t)
     {
         if (t == null) return localPos;
         return t.position + t.rotation * localPos;
     }
 
-    private static ColliderShape GetWorldShape(Collider c)
+    private ColliderShape GetWorldShape(Collider c)
     {
         return c.GetShape();
     }
 
-    public static bool Raycast(Ray ray, out RaycastHit hitInfo, float maxDistance, int layerMask)
+    public bool Raycast(Ray ray, out RaycastHit hitInfo, float maxDistance, int layerMask)
     {
         return Raycast(ray.origin, ray.direction, out hitInfo, maxDistance, layerMask, QueryTriggerInteraction.UseGlobal);
     }
 
-    public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction)
+    public bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction)
     {
         hitInfo = default;
         direction = direction.normalized;
@@ -210,12 +210,12 @@ internal static class PhysicsWorld
         return true;
     }
 
-    public static RaycastHit[] RaycastAll(Ray ray, float maxDistance, int layerMask)
+    public RaycastHit[] RaycastAll(Ray ray, float maxDistance, int layerMask)
     {
         return RaycastAll(ray.origin, ray.direction, maxDistance, layerMask, QueryTriggerInteraction.UseGlobal);
     }
 
-    public static RaycastHit[] RaycastAll(Vector3 origin, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction)
+    public RaycastHit[] RaycastAll(Vector3 origin, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction)
     {
         var hits = new List<RaycastHit>();
         direction = direction.normalized;
@@ -244,7 +244,7 @@ internal static class PhysicsWorld
         return hits.ToArray();
     }
 
-    private static bool RaycastShape(Vector3 origin, Vector3 dir, ColliderShape shape, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
+    private bool RaycastShape(Vector3 origin, Vector3 dir, ColliderShape shape, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
     {
         dist = maxDist;
         point = default;
@@ -259,7 +259,7 @@ internal static class PhysicsWorld
         return false;
     }
 
-    private static bool RaycastSphere(Vector3 origin, Vector3 dir, Vector3 center, float radius, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
+    private bool RaycastSphere(Vector3 origin, Vector3 dir, Vector3 center, float radius, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
     {
         dist = maxDist;
         point = default;
@@ -279,7 +279,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool RaycastBox(Vector3 origin, Vector3 dir, Vector3 center, Vector3 halfExtents, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
+    private bool RaycastBox(Vector3 origin, Vector3 dir, Vector3 center, Vector3 halfExtents, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
     {
         dist = maxDist;
         point = default;
@@ -305,7 +305,7 @@ internal static class PhysicsWorld
                 float t1 = (mn - o) * inv;
                 float t2 = (mx - o) * inv;
                 Vector3 n = Vector3.zero;
-                if (t1 > t2) { (t1, t2) = (t2, t1); }
+                if (t1 > t2) { float tmp = t1; t1 = t2; t2 = tmp; }
                 if (d > 0) n[i] = t1 > tmin ? -1f : n[i];
                 else n[i] = t1 > tmin ? 1f : n[i];
                 if (t1 > tmin) { tmin = t1; hitNormal = n; }
@@ -321,7 +321,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool RaycastCapsule(Vector3 origin, Vector3 dir, ColliderShape shape, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
+    private bool RaycastCapsule(Vector3 origin, Vector3 dir, ColliderShape shape, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
     {
         dist = maxDist;
         point = default;
@@ -377,7 +377,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction qti)
+    public bool SphereCast(Vector3 origin, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction qti)
     {
         hitInfo = default;
         direction = direction.normalized;
@@ -403,7 +403,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    public static RaycastHit[] SphereCastAll(Vector3 origin, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction qti)
+    public RaycastHit[] SphereCastAll(Vector3 origin, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction qti)
     {
         direction = direction.normalized;
         var hits = new List<RaycastHit>();
@@ -423,7 +423,7 @@ internal static class PhysicsWorld
         return hits.ToArray();
     }
 
-    private static bool SphereCastShape(Vector3 origin, float radius, Vector3 dir, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
+    private bool SphereCastShape(Vector3 origin, float radius, Vector3 dir, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
     {
         t = maxDist; pt = default; n = Vector3.up;
         if (shape.Type == ColliderShapeType.Sphere)
@@ -457,7 +457,7 @@ internal static class PhysicsWorld
         return false;
     }
 
-    public static bool BoxCast(Vector3 center, Vector3 halfExtents, Vector3 direction, out RaycastHit hitInfo, float maxDistance, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
+    public bool BoxCast(Vector3 center, Vector3 halfExtents, Vector3 direction, out RaycastHit hitInfo, float maxDistance, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
     {
         hitInfo = default;
         direction = direction.normalized;
@@ -483,7 +483,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool BoxCastShape(Vector3 center, Vector3 he, Vector3 dir, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
+    private bool BoxCastShape(Vector3 center, Vector3 he, Vector3 dir, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
     {
         t = maxDist; pt = default; n = Vector3.up;
         if (shape.Type == ColliderShapeType.Sphere)
@@ -517,7 +517,7 @@ internal static class PhysicsWorld
         return false;
     }
 
-    public static bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction qti)
+    public bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction qti)
     {
         hitInfo = default;
         direction = direction.normalized;
@@ -543,7 +543,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool CapsuleCastShape(Vector3 point0, Vector3 point1, float radius, Vector3 direction, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
+    private bool CapsuleCastShape(Vector3 point0, Vector3 point1, float radius, Vector3 direction, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
     {
         t = maxDist; pt = default; n = Vector3.up;
         Vector3 center = (point0 + point1) * 0.5f;
@@ -563,14 +563,14 @@ internal static class PhysicsWorld
         return false;
     }
 
-    public static Collider[] OverlapSphere(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti)
+    public Collider[] OverlapSphere(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti)
     {
         var list = new List<Collider>();
         OverlapSphereInternal(center, radius, layerMask, qti, list);
         return list.ToArray();
     }
 
-    public static int OverlapSphereNonAlloc(Vector3 center, float radius, Collider[] results, int layerMask, QueryTriggerInteraction qti)
+    public int OverlapSphereNonAlloc(Vector3 center, float radius, Collider[] results, int layerMask, QueryTriggerInteraction qti)
     {
         var list = new List<Collider>();
         OverlapSphereInternal(center, radius, layerMask, qti, list);
@@ -579,7 +579,7 @@ internal static class PhysicsWorld
         return count;
     }
 
-    public static bool CheckSphere(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti)
+    public bool CheckSphere(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti)
     {
         for (int i = 0; i < _colliders.Count; i++)
         {
@@ -594,14 +594,14 @@ internal static class PhysicsWorld
         return false;
     }
 
-    public static Collider[] OverlapBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
+    public Collider[] OverlapBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
     {
         var list = new List<Collider>();
         OverlapBoxInternal(center, halfExtents, layerMask, qti, list);
         return list.ToArray();
     }
 
-    public static int OverlapBoxNonAlloc(Vector3 center, Vector3 halfExtents, Collider[] results, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
+    public int OverlapBoxNonAlloc(Vector3 center, Vector3 halfExtents, Collider[] results, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
     {
         var list = new List<Collider>();
         OverlapBoxInternal(center, halfExtents, layerMask, qti, list);
@@ -610,7 +610,7 @@ internal static class PhysicsWorld
         return count;
     }
 
-    public static bool CheckBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
+    public bool CheckBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
     {
         for (int i = 0; i < _colliders.Count; i++)
         {
@@ -625,14 +625,14 @@ internal static class PhysicsWorld
         return false;
     }
 
-    public static Collider[] OverlapCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti)
+    public Collider[] OverlapCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti)
     {
         var list = new List<Collider>();
         OverlapCapsuleInternal(point0, point1, radius, layerMask, qti, list);
         return list.ToArray();
     }
 
-    public static int OverlapCapsuleNonAlloc(Vector3 point0, Vector3 point1, float radius, Collider[] results, int layerMask, QueryTriggerInteraction qti)
+    public int OverlapCapsuleNonAlloc(Vector3 point0, Vector3 point1, float radius, Collider[] results, int layerMask, QueryTriggerInteraction qti)
     {
         var list = new List<Collider>();
         OverlapCapsuleInternal(point0, point1, radius, layerMask, qti, list);
@@ -641,7 +641,7 @@ internal static class PhysicsWorld
         return count;
     }
 
-    public static bool CheckCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti)
+    public bool CheckCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti)
     {
         Vector3 center = (point0 + point1) * 0.5f;
         float height = Vector3.Distance(point0, point1);
@@ -662,7 +662,7 @@ internal static class PhysicsWorld
         return false;
     }
 
-    private static void OverlapSphereInternal(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
+    private void OverlapSphereInternal(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
     {
         var sphereShape = new ColliderShape(ColliderShapeType.Sphere, center, Vector3.one, radius, 0f, 0);
         for (int i = 0; i < _colliders.Count; i++)
@@ -676,7 +676,7 @@ internal static class PhysicsWorld
         }
     }
 
-    private static bool OverlapShapePoint(Vector3 center, float radius, ColliderShape shape)
+    private bool OverlapShapePoint(Vector3 center, float radius, ColliderShape shape)
     {
         if (shape.Type == ColliderShapeType.Sphere)
             return Vector3.Distance(center, shape.Center) <= radius + shape.Radius;
@@ -698,7 +698,7 @@ internal static class PhysicsWorld
         return false;
     }
 
-    private static void OverlapBoxInternal(Vector3 center, Vector3 halfExtents, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
+    private void OverlapBoxInternal(Vector3 center, Vector3 halfExtents, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
     {
         var boxShape = new ColliderShape(ColliderShapeType.Box, center, halfExtents * 2f, 0f, 0f, 0);
         for (int i = 0; i < _colliders.Count; i++)
@@ -712,13 +712,13 @@ internal static class PhysicsWorld
         }
     }
 
-    private static bool OverlapBoxShape(Vector3 center, Vector3 halfExtents, ColliderShape shape)
+    private bool OverlapBoxShape(Vector3 center, Vector3 halfExtents, ColliderShape shape)
     {
         var boxShape = new ColliderShape(ColliderShapeType.Box, center, halfExtents * 2f, 0f, 0f, 0);
         return Intersect(boxShape, shape, out _, out _);
     }
 
-    private static void OverlapCapsuleInternal(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
+    private void OverlapCapsuleInternal(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
     {
         Vector3 center = (point0 + point1) * 0.5f;
         float height = Vector3.Distance(point0, point1);
@@ -738,7 +738,7 @@ internal static class PhysicsWorld
         }
     }
 
-    private static Vector3 ClosestPointOnSegment(Vector3 p, Vector3 a, Vector3 b)
+    private Vector3 ClosestPointOnSegment(Vector3 p, Vector3 a, Vector3 b)
     {
         Vector3 ab = b - a;
         float denom = Vector3.Dot(ab, ab);
@@ -748,7 +748,7 @@ internal static class PhysicsWorld
         return a + ab * t;
     }
 
-    private static bool Intersect(ColliderShape a, ColliderShape b, out Vector3 normal, out float penetration)
+    private bool Intersect(ColliderShape a, ColliderShape b, out Vector3 normal, out float penetration)
     {
         normal = Vector3.up;
         penetration = 0f;
@@ -782,7 +782,7 @@ internal static class PhysicsWorld
         return false;
     }
 
-    private static bool IntersectSphereSphere(Vector3 c1, float r1, Vector3 c2, float r2, out Vector3 normal, out float penetration)
+    private bool IntersectSphereSphere(Vector3 c1, float r1, Vector3 c2, float r2, out Vector3 normal, out float penetration)
     {
         normal = Vector3.up;
         penetration = 0f;
@@ -795,7 +795,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool IntersectSphereBox(Vector3 sc, float r, Vector3 bc, Vector3 he, out Vector3 normal, out float penetration)
+    private bool IntersectSphereBox(Vector3 sc, float r, Vector3 bc, Vector3 he, out Vector3 normal, out float penetration)
     {
         normal = Vector3.up;
         penetration = 0f;
@@ -823,7 +823,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool IntersectBoxBox(Vector3 c1, Vector3 he1, Vector3 c2, Vector3 he2, out Vector3 normal, out float penetration)
+    private bool IntersectBoxBox(Vector3 c1, Vector3 he1, Vector3 c2, Vector3 he2, out Vector3 normal, out float penetration)
     {
         normal = Vector3.up;
         penetration = 0f;
@@ -841,9 +841,9 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static Vector3 GetCapsuleAxis(ColliderShape cap) => cap.Direction == 0 ? Vector3.right : cap.Direction == 1 ? Vector3.up : Vector3.forward;
+    private Vector3 GetCapsuleAxis(ColliderShape cap) => cap.Direction == 0 ? Vector3.right : cap.Direction == 1 ? Vector3.up : Vector3.forward;
 
-    private static bool IntersectCapsuleSphere(ColliderShape cap, Vector3 sc, float r, out Vector3 normal, out float penetration)
+    private bool IntersectCapsuleSphere(ColliderShape cap, Vector3 sc, float r, out Vector3 normal, out float penetration)
     {
         normal = Vector3.up;
         penetration = 0f;
@@ -861,7 +861,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool IntersectCapsuleCapsule(ColliderShape a, ColliderShape b, out Vector3 normal, out float penetration)
+    private bool IntersectCapsuleCapsule(ColliderShape a, ColliderShape b, out Vector3 normal, out float penetration)
     {
         normal = Vector3.up;
         penetration = 0f;
@@ -897,7 +897,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool IntersectCapsuleBox(ColliderShape cap, Vector3 bc, Vector3 he, out Vector3 normal, out float penetration)
+    private bool IntersectCapsuleBox(ColliderShape cap, Vector3 bc, Vector3 he, out Vector3 normal, out float penetration)
     {
         normal = Vector3.up;
         penetration = 0f;
@@ -923,7 +923,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    public static void Simulate(float step)
+    public void Simulate(float step)
     {
         foreach (var rb in _rigidbodies)
         {
@@ -1038,16 +1038,21 @@ internal static class PhysicsWorld
             }
         }
         _triggerStates.IntersectWith(currentTriggers);
+
+        foreach (var rb in _rigidbodies)
+        {
+            if (rb != null) rb.CheckSleep(_sleepThreshold);
+        }
     }
 
-    private static Collision CreateCollision(Collider a, Collider b, Vector3 normal, float pen, Vector3 relVel)
+    private Collision CreateCollision(Collider a, Collider b, Vector3 normal, float pen, Vector3 relVel)
     {
         var col = new Collision();
         col.SetFrom(a, b, normal, pen, relVel);
         return col;
     }
 
-    private static void ApplyJoints(float step)
+    private void ApplyJoints(float step)
     {
         foreach (var joint in _joints)
         {
@@ -1075,7 +1080,7 @@ internal static class PhysicsWorld
         }
     }
 
-    private static void ApplyFixedJoint(FixedJoint joint, float step)
+    private void ApplyFixedJoint(FixedJoint joint, float step)
     {
         var connectedBody = joint.connectedBody;
         if (connectedBody == null) return;
@@ -1116,7 +1121,7 @@ internal static class PhysicsWorld
         joint.SetCurrentForce(force);
     }
 
-    private static void ApplyHingeJoint(HingeJoint joint, float step)
+    private void ApplyHingeJoint(HingeJoint joint, float step)
     {
         var connectedBody = joint.connectedBody;
         if (connectedBody == null) return;
@@ -1175,7 +1180,7 @@ internal static class PhysicsWorld
         }
     }
 
-    private static void ApplyConfigurableJoint(ConfigurableJoint joint, float step)
+    private void ApplyConfigurableJoint(ConfigurableJoint joint, float step)
     {
         var connectedBody = joint.connectedBody;
         if (connectedBody == null) return;
@@ -1208,7 +1213,7 @@ internal static class PhysicsWorld
         }
     }
 
-    private static void ApplyCharacterJoint(CharacterJoint joint, float step)
+    private void ApplyCharacterJoint(CharacterJoint joint, float step)
     {
         var connectedBody = joint.connectedBody;
         if (connectedBody == null) return;
@@ -1241,7 +1246,7 @@ internal static class PhysicsWorld
         }
     }
 
-    private static void ApplySpringJoint(SpringJoint joint, float step)
+    private void ApplySpringJoint(SpringJoint joint, float step)
     {
         var connectedBody = joint.connectedBody;
         if (connectedBody == null) return;
@@ -1285,7 +1290,7 @@ internal static class PhysicsWorld
             connectedBody.AddForce(force);
     }
 
-    private static void ResolveCollision(Collider a, Collider b, Vector3 normal, float penetration)
+    private void ResolveCollision(Collider a, Collider b, Vector3 normal, float penetration)
     {
         var rbA = a.attachedRigidbody;
         var rbB = b.attachedRigidbody;
@@ -1343,7 +1348,7 @@ internal static class PhysicsWorld
         }
     }
 
-    public static int GetContacts(Collider collider, Collider[] results)
+    public int GetContacts(Collider collider, Collider[] results)
     {
         if (collider == null || results == null) return 0;
         var shape = GetWorldShape(collider);

@@ -37,17 +37,6 @@ public class RawImage : MaskableGraphic
         }
     }
 
-    protected override void UpdateGeometry()
-    {
-        if (canvasRenderer is null) return;
-        var vh = new VertexHelper();
-        OnPopulateMesh(vh);
-        var verts = new List<UIVertex>();
-        vh.GetUIVertexStream(verts);
-        canvasRenderer.SetVertices(verts);
-        vh.Dispose();
-    }
-
     protected virtual void OnPopulateMesh(VertexHelper vh)
     {
         vh.Clear();
@@ -56,12 +45,12 @@ public class RawImage : MaskableGraphic
         var uvMin = new Vector2(_uvRect.xMin, _uvRect.yMin);
         var uvMax = new Vector2(_uvRect.xMax, _uvRect.yMax);
 
-        vh.AddVert(new Vector3(rect.xMin, rect.yMin, 0f), color32, new Vector4(uvMin.x, uvMin.y, 0f, 0f));
-        vh.AddVert(new Vector3(rect.xMin, rect.yMax, 0f), color32, new Vector4(uvMin.x, uvMax.y, 0f, 0f));
-        vh.AddVert(new Vector3(rect.xMax, rect.yMax, 0f), color32, new Vector4(uvMax.x, uvMax.y, 0f, 0f));
-        vh.AddVert(new Vector3(rect.xMax, rect.yMin, 0f), color32, new Vector4(uvMax.x, uvMin.y, 0f, 0f));
+        vh.AddVert(new Vector3(rect.xMin, rect.yMin, 0f), color32, new Vector2(uvMin.x, uvMin.y));
+        vh.AddVert(new Vector3(rect.xMax, rect.yMin, 0f), color32, new Vector2(uvMax.x, uvMin.y));
+        vh.AddVert(new Vector3(rect.xMax, rect.yMax, 0f), color32, new Vector2(uvMax.x, uvMax.y));
+        vh.AddVert(new Vector3(rect.xMin, rect.yMax, 0f), color32, new Vector2(uvMin.x, uvMax.y));
         vh.AddTriangle(0, 1, 2);
-        vh.AddTriangle(2, 3, 0);
+        vh.AddTriangle(0, 2, 3);
     }
 
     public virtual void SetNativeSize()

@@ -151,10 +151,21 @@ public static class Lightmapping
         set => _lightmaps = value ?? Array.Empty<LightmapData>();
     }
 
+    public static LightmapData[] bakedLightmaps => _bakedLightmaps.ToArray();
+
     public static int lightmapCount => _lightmaps.Length;
+
+    public static LightmapsMode lightmapsMode
+    {
+        get => LightmapSettings.lightmapsMode;
+        set => LightmapSettings.lightmapsMode = value;
+    }
+
+    public static ColorSpace lightmapColorSpace { get; set; } = ColorSpace.Gamma;
 
     public static event Action? LightmappingBakeStarted;
     public static event Action? BakeCompleted;
+    public static event Action? bakeCompleted;
     public static event Action? onStarted;
     public static event Action? onCompleted;
     public static event Action<bool>? onBakeCompleted;
@@ -182,23 +193,27 @@ public static class Lightmapping
         SimulateBake();
     }
 
-    public static void BakeAsync()
+    public static AsyncOperation BakeAsync()
     {
+        var op = new AsyncOperation();
         _isBaking = true;
         _bakeProgress = 0f;
         LightmappingBakeStarted?.Invoke();
         onStarted?.Invoke();
-        SimulateBakeAsync();
+        SimulateBakeAsync(op);
+        return op;
     }
 
-    private static async void SimulateBakeAsync()
+    private static async void SimulateBakeAsync(AsyncOperation op)
     {
         await System.Threading.Tasks.Task.Delay(100);
         _bakeProgress = 1f;
         _isBaking = false;
         BakeCompleted?.Invoke();
+        bakeCompleted?.Invoke();
         onCompleted?.Invoke();
         onBakeCompleted?.Invoke(true);
+        op.SetDone();
     }
 
     private static void SimulateBake()
@@ -206,6 +221,7 @@ public static class Lightmapping
         _bakeProgress = 1f;
         _isBaking = false;
         BakeCompleted?.Invoke();
+        bakeCompleted?.Invoke();
         onCompleted?.Invoke();
         onBakeCompleted?.Invoke(true);
     }
@@ -255,6 +271,13 @@ public static class Lightmapping
     {
         _settings[key] = value!;
     }
+}
+
+public enum ColorSpace
+{
+    Uninitialized = -1,
+    Gamma = 0,
+    Linear = 1
 }
 
 public enum MixedLightingMode

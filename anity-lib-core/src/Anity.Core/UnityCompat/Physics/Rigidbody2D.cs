@@ -68,7 +68,12 @@ public class Rigidbody2D : Component
 
   public Rigidbody2D()
   {
-    Physics2DWorld.Register(this);
+    Physics2D.s_world2D.Register(this);
+  }
+
+  ~Rigidbody2D()
+  {
+    Physics2D.s_world2D.Unregister(this);
   }
 
   public void AddForce(Vector2 force)
@@ -197,6 +202,12 @@ public class Rigidbody2D : Component
   }
 
   public bool IsSleeping() => _isSleeping;
+
+  internal bool isSleeping
+  {
+    get => _isSleeping;
+    set => _isSleeping = value;
+  }
 
   public Vector2 GetPoint(Vector2 relativePoint)
   {

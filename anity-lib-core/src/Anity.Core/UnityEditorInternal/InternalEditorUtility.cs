@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using UnityEngine;
 
 namespace UnityEditorInternal;
 
@@ -8,11 +10,15 @@ public static class InternalEditorUtility
 {
   private static bool _reloading;
   private static bool _proSkin;
+  private static readonly Dictionary<Object, Texture2D> _icons = new();
 
   public static bool inBatchMode { get; set; }
   public static bool isHumanControllable => true;
   public static bool isApplicationActive => true;
   public static bool hasProLicense => true;
+  public static bool ignoreFailure { get; set; }
+  public static bool throwExceptionIfNull { get; set; }
+  public static string unityVersion => "2022.3.61f1";
   public static bool isProSkin
   {
     get => _proSkin;
@@ -153,18 +159,18 @@ public static class InternalEditorUtility
     _repaintCount++;
   }
 
-  public static void SetDirty(UnityEngine.Object obj)
+  public static void SetDirty(Object obj)
   {
     _ = obj;
   }
 
-  public static bool IsObjectAManagedReference(UnityEngine.Object obj)
+  public static bool IsObjectAManagedReference(Object obj)
   {
     _ = obj;
     return false;
   }
 
-  public static string[] GetSerializedObjectProperties(UnityEngine.Object obj)
+  public static string[] GetSerializedObjectProperties(Object obj)
   {
     _ = obj;
     return Array.Empty<string>();
@@ -221,5 +227,33 @@ public static class InternalEditorUtility
   {
     _ = path;
     return string.Empty;
+  }
+
+  public static Bounds CalculateBounds(GameObject go)
+  {
+    if (go == null) return new Bounds(Vector3.zero, Vector3.zero);
+    var bounds = new Bounds(go.transform.position, Vector3.zero);
+    bool hasBounds = false;
+    foreach (var renderer in go.GetComponentsInChildren<Renderer>())
+    {
+      if (renderer == null) continue;
+      if (!hasBounds) { bounds = renderer.bounds; hasBounds = true; }
+      else bounds.Encapsulate(renderer.bounds);
+    }
+    return bounds;
+  }
+
+  public static void SetIconForObject(Object obj, Texture2D icon)
+  {
+    if (obj == null) return;
+    if (icon == null) _icons.Remove(obj);
+    else _icons[obj] = icon;
+  }
+
+  public static Texture2D GetIconForObject(Object obj)
+  {
+    if (obj != null && _icons.TryGetValue(obj, out var icon))
+      return icon;
+    return null;
   }
 }

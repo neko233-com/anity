@@ -78,8 +78,6 @@ public static class Time
     _timeSinceLevelLoad += _deltaTime;
     _frameCount++;
     _renderedFrameCount++;
-
-    Object.TickDestroyQueue();
   }
 
   public static void FixedTick()

@@ -1,20 +1,13 @@
 using System;
-using System.Runtime.InteropServices;
+using UnityEngine;
 
 namespace Anity.WebGL;
 
-/// <summary>
-/// WebGL platform runtime support for Unity-compatible WebGL builds.
-/// Handles WebGL-specific constraints: no JIT, no threads, no file system.
-/// </summary>
 public static class WebGLRuntime
 {
   private static bool _initialized;
   private static bool _isRunningInWebGL;
 
-  /// <summary>
-  /// Gets whether the application is running in a WebGL environment.
-  /// </summary>
   public static bool IsRunningInWebGL
   {
     get
@@ -24,195 +17,117 @@ public static class WebGLRuntime
         _isRunningInWebGL = DetectWebGL();
         _initialized = true;
       }
-
       return _isRunningInWebGL;
     }
   }
 
-  /// <summary>
-  /// WebGL does not support JIT compilation.
-  /// </summary>
   public static bool SupportsJit => false;
-
-  /// <summary>
-  /// WebGL does not support threading.
-  /// </summary>
   public static bool SupportsThreading => false;
-
-  /// <summary>
-  /// WebGL has no direct file system access.
-  /// </summary>
   public static bool SupportsFileSystem => false;
-
-  /// <summary>
-  /// WebGL uses IndexedDB for persistent storage.
-  /// </summary>
   public static bool SupportsIndexedDB => true;
-
-  /// <summary>
-  /// WebGL maximum memory size in bytes (default 256MB).
-  /// </summary>
   public static long MaxMemorySize => 256 * 1024 * 1024;
 
-  /// <summary>
-  /// Initializes WebGL runtime support.
-  /// </summary>
   public static void Initialize()
   {
-    if (_initialized)
-    {
-      return;
-    }
-
+    if (_initialized) return;
     _isRunningInWebGL = DetectWebGL();
     _initialized = true;
-
-    if (_isRunningInWebGL)
-    {
-      ConfigureForWebGL();
-    }
+    if (_isRunningInWebGL) ConfigureForWebGL();
   }
 
-  /// <summary>
-  /// Configures the runtime for WebGL builds.
-  /// </summary>
-  private static void ConfigureForWebGL()
-  {
-    // WebGL-specific configuration:
-    // - Disable threading
-    // - Configure memory limits
-    // - Set up IndexedDB storage
-    // - Configure audio context
-  }
-
-  private static bool DetectWebGL()
-  {
-    // In a real WebGL environment, this would check for WebGL-specific indicators
-    // For now, return false for non-WebGL environments
-    return false;
-  }
+  private static void ConfigureForWebGL() { }
+  private static bool DetectWebGL() => false;
 }
 
-/// <summary>
-/// WebGL-specific audio support.
-/// </summary>
 public static class WebGLAudio
 {
-  /// <summary>
-  /// Gets whether audio is supported in WebGL.
-  /// </summary>
   public static bool IsSupported => true;
-
-  /// <summary>
-  /// Gets the maximum number of audio sources.
-  /// </summary>
   public static int MaxSources => 32;
-
-  /// <summary>
-  /// Initializes the audio system for WebGL.
-  /// </summary>
-  public static void Initialize()
-  {
-    // WebGL audio requires user interaction to start
-  }
+  public static void Initialize() { }
 }
 
-/// <summary>
-/// WebGL-specific input support.
-/// </summary>
 public static class WebGLInput
 {
-  /// <summary>
-  /// Gets whether touch input is supported.
-  /// </summary>
   public static bool TouchSupported => true;
-
-  /// <summary>
-  /// Gets whether mouse input is supported.
-  /// </summary>
   public static bool MouseSupported => true;
-
-  /// <summary>
-  /// Gets whether keyboard input is supported.
-  /// </summary>
   public static bool KeyboardSupported => true;
-
-  /// <summary>
-  /// Gets whether gamepad input is supported.
-  /// </summary>
   public static bool GamepadSupported => true;
-
-  /// <summary>
-  /// Gets the maximum number of touch points.
-  /// </summary>
   public static int MaxTouchPoints => 10;
+
+  public static event Action<int, float, float>? OnTouchStart;
+  public static event Action<int, float, float>? OnTouchMove;
+  public static event Action<int>? OnTouchEnd;
+  public static event Action<int>? OnTouchCancel;
+
+  public static event Action<string>? OnKeyDown;
+  public static event Action<string>? OnKeyUp;
+  public static event Action<char>? OnKeyPress;
+
+  public static void SimulateTouchStart(int fingerId, float x, float y) => OnTouchStart?.Invoke(fingerId, x, y);
+  public static void SimulateTouchMove(int fingerId, float x, float y) => OnTouchMove?.Invoke(fingerId, x, y);
+  public static void SimulateTouchEnd(int fingerId) => OnTouchEnd?.Invoke(fingerId);
+  public static void SimulateTouchCancel(int fingerId) => OnTouchCancel?.Invoke(fingerId);
+  public static void SimulateKeyDown(string key) => OnKeyDown?.Invoke(key);
+  public static void SimulateKeyUp(string key) => OnKeyUp?.Invoke(key);
+  public static void SimulateKeyPress(char key) => OnKeyPress?.Invoke(key);
 }
 
-/// <summary>
-/// WebGL-specific storage support using IndexedDB.
-/// </summary>
+public static class WebGLGraphics
+{
+  private static IntPtr _canvas;
+  private static Color _clearColor = Color.black;
+
+  public static void SetCanvas(IntPtr canvas) => _canvas = canvas;
+  public static IntPtr GetCanvas() => _canvas;
+  public static void RenderFrame() { }
+  public static void Present() { }
+  public static void SetClearColor(Color color) => _clearColor = color;
+  public static void SetClearColor(float r, float g, float b, float a = 1f) => _clearColor = new Color(r, g, b, a);
+  public static Color GetClearColor() => _clearColor;
+  public static void Clear() { }
+}
+
+public static class WebGLDisplay
+{
+  public static int width { get; set; } = 1920;
+  public static int height { get; set; } = 1080;
+  public static float dpiScale { get; set; } = 1f;
+  public static bool fullscreen { get; set; }
+
+  public static event Action<int, int>? OnResize;
+
+  public static void Resize(int newWidth, int newHeight)
+  {
+    width = newWidth;
+    height = newHeight;
+    OnResize?.Invoke(newWidth, newHeight);
+  }
+}
+
 public static class WebGLStorage
 {
-  /// <summary>
-  /// Gets whether persistent storage is available.
-  /// </summary>
   public static bool IsPersistent => true;
+  public static long MaxStorageSize => 50 * 1024 * 1024;
 
-  /// <summary>
-  /// Gets the maximum storage size in bytes.
-  /// </summary>
-  public static long MaxStorageSize => 50 * 1024 * 1024; // 50MB
-
-  /// <summary>
-  /// Saves data to IndexedDB.
-  /// </summary>
-  /// <param name="key">The storage key.</param>
-  /// <param name="data">The data to save.</param>
-  /// <returns>True if the save was successful.</returns>
   public static bool Save(string key, byte[] data)
   {
-    // WebGL IndexedDB save implementation
-    return false;
+    _ = key; _ = data; return false;
   }
 
-  /// <summary>
-  /// Loads data from IndexedDB.
-  /// </summary>
-  /// <param name="key">The storage key.</param>
-  /// <returns>The loaded data, or null if not found.</returns>
   public static byte[]? Load(string key)
   {
-    // WebGL IndexedDB load implementation
-    return null;
+    _ = key; return null;
   }
 
-  /// <summary>
-  /// Deletes data from IndexedDB.
-  /// </summary>
-  /// <param name="key">The storage key.</param>
-  /// <returns>True if the delete was successful.</returns>
   public static bool Delete(string key)
   {
-    // WebGL IndexedDB delete implementation
-    return false;
+    _ = key; return false;
   }
 
-  /// <summary>
-  /// Checks if a key exists in IndexedDB.
-  /// </summary>
-  /// <param name="key">The storage key.</param>
-  /// <returns>True if the key exists.</returns>
   public static bool Exists(string key)
   {
-    // WebGL IndexedDB exists implementation
-    return false;
+    _ = key; return false;
   }
 
-  /// <summary>
-  /// Clears all data from IndexedDB.
-  /// </summary>
-  public static void Clear()
-  {
-    // WebGL IndexedDB clear implementation
-  }
+  public static void Clear() { }
 }

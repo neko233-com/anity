@@ -125,7 +125,7 @@ public static class Input
     private static readonly Dictionary<string, bool> _buttonsHeld = new();
     private static readonly HashSet<string> _buttonsDown = new();
     private static readonly HashSet<string> _buttonsUp = new();
-    private static readonly Touch[] _emptyTouches = Array.Empty<Touch>();
+    private static readonly List<Touch> _touches = new();
     private static bool _anyKey;
     private static bool _anyKeyDown;
     private static readonly LocationService _location = new();
@@ -142,17 +142,17 @@ public static class Input
     public static Vector2 mouseScrollDelta { get; set; }
     public static bool backButtonLeavesApp { get; set; }
     public static bool compensateSensors { get; set; }
-    public static bool multiTouchEnabled { get; set; }
+    public static bool multiTouchEnabled { get; set; } = true;
     public static Vector3 acceleration { get; set; }
-    public static Touch[] touches => _emptyTouches;
-    public static int touchCount => touches.Length;
+    public static Touch[] touches => _touches.ToArray();
+    public static int touchCount => _touches.Count;
     public static int imeCompositionMode { get; set; }
     public static string compositionString { get; private set; } = string.Empty;
     public static bool imeIsSelected => false;
     public static Vector2 compositionCursorPos { get; set; }
     public static bool mousePresent => true;
-    public static bool touchSupported => false;
-    public static bool GetTouchSupported() => false;
+    public static bool touchSupported => true;
+    public static bool GetTouchSupported() => true;
 
     static Input()
     {
@@ -204,7 +204,7 @@ public static class Input
 
     public static void SimulateButtonDown(string buttonName)
     {
-        if (!_buttonsHeld[buttonName])
+        if (!_buttonsHeld.TryGetValue(buttonName, out bool held) || !held)
         {
             _buttonsDown.Add(buttonName);
         }
@@ -213,11 +213,50 @@ public static class Input
 
     public static void SimulateButtonUp(string buttonName)
     {
-        if (_buttonsHeld[buttonName])
+        if (_buttonsHeld.TryGetValue(buttonName, out bool held) && held)
         {
             _buttonsUp.Add(buttonName);
         }
         _buttonsHeld[buttonName] = false;
+    }
+
+    public static void SimulateTouch(int fingerId, Vector2 position, TouchPhase phase)
+    {
+        var touch = new Touch
+        {
+            fingerId = fingerId,
+            position = position,
+            rawPosition = position,
+            phase = phase,
+            tapCount = 1,
+            pressure = 1f,
+            maximumPossiblePressure = 1f,
+            type = TouchType.Direct,
+            deltaTime = Time.deltaTime
+        };
+
+        for (int i = 0; i < _touches.Count; i++)
+        {
+            if (_touches[i].fingerId == fingerId)
+            {
+                var prev = _touches[i];
+                touch.deltaPosition = position - prev.position;
+                if (phase == TouchPhase.Ended || phase == TouchPhase.Canceled)
+                {
+                    _touches.RemoveAt(i);
+                }
+                else
+                {
+                    _touches[i] = touch;
+                }
+                return;
+            }
+        }
+
+        if (phase != TouchPhase.Ended && phase != TouchPhase.Canceled)
+        {
+            _touches.Add(touch);
+        }
     }
 
     internal static void UpdatePerFrame()
@@ -228,6 +267,24 @@ public static class Input
         _buttonsUp.Clear();
         _anyKeyDown = false;
         mouseScrollDelta = Vector2.zero;
+        for (int i = _touches.Count - 1; i >= 0; i--)
+        {
+            var t = _touches[i];
+            if (t.phase == TouchPhase.Began)
+            {
+                t.phase = TouchPhase.Stationary;
+                _touches[i] = t;
+            }
+            else if (t.phase == TouchPhase.Moved)
+            {
+                t.phase = TouchPhase.Stationary;
+                _touches[i] = t;
+            }
+            else if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
+            {
+                _touches.RemoveAt(i);
+            }
+        }
     }
 
     public static bool GetKey(KeyCode key) => _keysHeld.Contains(key);
@@ -247,6 +304,6 @@ public static class Input
     public static bool GetButtonDown(string buttonName) => _buttonsDown.Contains(buttonName);
     public static bool GetButtonUp(string buttonName) => _buttonsUp.Contains(buttonName);
 
-    public static Touch GetTouch(int index) => touches[index];
+    public static Touch GetTouch(int index) => _touches[index];
     public static bool GetKeyUp(KeyCode key, bool useAutoRepeat) => GetKeyUp(key);
 }

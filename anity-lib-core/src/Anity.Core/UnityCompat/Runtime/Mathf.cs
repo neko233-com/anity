@@ -86,4 +86,11 @@ public static class Mathf
     }
     return output;
   }
+
+  public static float SmoothStep(float from, float to, float t)
+  {
+    t = Clamp01(t);
+    t = t * t * (3f - 2f * t);
+    return to * t + from * (1f - t);
+  }
 }

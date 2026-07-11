@@ -10,21 +10,10 @@ public static class SceneManager
 {
   private const string DefaultSceneName = "SampleScene";
 
-  private sealed class SceneState
-  {
-    public int Handle;
-    public string Name = string.Empty;
-    public int BuildIndex;
-    public bool IsLoaded = true;
-    public bool IsSubScene;
-    public string Path = string.Empty;
-  }
-
-  private static readonly Dictionary<int, SceneState> _scenes = new();
+  private static readonly List<Scene> _scenes = new();
   private static readonly Dictionary<string, int> _nameToHandle = new(StringComparer.Ordinal);
   private static readonly Dictionary<string, int> _pathToHandle = new(StringComparer.Ordinal);
   private static readonly Dictionary<int, int> _buildIndexToHandle = new();
-  private static readonly List<int> _loadedOrder = new();
   private static int _nextHandle = 1;
   private static int _activeHandle;
 
@@ -34,14 +23,14 @@ public static class SceneManager
 
   static SceneManager()
   {
-    var defaultHandle = RegisterScene(DefaultSceneName, 0, true);
-    _activeHandle = defaultHandle;
-    PushLoaded(defaultHandle);
+    var defaultScene = CreateSceneInternal(DefaultSceneName, 0, true);
+    _activeHandle = defaultScene._handle;
   }
 
-  public static int sceneCount => _loadedOrder.Count;
+  public static int sceneCount => _scenes.Count;
   public static int sceneCountInBuildSettings => _scenes.Count;
-  public static int loadedSceneCount => _loadedOrder.Count;
+  public static int loadedSceneCount => _scenes.Count(s => s._isLoaded);
+
   public static Scene activeScene
   {
     get => GetSceneByHandle(_activeHandle);
@@ -56,10 +45,20 @@ public static class SceneManager
   public static Scene CreateScene(string sceneName)
   {
     var name = string.IsNullOrWhiteSpace(sceneName) ? $"Scene_{_nextHandle}" : sceneName;
-    var handle = RegisterScene(name, _scenes.Count, true);
-    PushLoaded(handle);
-    _activeHandle = handle;
-    return GetSceneByHandle(handle);
+    var scene = CreateSceneInternal(name, _scenes.Count, true);
+    _activeHandle = scene._handle;
+    return scene;
+  }
+
+  private static Scene CreateSceneInternal(string sceneName, int buildIndex, bool isLoaded)
+  {
+    var name = string.IsNullOrWhiteSpace(sceneName) ? DefaultSceneName : sceneName;
+    var handle = _nextHandle++;
+    var scene = new Scene(handle, name, buildIndex, isLoaded, false, "");
+    _scenes.Add(scene);
+    _nameToHandle[name] = handle;
+    _buildIndexToHandle[buildIndex] = handle;
+    return scene;
   }
 
   public static Scene GetSceneByName(string sceneName)
@@ -85,18 +84,18 @@ public static class SceneManager
 
   public static Scene GetSceneAt(int index)
   {
-    if (index < 0 || index >= _loadedOrder.Count)
+    if (index < 0 || index >= _scenes.Count)
     {
       return Scene.Invalid;
     }
 
-    return GetSceneByHandle(_loadedOrder[index]);
+    return _scenes[index];
   }
 
   public static void LoadScene(string sceneName, LoadSceneMode mode = LoadSceneMode.Single)
   {
     var scene = LoadSceneInternal(sceneName, mode);
-    _activeHandle = scene.handle;
+    _activeHandle = scene._handle;
   }
 
   public static void LoadScene(int buildIndex, LoadSceneMode mode = LoadSceneMode.Single)
@@ -109,6 +108,8 @@ public static class SceneManager
   {
     var op = new AsyncOperation();
     LoadScene(sceneName, mode);
+    op.isDone = true;
+    op.progress = 1f;
     return op;
   }
 
@@ -118,18 +119,20 @@ public static class SceneManager
     return LoadSceneAsync(fallback, mode);
   }
 
-  public static void SetActiveScene(Scene scene)
+  public static bool SetActiveScene(Scene scene)
   {
-    var state = ResolveSceneState(scene);
-    if (state is null || !state.IsLoaded)
+    if (scene is null || !scene._isLoaded)
     {
-      return;
+      return false;
     }
 
     var previous = GetActiveScene();
-    _activeHandle = state.Handle;
-    PushLoaded(state.Handle);
-    activeSceneChanged?.Invoke(previous, scene);
+    _activeHandle = scene._handle;
+    if (previous != scene)
+    {
+      activeSceneChanged?.Invoke(previous, scene);
+    }
+    return true;
   }
 
   public static AsyncOperation UnloadSceneAsync(string sceneName)
@@ -139,42 +142,70 @@ public static class SceneManager
 
   public static AsyncOperation UnloadSceneAsync(Scene scene)
   {
-    return UnloadByHandle(scene.handle);
+    return scene != null ? UnloadByHandle(scene._handle) : new AsyncOperation();
   }
 
   internal static int CreateHandleForUntrackedScene(string sceneName, int buildIndex)
   {
     sceneName = sceneName ?? DefaultSceneName;
     var existing = ResolveHandle(sceneName, buildIndex);
-    return existing != 0 ? existing : RegisterScene(sceneName, buildIndex, true);
+    return existing != 0 ? existing : CreateSceneInternal(sceneName, buildIndex, true)._handle;
   }
 
   internal static int GetRootCount(int handle)
   {
-    if (handle <= 0)
-    {
-      return 0;
-    }
-
-    return GameObject.GetSceneRootGameObjects().Length;
+    var scene = GetSceneByHandleInternal(handle);
+    return scene?._rootObjects?.Count ?? 0;
   }
 
   internal static GameObject[] GetRootGameObjects(int handle)
   {
-    _ = handle;
-    return GameObject.GetSceneRootGameObjects();
+    var scene = GetSceneByHandleInternal(handle);
+    return scene?.GetRootGameObjects() ?? Array.Empty<GameObject>();
+  }
+
+  internal static void RegisterRootGameObject(GameObject go, Scene scene)
+  {
+    if (go == null || scene == null) return;
+    if (!scene._rootObjects.Contains(go))
+    {
+      scene._rootObjects.Add(go);
+    }
+  }
+
+  internal static void UnregisterRootGameObject(GameObject go, Scene scene)
+  {
+    if (go == null || scene == null) return;
+    scene._rootObjects.Remove(go);
   }
 
   public static void MergeScenes(Scene sourceScene, Scene targetScene)
   {
-    _ = sourceScene;
-    _ = targetScene;
+    if (sourceScene == null || targetScene == null) return;
+    var roots = sourceScene.GetRootGameObjects();
+    foreach (var go in roots)
+    {
+      if (go != null && go.transform != null)
+      {
+        go.transform.SetParent(null, true);
+        targetScene._rootObjects.Add(go);
+      }
+    }
+    sourceScene._rootObjects.Clear();
   }
 
   public static void MoveGameObjectToScene(GameObject go, Scene scene)
   {
-    _ = go;
-    _ = scene;
+    if (go == null || scene == null) return;
+    var oldScene = GetSceneByName(go.scene.name);
+    if (oldScene != null && oldScene._rootObjects.Contains(go))
+    {
+      oldScene._rootObjects.Remove(go);
+    }
+    if (!scene._rootObjects.Contains(go))
+    {
+      scene._rootObjects.Add(go);
+    }
   }
 
   public static Scene GetSceneByPath(string scenePath)
@@ -189,24 +220,28 @@ public static class SceneManager
   private static Scene LoadSceneInternal(string sceneName, LoadSceneMode mode)
   {
     var name = string.IsNullOrWhiteSpace(sceneName) ? DefaultSceneName : sceneName;
-    var handle = ResolveHandle(name, _buildIndexToHandle.Count);
 
     if (mode == LoadSceneMode.Single)
     {
-      _loadedOrder.Clear();
+      foreach (var s in _scenes.Where(s => s._isLoaded).ToList())
+      {
+        if (s._handle != _activeHandle)
+        {
+          s._isLoaded = false;
+          s._rootObjects.Clear();
+        }
+      }
     }
 
-    if (handle == 0)
+    var existing = GetSceneByName(name);
+    if (existing.IsValid())
     {
-      handle = RegisterScene(name, _buildIndexToHandle.Count, true);
+      existing._isLoaded = true;
+      sceneLoaded?.Invoke(existing, mode);
+      return existing;
     }
 
-    var state = _scenes[handle];
-    state.IsLoaded = true;
-    _scenes[handle] = state;
-    PushLoaded(handle);
-
-    var scene = GetSceneByHandle(handle);
+    var scene = CreateSceneInternal(name, _buildIndexToHandle.Count, true);
     sceneLoaded?.Invoke(scene, mode);
 
     return scene;
@@ -215,23 +250,46 @@ public static class SceneManager
   private static AsyncOperation UnloadByHandle(int handle)
   {
     var op = new AsyncOperation();
-    if (!_scenes.TryGetValue(handle, out var state))
+    var scene = GetSceneByHandleInternal(handle);
+    if (scene == null)
     {
       return op;
     }
 
-    var scene = GetSceneByHandle(handle);
-    state.IsLoaded = false;
-    _scenes[handle] = state;
-    _ = _loadedOrder.RemoveAll(x => x == handle);
+    scene._isLoaded = false;
+    var roots = scene._rootObjects.ToList();
+    foreach (var go in roots)
+    {
+      if (go != null && !go.IsDontDestroyOnLoad)
+      {
+        Object.DestroyImmediate(go);
+      }
+    }
+    scene._rootObjects.Clear();
 
     if (_activeHandle == handle)
     {
-      _activeHandle = _loadedOrder.Count == 0 ? GetDefaultSceneHandle() : _loadedOrder[^1];
+      var remaining = _scenes.FirstOrDefault(s => s._isLoaded);
+      _activeHandle = remaining != null ? remaining._handle : 0;
+      if (_activeHandle == 0 && _scenes.Count > 0)
+      {
+        _scenes[0]._isLoaded = true;
+        _activeHandle = _scenes[0]._handle;
+      }
     }
+
+    _scenes.Remove(scene);
+    _nameToHandle.Remove(scene.name);
+    if (!string.IsNullOrEmpty(scene.path))
+    {
+      _pathToHandle.Remove(scene.path);
+    }
+    _buildIndexToHandle.Remove(scene.buildIndex);
 
     sceneUnloaded?.Invoke(scene);
 
+    op.isDone = true;
+    op.progress = 1f;
     return op;
   }
 
@@ -249,47 +307,13 @@ public static class SceneManager
       : 0;
   }
 
-  private static int RegisterScene(string sceneName, int buildIndex, bool loaded, bool isSubScene = false)
+  private static Scene? GetSceneByHandleInternal(int handle)
   {
-    var normalizedName = sceneName ?? DefaultSceneName;
-    var state = new SceneState
-    {
-      Handle = _nextHandle++,
-      Name = normalizedName,
-      BuildIndex = buildIndex,
-      IsLoaded = loaded,
-      IsSubScene = isSubScene
-    };
-
-    var handle = state.Handle;
-    _scenes[handle] = state;
-    _nameToHandle[normalizedName] = handle;
-    _buildIndexToHandle[buildIndex] = handle;
-    return handle;
-  }
-
-  private static void PushLoaded(int handle)
-  {
-    _ = _loadedOrder.RemoveAll(x => x == handle);
-    _loadedOrder.Add(handle);
-  }
-
-  private static int GetDefaultSceneHandle()
-  {
-    return _nameToHandle.TryGetValue(DefaultSceneName, out var defaultHandle)
-      ? defaultHandle
-      : _scenes.Keys.FirstOrDefault();
+    return _scenes.FirstOrDefault(s => s._handle == handle);
   }
 
   private static Scene GetSceneByHandle(int handle)
   {
-    return _scenes.TryGetValue(handle, out var state)
-      ? new Scene(state.Handle, state.Name, state.BuildIndex, state.IsLoaded, state.IsSubScene, state.Path)
-      : Scene.Invalid;
-  }
-
-  private static SceneState? ResolveSceneState(Scene scene)
-  {
-    return _scenes.TryGetValue(scene.handle, out var state) ? state : null;
+    return GetSceneByHandleInternal(handle) ?? Scene.Invalid;
   }
 }

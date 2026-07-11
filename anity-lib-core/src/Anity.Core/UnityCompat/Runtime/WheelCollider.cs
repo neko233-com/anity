@@ -68,12 +68,12 @@ public class WheelCollider : Collider
 
     public WheelCollider()
     {
-        PhysicsWorld.RegisterWheel(this);
+        Physics.s_world.RegisterWheel(this);
     }
 
     ~WheelCollider()
     {
-        PhysicsWorld.UnregisterWheel(this);
+        Physics.s_world.UnregisterWheel(this);
     }
 
     public Vector3 center
@@ -214,7 +214,7 @@ public class WheelCollider : Collider
         Vector3 origin = transform.TransformPoint(_center);
         float rayLength = _suspensionDistance + _radius;
 
-        if (PhysicsWorld.Raycast(origin, -up, out RaycastHit hit, rayLength, -1, QueryTriggerInteraction.Ignore))
+        if (Physics.s_world.Raycast(origin, -up, out RaycastHit hit, rayLength, -1, QueryTriggerInteraction.Ignore))
         {
             _isGrounded = true;
             float hitDistance = hit.distance;

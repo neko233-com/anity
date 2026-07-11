@@ -62,12 +62,12 @@ public class Collider : Component
 
     public Collider()
     {
-        PhysicsWorld.Register(this);
+        Physics.s_world.Register(this);
     }
 
     ~Collider()
     {
-        PhysicsWorld.UnregisterCollider(this);
+        Physics.s_world.UnregisterCollider(this);
     }
 
     public virtual Vector3 ClosestPoint(Vector3 position)

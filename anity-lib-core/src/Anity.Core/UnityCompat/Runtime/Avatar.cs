@@ -8,6 +8,8 @@ public class Avatar : Object
   public bool hasTransformHierarchy { get; set; }
   public float humanScale { get; set; } = 1f;
   public int avatarSize { get; set; }
+  public int muscleCount { get; set; } = 95;
+  public Transform? rootBone { get; set; }
 
   public static Avatar Build(RawAvatar avatar)
   {
@@ -28,6 +30,23 @@ public class Avatar : Object
   {
     _ = boneName;
     return string.Empty;
+  }
+}
+
+public static class AvatarBuilder
+{
+  public static Avatar BuildHumanAvatar(GameObject go, HumanDescription humanDescription)
+  {
+    _ = go;
+    var avatar = new Avatar
+    {
+      isValid = true,
+      isHuman = true,
+      hasTransformHierarchy = true,
+      humanDescription = humanDescription,
+      rootBone = go?.transform
+    };
+    return avatar;
   }
 }
 

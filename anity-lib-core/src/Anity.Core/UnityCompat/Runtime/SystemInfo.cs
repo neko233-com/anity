@@ -53,12 +53,14 @@ public static class SystemInfo
     public static bool supportsShadows => true;
     public static bool supportsRawShadowDepthSampling => true;
     public static bool supportsMotionVectors => true;
+    public static bool supportsComputeShadows => true;
     public static bool supports3DTextures => true;
     public static bool supports2DArrayTextures => true;
     public static bool supportsCubemapArrayTextures => true;
     public static bool supportsComputeShaders => true;
     public static bool supportsInstancing => true;
     public static bool supportsGeometryShaders => true;
+    public static bool supportsTessellationShaders => true;
     public static bool supportsHardwareQuadTopology => false;
     public static bool supports32bitsIndexBuffer => true;
     public static bool supportsSparseTextures => false;

@@ -540,24 +540,13 @@ public class Image : MaskableGraphic, ILayoutElement, ICanvasRaycastFilter
   {
     var startIndex = vh.currentVertCount;
 
-    vh.AddVert(new Vector3(xMin, yMin, 0f), color, new Vector4(uvMinX, uvMinY, 0f, 1f));
-    vh.AddVert(new Vector3(xMin, yMax, 0f), color, new Vector4(uvMinX, uvMaxY, 0f, 1f));
-    vh.AddVert(new Vector3(xMax, yMax, 0f), color, new Vector4(uvMaxX, uvMaxY, 0f, 1f));
-    vh.AddVert(new Vector3(xMax, yMin, 0f), color, new Vector4(uvMaxX, uvMinY, 0f, 1f));
+    vh.AddVert(new Vector3(xMin, yMin, 0f), color, new Vector2(uvMinX, uvMinY));
+    vh.AddVert(new Vector3(xMax, yMin, 0f), color, new Vector2(uvMaxX, uvMinY));
+    vh.AddVert(new Vector3(xMax, yMax, 0f), color, new Vector2(uvMaxX, uvMaxY));
+    vh.AddVert(new Vector3(xMin, yMax, 0f), color, new Vector2(uvMinX, uvMaxY));
 
     vh.AddTriangle(startIndex, startIndex + 1, startIndex + 2);
     vh.AddTriangle(startIndex, startIndex + 2, startIndex + 3);
-  }
-
-  protected override void UpdateGeometry()
-  {
-    if (canvasRenderer is null) return;
-    var vh = new VertexHelper();
-    OnPopulateMesh(vh);
-    var verts = new List<UIVertex>();
-    vh.GetUIVertexStream(verts);
-    canvasRenderer.SetVertices(verts);
-    vh.Dispose();
   }
 
   protected override void OnEnable()

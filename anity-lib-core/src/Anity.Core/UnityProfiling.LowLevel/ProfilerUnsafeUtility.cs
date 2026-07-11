@@ -23,7 +23,6 @@ public static class ProfilerUnsafeUtility
 
   public static void RegisterProfilerCounter()
   {
-    // compatibility stub: marker for allocation counters on platforms requiring init
   }
 
   public static ulong CreateMarker(string name, ushort categoryId, byte flags, int metadataCount)
@@ -37,6 +36,26 @@ public static class ProfilerUnsafeUtility
       checked { _nextId++; }
       return _nextId;
     }
+  }
+
+  public static void BeginSample(ulong markerId)
+  {
+    _ = markerId;
+  }
+
+  public static void EndSample(ulong markerId)
+  {
+    _ = markerId;
+  }
+
+  public static void Internal_Begin(ulong markerId)
+  {
+    _ = markerId;
+  }
+
+  public static void Internal_End(ulong markerId)
+  {
+    _ = markerId;
   }
 
   public static void DestroyMarker(ulong markerId)

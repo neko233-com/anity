@@ -109,8 +109,13 @@ public struct MeshData : IDisposable
     private int _indexCount;
     private List<SubmeshDescriptor> _subMeshes;
     private bool _disposed;
-    private NativeArray<byte> _vertexBuffer;
-    private NativeArray<byte> _indexBuffer;
+    private List<Vector3> _positions;
+    private List<Vector3> _normals;
+    private List<Vector4> _tangents;
+    private List<Color> _colors;
+    private List<Vector2> _uv0;
+    private List<Vector2> _uv1;
+    private List<int> _indices;
 
     public IndexFormat indexFormat
     {
@@ -137,13 +142,25 @@ public struct MeshData : IDisposable
     {
         _vertexCount = vertexCount;
         _vertexAttributes = attributes != null ? new List<VertexAttributeDescriptor>(attributes) : new List<VertexAttributeDescriptor>();
-        int vertexStride = 0;
-        for (int i = 0; i < _vertexAttributes.Count; i++)
-            vertexStride += _vertexAttributes[i].dimension * GetFormatSize(_vertexAttributes[i].format);
-        if (vertexCount > 0 && vertexStride > 0)
+        EnsureLists(vertexCount);
+    }
+
+    private void EnsureLists(int count)
+    {
+        _positions = new List<Vector3>(count);
+        _normals = new List<Vector3>(count);
+        _tangents = new List<Vector4>(count);
+        _colors = new List<Color>(count);
+        _uv0 = new List<Vector2>(count);
+        _uv1 = new List<Vector2>(count);
+        for (int i = 0; i < count; i++)
         {
-            if (_vertexBuffer.IsCreated) _vertexBuffer.Dispose();
-            _vertexBuffer = new NativeArray<byte>(vertexCount * vertexStride, Allocator.Persistent);
+            _positions.Add(Vector3.zero);
+            _normals.Add(Vector3.up);
+            _tangents.Add(new Vector4(1, 0, 0, 1));
+            _colors.Add(Color.white);
+            _uv0.Add(Vector2.zero);
+            _uv1.Add(Vector2.zero);
         }
     }
 
@@ -151,12 +168,9 @@ public struct MeshData : IDisposable
     {
         _indexCount = indexCount;
         _indexFormat = format;
-        int indexSize = format == IndexFormat.UInt32 ? 4 : 2;
-        if (indexCount > 0)
-        {
-            if (_indexBuffer.IsCreated) _indexBuffer.Dispose();
-            _indexBuffer = new NativeArray<byte>(indexCount * indexSize, Allocator.Persistent);
-        }
+        _indices = new List<int>(indexCount);
+        for (int i = 0; i < indexCount; i++)
+            _indices.Add(0);
     }
 
     private static int GetFormatSize(VertexAttributeFormat format)
@@ -170,10 +184,28 @@ public struct MeshData : IDisposable
         };
     }
 
-    public void GetVertices<T>(NativeArray<T> vertices) where T : struct { }
-    public void SetVertices<T>(NativeArray<T> vertices) where T : struct { }
-    public void GetIndices<T>(NativeArray<T> indices, int submesh, bool applyBaseVertex = true) where T : struct { }
-    public void SetIndices<T>(NativeArray<T> indices, int submesh, MeshTopology topology, bool renderNode = false) where T : struct { }
+    public NativeArray<T> GetVertexData<T>(int stream = 0) where T : struct
+    {
+        _ = stream;
+        if (typeof(T) == typeof(Vector3))
+            return new NativeArray<T>(0, Allocator.Persistent);
+        return new NativeArray<T>(0, Allocator.Persistent);
+    }
+
+    public NativeArray<T> GetIndexData<T>() where T : struct
+    {
+        if (_indices == null) return new NativeArray<T>(0, Allocator.Persistent);
+        var arr = new NativeArray<T>(_indices.Count, Allocator.Persistent);
+        return arr;
+    }
+
+    public void SetSubMesh(int index, SubmeshDescriptor subMesh, MeshUpdateFlags flags = MeshUpdateFlags.Default)
+    {
+        _ = flags;
+        if (_subMeshes == null) _subMeshes = new List<SubmeshDescriptor>();
+        while (_subMeshes.Count <= index) _subMeshes.Add(default);
+        _subMeshes[index] = subMesh;
+    }
 
     public SubmeshDescriptor GetSubMesh(int index)
     {
@@ -182,27 +214,38 @@ public struct MeshData : IDisposable
         return default;
     }
 
-    public void SetSubMesh(int index, SubmeshDescriptor subMesh)
-    {
-        if (_subMeshes == null) _subMeshes = new List<SubmeshDescriptor>();
-        while (_subMeshes.Count <= index) _subMeshes.Add(default);
-        _subMeshes[index] = subMesh;
-    }
-
     public void SetSubMeshes(params SubmeshDescriptor[] subMeshes)
     {
         _subMeshes = subMeshes != null ? new List<SubmeshDescriptor>(subMeshes) : new List<SubmeshDescriptor>();
     }
 
+    internal List<Vector3> GetPositions() => _positions ?? new List<Vector3>();
+    internal List<int> GetIndices() => _indices ?? new List<int>();
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        if (_vertexBuffer.IsCreated) _vertexBuffer.Dispose();
-        if (_indexBuffer.IsCreated) _indexBuffer.Dispose();
+        _positions?.Clear();
+        _normals?.Clear();
+        _tangents?.Clear();
+        _colors?.Clear();
+        _uv0?.Clear();
+        _uv1?.Clear();
+        _indices?.Clear();
         _vertexAttributes?.Clear();
         _subMeshes?.Clear();
     }
+}
+
+[Flags]
+public enum MeshUpdateFlags
+{
+    Default = 0,
+    DontValidateIndices = 1,
+    DontResetBoneBounds = 2,
+    DontNotifyMeshUsers = 4,
+    DontRecalculateBounds = 8
 }
 
 public struct MeshDataArray : IDisposable
@@ -268,8 +311,9 @@ public partial class Mesh
 
     public static MeshDataArray AllocateWritableMeshData(int meshCount) => new MeshDataArray(meshCount);
 
-    public static void ApplyAndDisposeWritableMeshData(MeshDataArray data, Mesh[] meshes)
+    public static void ApplyAndDisposeWritableMeshData(MeshDataArray data, Mesh[] meshes, MeshUpdateFlags flags = MeshUpdateFlags.Default)
     {
+        _ = flags;
         if (data._data == null || meshes == null) { data.Dispose(); return; }
         int count = Math.Min(data._data.Length, meshes.Length);
         for (int i = 0; i < count; i++)
@@ -279,17 +323,27 @@ public partial class Mesh
             meshes[i]._vertexAttributeDescriptors = new List<VertexAttributeDescriptor>(md.GetVertexAttributes());
             int smc = md.subMeshCount;
             meshes[i]._submeshDescriptors = new List<SubmeshDescriptor>();
+            var positions = md.GetPositions();
+            var indices = md.GetIndices();
+            if (positions.Count > 0)
+                meshes[i].SetVertices(positions.ToArray());
+            if (indices.Count > 0)
+            {
+                meshes[i].triangles = indices.ToArray();
+            }
             for (int s = 0; s < smc; s++)
                 meshes[i]._submeshDescriptors.Add(md.GetSubMesh(s));
             meshes[i]._meshVertexCount = md.vertexCount;
             meshes[i]._meshIndexCount = md.indexCount;
             meshes[i].indexFormat = md.indexFormat;
+            meshes[i].RecalculateBounds();
         }
         data.Dispose();
     }
 
-    public static void ApplyAndDisposeWritableMeshData(MeshDataArray data, Mesh mesh, int index = 0)
+    public static void ApplyAndDisposeWritableMeshData(MeshDataArray data, Mesh mesh, int index = 0, MeshUpdateFlags flags = MeshUpdateFlags.Default)
     {
+        _ = flags;
         if (mesh == null || data._data == null) { data.Dispose(); return; }
         if (index >= 0 && index < data._data.Length)
         {
@@ -297,11 +351,18 @@ public partial class Mesh
             mesh._vertexAttributeDescriptors = new List<VertexAttributeDescriptor>(md.GetVertexAttributes());
             int smc = md.subMeshCount;
             mesh._submeshDescriptors = new List<SubmeshDescriptor>();
+            var positions = md.GetPositions();
+            var indices = md.GetIndices();
+            if (positions.Count > 0)
+                mesh.SetVertices(positions.ToArray());
+            if (indices.Count > 0)
+                mesh.triangles = indices.ToArray();
             for (int s = 0; s < smc; s++)
                 mesh._submeshDescriptors.Add(md.GetSubMesh(s));
             mesh._meshVertexCount = md.vertexCount;
             mesh._meshIndexCount = md.indexCount;
             mesh.indexFormat = md.indexFormat;
+            mesh.RecalculateBounds();
         }
         data.Dispose();
     }

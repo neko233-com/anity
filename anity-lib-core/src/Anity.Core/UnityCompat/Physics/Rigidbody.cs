@@ -145,7 +145,12 @@ public class Rigidbody : Component
 
     public Rigidbody()
     {
-        PhysicsWorld.Register(this);
+        Physics.s_world.Register(this);
+    }
+
+    ~Rigidbody()
+    {
+        Physics.s_world.UnregisterRigidbody(this);
     }
 
     private Vector3 CalculateCenterOfMass()
@@ -341,6 +346,13 @@ public class Rigidbody : Component
 
     public bool IsSleeping() => _isSleeping;
 
+    internal void CheckSleep(float threshold)
+    {
+        if (isKinematic) return;
+        float kineticEnergy = _velocity.sqrMagnitude * mass + _angularVelocity.sqrMagnitude * Mathf.Max(inertiaTensor.x, inertiaTensor.y, inertiaTensor.z);
+        _isSleeping = kineticEnergy < threshold * threshold;
+    }
+
     public bool SweepTest(Vector3 direction, out RaycastHit hitInfo)
     {
         return SweepTest(direction, out hitInfo, float.PositiveInfinity);
@@ -350,7 +362,7 @@ public class Rigidbody : Component
     {
         hitInfo = default;
         if (transform == null) return false;
-        return PhysicsWorld.SphereCast(worldCenterOfMass, 0.5f, direction.normalized, out hitInfo, maxDistance, -1, QueryTriggerInteraction.Ignore);
+        return Physics.s_world.SphereCast(worldCenterOfMass, 0.5f, direction.normalized, out hitInfo, maxDistance, -1, QueryTriggerInteraction.Ignore);
     }
 
     public RaycastHit[] SweepTestAll(Vector3 direction)
@@ -361,7 +373,7 @@ public class Rigidbody : Component
     public RaycastHit[] SweepTestAll(Vector3 direction, float maxDistance)
     {
         direction = direction.normalized;
-        var hits = PhysicsWorld.SphereCastAll(worldCenterOfMass, 0.5f, direction, maxDistance, -1, QueryTriggerInteraction.Ignore);
+        var hits = Physics.s_world.SphereCastAll(worldCenterOfMass, 0.5f, direction, maxDistance, -1, QueryTriggerInteraction.Ignore);
         return hits;
     }
 

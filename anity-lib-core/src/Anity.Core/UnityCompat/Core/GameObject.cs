@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using UnityEngine.SceneManagement;
 
 namespace UnityEngine;
 
@@ -10,7 +11,7 @@ public class GameObject : Object
   private static readonly Dictionary<string, List<GameObject>> _sceneObjects = new(StringComparer.Ordinal);
   private static readonly List<GameObject> _allObjects = new();
   private readonly List<Component> _components = new();
-  private string _sceneName = "SampleScene";
+  private Scene _scene;
   private bool _isActiveInHierarchyPrev;
 
   public GameObject(string name = "GameObject")
@@ -18,6 +19,7 @@ public class GameObject : Object
     this.name = name;
     transform = new Transform { gameObject = this };
     _components.Add(transform);
+    _scene = SceneManager.GetActiveScene();
     AddToScene(this);
   }
 
@@ -67,7 +69,7 @@ public class GameObject : Object
 
   public bool isStatic { get; set; }
 
-  public SceneManagement.Scene scene => new SceneManagement.Scene(_sceneName, 0, true);
+  public SceneManagement.Scene scene => _scene ?? SceneManagement.Scene.Invalid;
 
   public static GameObject? Find(string name)
   {
@@ -435,13 +437,17 @@ public class GameObject : Object
     {
       byName.Add(go);
     }
+
+    if (go._scene != null && go.transform != null && go.transform.parent is null)
+    {
+      SceneManager.RegisterRootGameObject(go, go._scene);
+    }
   }
 
   internal static GameObject[] GetSceneRootGameObjects()
   {
-    return _allObjects
-      .Where(go => !go.IsDestroyed && go.transform.parent is null)
-      .ToArray();
+    var activeScene = SceneManager.GetActiveScene();
+    return activeScene.GetRootGameObjects();
   }
 
   internal static void UnregisterFromScene(GameObject? go)
@@ -452,6 +458,11 @@ public class GameObject : Object
     }
 
     _ = _allObjects.Remove(go);
+
+    if (go._scene != null)
+    {
+      SceneManager.UnregisterRootGameObject(go, go._scene);
+    }
 
     if (_sceneObjects.TryGetValue(go.name, out var byName))
     {

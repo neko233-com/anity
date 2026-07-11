@@ -35,8 +35,67 @@ public struct Vector2
 
   public static float Dot(Vector2 a, Vector2 b) => a.x * b.x + a.y * b.y;
   public static float Distance(Vector2 a, Vector2 b) => (a - b).magnitude;
+
+  public static float Angle(Vector2 from, Vector2 to)
+  {
+    float d = Dot(from.normalized, to.normalized);
+    d = Mathf.Clamp(d, -1f, 1f);
+    return Mathf.Acos(d) * Mathf.Rad2Deg;
+  }
+
+  public static Vector2 MoveTowards(Vector2 current, Vector2 target, float maxDistanceDelta)
+  {
+    Vector2 toVector = target - current;
+    float dist = toVector.magnitude;
+    if (dist <= maxDistanceDelta || dist < 1e-6f) return target;
+    return current + toVector / dist * maxDistanceDelta;
+  }
+
+  public static Vector2 SmoothDamp(Vector2 current, Vector2 target, ref Vector2 currentVelocity, float smoothTime, float maxSpeed)
+  {
+    return SmoothDamp(current, target, ref currentVelocity, smoothTime, maxSpeed, Time.deltaTime);
+  }
+
+  public static Vector2 SmoothDamp(Vector2 current, Vector2 target, ref Vector2 currentVelocity, float smoothTime)
+  {
+    return SmoothDamp(current, target, ref currentVelocity, smoothTime, float.PositiveInfinity, Time.deltaTime);
+  }
+
+  public static Vector2 SmoothDamp(Vector2 current, Vector2 target, ref Vector2 currentVelocity, float smoothTime, float maxSpeed, float deltaTime)
+  {
+    smoothTime = Mathf.Max(0.0001f, smoothTime);
+    float omega = 2f / smoothTime;
+    float x = omega * deltaTime;
+    float exp = 1f / (1f + x + 0.48f * x * x + 0.235f * x * x * x);
+    float cx = current.x; float cy = current.y;
+    float tx = target.x; float ty = target.y;
+    float cvx = currentVelocity.x; float cvy = currentVelocity.y;
+    float maxChange = maxSpeed * smoothTime;
+    float dx = Mathf.Clamp(cx - tx, -maxChange, maxChange);
+    float dy = Mathf.Clamp(cy - ty, -maxChange, maxChange);
+    float otx = tx; float oty = ty;
+    tx = cx - dx; ty = cy - dy;
+    float tempx = (cvx + omega * dx) * deltaTime;
+    float tempy = (cvy + omega * dy) * deltaTime;
+    cvx = (cvx - omega * tempx) * exp;
+    cvy = (cvy - omega * tempy) * exp;
+    float outx = tx + (dx + tempx) * exp;
+    float outy = ty + (dy + tempy) * exp;
+    if ((otx - cx) > 0f == outx > otx) { outx = otx; cvx = (outx - otx) / deltaTime; }
+    if ((oty - cy) > 0f == outy > oty) { outy = oty; cvy = (outy - oty) / deltaTime; }
+    currentVelocity = new Vector2(cvx, cvy);
+    return new Vector2(outx, outy);
+  }
+
   public static Vector2 Lerp(Vector2 a, Vector2 b, float t) => a + (b - a) * Math.Clamp(t, 0f, 1f);
   public static Vector2 LerpUnclamped(Vector2 a, Vector2 b, float t) => a + (b - a) * t;
+
+  public void Normalize()
+  {
+    float m = magnitude;
+    if (m > 1e-6f) { this /= m; }
+    else { this = zero; }
+  }
   public static Vector2 ClampMagnitude(Vector2 vector, float maxLength)
   {
     var sqr = vector.sqrMagnitude;

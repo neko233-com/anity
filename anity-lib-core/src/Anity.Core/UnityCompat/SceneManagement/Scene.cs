@@ -1,18 +1,21 @@
-using UnityEngine;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace UnityEngine.SceneManagement;
 
-public readonly struct Scene
+public class Scene
 {
-  private readonly int _handle;
+  internal int _handle;
+  internal List<GameObject> _rootObjects = new();
+  internal bool _isLoaded;
 
   public int handle => _handle;
-  public string name { get; }
-  public int buildIndex { get; }
-  public bool isLoaded { get; }
-  public bool isSubScene { get; }
-  public string path { get; }
+  public string name { get; internal set; }
+  public int buildIndex { get; internal set; }
+  public bool isLoaded => _isLoaded;
+  public bool isSubScene { get; internal set; }
+  public string path { get; internal set; }
   public bool isValid => IsValid();
 
   internal Scene(int handle, string name, int buildIndex, bool isLoaded = true, bool isSubScene = false, string path = "")
@@ -25,7 +28,7 @@ public readonly struct Scene
     _handle = handle;
     this.name = name ?? string.Empty;
     this.buildIndex = buildIndex;
-    this.isLoaded = isLoaded;
+    _isLoaded = isLoaded;
     this.isSubScene = isSubScene;
     this.path = path ?? string.Empty;
   }
@@ -40,11 +43,11 @@ public readonly struct Scene
     return _handle != 0;
   }
 
-  public int rootCount => IsValid() ? SceneManager.GetRootCount(_handle) : 0;
+  public int rootCount => _rootObjects?.Count ?? 0;
 
   public GameObject[] GetRootGameObjects()
   {
-    return IsValid() ? SceneManager.GetRootGameObjects(_handle) : Array.Empty<GameObject>();
+    return _rootObjects?.Where(go => go != null && !go.IsDestroyed).ToArray() ?? Array.Empty<GameObject>();
   }
 
   public override int GetHashCode()
@@ -57,14 +60,16 @@ public readonly struct Scene
     return obj is Scene other && _handle == other._handle;
   }
 
-  public static bool operator ==(Scene left, Scene right)
+  public static bool operator ==(Scene? left, Scene? right)
   {
+    if (left is null && right is null) return true;
+    if (left is null || right is null) return false;
     return left.Equals(right);
   }
 
-  public static bool operator !=(Scene left, Scene right)
+  public static bool operator !=(Scene? left, Scene? right)
   {
-    return !left.Equals(right);
+    return !(left == right);
   }
 
   public static readonly Scene Invalid = new(0, string.Empty, -1, false);

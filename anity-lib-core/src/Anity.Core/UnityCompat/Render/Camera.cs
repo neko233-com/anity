@@ -249,6 +249,8 @@ public class Camera : Behaviour
 
     public static Camera? current { get; set; }
 
+    public static Camera[] AllCameras => _allCameras.ToArray();
+
     public static Camera[] allCameras => _allCameras.ToArray();
 
     public int allCamerasCount => _allCameras.Count;
@@ -259,6 +261,27 @@ public class Camera : Behaviour
         _cameraCount++;
         _pixelWidth = Screen.width;
         _pixelHeight = Screen.height;
+    }
+
+    internal static void RemoveCamera(Camera cam)
+    {
+        if (cam != null)
+        {
+            _allCameras.Remove(cam);
+            if (_main == cam)
+            {
+                _main = null;
+            }
+        }
+    }
+
+    public static void RenderAll()
+    {
+        var sorted = _allCameras.Where(c => c != null && c.enabled).OrderBy(c => c.depth).ToList();
+        foreach (var cam in sorted)
+        {
+            cam.Render();
+        }
     }
 
     private Matrix4x4 CalculateProjectionMatrix()

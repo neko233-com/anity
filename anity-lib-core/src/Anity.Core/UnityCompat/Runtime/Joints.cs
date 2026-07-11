@@ -96,12 +96,12 @@ public class Joint : Component
 
     public Joint()
     {
-        PhysicsWorld.RegisterJoint(this);
+        Physics.s_world.RegisterJoint(this);
     }
 
     ~Joint()
     {
-        PhysicsWorld.UnregisterJoint(this);
+        Physics.s_world.UnregisterJoint(this);
     }
 
     internal void SetCurrentForce(Vector3 f) => _currentForce = f;

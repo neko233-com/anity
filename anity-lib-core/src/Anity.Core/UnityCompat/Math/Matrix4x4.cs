@@ -157,6 +157,20 @@ public struct Matrix4x4
     return new Matrix4x4(result);
   }
 
+  public static Matrix4x4 Frustum(float left, float right, float bottom, float top, float zNear, float zFar)
+  {
+    var result = new float[16];
+    result[0]  = 2f * zNear / (right - left);
+    result[5]  = 2f * zNear / (top - bottom);
+    result[8]  = (right + left) / (right - left);
+    result[9]  = (top + bottom) / (top - bottom);
+    result[10] = -(zFar + zNear) / (zFar - zNear);
+    result[11] = -1f;
+    result[14] = -(2f * zFar * zNear) / (zFar - zNear);
+    result[15] = 0f;
+    return new Matrix4x4(result);
+  }
+
   public static Matrix4x4 LookAt(Vector3 eye, Vector3 target, Vector3 up)
   {
     Vector3 zAxis = (eye - target).normalized;

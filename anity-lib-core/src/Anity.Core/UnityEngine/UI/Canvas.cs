@@ -15,6 +15,8 @@ public enum SortOrder
 
 public class Canvas : Behaviour
 {
+  internal static readonly List<Canvas> _canvases = new();
+
   public RenderMode renderMode { get; set; }
   public Camera? worldCamera { get; set; }
   public int sortingOrder { get; set; }
@@ -33,6 +35,8 @@ public class Canvas : Behaviour
   public bool isRootCanvas { get; set; } = true;
   public RectTransform? renderTransform { get; set; }
 
+  public static List<Canvas> canvases => _canvases;
+
   public static event System.Action<bool>? preWillRenderCanvases;
   public static event System.Action? willRenderCanvases;
 
@@ -49,5 +53,10 @@ public class Canvas : Behaviour
   {
     preWillRenderCanvases?.Invoke(false);
     willRenderCanvases?.Invoke();
+  }
+
+  public Canvas()
+  {
+    _canvases.Add(this);
   }
 }

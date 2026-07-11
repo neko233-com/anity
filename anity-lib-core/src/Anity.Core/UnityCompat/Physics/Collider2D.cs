@@ -67,12 +67,12 @@ public class Collider2D : Component
 
   public Collider2D()
   {
-    Physics2DWorld.Register(this);
+    Physics2D.s_world2D.Register(this);
   }
 
   ~Collider2D()
   {
-    Physics2DWorld.Unregister(this);
+    Physics2D.s_world2D.Unregister(this);
   }
 
   public bool IsTouching(Collider2D otherCollider)
@@ -82,24 +82,24 @@ public class Collider2D : Component
       return false;
     }
 
-    return Physics2DWorld.Intersect(this, otherCollider);
+    return Physics2D.s_world2D.Intersect(this, otherCollider);
   }
 
   public bool IsTouchingLayers(int layerMask = -1)
   {
-    foreach (var collider in Physics2DWorld.GetColliders())
+    foreach (var collider in Physics2D.s_world2D.GetColliders())
     {
       if (collider is null || collider == this || collider.IsDestroyed)
       {
         continue;
       }
 
-      if (!Physics2DWorld.LayerMatches(collider.gameObject?.layer ?? 0, layerMask))
+      if (!Physics2D.s_world2D.LayerMatches(collider.gameObject?.layer ?? 0, layerMask))
       {
         continue;
       }
 
-      if (Physics2DWorld.Intersect(this, collider))
+      if (Physics2D.s_world2D.Intersect(this, collider))
       {
         return true;
       }
@@ -126,25 +126,25 @@ public class Collider2D : Component
         if (dist <= shape.radius) return position;
         return worldPos + delta.normalized * shape.radius;
       case ColliderShapeType2D.Capsule:
-        Physics2DWorld.GetCapsuleTransform(shape, worldPos, out var capCenter, out var capAxis, out var capRadius, out var capHalfHeight);
+        Physics2D.s_world2D.GetCapsuleTransform(shape, worldPos, out var capCenter, out var capAxis, out var capRadius, out var capHalfHeight);
         Vector2 p0 = capCenter - capAxis * capHalfHeight;
         Vector2 p1 = capCenter + capAxis * capHalfHeight;
-        Vector2 closestSeg = Physics2DWorld.ClosestPointOnSegment(position, p0, p1);
+        Vector2 closestSeg = Physics2D.s_world2D.ClosestPointOnSegment(position, p0, p1);
         Vector2 d = position - closestSeg;
         float dMag = d.magnitude;
         if (dMag <= capRadius) return position;
         return closestSeg + d.normalized * capRadius;
       case ColliderShapeType2D.Polygon:
-        Vector2[] polyPoints = Physics2DWorld.TransformPoints(shape.points, worldPos);
+        Vector2[] polyPoints = Physics2D.s_world2D.TransformPoints(shape.points, worldPos);
         if (polyPoints == null || polyPoints.Length == 0) return position;
-        if (Physics2DWorld.PointInPolygon(position, polyPoints)) return position;
+        if (Physics2D.s_world2D.PointInPolygon(position, polyPoints)) return position;
         float bestDist = float.MaxValue;
         Vector2 bestPt = position;
         for (int i = 0; i < polyPoints.Length; i++)
         {
           Vector2 a = polyPoints[i];
           Vector2 b = polyPoints[(i + 1) % polyPoints.Length];
-          Vector2 cp = Physics2DWorld.ClosestPointOnSegment(position, a, b);
+          Vector2 cp = Physics2D.s_world2D.ClosestPointOnSegment(position, a, b);
           float dPoly = Vector2.Distance(position, cp);
           if (dPoly < bestDist)
           {
@@ -154,7 +154,7 @@ public class Collider2D : Component
         }
         return bestPt;
       case ColliderShapeType2D.Edge:
-        Vector2[] edgePoints = Physics2DWorld.TransformPoints(shape.points, worldPos);
+        Vector2[] edgePoints = Physics2D.s_world2D.TransformPoints(shape.points, worldPos);
         if (edgePoints == null || edgePoints.Length < 2) return position;
         Vector2 bestEdgePt = position;
         float bestEdgeDist = float.MaxValue;
@@ -162,7 +162,7 @@ public class Collider2D : Component
         {
           Vector2 a = edgePoints[i];
           Vector2 b = edgePoints[i + 1];
-          Vector2 cp = Physics2DWorld.ClosestPointOnSegment(position, a, b);
+          Vector2 cp = Physics2D.s_world2D.ClosestPointOnSegment(position, a, b);
           float dEdge = Vector2.Distance(position, cp);
           if (dEdge < bestEdgeDist)
           {

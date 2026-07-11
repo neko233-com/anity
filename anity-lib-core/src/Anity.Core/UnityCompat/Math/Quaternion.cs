@@ -175,6 +175,83 @@ public readonly struct Quaternion
 
     return new Quaternion(qx, qy, qz, qw).normalized;
   }
+
+  public static Quaternion FromToRotation(Vector3 fromDirection, Vector3 toDirection)
+  {
+    fromDirection = fromDirection.normalized;
+    toDirection = toDirection.normalized;
+    float d = Vector3.Dot(fromDirection, toDirection);
+    if (d >= 1f - 1e-6f) return identity;
+    if (d <= -1f + 1e-6f)
+    {
+      Vector3 right = Vector3.Cross(Vector3.right, fromDirection);
+      if (right.sqrMagnitude < 1e-6f) right = Vector3.Cross(Vector3.up, fromDirection);
+      right = right.normalized;
+      return AngleAxis(180f, right);
+    }
+    float f = MathF.Sqrt(2f * (1f + d));
+    Vector3 cross = Vector3.Cross(fromDirection, toDirection);
+    return new Quaternion(cross.x / f, cross.y / f, cross.z / f, f * 0.5f).normalized;
+  }
+
+  public static float Angle(Quaternion a, Quaternion b)
+  {
+    float dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    dot = Mathf.Clamp(MathF.Abs(dot), 0f, 1f);
+    return Mathf.Acos(Mathf.Min(dot, 1f)) * 2f * Mathf.Rad2Deg;
+  }
+
+  public static Quaternion RotateTowards(Quaternion from, Quaternion to, float maxDegreesDelta)
+  {
+    float num = Angle(from, to);
+    if (num == 0f) return to;
+    float t = Mathf.Min(1f, maxDegreesDelta / num);
+    return SlerpUnclamped(from, to, t);
+  }
+
+  public static Quaternion Slerp(Quaternion a, Quaternion b, float t) => SlerpUnclamped(a, b, Mathf.Clamp01(t));
+
+  public static Quaternion SlerpUnclamped(Quaternion a, Quaternion b, float t)
+  {
+    float dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    if (dot < 0f) { b = new Quaternion(-b.x, -b.y, -b.z, -b.w); dot = -dot; }
+    if (dot > 0.9995f) return Lerp(a, b, t);
+    float theta0 = MathF.Acos(dot);
+    float theta = theta0 * t;
+    float sinTheta = MathF.Sin(theta);
+    float sinTheta0 = MathF.Sin(theta0);
+    float s1 = sinTheta / sinTheta0;
+    float s0 = MathF.Cos(theta) - dot * s1;
+    return new Quaternion(
+      s0 * a.x + s1 * b.x,
+      s0 * a.y + s1 * b.y,
+      s0 * a.z + s1 * b.z,
+      s0 * a.w + s1 * b.w).normalized;
+  }
+
+  public static Quaternion Lerp(Quaternion a, Quaternion b, float t)
+  {
+    t = Mathf.Clamp01(t);
+    return LerpUnclamped(a, b, t).normalized;
+  }
+
+  public static Quaternion LerpUnclamped(Quaternion a, Quaternion b, float t)
+  {
+    float dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    if (dot < 0f)
+    {
+      return new Quaternion(
+        a.x + (-b.x - a.x) * t,
+        a.y + (-b.y - a.y) * t,
+        a.z + (-b.z - a.z) * t,
+        a.w + (-b.w - a.w) * t);
+    }
+    return new Quaternion(
+      a.x + (b.x - a.x) * t,
+      a.y + (b.y - a.y) * t,
+      a.z + (b.z - a.z) * t,
+      a.w + (b.w - a.w) * t);
+  }
 }
 
 internal static class QuaternionHelpers

@@ -51,10 +51,10 @@ public struct UIVertex
   public Vector3 normal;
   public Vector4 tangent;
   public Color32 color;
-  public Vector4 uv0;
-  public Vector4 uv1;
-  public Vector4 uv2;
-  public Vector4 uv3;
+  public Vector2 uv0;
+  public Vector2 uv1;
+  public Vector2 uv2;
+  public Vector2 uv3;
 
   public static UIVertex simpleVert = new()
   {
@@ -62,7 +62,8 @@ public struct UIVertex
     normal = new Vector3(0f, 0f, -1f),
     tangent = new Vector4(1f, 0f, 0f, -1f),
     color = new Color32(255, 255, 255, 255),
-    uv0 = new Vector4(0f, 0f, 0f, 1f)
+    uv0 = new Vector2(0f, 0f),
+    uv1 = new Vector2(0f, 0f)
   };
 }
 
@@ -252,22 +253,28 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
     {
       modifiers[i]?.ModifyMesh(vh);
     }
-    var verts = new List<UIVertex>();
-    vh.GetUIVertexStream(verts);
-    canvasRenderer.SetVertices(verts);
+    var mesh = new Mesh();
+    vh.FillMesh(mesh);
+    canvasRenderer.SetMesh(mesh);
     vh.Dispose();
   }
 
   protected virtual void UpdateMaterial()
   {
     if (canvasRenderer is null) return;
-    var mat = material;
-    if (this is IMaterialModifier materialModifier)
-      mat = materialModifier.GetModifiedMaterial(mat);
-    canvasRenderer.SetMaterial(mat, 0);
-    canvasRenderer.SetColor(color);
-    if (mainTexture != null)
-      canvasRenderer.SetAlphaTexture(mainTexture);
+    var mat = materialForRendering;
+    canvasRenderer.SetMaterial(mat, mainTexture);
+  }
+
+  public virtual Material materialForRendering
+  {
+    get
+    {
+      var mat = material;
+      if (this is IMaterialModifier materialModifier)
+        mat = materialModifier.GetModifiedMaterial(mat);
+      return mat;
+    }
   }
 
   public virtual void CrossFadeColor(Color targetColor, float duration, bool ignoreTimeScale, bool useAlpha)
@@ -302,16 +309,21 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
     vh.Clear();
     var rect = rectTransform != null ? rectTransform.rect : new Rect(0f, 0f, 100f, 100f);
     var color32 = (Color32)color;
-    AddQuad(vh, rect.xMin, rect.yMin, rect.xMax, rect.yMax, color32, 0f, 0f, 1f, 1f);
+    AddQuad(vh, rect, color32, new Vector2(0f, 0f), new Vector2(1f, 1f));
+  }
+
+  private static void AddQuad(VertexHelper vh, Rect rect, Color32 color, Vector2 uvMin, Vector2 uvMax)
+  {
+    AddQuad(vh, rect.xMin, rect.yMin, rect.xMax, rect.yMax, color, uvMin.x, uvMin.y, uvMax.x, uvMax.y);
   }
 
   private static void AddQuad(VertexHelper vh, float xMin, float yMin, float xMax, float yMax, Color32 color, float uvMinX, float uvMinY, float uvMaxX, float uvMaxY)
   {
     var startIndex = vh.currentVertCount;
-    vh.AddVert(new Vector3(xMin, yMin, 0f), color, new Vector4(uvMinX, uvMinY, 0f, 1f));
-    vh.AddVert(new Vector3(xMin, yMax, 0f), color, new Vector4(uvMinX, uvMaxY, 0f, 1f));
-    vh.AddVert(new Vector3(xMax, yMax, 0f), color, new Vector4(uvMaxX, uvMaxY, 0f, 1f));
-    vh.AddVert(new Vector3(xMax, yMin, 0f), color, new Vector4(uvMaxX, uvMinY, 0f, 1f));
+    vh.AddVert(new Vector3(xMin, yMin, 0f), color, new Vector2(uvMinX, uvMinY));
+    vh.AddVert(new Vector3(xMax, yMin, 0f), color, new Vector2(uvMaxX, uvMinY));
+    vh.AddVert(new Vector3(xMax, yMax, 0f), color, new Vector2(uvMaxX, uvMaxY));
+    vh.AddVert(new Vector3(xMin, yMax, 0f), color, new Vector2(uvMinX, uvMaxY));
     vh.AddTriangle(startIndex, startIndex + 1, startIndex + 2);
     vh.AddTriangle(startIndex, startIndex + 2, startIndex + 3);
   }
@@ -415,6 +427,12 @@ public class CanvasRenderer : MonoBehaviour
   }
 
   public bool hasMoved { get; set; }
+
+  public void SetMaterial(Material? material, Texture? texture)
+  {
+    _material = material;
+    _alphaTexture = texture;
+  }
 
   public void SetMaterial(Material? material, int index)
   {

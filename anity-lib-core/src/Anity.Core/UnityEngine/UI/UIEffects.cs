@@ -44,107 +44,164 @@ public interface IMeshModifier
 
 public class VertexHelper : IDisposable
 {
-    private readonly List<UIVertex> _verts = new();
+    private readonly List<Vector3> m_Positions = new();
+    private readonly List<Color32> m_Colors = new();
+    private readonly List<Vector2> m_Uvs = new();
+    private readonly List<Vector3> m_Normals = new();
+    private readonly List<Vector4> m_Tangents = new();
+    private readonly List<int> m_Indices = new();
 
-    public int currentVertCount => _verts.Count;
-    public int currentIndexCount => (_verts.Count / 4) * 6;
+    public int currentVertCount => m_Positions.Count;
+    public int currentIndexCount => m_Indices.Count;
+
+    public VertexHelper()
+    {
+    }
+
+    public VertexHelper(Mesh m)
+    {
+        if (m == null) return;
+        m_Positions.AddRange(m.vertices);
+        m_Colors.AddRange(m.colors32);
+        m_Uvs.AddRange(m.uv);
+        var normals = m.normals;
+        if (normals != null && normals.Length > 0)
+            m_Normals.AddRange(normals);
+        var tangents = m.tangents;
+        if (tangents != null && tangents.Length > 0)
+            m_Tangents.AddRange(tangents);
+        m_Indices.AddRange(m.triangles);
+    }
 
     public void Clear()
     {
-        _verts.Clear();
-        _indices.Clear();
-    }
-
-    public void AddVert(Vector3 position, Color32 color, Vector4 uv0)
-    {
-        AddVert(position, color, uv0, Vector4.zero, Vector3.zero, Vector4.zero);
-    }
-
-    public void AddVert(Vector3 position, Color32 color, Vector4 uv0, Vector4 uv1, Vector3 normal, Vector4 tangent)
-    {
-        _verts.Add(new UIVertex
-        {
-            position = position,
-            color = color,
-            uv0 = uv0,
-            uv1 = uv1,
-            normal = normal,
-            tangent = tangent
-        });
-    }
-
-    private readonly List<int> _indices = new();
-
-    public void AddTriangle(int idx0, int idx1, int idx2)
-    {
-        _indices.Add(idx0);
-        _indices.Add(idx1);
-        _indices.Add(idx2);
-    }
-
-    public void AddUIVertexTriangleStream(List<UIVertex> verts)
-    {
-        if (verts is null) return;
-        _verts.AddRange(verts);
-    }
-
-    public void GetUIVertexStream(List<UIVertex> stream)
-    {
-        if (stream is null) return;
-        stream.Clear();
-        for (var i = 0; i < _indices.Count; i++)
-        {
-            var idx = _indices[i];
-            if (idx >= 0 && idx < _verts.Count)
-                stream.Add(_verts[idx]);
-        }
-    }
-
-    public void PopulateUIVertex(ref UIVertex vertex, int index)
-    {
-        if (index < 0 || index >= _verts.Count) return;
-        vertex = _verts[index];
-    }
-
-    public void SetUIVertex(UIVertex vertex, int index)
-    {
-        if (index < 0 || index >= _verts.Count) return;
-        _verts[index] = vertex;
-    }
-
-    public void FillMesh(Mesh mesh)
-    {
-        if (mesh is null) return;
-        var verts = new List<UIVertex>();
-        GetUIVertexStream(verts);
-        var positions = new Vector3[verts.Count];
-        var colors = new Color32[verts.Count];
-        var uvs = new Vector2[verts.Count];
-        var normals = new Vector3[verts.Count];
-        var tangents = new Vector4[verts.Count];
-        for (var i = 0; i < verts.Count; i++)
-        {
-            positions[i] = verts[i].position;
-            colors[i] = verts[i].color;
-            uvs[i] = new Vector2(verts[i].uv0.x, verts[i].uv0.y);
-            normals[i] = verts[i].normal;
-            tangents[i] = verts[i].tangent;
-        }
-        var indicesArray = new int[verts.Count];
-        for (var i = 0; i < verts.Count; i++)
-            indicesArray[i] = i;
-        mesh.vertices = positions;
-        mesh.normals = normals;
-        mesh.tangents = tangents;
-        mesh.colors32 = colors;
-        mesh.uv = uvs;
-        mesh.triangles = indicesArray;
+        m_Positions.Clear();
+        m_Colors.Clear();
+        m_Uvs.Clear();
+        m_Normals.Clear();
+        m_Tangents.Clear();
+        m_Indices.Clear();
     }
 
     public void Dispose()
     {
         Clear();
-        _indices.Clear();
+    }
+
+    public void AddVert(UIVertex v)
+    {
+        AddVert(v.position, v.color, v.uv0, v.normal, v.tangent);
+    }
+
+    public void AddVert(Vector3 position, Color32 color, Vector2 uv0)
+    {
+        AddVert(position, color, uv0, new Vector3(0f, 0f, -1f), new Vector4(1f, 0f, 0f, -1f));
+    }
+
+    public void AddVert(Vector3 position, Color32 color, Vector2 uv0, Vector3 normal, Vector4 tangent)
+    {
+        m_Positions.Add(position);
+        m_Colors.Add(color);
+        m_Uvs.Add(uv0);
+        m_Normals.Add(normal);
+        m_Tangents.Add(tangent);
+    }
+
+    public void AddTriangle(int idx0, int idx1, int idx2)
+    {
+        m_Indices.Add(idx0);
+        m_Indices.Add(idx1);
+        m_Indices.Add(idx2);
+    }
+
+    public void AddUIVertexQuad(UIVertex[] verts)
+    {
+        if (verts == null || verts.Length < 4) return;
+        int startIndex = currentVertCount;
+        AddVert(verts[0]);
+        AddVert(verts[1]);
+        AddVert(verts[2]);
+        AddVert(verts[3]);
+        AddTriangle(startIndex, startIndex + 1, startIndex + 2);
+        AddTriangle(startIndex, startIndex + 2, startIndex + 3);
+    }
+
+    public void AddUIVertexStream(List<UIVertex> verts, List<int> indices)
+    {
+        if (verts == null) return;
+        for (int i = 0; i < verts.Count; i++)
+            AddVert(verts[i]);
+        if (indices != null)
+            m_Indices.AddRange(indices);
+    }
+
+    public void AddUIVertexTriangleStream(List<UIVertex> verts)
+    {
+        if (verts == null) return;
+        int startIndex = currentVertCount;
+        for (int i = 0; i < verts.Count; i++)
+            AddVert(verts[i]);
+        for (int i = 0; i < verts.Count; i += 3)
+        {
+            m_Indices.Add(startIndex + i);
+            m_Indices.Add(startIndex + i + 1);
+            m_Indices.Add(startIndex + i + 2);
+        }
+    }
+
+    public void GetUIVertexStream(List<UIVertex> stream)
+    {
+        if (stream == null) return;
+        stream.Clear();
+        for (int i = 0; i < m_Indices.Count; i++)
+        {
+            int idx = m_Indices[i];
+            if (idx >= 0 && idx < m_Positions.Count)
+            {
+                var vert = new UIVertex();
+                PopulateUIVertex(ref vert, idx);
+                stream.Add(vert);
+            }
+        }
+    }
+
+    public void PopulateUIVertex(ref UIVertex vertex, int index)
+    {
+        if (index < 0 || index >= m_Positions.Count) return;
+        vertex.position = m_Positions[index];
+        vertex.color = m_Colors[index];
+        vertex.uv0 = m_Uvs[index];
+        vertex.normal = m_Normals.Count > index ? m_Normals[index] : new Vector3(0f, 0f, -1f);
+        vertex.tangent = m_Tangents.Count > index ? m_Tangents[index] : new Vector4(1f, 0f, 0f, -1f);
+    }
+
+    public void SetUIVertex(UIVertex vertex, int index)
+    {
+        if (index < 0 || index >= m_Positions.Count) return;
+        m_Positions[index] = vertex.position;
+        m_Colors[index] = vertex.color;
+        m_Uvs[index] = vertex.uv0;
+        if (m_Normals.Count > index) m_Normals[index] = vertex.normal;
+        if (m_Tangents.Count > index) m_Tangents[index] = vertex.tangent;
+    }
+
+    public void FillMesh(Mesh mesh)
+    {
+        if (mesh == null) return;
+        mesh.Clear();
+
+        if (m_Positions.Count >= 65000)
+            throw new ArgumentException("Mesh can not have more than 65000 vertices");
+
+        mesh.SetVertices(m_Positions);
+        mesh.SetColors(m_Colors);
+        mesh.SetUVs(0, m_Uvs);
+        if (m_Normals.Count == m_Positions.Count)
+            mesh.SetNormals(m_Normals);
+        if (m_Tangents.Count == m_Positions.Count)
+            mesh.SetTangents(m_Tangents);
+        mesh.SetTriangles(m_Indices, 0);
+        mesh.RecalculateBounds();
     }
 }
 
@@ -161,13 +218,11 @@ public class Outline : Shadow
         vh.GetUIVertexStream(verts);
         vh.Clear();
 
-        var start = 0;
-        var count = verts.Count;
-        ApplyShadowZeroAlloc(verts, (Color32)effectColor, start, verts.Count, effectDistance.x, effectDistance.y);
-        ApplyShadowZeroAlloc(verts, (Color32)effectColor, start, verts.Count, effectDistance.x, -effectDistance.y);
-        ApplyShadowZeroAlloc(verts, (Color32)effectColor, start, verts.Count, -effectDistance.x, effectDistance.y);
-        ApplyShadowZeroAlloc(verts, (Color32)effectColor, start, verts.Count, -effectDistance.x, -effectDistance.y);
-        _ = count;
+        var originalCount = verts.Count;
+        ApplyShadowZeroAlloc(verts, (Color32)effectColor, 0, originalCount, effectDistance.x, effectDistance.y);
+        ApplyShadowZeroAlloc(verts, (Color32)effectColor, 0, originalCount, effectDistance.x, -effectDistance.y);
+        ApplyShadowZeroAlloc(verts, (Color32)effectColor, 0, originalCount, -effectDistance.x, effectDistance.y);
+        ApplyShadowZeroAlloc(verts, (Color32)effectColor, 0, originalCount, -effectDistance.x, -effectDistance.y);
 
         vh.AddUIVertexTriangleStream(verts);
     }
@@ -195,12 +250,12 @@ public class Shadow : BaseMeshEffect
         for (var i = start; i < end; ++i)
         {
             var vt = verts[i];
-            verts.Add(vt);
+            var shadowVt = vt;
 
-            var v = vt.position;
+            var v = shadowVt.position;
             v.x += x;
             v.y += y;
-            vt.position = v;
+            shadowVt.position = v;
 
             var newColor = color;
             if (_useGraphicAlpha)
@@ -208,8 +263,8 @@ public class Shadow : BaseMeshEffect
                 newColor.a = (byte)(color.a * vt.color.a / 255);
             }
 
-            vt.color = newColor;
-            verts[i] = vt;
+            shadowVt.color = newColor;
+            verts.Add(shadowVt);
         }
     }
 
@@ -221,10 +276,8 @@ public class Shadow : BaseMeshEffect
         vh.GetUIVertexStream(verts);
         vh.Clear();
 
-        var start = 0;
-        var count = verts.Count;
-        ApplyShadowZeroAlloc(verts, (Color32)effectColor, start, verts.Count, effectDistance.x, effectDistance.y);
-        _ = count;
+        var originalCount = verts.Count;
+        ApplyShadowZeroAlloc(verts, (Color32)effectColor, 0, originalCount, effectDistance.x, effectDistance.y);
 
         vh.AddUIVertexTriangleStream(verts);
     }
@@ -241,7 +294,7 @@ public class PositionAsUV1 : BaseMeshEffect
         for (var i = 0; i < vh.currentVertCount; i++)
         {
             vh.PopulateUIVertex(ref vertex, i);
-            vertex.uv1 = new Vector4(vertex.position.x, vertex.position.y, 0f, 0f);
+            vertex.uv1 = new Vector2(vertex.position.x, vertex.position.y);
             vh.SetUIVertex(vertex, i);
         }
     }

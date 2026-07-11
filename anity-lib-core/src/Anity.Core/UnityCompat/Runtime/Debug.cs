@@ -168,6 +168,26 @@ public static class Debug
     _debugLines.Clear();
   }
 
+  internal static void TickLines(float deltaTime)
+  {
+    for (int i = _debugLines.Count - 1; i >= 0; i--)
+    {
+      var line = _debugLines[i];
+      if (line.duration > 0f)
+      {
+        line.duration -= deltaTime;
+        if (line.duration <= 0f)
+        {
+          _debugLines.RemoveAt(i);
+        }
+        else
+        {
+          _debugLines[i] = line;
+        }
+      }
+    }
+  }
+
   public static void Log(object? message) => unityLogger.Log(LogType.Log, message);
   public static void Log(object? message, Object? context) => unityLogger.Log(LogType.Log, message, context);
   public static void Log(string tag, object? message) => unityLogger.Log(tag, message);

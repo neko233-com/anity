@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine.UI;
 
 namespace UnityEngine;
 
@@ -105,6 +106,14 @@ public class Object : IDisposable
       if (component.gameObject is not null)
       {
         component.gameObject.RemoveComponentInternal(component);
+      }
+      if (component is Camera cam)
+      {
+        Camera.RemoveCamera(cam);
+      }
+      if (component is Canvas canvas)
+      {
+        Canvas._canvases.Remove(canvas);
       }
       if (component is Behaviour behaviour && behaviour.enabled)
       {
@@ -426,6 +435,11 @@ public class Object : IDisposable
   {
     Destroy(this);
     GC.SuppressFinalize(this);
+  }
+
+  public static Object[] GetAllObjects()
+  {
+    return _allObjects.Where(o => !o._destroyed).ToArray();
   }
 
   internal static IReadOnlyCollection<Object> AllObjects => _allObjects;
