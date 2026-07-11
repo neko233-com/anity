@@ -54,11 +54,26 @@ namespace UnityEngine.Rendering
 
     public bool sharedProfile => true;
 
+    private void OnEnable()
+    {
+      VolumeManager.instance.Register(this);
+    }
+
+    private void OnDisable()
+    {
+      VolumeManager.instance.Unregister(this);
+    }
+
+    private void OnDestroy()
+    {
+      VolumeManager.instance.Unregister(this);
+    }
+
     public T Add<T>(bool overrides = false) where T : VolumeComponent
     {
       var comp = (T)Activator.CreateInstance(typeof(T));
       comp.active = true;
-      comp.name = typeof(T).Name;
+      comp.displayName = typeof(T).Name;
       m_Components.Add(comp);
       return comp;
     }
@@ -69,7 +84,7 @@ namespace UnityEngine.Rendering
         throw new ArgumentException("type must inherit from VolumeComponent");
       var comp = (VolumeComponent)Activator.CreateInstance(type);
       comp.active = true;
-      comp.name = type.Name;
+      comp.displayName = type.Name;
       m_Components.Add(comp);
       return comp;
     }
@@ -79,6 +94,8 @@ namespace UnityEngine.Rendering
       for (int i = 0; i < m_Components.Count; i++)
         if (m_Components[i] is T)
           return true;
+      if (m_Profile != null)
+        return m_Profile.Has<T>();
       return false;
     }
 
@@ -87,6 +104,8 @@ namespace UnityEngine.Rendering
       for (int i = 0; i < m_Components.Count; i++)
         if (type.IsInstanceOfType(m_Components[i]))
           return true;
+      if (m_Profile != null)
+        return m_Profile.Has(type);
       return false;
     }
 
@@ -95,6 +114,8 @@ namespace UnityEngine.Rendering
       for (int i = 0; i < m_Components.Count; i++)
         if (m_Components[i] is T comp)
           return comp;
+      if (m_Profile != null)
+        return m_Profile.Get<T>();
       return null;
     }
 
@@ -103,9 +124,6 @@ namespace UnityEngine.Rendering
       component = Get<T>();
       return component != null;
     }
-
-    public void OnEnable() { }
-    void OnDisable() { }
   }
 
   public class VolumeProfile : ScriptableObject
@@ -119,7 +137,7 @@ namespace UnityEngine.Rendering
     {
       var comp = (T)Activator.CreateInstance(typeof(T));
       comp.active = true;
-      comp.name = typeof(T).Name;
+      comp.displayName = typeof(T).Name;
       m_Components.Add(comp);
       return comp;
     }
@@ -128,7 +146,7 @@ namespace UnityEngine.Rendering
     {
       var comp = (VolumeComponent)Activator.CreateInstance(type);
       comp.active = true;
-      comp.name = type.Name;
+      comp.displayName = type.Name;
       m_Components.Add(comp);
       return comp;
     }
@@ -150,6 +168,14 @@ namespace UnityEngine.Rendering
     {
       for (int i = 0; i < m_Components.Count; i++)
         if (m_Components[i] is T)
+          return true;
+      return false;
+    }
+
+    public bool Has(Type type)
+    {
+      for (int i = 0; i < m_Components.Count; i++)
+        if (type.IsInstanceOfType(m_Components[i]))
           return true;
       return false;
     }
@@ -233,7 +259,7 @@ namespace UnityEngine.Rendering
   public class VolumeParameter<T> : VolumeParameter
   {
     [SerializeField]
-    private T m_Value;
+    protected T m_Value;
 
     public T value
     {
@@ -253,6 +279,17 @@ namespace UnityEngine.Rendering
     {
       return parameter.m_Value;
     }
+
+    public virtual void Interp(T from, T to, float t)
+    {
+      m_Value = t > 0f ? to : from;
+    }
+
+    public void Override(T x)
+    {
+      m_Value = x;
+      m_OverrideState = true;
+    }
   }
 
   [Serializable]
@@ -264,6 +301,18 @@ namespace UnityEngine.Rendering
       : base(value, overrideState)
     {
       this.min = min;
+    }
+  }
+
+  [Serializable]
+  public sealed class MaxFloatParameter : VolumeParameter<float>
+  {
+    public float max;
+
+    public MaxFloatParameter(float value, float max, bool overrideState = false)
+      : base(value, overrideState)
+    {
+      this.max = max;
     }
   }
 
@@ -343,6 +392,24 @@ namespace UnityEngine.Rendering
   }
 
   [Serializable]
+  public sealed class Vector4Parameter : VolumeParameter<Vector4>
+  {
+    public Vector4Parameter(Vector4 value, bool overrideState = false)
+      : base(value, overrideState)
+    {
+    }
+  }
+
+  [Serializable]
+  public sealed class TextureParameter : VolumeParameter<Texture>
+  {
+    public TextureParameter(Texture value, bool overrideState = false)
+      : base(value, overrideState)
+    {
+    }
+  }
+
+  [Serializable]
   public sealed class Texture2DParameter : VolumeParameter<Texture2D>
   {
     public Texture2DParameter(Texture2D value, bool overrideState = false)
@@ -360,8 +427,17 @@ namespace UnityEngine.Rendering
     }
   }
 
+  [Serializable]
+  public sealed class AnimationCurveParameter : VolumeParameter<AnimationCurve>
+  {
+    public AnimationCurveParameter(AnimationCurve value, bool overrideState = false)
+      : base(value, overrideState)
+    {
+    }
+  }
+
   [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
-  public sealed class VolumeComponentMenuAttribute : Attribute
+  public class VolumeComponentMenuAttribute : Attribute
   {
     public string menu { get; }
 
@@ -388,6 +464,21 @@ namespace UnityEngine.Rendering
       return component != null;
     }
 
+    internal bool TryGet(Type type, out VolumeComponent component)
+    {
+      return m_Components.TryGetValue(type, out component);
+    }
+
+    internal void Add(Type type, VolumeComponent comp)
+    {
+      m_Components[type] = comp;
+    }
+
+    internal void Clear()
+    {
+      m_Components.Clear();
+    }
+
     void IDisposable.Dispose()
     {
     }
@@ -399,27 +490,116 @@ namespace UnityEngine.Rendering
     public static VolumeManager instance => s_Instance.Value;
 
     private VolumeStack m_Stack;
+    private readonly List<Volume> m_Volumes = new();
+    private VolumeStack m_DefaultStack;
+
     public VolumeStack stack
     {
       get
       {
         if (m_Stack == null)
-          m_Stack = new VolumeStack();
+          m_Stack = CreateStack();
         return m_Stack;
       }
     }
 
-    public List<Volume> volumes { get; } = new();
+    public List<Volume> volumes => m_Volumes;
+
+    public VolumeManager()
+    {
+      m_DefaultStack = CreateStack();
+    }
 
     public VolumeStack CreateStack() => new VolumeStack();
     public void DestroyStack(VolumeStack stack) { }
 
-    public void Update(Transform trnsform)
+    public void Register(Volume volume)
     {
+      if (!m_Volumes.Contains(volume))
+        m_Volumes.Add(volume);
     }
 
-    public void Update(Transform transform, LayerMask layerMask)
+    public void Unregister(Volume volume)
     {
+      m_Volumes.Remove(volume);
+    }
+
+    public void Update(Transform trigger, LayerMask layerMask)
+    {
+      UpdateStack(stack, trigger, layerMask);
+    }
+
+    public void Update(Transform trigger)
+    {
+      UpdateStack(stack, trigger, -1);
+    }
+
+    private void UpdateStack(VolumeStack stack, Transform trigger, LayerMask layerMask)
+    {
+      stack.Clear();
+
+      var sortedVolumes = new List<Volume>(m_Volumes);
+      sortedVolumes.Sort((a, b) => b.priority.CompareTo(a.priority));
+
+      for (var i = 0; i < sortedVolumes.Count; i++)
+      {
+        var vol = sortedVolumes[i];
+        if (vol == null || !vol.enabled || !vol.gameObject.activeInHierarchy) continue;
+        if (!vol.isGlobal && trigger != null)
+        {
+          if ((vol.layerMask & layerMask) == 0) continue;
+          var dist = Vector3.Distance(trigger.position, vol.transform.position);
+          if (dist > vol.blendDistance + vol.GetComponent<Collider>()?.bounds.extents.magnitude) continue;
+        }
+
+        var weight = vol.weight;
+        if (weight <= 0f) continue;
+
+        foreach (var comp in vol.components)
+        {
+          if (comp == null || !comp.active) continue;
+          var type = comp.GetType();
+          if (!stack.TryGet(type, out var existing))
+          {
+            stack.Add(type, comp);
+          }
+        }
+
+        if (vol.profile != null)
+        {
+          foreach (var comp in vol.profile.components)
+          {
+            if (comp == null || !comp.active) continue;
+            var type = comp.GetType();
+            if (!stack.TryGet(type, out var existing))
+            {
+              stack.Add(type, comp);
+            }
+          }
+        }
+      }
     }
   }
+}
+
+public class AnimationCurve
+{
+    public Keyframe[] keys { get; set; } = Array.Empty<Keyframe>();
+    public float preWrapMode { get; set; }
+    public float postWrapMode { get; set; }
+
+    public AnimationCurve() { }
+    public AnimationCurve(params Keyframe[] keys) { this.keys = keys; }
+    public float Evaluate(float time) => 0f;
+
+    public static AnimationCurve Linear(float start, float end, float duration = 1f) => new();
+    public static AnimationCurve EaseInOut(float start, float end, float duration = 1f) => new();
+}
+
+public struct Keyframe
+{
+    public float time;
+    public float value;
+    public float inTangent;
+    public float outTangent;
 }

@@ -1,18 +1,15 @@
 using System;
+using System.Collections.Generic;
 
 namespace UnityEngine;
 
-/// <summary>
-/// Unity AudioSource component for playing audio.
-/// </summary>
 [AddComponentMenu("Audio/Audio Source")]
 public class AudioSource : Behaviour
 {
     private AudioClip? _clip;
     private float _volume = 1.0f;
     private float _pitch = 1.0f;
-    private bool _loop;
-    private bool _playOnAwake = true;
+    private float _panStereo;
     private float _spatialBlend;
     private float _reverbZoneMix = 1.0f;
     private float _dopplerLevel = 1.0f;
@@ -21,6 +18,19 @@ public class AudioSource : Behaviour
     private float _minDistance = 1.0f;
     private float _maxDistance = 500.0f;
     private AudioRolloffMode _rolloffMode = AudioRolloffMode.Logarithmic;
+    private bool _loop;
+    private bool _playOnAwake = true;
+    private bool _mute;
+    private bool _bypassEffects;
+    private bool _bypassListenerEffects;
+    private bool _bypassReverbZones;
+    private bool _ignoreListenerPause;
+    private bool _ignoreListenerVolume;
+    private bool _isPlaying;
+    private bool _isVirtual;
+    private float _time;
+    private int _timeSamples;
+    private readonly List<AudioClip> _oneShotClips = new();
 
     public AudioClip? clip
     {
@@ -40,23 +50,19 @@ public class AudioSource : Behaviour
         set => _pitch = value;
     }
 
-    public bool loop
+    public float panStereo
     {
-        get => _loop;
-        set => _loop = value;
+        get => _panStereo;
+        set => _panStereo = Mathf.Clamp(value, -1f, 1f);
     }
-
-    public bool playOnAwake
-    {
-        get => _playOnAwake;
-        set => _playOnAwake = value;
-    }
-
-    public bool isPlaying { get; private set; }
-
-    public float time { get; set; }
 
     public float spatialBlend
+    {
+        get => _spatialBlend;
+        set => _spatialBlend = Mathf.Clamp01(value);
+    }
+
+    public float panLevel
     {
         get => _spatialBlend;
         set => _spatialBlend = Mathf.Clamp01(value);
@@ -104,54 +110,130 @@ public class AudioSource : Behaviour
         set => _rolloffMode = value;
     }
 
+    public bool loop
+    {
+        get => _loop;
+        set => _loop = value;
+    }
+
+    public bool playOnAwake
+    {
+        get => _playOnAwake;
+        set => _playOnAwake = value;
+    }
+
+    public bool mute
+    {
+        get => _mute;
+        set => _mute = value;
+    }
+
+    public bool bypassEffects
+    {
+        get => _bypassEffects;
+        set => _bypassEffects = value;
+    }
+
+    public bool bypassListenerEffects
+    {
+        get => _bypassListenerEffects;
+        set => _bypassListenerEffects = value;
+    }
+
+    public bool bypassReverbZones
+    {
+        get => _bypassReverbZones;
+        set => _bypassReverbZones = value;
+    }
+
+    public bool ignoreListenerPause
+    {
+        get => _ignoreListenerPause;
+        set => _ignoreListenerPause = value;
+    }
+
+    public bool ignoreListenerVolume
+    {
+        get => _ignoreListenerVolume;
+        set => _ignoreListenerVolume = value;
+    }
+
+    public bool isPlaying => _isPlaying;
+    public bool isVirtual => _isVirtual;
+
+    public float time
+    {
+        get => _time;
+        set => _time = Mathf.Max(0f, value);
+    }
+
+    public int timeSamples
+    {
+        get => _timeSamples;
+        set => _timeSamples = Math.Max(0, value);
+    }
+
+    public AudioVelocityUpdateMode velocityUpdateMode { get; set; } = AudioVelocityUpdateMode.Auto;
+
     public void Play()
     {
         if (_clip != null)
         {
-            isPlaying = true;
+            _isPlaying = true;
+            _time = 0f;
+            _oneShotClips.Clear();
         }
     }
 
     public void Play(ulong delay)
     {
+        _ = delay;
         Play();
     }
 
     public void PlayDelayed(float delay)
     {
+        _ = delay;
         Play();
     }
 
     public void PlayOneShot(AudioClip clip)
     {
-        if (clip != null)
-        {
-            isPlaying = true;
-        }
+        PlayOneShot(clip, 1f);
     }
 
     public void PlayOneShot(AudioClip clip, float volumeScale)
     {
-        PlayOneShot(clip);
+        _ = volumeScale;
+        if (clip != null)
+        {
+            _oneShotClips.Add(clip);
+            _isPlaying = true;
+        }
     }
 
     public void Stop()
     {
-        isPlaying = false;
+        _isPlaying = false;
+        _time = 0f;
+        _oneShotClips.Clear();
     }
 
     public void Pause()
     {
-        isPlaying = false;
+        _isPlaying = false;
     }
 
     public void UnPause()
     {
-        isPlaying = true;
+        if (_clip != null || _oneShotClips.Count > 0)
+        {
+            _isPlaying = true;
+        }
     }
 
-    public void SetScheduledStartTime(double time) { }
-    public void SetScheduledEndTime(double time) { }
+    public void SetScheduledStartTime(double time) { _ = time; }
+    public void SetScheduledEndTime(double time) { _ = time; }
 
     public bool GetOutputData(float[] samples, int channel)
     {
@@ -169,18 +251,16 @@ public class AudioSource : Behaviour
 
     public static void PlayClipAtPoint(AudioClip clip, Vector3 position)
     {
-        if (clip == null) return;
+        PlayClipAtPoint(clip, position, 1f);
     }
 
     public static void PlayClipAtPoint(AudioClip clip, Vector3 position, float volumeScale)
     {
-        PlayClipAtPoint(clip, position);
+        _ = position;
+        _ = volumeScale;
     }
 }
 
-/// <summary>
-/// Audio rolloff mode for 3D audio.
-/// </summary>
 public enum AudioRolloffMode
 {
     Logarithmic,
@@ -188,9 +268,6 @@ public enum AudioRolloffMode
     Custom
 }
 
-/// <summary>
-/// FFT window for spectrum analysis.
-/// </summary>
 public enum FFTWindow
 {
     Rectangular,

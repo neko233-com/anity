@@ -1,87 +1,17 @@
-namespace UnityEngine.UI;
+namespace UnityEngine;
 
-public enum TextAnchor
-{
-  UpperLeft = 0,
-  UpperCenter = 1,
-  UpperRight = 2,
-  MiddleLeft = 3,
-  MiddleCenter = 4,
-  MiddleRight = 5,
-  LowerLeft = 6,
-  LowerCenter = 7,
-  LowerRight = 8
-}
-
-public enum TextOverflow
-{
-  Overflow = 0,
-  Ellipsis = 1,
-  Mask = 2,
-  Truncate = 3
-}
-
-public enum FontStyles
-{
-  Normal = 0,
-  Bold = 1,
-  Italic = 2,
-  BoldAndItalic = 3
-}
-
-public enum ImageFillMethod
+public enum Axis
 {
   Horizontal = 0,
-  Vertical = 1,
-  Radial90 = 2,
-  Radial180 = 3,
-  Radial360 = 4
+  Vertical = 1
 }
 
-public enum ImageType
+public enum Edge
 {
-  Simple = 0,
-  Sliced = 1,
-  Tiled = 2,
-  Filled = 3
-}
-
-public enum BlendMode
-{
-  Zero = 0,
-  One = 1,
-  DstColor = 2,
-  SrcColor = 3,
-  OneMinusDstColor = 4,
-  SrcAlpha = 5,
-  OneMinusSrcColor = 6,
-  DstAlpha = 7,
-  OneMinusDstAlpha = 8,
-  SrcAlphaSaturate = 9,
-  OneMinusSrcAlpha = 10
-}
-
-public enum ColorBlockColorMode
-{
-  Multiplied = 0,
-  Tinted = 1
-}
-
-public enum NavigationMode
-{
-  None = 0,
-  Horizontal = 1,
-  Vertical = 2,
-  Automatic = 3,
-  Explicit = 4
-}
-
-public enum Transition
-{
-  None = 0,
-  ColorTint = 1,
-  SpriteSwap = 2,
-  Animation = 3
+  Left = 0,
+  Right = 1,
+  Top = 2,
+  Bottom = 3
 }
 
 public class RectTransform : Transform
@@ -91,9 +21,7 @@ public class RectTransform : Transform
   private Vector2 _anchorMin = new(0.5f, 0.5f);
   private Vector2 _anchorMax = new(0.5f, 0.5f);
   private Vector2 _pivot = new(0.5f, 0.5f);
-  private Vector2 _offsetMin;
-  private Vector2 _offsetMax;
-  private Vector2 _anchoredPosition3D;
+  private Vector3 _anchoredPosition3D;
 
   public Vector2 anchoredPosition
   {
@@ -103,8 +31,8 @@ public class RectTransform : Transform
 
   public Vector3 anchoredPosition3D
   {
-    get => new Vector3(_anchoredPosition3D.x, _anchoredPosition3D.y, 0f);
-    set => _anchoredPosition3D = new Vector2(value.x, value.y);
+    get => _anchoredPosition3D;
+    set => _anchoredPosition3D = value;
   }
 
   public Vector2 sizeDelta
@@ -133,25 +61,107 @@ public class RectTransform : Transform
 
   public Vector2 offsetMin
   {
-    get => _offsetMin;
-    set => _offsetMin = value;
+    get
+    {
+      Rect pr = GetParentRect();
+      return new Vector2(rect.xMin - pr.xMin, rect.yMin - pr.yMin);
+    }
+    set
+    {
+      Rect pr = GetParentRect();
+      _anchoredPosition.x = value.x + _sizeDelta.x * _pivot.x + pr.width * _anchorMin.x;
+      _anchoredPosition.y = value.y + _sizeDelta.y * _pivot.y + pr.height * _anchorMin.y;
+    }
   }
 
   public Vector2 offsetMax
   {
-    get => _offsetMax;
-    set => _offsetMax = value;
+    get
+    {
+      Rect pr = GetParentRect();
+      return new Vector2(rect.xMax - pr.xMax, rect.yMax - pr.yMax);
+    }
+    set
+    {
+      Rect pr = GetParentRect();
+      _anchoredPosition.x = value.x - _sizeDelta.x * (1f - _pivot.x) + pr.width * _anchorMax.x;
+      _anchoredPosition.y = value.y - _sizeDelta.y * (1f - _pivot.y) + pr.height * _anchorMax.y;
+    }
   }
 
-  public Rect rect => new(
-    _anchoredPosition.x - _sizeDelta.x * _pivot.x,
-    _anchoredPosition.y - _sizeDelta.y * _pivot.y,
-    _sizeDelta.x,
-    _sizeDelta.y);
-
-  public Vector2 GetAnchoredPosition()
+  public Rect rect
   {
-    return _anchoredPosition;
+    get
+    {
+      float w, h;
+      bool anchorsSameX = MathF.Abs(_anchorMax.x - _anchorMin.x) < 1e-5f;
+      bool anchorsSameY = MathF.Abs(_anchorMax.y - _anchorMin.y) < 1e-5f;
+      Rect pr = GetParentRect();
+      if (anchorsSameX) w = _sizeDelta.x;
+      else w = pr.width * (_anchorMax.x - _anchorMin.x) + _sizeDelta.x;
+      if (anchorsSameY) h = _sizeDelta.y;
+      else h = pr.height * (_anchorMax.y - _anchorMin.y) + _sizeDelta.y;
+      return new Rect(-_pivot.x * w, -_pivot.y * h, w, h);
+    }
+  }
+
+  private Rect GetParentRect()
+  {
+    if (parent is RectTransform prt) return prt.rect;
+    return new Rect(-10000f, -10000f, 20000f, 20000f);
+  }
+
+  public void GetLocalCorners(Vector3[] corners)
+  {
+    if (corners is null || corners.Length < 4) return;
+    Rect r = rect;
+    corners[0] = new Vector3(r.xMin, r.yMin, 0f);
+    corners[1] = new Vector3(r.xMax, r.yMin, 0f);
+    corners[2] = new Vector3(r.xMax, r.yMax, 0f);
+    corners[3] = new Vector3(r.xMin, r.yMax, 0f);
+  }
+
+  public void GetWorldCorners(Vector3[] corners)
+  {
+    if (corners is null || corners.Length < 4) return;
+    GetLocalCorners(corners);
+    Matrix4x4 mat = localToWorldMatrix;
+    for (int i = 0; i < 4; i++)
+    {
+      corners[i] = mat.MultiplyPoint(corners[i]);
+    }
+  }
+
+  public void SetInsetAndSizeFromParentEdge(Edge edge, float inset, float size)
+  {
+    float posX = _anchoredPosition.x;
+    float posY = _anchoredPosition.y;
+    switch (edge)
+    {
+      case Edge.Left:
+        _anchorMax = new Vector2(_anchorMin.x, _anchorMax.y);
+        _sizeDelta = new Vector2(size, _sizeDelta.y);
+        posX = inset + size * _pivot.x;
+        break;
+      case Edge.Right:
+        _anchorMin = new Vector2(_anchorMax.x, _anchorMin.y);
+        _sizeDelta = new Vector2(size, _sizeDelta.y);
+        float xOffset = 1f - _pivot.x;
+        posX = -inset - size * xOffset;
+        break;
+      case Edge.Top:
+        _anchorMin = new Vector2(_anchorMin.x, _anchorMax.y);
+        _sizeDelta = new Vector2(_sizeDelta.x, size);
+        float yOffset = 1f - _pivot.y;
+        posY = -inset - size * yOffset;
+        break;
+      case Edge.Bottom:
+        _anchorMax = new Vector2(_anchorMax.x, _anchorMin.y);
+        _sizeDelta = new Vector2(_sizeDelta.x, size);
+        posY = inset + size * _pivot.y;
+        break;
+    }
+    _anchoredPosition = new Vector2(posX, posY);
   }
 
   public void SetSizeWithCurrentAnchors(Axis axis, float size)
@@ -166,39 +176,10 @@ public class RectTransform : Transform
     }
   }
 
-  public void SetInsetAndSizeFromParentEdge(Edge edge, float inset, float size)
+  public void ForceUpdateRects() {}
+
+  public static void ForceUpdateRects(RectTransform[] rectTransforms)
   {
-    _ = edge;
-    _ = inset;
-    _ = size;
+    _ = rectTransforms;
   }
-
-  public void SetAnchorMin3D(Vector3 anchorMin)
-  {
-    _anchorMin = new Vector2(anchorMin.x, anchorMin.y);
-  }
-
-  public void SetAnchorMax3D(Vector3 anchorMax)
-  {
-    _anchorMax = new Vector2(anchorMax.x, anchorMax.y);
-  }
-
-  public void SetPivot(Vector2 pivot)
-  {
-    this.pivot = pivot;
-  }
-}
-
-public enum Axis
-{
-  Horizontal = 0,
-  Vertical = 1
-}
-
-public enum Edge
-{
-  Left = 0,
-  Right = 1,
-  Top = 2,
-  Bottom = 3
 }

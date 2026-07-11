@@ -36,6 +36,12 @@ public struct Vector3
   public static float DistanceSquared(Vector3 a, Vector3 b) => (a - b).sqrMagnitude;
   public static Vector3 Abs(Vector3 v) => new(MathF.Abs(v.x), MathF.Abs(v.y), MathF.Abs(v.z));
   public static float Dot(Vector3 a, Vector3 b) => a.x * b.x + a.y * b.y + a.z * b.z;
+  public static float Angle(Vector3 from, Vector3 to)
+  {
+    float d = Dot(from.normalized, to.normalized);
+    d = Mathf.Clamp(d, -1f, 1f);
+    return Mathf.Acos(d) * Mathf.Rad2Deg;
+  }
   public static Vector3 Cross(Vector3 a, Vector3 b) => new(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
   public static Vector3 operator +(Vector3 a, Vector3 b) => new(a.x + b.x, a.y + b.y, a.z + b.z);
   public static Vector3 operator -(Vector3 a, Vector3 b) => new(a.x - b.x, a.y - b.y, a.z - b.z);

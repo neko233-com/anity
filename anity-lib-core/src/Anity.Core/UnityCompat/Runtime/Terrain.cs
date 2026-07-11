@@ -2,31 +2,31 @@ using System;
 
 namespace UnityEngine;
 
-/// <summary>
-/// Unity Terrain component for rendering terrains.
-/// </summary>
 [AddComponentMenu("Terrain/Terrain")]
 public class Terrain : Behaviour
 {
     private TerrainData? _terrainData;
+    private Material? _materialTemplate;
     private float _heightmapPixelError = 5.0f;
-    private int _basemapResolution = 257;
+    private float _basemapDistance = 1000f;
     private float _detailObjectDistance = 80.0f;
-    private float _detailObjectDensity = 1.0f;
     private float _treeDistance = 5000.0f;
-    private float _treeBillboardDistance = 50.0f;
-    private float _treeCrossFadeLength = 5.0f;
     private int _treeMaximumFullLODCount = 50;
-    private float _detailObjectDensity1 = 1.0f;
-    private bool _drawHeightmap = true;
     private bool _drawTreesAndFoliage = true;
     private bool _collectDetailPatches = true;
-    private bool _legacyShadows = true;
+    private bool _castShadows = true;
+    private TerrainRenderFlags _editorRenderFlags = TerrainRenderFlags.All;
 
     public TerrainData? terrainData
     {
         get => _terrainData;
         set => _terrainData = value;
+    }
+
+    public Material? materialTemplate
+    {
+        get => _materialTemplate;
+        set => _materialTemplate = value;
     }
 
     public float heightmapPixelError
@@ -35,10 +35,10 @@ public class Terrain : Behaviour
         set => _heightmapPixelError = value;
     }
 
-    public int basemapResolution
+    public float basemapDistance
     {
-        get => _basemapResolution;
-        set => _basemapResolution = value;
+        get => _basemapDistance;
+        set => _basemapDistance = value;
     }
 
     public float detailObjectDistance
@@ -47,40 +47,16 @@ public class Terrain : Behaviour
         set => _detailObjectDistance = value;
     }
 
-    public float detailObjectDensity
-    {
-        get => _detailObjectDensity;
-        set => _detailObjectDensity = value;
-    }
-
     public float treeDistance
     {
         get => _treeDistance;
         set => _treeDistance = value;
     }
 
-    public float treeBillboardDistance
-    {
-        get => _treeBillboardDistance;
-        set => _treeBillboardDistance = value;
-    }
-
-    public float treeCrossFadeLength
-    {
-        get => _treeCrossFadeLength;
-        set => _treeCrossFadeLength = value;
-    }
-
     public int treeMaximumFullLODCount
     {
         get => _treeMaximumFullLODCount;
         set => _treeMaximumFullLODCount = value;
-    }
-
-    public bool drawHeightmap
-    {
-        get => _drawHeightmap;
-        set => _drawHeightmap = value;
     }
 
     public bool drawTreesAndFoliage
@@ -95,120 +71,227 @@ public class Terrain : Behaviour
         set => _collectDetailPatches = value;
     }
 
-    public bool legacyShadows
+    public bool castShadows
     {
-        get => _legacyShadows;
-        set => _legacyShadows = value;
+        get => _castShadows;
+        set => _castShadows = value;
     }
 
-    public float[] GetHeights(int x, int y, int width, int height) => new float[width * height];
-    public void SetHeights(int x, int y, float[,] heights) { }
-    public float GetHeight(int x, int y) => 0.0f;
-    public Vector3 GetInterpolatedNormal(float x, float y) => Vector3.up;
-    public Vector3 GetPosition() => transform?.position ?? Vector3.zero;
-    public void SampleHeight(Vector3 worldPosition, out float height) => height = 0.0f;
+    public TerrainRenderFlags editorRenderFlags
+    {
+        get => _editorRenderFlags;
+        set => _editorRenderFlags = value;
+    }
+
+    public float[] GetHeights(int xBase, int yBase, int width, int height)
+    {
+        if (_terrainData == null) return Array.Empty<float>();
+        return _terrainData.GetHeights(xBase, yBase, width, height);
+    }
+
+    public void SetHeights(int xBase, int yBase, float[,] heights)
+    {
+        _terrainData?.SetHeights(xBase, yBase, heights);
+    }
+
+    public float GetHeight(int x, int y)
+    {
+        return _terrainData?.GetHeight(x, y) ?? 0f;
+    }
+
+    public Vector3 GetInterpolatedNormal(float x, float y)
+    {
+        return _terrainData?.GetInterpolatedNormal(x, y) ?? Vector3.up;
+    }
+
+    public Vector3 GetPosition()
+    {
+        return transform?.position ?? Vector3.zero;
+    }
+
+    public void SampleHeight(Vector3 worldPosition, out float height)
+    {
+        height = 0f;
+    }
+
     public void ApplyDelayedHeightmapModification() { }
+
+    public void CollectDetailPatches(float height, int layer) { _ = height; _ = layer; }
+
+    public static Terrain activeTerrain { get; set; }
 }
 
-/// <summary>
-/// Unity TerrainData asset.
-/// </summary>
-public class TerrainData : UnityEngine.Object
+public class TerrainData : Object
 {
-    public int heightmapResolution { get; set; } = 33;
-    public Vector3 size { get; set; } = new Vector3(500, 600, 500);
-    public float[]alphamaps { get; set; } = Array.Empty<float>();
-    public int alphamapResolution { get; set; } = 512;
-    public int alphamapLayers { get; set; }
-    public float[,,] GetAlphamaps(int x, int y, int width, int height) => new float[width, height, alphamapLayers];
-    public void SetAlphamaps(int x, int y, float[,,] alphamaps) { }
-    public float[,] GetHeights(int x, int y, int width, int height) => new float[width, height];
-    public void SetHeights(int x, int y, float[,] heights) { }
-    public float[,] GetInterpolatedHeights(float x, float y, int width, int height) => new float[width, height];
-    public Vector3 GetNormal(float x, float y) => Vector3.up;
-    public Vector3 GetInterpolatedNormal(float x, float y) => Vector3.up;
-    public float GetHeight(int x, int y) => 0.0f;
-    public float GetBaseHeight(int x, int y) => 0.0f;
-    public void SetBaseHeight(int x, int y, float height) { }
-    public Texture2D GetAlphamapTexture(int index) => null;
-    public void SetAlphamapTexture(int index, Texture2D texture) { }
-    public int alphamapTextureCount { get; set; }
-    public Texture2D[] alphamapTextures { get; set; } = Array.Empty<Texture2D>();
-    public int detailResolution { get; set; }
-    public int detailResolutionPerPatch { get; set; } = 16;
-    public int detailPatchCount { get; set; }
-    public int detailDatabaseResolution { get; set; }
-    public Texture2D detailDatabaseTexture { get; set; }
-    public int detailDatabaseTextureResolution { get; set; }
-    public Material[] detailPrototypes { get; set; } = Array.Empty<Material>();
-    public void SetDetailLayer(int x, int y, int detailLayer, int[,] detail) { }
-    public int[,] GetDetailLayer(int x, int y, int width, int height, int detailLayer) => new int[width, height];
-    public void SetDetailResolution(int resolution, int resolutionPerPatch) { }
-    public void RefreshPrototypes() { }
-    public TreePrototype[] treePrototypes { get; set; } = Array.Empty<TreePrototype>();
-    public void SetTreePrototypes(TreePrototype[] prototypes) { }
-    public TreeInstance[] treeInstances { get; set; } = Array.Empty<TreeInstance>();
-    public void SetTreeInstances(TreeInstance[] instances) { }
-    public void AddTreeInstance(TreeInstance instance) { }
-    public void RemoveTreeInstance(int index) { }
-    public void SetTreeInstance(int index, TreeInstance instance) { }
-    public TreeInstance GetTreeInstance(int index) => default;
-    public int treeInstanceCount { get; set; }
+    private float[,] _heights = new float[33, 33];
+    private float[,,] _alphamaps = new float[512, 512, 0];
+    private int _heightmapResolution = 33;
+    private int _alphamapResolution = 512;
+    private int _alphamapLayers;
+    private Vector3 _size = new Vector3(500, 600, 500);
+    private Vector3 _heightmapScale;
+
+    public int heightmapWidth => _heightmapResolution;
+    public int heightmapHeight => _heightmapResolution;
+    public int heightmapResolution
+    {
+        get => _heightmapResolution;
+        set
+        {
+            if (value < 2) value = 2;
+            _heightmapResolution = value;
+            var newHeights = new float[value, value];
+            for (int y = 0; y < Math.Min(value, _heights.GetLength(1)); y++)
+                for (int x = 0; x < Math.Min(value, _heights.GetLength(0)); x++)
+                    newHeights[x, y] = _heights[x, y];
+            _heights = newHeights;
+            RecalculateHeightmapScale();
+        }
+    }
+
+    public int alphamapResolution
+    {
+        get => _alphamapResolution;
+        set => _alphamapResolution = value;
+    }
+
+    public int alphamapLayers => _alphamapLayers;
+
+    public Vector3 heightmapScale => _heightmapScale;
+
+    public Vector3 size
+    {
+        get => _size;
+        set
+        {
+            _size = value;
+            RecalculateHeightmapScale();
+        }
+    }
+
     public TerrainLayer[] terrainLayers { get; set; } = Array.Empty<TerrainLayer>();
-    public void SetTerrainLayers(TerrainLayer[] layers) { }
-    public void AddTerrainLayer(TerrainLayer layer) { }
-    public void RemoveTerrainLayer(int index) { }
-    public TerrainLayer GetTerrainLayer(int index) => null;
-    public int terrainLayerCount { get; set; }
+
+    public TerrainData()
+    {
+        RecalculateHeightmapScale();
+    }
+
+    private void RecalculateHeightmapScale()
+    {
+        _heightmapScale = new Vector3(
+            _size.x / (_heightmapResolution - 1),
+            _size.y,
+            _size.z / (_heightmapResolution - 1));
+    }
+
+    public float GetHeight(int x, int y)
+    {
+        if (x < 0 || x >= _heightmapResolution || y < 0 || y >= _heightmapResolution)
+            return 0f;
+        return _heights[x, y] * _heightmapScale.y;
+    }
+
+    public float[] GetHeights(int xBase, int yBase, int width, int height)
+    {
+        var result = new float[width * height];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int hx = xBase + x;
+                int hy = yBase + y;
+                if (hx >= 0 && hx < _heightmapResolution && hy >= 0 && hy < _heightmapResolution)
+                    result[y * width + x] = _heights[hx, hy] * _heightmapScale.y;
+            }
+        }
+        return result;
+    }
+
+    public void SetHeights(int xBase, int yBase, float[,] heights)
+    {
+        if (heights == null) return;
+        int width = heights.GetLength(0);
+        int height = heights.GetLength(1);
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int hx = xBase + x;
+                int hy = yBase + y;
+                if (hx >= 0 && hx < _heightmapResolution && hy >= 0 && hy < _heightmapResolution)
+                    _heights[hx, hy] = heights[x, y] / _heightmapScale.y;
+            }
+        }
+    }
+
+    public void SetHeightsDelayLOD(int xBase, int yBase, float[,] heights)
+    {
+        SetHeights(xBase, yBase, heights);
+    }
+
+    public float GetInterpolatedHeight(float x, float y)
+    {
+        int x0 = (int)x;
+        int y0 = (int)y;
+        if (x0 < 0 || x0 >= _heightmapResolution - 1 || y0 < 0 || y0 >= _heightmapResolution - 1)
+            return GetHeight(x0, y0);
+        float fx = x - x0;
+        float fy = y - y0;
+        float h00 = _heights[x0, y0];
+        float h10 = _heights[x0 + 1, y0];
+        float h01 = _heights[x0, y0 + 1];
+        float h11 = _heights[x0 + 1, y0 + 1];
+        return Mathf.Lerp(Mathf.Lerp(h00, h10, fx), Mathf.Lerp(h01, h11, fx), fy) * _heightmapScale.y;
+    }
+
+    public Vector3 GetInterpolatedNormal(float x, float y)
+    {
+        return Vector3.up;
+    }
+
+    public Vector3 GetNormal(float x, float y)
+    {
+        return Vector3.up;
+    }
+
+    public float[,,] GetAlphamaps(int x, int y, int width, int height)
+    {
+        if (_alphamaps.GetLength(2) == 0)
+            return new float[width, height, 0];
+        var result = new float[width, height, _alphamapLayers];
+        return result;
+    }
+
+    public void SetAlphamaps(int x, int y, float[,,] alphamaps)
+    {
+        if (alphamaps == null) return;
+        _alphamapLayers = alphamaps.GetLength(2);
+        _alphamaps = new float[_alphamapResolution, _alphamapResolution, _alphamapLayers];
+    }
 }
 
-/// <summary>
-/// Tree prototype for Terrain.
-/// </summary>
-[Serializable]
-public class TreePrototype
+[Flags]
+public enum TerrainRenderFlags
 {
-    public GameObject? prefab;
-    public float bendFactor;
+    None = 0,
+    Heightmap = 1,
+    Trees = 2,
+    Details = 4,
+    All = Heightmap | Trees | Details
 }
 
-/// <summary>
-/// Tree instance for Terrain.
-/// </summary>
-public struct TreeInstance
+public class TerrainLayer : Object
 {
-    public Vector3 position;
-    public float widthScale;
-    public float heightScale;
-    public float rotation;
-    public Color color;
-    public int prototypeIndex;
-    public bool temporaryTreeInstance;
-}
-
-/// <summary>
-/// Terrain layer.
-/// </summary>
-public class TerrainLayer : UnityEngine.Object
-{
+    public string name { get; set; }
     public Texture2D diffuseTexture { get; set; }
     public Texture2D normalMapTexture { get; set; }
-    public Vector4 tileOffset { get; set; }
-    public Vector2 tileSize { get; set; } = Vector2.one;
+    public Texture2D maskMapTexture { get; set; }
+    public Vector2 tileSize { get; set; } = new Vector2(1, 1);
+    public Vector2 tileOffset { get; set; }
+    public Color specular { get; set; } = Color.gray;
     public float metallic { get; set; }
     public float smoothness { get; set; }
-    public float normalScale { get; set; } = 1.0f;
-    public Vector4 maskMapRemappingMin { get; set; }
-    public Vector4 maskMapRemappingMax { get; set; }
-}
-
-/// <summary>
-/// Terrain tools for editing terrains.
-/// </summary>
-public static class TerrainTools
-{
-    public static void PaintHeight(Terrain terrain, Vector3 position, float radius, float opacity) { }
-    public static void PaintTexture(Terrain terrain, Vector3 position, float radius, float opacity, int layer) { }
-    public static void PaintDetails(Terrain terrain, Vector3 position, float radius, int detail, float opacity) { }
-    public static void PaintTrees(Terrain terrain, Vector3 position, float radius, int tree, float opacity) { }
+    public float normalScale { get; set; } = 1f;
+    public Vector4 diffuseRemap { get; set; } = new Vector4(0, 1, 0, 1);
+    public Vector4 maskMapRemap { get; set; } = new Vector4(0, 1, 0, 1);
 }

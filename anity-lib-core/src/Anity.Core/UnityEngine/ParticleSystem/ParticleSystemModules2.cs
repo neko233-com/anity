@@ -1,244 +1,104 @@
 namespace UnityEngine;
 
-public partial class ParticleSystem
+public class CollisionModule
 {
-    public struct VelocityOverLifetimeModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal VelocityOverLifetimeModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            x = new ParticleSystem.MinMaxCurve(0f);
-            y = new ParticleSystem.MinMaxCurve(0f);
-            z = new ParticleSystem.MinMaxCurve(0f);
-            space = ParticleSystemSimulationSpace.Local;
-            orbitalX = new ParticleSystem.MinMaxCurve(0f);
-            orbitalY = new ParticleSystem.MinMaxCurve(0f);
-            orbitalZ = new ParticleSystem.MinMaxCurve(0f);
-            orbitalOffsetX = new ParticleSystem.MinMaxCurve(0f);
-            orbitalOffsetY = new ParticleSystem.MinMaxCurve(0f);
-            orbitalOffsetZ = new ParticleSystem.MinMaxCurve(0f);
-            radial = new ParticleSystem.MinMaxCurve(0f);
-            speedModifier = new ParticleSystem.MinMaxCurve(1f);
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxCurve x { get; set; }
-        public ParticleSystem.MinMaxCurve y { get; set; }
-        public ParticleSystem.MinMaxCurve z { get; set; }
-        public ParticleSystemSimulationSpace space { get; set; }
-        public ParticleSystem.MinMaxCurve orbitalX { get; set; }
-        public ParticleSystem.MinMaxCurve orbitalY { get; set; }
-        public ParticleSystem.MinMaxCurve orbitalZ { get; set; }
-        public ParticleSystem.MinMaxCurve orbitalOffsetX { get; set; }
-        public ParticleSystem.MinMaxCurve orbitalOffsetY { get; set; }
-        public ParticleSystem.MinMaxCurve orbitalOffsetZ { get; set; }
-        public ParticleSystem.MinMaxCurve radial { get; set; }
-        public ParticleSystem.MinMaxCurve speedModifier { get; set; }
-    }
-
-    public struct LimitVelocityOverLifetimeModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal LimitVelocityOverLifetimeModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            limitX = new ParticleSystem.MinMaxCurve(1f);
-            limitY = new ParticleSystem.MinMaxCurve(1f);
-            limitZ = new ParticleSystem.MinMaxCurve(1f);
-            limit = new ParticleSystem.MinMaxCurve(1f);
-            dampen = 1f;
-            drag = 0f;
-            multiplyByDrag = false;
-            multiplyByParticleSize = false;
-            multiplyByParticleMass = false;
-            space = ParticleSystemSimulationSpace.Local;
-            separateAxes = false;
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxCurve limitX { get; set; }
-        public ParticleSystem.MinMaxCurve limitY { get; set; }
-        public ParticleSystem.MinMaxCurve limitZ { get; set; }
-        public ParticleSystem.MinMaxCurve limit { get; set; }
-        public float dampen { get; set; }
-        public float drag { get; set; }
-        public bool multiplyByDrag { get; set; }
-        public bool multiplyByParticleSize { get; set; }
-        public bool multiplyByParticleMass { get; set; }
-        public ParticleSystemSimulationSpace space { get; set; }
-        public bool separateAxes { get; set; }
-    }
-
-    public struct InheritVelocityModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal InheritVelocityModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            mode = ParticleSystemInheritVelocityMode.Initial;
-            curve = new ParticleSystem.MinMaxCurve(1f);
-            subEmitterSamplingDistance = 0.25f;
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystemInheritVelocityMode mode { get; set; }
-        public MinMaxCurve curve { get; set; }
-        public float subEmitterSamplingDistance { get; set; }
-    }
-
-    public struct ForceOverLifetimeModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal ForceOverLifetimeModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            x = new ParticleSystem.MinMaxCurve(0f);
-            y = new ParticleSystem.MinMaxCurve(0f);
-            z = new ParticleSystem.MinMaxCurve(0f);
-            space = ParticleSystemSimulationSpace.Local;
-            randomize = false;
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxCurve x { get; set; }
-        public ParticleSystem.MinMaxCurve y { get; set; }
-        public ParticleSystem.MinMaxCurve z { get; set; }
-        public ParticleSystemSimulationSpace space { get; set; }
-        public bool randomize { get; set; }
-    }
-
-    public struct ColorOverLifetimeModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal ColorOverLifetimeModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            color = new ParticleSystem.MinMaxGradient(Color.white);
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxGradient color { get; set; }
-    }
-
-    public struct ColorBySpeedModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal ColorBySpeedModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            color = new ParticleSystem.MinMaxGradient(Color.white);
-            range = new Vector2(0f, 1f);
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxGradient color { get; set; }
-        public Vector2 range { get; set; }
-    }
-
-    public struct SizeOverLifetimeModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal SizeOverLifetimeModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            size = new ParticleSystem.MinMaxCurve(1f);
-            sizeX = new ParticleSystem.MinMaxCurve(1f);
-            sizeY = new ParticleSystem.MinMaxCurve(1f);
-            sizeZ = new ParticleSystem.MinMaxCurve(1f);
-            separateAxes = false;
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxCurve size { get; set; }
-        public ParticleSystem.MinMaxCurve sizeX { get; set; }
-        public ParticleSystem.MinMaxCurve sizeY { get; set; }
-        public ParticleSystem.MinMaxCurve sizeZ { get; set; }
-        public bool separateAxes { get; set; }
-    }
-
-    public struct SizeBySpeedModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal SizeBySpeedModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            size = new ParticleSystem.MinMaxCurve(1f);
-            sizeX = new ParticleSystem.MinMaxCurve(1f);
-            sizeY = new ParticleSystem.MinMaxCurve(1f);
-            sizeZ = new ParticleSystem.MinMaxCurve(1f);
-            separateAxes = false;
-            range = new Vector2(0f, 1f);
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxCurve size { get; set; }
-        public ParticleSystem.MinMaxCurve sizeX { get; set; }
-        public ParticleSystem.MinMaxCurve sizeY { get; set; }
-        public ParticleSystem.MinMaxCurve sizeZ { get; set; }
-        public bool separateAxes { get; set; }
-        public Vector2 range { get; set; }
-    }
-
-    public struct RotationOverLifetimeModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal RotationOverLifetimeModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            x = new ParticleSystem.MinMaxCurve(0f);
-            y = new ParticleSystem.MinMaxCurve(0f);
-            z = new ParticleSystem.MinMaxCurve(0f);
-            separateAxes = false;
-            zCurve = new ParticleSystem.MinMaxCurve(0f);
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxCurve x { get; set; }
-        public ParticleSystem.MinMaxCurve y { get; set; }
-        public ParticleSystem.MinMaxCurve z { get; set; }
-        public ParticleSystem.MinMaxCurve zCurve { get; set; }
-        public bool separateAxes { get; set; }
-    }
-
-    public struct RotationBySpeedModule
-    {
-        private ParticleSystem _particleSystem;
-
-        internal RotationBySpeedModule(ParticleSystem ps)
-        {
-            _particleSystem = ps;
-            enabled = false;
-            x = new ParticleSystem.MinMaxCurve(0f);
-            y = new ParticleSystem.MinMaxCurve(0f);
-            z = new ParticleSystem.MinMaxCurve(0f);
-            separateAxes = false;
-            range = new Vector2(0f, 1f);
-        }
-
-        public bool enabled { get; set; }
-        public ParticleSystem.MinMaxCurve x { get; set; }
-        public ParticleSystem.MinMaxCurve y { get; set; }
-        public ParticleSystem.MinMaxCurve z { get; set; }
-        public bool separateAxes { get; set; }
-        public Vector2 range { get; set; }
-    }
+    private readonly ParticleSystem _ps;
+    public CollisionModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+    public ParticleSystemCollisionType type { get; set; }
+    public int collidesWith { get; set; } = -1;
+    public MinMaxCurve dampen { get; set; } = new MinMaxCurve(0f);
+    public MinMaxCurve bounce { get; set; } = new MinMaxCurve(0f);
+    public MinMaxCurve lifetimeLoss { get; set; } = new MinMaxCurve(0f);
+    public float minKillSpeed { get; set; }
 }
+
+public class TriggerModule
+{
+    private readonly ParticleSystem _ps;
+    public TriggerModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+}
+
+public class SubEmittersModule
+{
+    private readonly ParticleSystem _ps;
+    public SubEmittersModule(ParticleSystem ps) { _ps = ps; }
+    public ParticleSystem[] subEmitters { get; set; }
+    public int subEmittersCount => subEmitters?.Length ?? 0;
+}
+
+public class TextureSheetAnimationModule
+{
+    private readonly ParticleSystem _ps;
+    public TextureSheetAnimationModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+    public int numTilesX { get; set; } = 1;
+    public int numTilesY { get; set; } = 1;
+    public int cycleCount { get; set; } = 1;
+    public float fps { get; set; } = 30f;
+}
+
+public class NoiseModule
+{
+    private readonly ParticleSystem _ps;
+    public NoiseModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+    public MinMaxCurve strength { get; set; } = new MinMaxCurve(1f);
+    public float frequency { get; set; } = 0.5f;
+    public bool damping { get; set; } = true;
+    public float scrollSpeed { get; set; }
+}
+
+public class TrailModule
+{
+    private readonly ParticleSystem _ps;
+    public TrailModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+    public float ratio { get; set; } = 1f;
+    public MinMaxCurve lifetime { get; set; } = new MinMaxCurve(1f);
+    public float widthPerTrail { get; set; } = 1f;
+}
+
+public class ColorBySpeedModule
+{
+    private readonly ParticleSystem _ps;
+    public ColorBySpeedModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+    public MinMaxGradient color { get; set; } = Color.white;
+    public Vector2 range { get; set; } = new Vector2(0f, 1f);
+}
+
+public class SizeBySpeedModule
+{
+    private readonly ParticleSystem _ps;
+    public SizeBySpeedModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+    public MinMaxCurve size { get; set; } = new MinMaxCurve(1f);
+    public Vector2 range { get; set; } = new Vector2(0f, 1f);
+}
+
+public class RotationBySpeedModule
+{
+    private readonly ParticleSystem _ps;
+    public RotationBySpeedModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+}
+
+public class InheritVelocityModule
+{
+    private readonly ParticleSystem _ps;
+    public InheritVelocityModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+    public MinMaxCurve curve { get; set; } = new MinMaxCurve(1f);
+    public ParticleSystemInheritVelocityMode mode { get; set; }
+}
+
+public class LimitVelocityOverLifetimeModule
+{
+    private readonly ParticleSystem _ps;
+    public LimitVelocityOverLifetimeModule(ParticleSystem ps) { _ps = ps; }
+    public bool enabled { get; set; }
+}
+
+public enum ParticleSystemGravitySimulation { Physics3D, Physics2D }

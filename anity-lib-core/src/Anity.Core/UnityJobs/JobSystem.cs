@@ -3,6 +3,7 @@ using System.Threading;
 using System.Collections.Generic;
 using UnityEngine;
 using Unity.Collections;
+using Unity.Burst;
 
 namespace Unity.Jobs
 {
@@ -41,6 +42,7 @@ namespace Unity.Jobs
     internal int m_JobId;
     internal bool m_IsCompleted;
     internal object m_Data;
+    internal Action _execute;
 
     public bool IsCompleted
     {
@@ -68,6 +70,7 @@ namespace Unity.Jobs
 
     public void Complete()
     {
+      _execute?.Invoke();
       if (m_JobId > 0)
       {
         JobScheduler.EnsureCompleted(m_JobId);
@@ -103,26 +106,6 @@ namespace Unity.Jobs
     {
       return jobs.Length == 0;
     }
-
-    public static JobHandle Schedule<T>(T jobData, JobHandle dependsOn = new JobHandle()) where T : struct, IJob
-    {
-      dependsOn.Complete();
-      jobData.Execute();
-      return new JobHandle { m_IsCompleted = true };
-    }
-  }
-
-  [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false)]
-  public class BurstCompileAttribute : Attribute
-  {
-    public float FloatMode { get; set; }
-    public FloatPrecision FloatPrecision { get; set; }
-    public bool CompileSynchronously { get; set; }
-    public bool Options { get; set; }
-    public string[] OptionsNames { get; set; }
-
-    public BurstCompileAttribute() { }
-    public BurstCompileAttribute(float precision) { FloatPrecision = (FloatPrecision)precision; }
   }
 
   public enum FloatPrecision
@@ -140,7 +123,7 @@ namespace Unity.Jobs
     {
       dependsOn.Complete();
       jobData.Execute();
-      return new JobHandle { m_IsCompleted = true };
+      return new JobHandle { m_IsCompleted = true, _execute = () => jobData.Execute() };
     }
 
     public static JobHandle Run<T>(this T jobData) where T : struct, IJob
@@ -211,13 +194,51 @@ namespace Unity.Jobs
     }
   }
 
+  public static class IJobParallelForTransformExtensions
+  {
+    public static JobHandle Schedule<T>(this T jobData, TransformAccessArray transforms, int innerloopBatchCount, JobHandle dependsOn = new JobHandle()) where T : struct, IJobParallelForTransform
+    {
+      dependsOn.Complete();
+      for (int i = 0; i < transforms.length; i++)
+      {
+        jobData.Execute(i, transforms[i]);
+      }
+      return new JobHandle { m_IsCompleted = true };
+    }
+
+    public static void Run<T>(this T jobData, TransformAccessArray transforms) where T : struct, IJobParallelForTransform
+    {
+      for (int i = 0; i < transforms.length; i++)
+      {
+        jobData.Execute(i, transforms[i]);
+      }
+    }
+  }
+
   public struct TransformAccess
   {
     public int index;
     public Vector3 position;
     public Quaternion rotation;
+    public Vector3 localPosition;
+    public Quaternion localRotation;
     public Vector3 localScale;
+    public Matrix4x4 localToWorldMatrix;
+    public Matrix4x4 worldToLocalMatrix;
     public string name;
+
+    public TransformAccess(Transform transform)
+    {
+      index = 0;
+      position = transform != null ? transform.position : Vector3.zero;
+      rotation = transform != null ? transform.rotation : Quaternion.identity;
+      localPosition = transform != null ? transform.localPosition : Vector3.zero;
+      localRotation = transform != null ? transform.localRotation : Quaternion.identity;
+      localScale = transform != null ? transform.localScale : Vector3.one;
+      localToWorldMatrix = transform != null ? transform.localToWorldMatrix : Matrix4x4.identity;
+      worldToLocalMatrix = transform != null ? transform.worldToLocalMatrix : Matrix4x4.identity;
+      name = transform != null ? transform.name : string.Empty;
+    }
   }
 
   internal static class JobScheduler
@@ -257,17 +278,27 @@ namespace Unity.Jobs
     ParallelForBatch
   }
 
-  [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
+  [AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Field, AllowMultiple = false)]
   public class ReadOnlyAttribute : Attribute
   {
   }
 
-  [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
+  [AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Field, AllowMultiple = false)]
   public class WriteOnlyAttribute : Attribute
   {
   }
 
-  [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
+  [AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Field, AllowMultiple = false)]
+  public class DeallocateOnJobCompletionAttribute : Attribute
+  {
+  }
+
+  [AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Field | AttributeTargets.Struct, AllowMultiple = false)]
+  public class NativeDisableContainerSafetyRestrictionAttribute : Attribute
+  {
+  }
+
+  [AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Field, AllowMultiple = false)]
   public class NativeDisableParallelForRestrictionAttribute : Attribute
   {
   }

@@ -9,20 +9,6 @@ public abstract class CustomYieldInstruction : YieldInstruction
     public abstract bool keepWaiting { get; }
 }
 
-public class WaitForSeconds : YieldInstruction
-{
-    public float seconds { get; }
-
-    public WaitForSeconds(float seconds)
-    {
-        this.seconds = seconds;
-    }
-}
-
-public class WaitForEndOfFrame : YieldInstruction { }
-
-public class WaitForFixedUpdate : YieldInstruction { }
-
 public class WaitForWWW : YieldInstruction { }
 
 public class WaitForAsyncOperation : CustomYieldInstruction

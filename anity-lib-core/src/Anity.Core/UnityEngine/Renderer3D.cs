@@ -3,14 +3,6 @@ using System.Collections.Generic;
 
 namespace UnityEngine;
 
-public enum ShadowCastingMode
-{
-    Off = 0,
-    On = 1,
-    TwoSided = 2,
-    ShadowsOnly = 3,
-}
-
 public enum ReceiveShadows
 {
     Off = 0,
@@ -151,9 +143,10 @@ public enum LODCrossFade
     Dither = 2,
 }
 
-public class ReflectionProbe : Component
+public class ReflectionProbe : Behaviour
 {
     private ReflectionProbeMode _mode = ReflectionProbeMode.Baked;
+    private ReflectionProbeType _type = ReflectionProbeType.Cube;
     private ReflectionProbeRefreshMode _refreshMode = ReflectionProbeRefreshMode.OnAwake;
     private ReflectionProbeTimeSlicing _timeSlicing = ReflectionProbeTimeSlicing.AllFacesAtOnce;
     private int _resolution = 128;
@@ -162,6 +155,7 @@ public class ReflectionProbe : Component
     private float _shadowDistance = 100f;
     private Color _backgroundColor = Color.white;
     private int _cullingMask = ~0;
+    private int _renderingLayerMask = 1;
     private float _nearClipPlane = 0.3f;
     private float _farClipPlane = 1000f;
     private float _importance = 0f;
@@ -172,16 +166,22 @@ public class ReflectionProbe : Component
     private Vector3 _size = new Vector3(10, 10, 10);
     private Vector3 _center;
     private bool _boxProjection;
-    private bool _blendDistance;
-    private float _blendDistanceValue;
+    private float _blendDistance;
     private CameraClearFlags _clearFlags = CameraClearFlags.Skybox;
     private bool _useOcclusionCulling = true;
+    private bool _isFinishedRendering = true;
 
     public enum ReflectionProbeMode
     {
         Baked = 0,
         Realtime = 1,
         Custom = 2,
+    }
+
+    public enum ReflectionProbeType
+    {
+        Cube = 0,
+        Card = 1,
     }
 
     public enum ReflectionProbeRefreshMode
@@ -196,6 +196,18 @@ public class ReflectionProbe : Component
         AllFacesAtOnce = 0,
         IndividualFaces = 1,
         NoTimeSlicing = 2,
+    }
+
+    public ReflectionProbeMode mode
+    {
+        get => _mode;
+        set => _mode = value;
+    }
+
+    public ReflectionProbeType type
+    {
+        get => _type;
+        set => _type = value;
     }
 
     public CameraClearFlags clearFlags
@@ -252,6 +264,25 @@ public class ReflectionProbe : Component
         set => _cullingMask = value;
     }
 
+    private float _cullingDistance = 1000f;
+    public float cullingDistance
+    {
+        get => _cullingDistance;
+        set => _cullingDistance = value;
+    }
+
+    public ReflectionProbeTimeSlicing timeSlicingMode
+    {
+        get => _timeSlicing;
+        set => _timeSlicing = value;
+    }
+
+    public int renderingLayerMask
+    {
+        get => _renderingLayerMask;
+        set => _renderingLayerMask = value;
+    }
+
     public float nearClipPlane
     {
         get => _nearClipPlane;
@@ -274,6 +305,12 @@ public class ReflectionProbe : Component
     {
         get => _intensity;
         set => _intensity = value;
+    }
+
+    public float blendDistance
+    {
+        get => _blendDistance;
+        set => _blendDistance = value;
     }
 
     public RenderTexture bakedTexture
@@ -312,16 +349,41 @@ public class ReflectionProbe : Component
         set => _useOcclusionCulling = value;
     }
 
-    public Texture texture { get; }
+    public Texture texture => _bakedTexture != null ? _bakedTexture : defaultTexture;
     public Texture textureHDRI { get; }
     public RenderTexture targetTexture { get; set; }
     public float blendedDistance { get; set; }
+    public Bounds bounds => new(transform.position + _center, _size);
 
-    public void RenderProbe() { }
-    public void RenderProbe(RenderTexture targetTexture) { }
-    public void Reset() { }
+    public static Texture defaultTexture
+    {
+        get
+        {
+            var tex = new Texture2D(1, 1);
+            return tex;
+        }
+    }
 
     public static ReflectionProbe defaultReflectionProbe { get; }
+
+    public int RenderProbe()
+    {
+        _isFinishedRendering = false;
+        return 0;
+    }
+
+    public int RenderProbe(RenderTexture targetTexture)
+    {
+        this.targetTexture = targetTexture;
+        return RenderProbe();
+    }
+
+    public bool IsFinishedRendering(int renderId)
+    {
+        return _isFinishedRendering;
+    }
+
+    public void Reset() { _isFinishedRendering = true; }
 
     public static void BlendReflections(
         Texture src,
@@ -370,17 +432,6 @@ public class SortingGroup : Component
     {
         return null;
     }
-}
-
-public struct CombineInstance
-{
-    public Mesh mesh;
-    public int subMeshIndex;
-    public Matrix4x4 transform;
-    public bool lightmapScaleOffset;
-    public Vector4 lightmapScaleOffsetValue;
-    public bool realtimeLightmapScaleOffset;
-    public Vector4 realtimeLightmapScaleOffsetValue;
 }
 
 public static class StaticBatchingUtility

@@ -19,7 +19,7 @@ public class ParticleSystemRenderer : Renderer
         minParticleSize = 0.01f;
         maxParticleSize = 0.5f;
         normalDirection = 0.5f;
-        castShadows = true;
+        shadowCastingMode = ShadowCastingMode.On;
         receiveShadows = true;
         shadowBias = 0f;
         sortingFudge = 0f;

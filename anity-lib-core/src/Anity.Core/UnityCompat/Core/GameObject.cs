@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 
 namespace UnityEngine;
 
@@ -8,13 +9,15 @@ public class GameObject : Object
 {
   private static readonly Dictionary<string, List<GameObject>> _sceneObjects = new(StringComparer.Ordinal);
   private static readonly List<GameObject> _allObjects = new();
-  private readonly Dictionary<Type, List<Component>> _components = new();
+  private readonly List<Component> _components = new();
+  private string _sceneName = "SampleScene";
+  private bool _isActiveInHierarchyPrev;
 
   public GameObject(string name = "GameObject")
   {
     this.name = name;
     transform = new Transform { gameObject = this };
-    RegisterComponent(transform);
+    _components.Add(transform);
     AddToScene(this);
   }
 
@@ -32,10 +35,27 @@ public class GameObject : Object
     }
   }
 
-  public string name { get; set; } = "GameObject";
   public Transform transform { get; }
   public bool activeSelf { get; private set; } = true;
-  public bool activeInHierarchy => IsActiveInHierarchy();
+
+  public bool activeInHierarchy
+  {
+    get
+    {
+      if (!activeSelf) return false;
+      var current = transform.parent;
+      while (current is not null)
+      {
+        if (current.gameObject is null || !current.gameObject.activeSelf)
+        {
+          return false;
+        }
+        current = current.parent;
+      }
+      return true;
+    }
+  }
+
   public string tag { get; set; } = "Untagged";
 
   private int _layer;
@@ -47,26 +67,7 @@ public class GameObject : Object
 
   public bool isStatic { get; set; }
 
-  private bool IsActiveInHierarchy()
-  {
-    if (!activeSelf)
-    {
-      return false;
-    }
-
-    var current = transform.parent;
-    while (current is not null)
-    {
-      if (current.gameObject is null || !current.gameObject.activeSelf)
-      {
-        return false;
-      }
-
-      current = current.parent;
-    }
-
-    return true;
-  }
+  public SceneManagement.Scene scene => new SceneManagement.Scene(_sceneName, 0, true);
 
   public static GameObject? Find(string name)
   {
@@ -137,18 +138,26 @@ public class GameObject : Object
     return RegisterComponent(component);
   }
 
-  private Component RegisterComponent(Component component)
+  internal Component RegisterComponent(Component component)
   {
     component.gameObject = this;
+    _components.Add(component);
 
-    if (!_components.TryGetValue(component.GetType(), out var list))
+    if (component is MonoBehaviour mb)
     {
-      list = new List<Component>();
-      _components[component.GetType()] = list;
+      try { mb.InternalAwake(); } catch { }
+      if (activeInHierarchy && mb.enabled)
+      {
+        try { mb.InternalOnEnable(); } catch { }
+      }
     }
 
-    list.Add(component);
     return component;
+  }
+
+  internal void RemoveComponentInternal(Component component)
+  {
+    _components.Remove(component);
   }
 
   public Component? GetComponent(Type componentType)
@@ -158,14 +167,11 @@ public class GameObject : Object
       return null;
     }
 
-    foreach (var componentList in _components.Values)
+    foreach (var component in _components)
     {
-      foreach (var component in componentList)
+      if (component is not null && componentType.IsInstanceOfType(component))
       {
-        if (component is not null && componentType.IsAssignableFrom(component.GetType()))
-        {
-          return component;
-        }
+        return component;
       }
     }
 
@@ -190,14 +196,27 @@ public class GameObject : Object
       return Array.Empty<Component>();
     }
 
-    return _components.Values.SelectMany(list => list)
-      .Where(component => component is not null && componentType.IsAssignableFrom(component.GetType()))
+    return _components
+      .Where(component => component is not null && componentType.IsInstanceOfType(component))
       .ToArray();
   }
 
   public T[] GetComponents<T>() where T : class
   {
     return GetComponents(typeof(T)).OfType<T>().ToArray();
+  }
+
+  public void GetComponents<T>(List<T> results) where T : class
+  {
+    if (results is null) return;
+    results.Clear();
+    foreach (var component in _components)
+    {
+      if (component is T t)
+      {
+        results.Add(t);
+      }
+    }
   }
 
   public Component[] GetComponentsInChildren(Type componentType, bool includeInactive = true)
@@ -290,24 +309,117 @@ public class GameObject : Object
 
   public void SetActive(bool value)
   {
+    if (activeSelf == value) return;
     activeSelf = value;
+
+    bool wasActive = _isActiveInHierarchyPrev;
+    bool nowActive = activeInHierarchy;
+    _isActiveInHierarchyPrev = nowActive;
+
+    if (wasActive != nowActive)
+    {
+      SetComponentsActiveState(this, nowActive);
+      for (int i = 0; i < transform.childCount; i++)
+      {
+        var child = transform.GetChild(i);
+        if (child.gameObject is not null && child.gameObject.activeSelf)
+        {
+          child.gameObject.SetChildrenActiveState(child.gameObject, nowActive);
+        }
+      }
+    }
+  }
+
+  private void SetChildrenActiveState(GameObject go, bool rootActive)
+  {
+    bool nowActive = rootActive && go.activeSelf;
+    SetComponentsActiveState(go, nowActive);
+    for (int i = 0; i < go.transform.childCount; i++)
+    {
+      var child = go.transform.GetChild(i);
+      if (child.gameObject is not null && child.gameObject.activeSelf)
+      {
+        SetChildrenActiveState(child.gameObject, nowActive);
+      }
+    }
+  }
+
+  private void SetComponentsActiveState(GameObject go, bool isActive)
+  {
+    foreach (var comp in go._components)
+    {
+      if (comp is Behaviour behaviour && behaviour.enabled)
+      {
+        if (comp is MonoBehaviour mb)
+        {
+          try
+          {
+            if (isActive) mb.InternalOnEnable();
+            else mb.InternalOnDisable();
+          }
+          catch { }
+        }
+      }
+    }
   }
 
   public void SendMessage(string methodName, object? value = null, SendMessageOptions options = SendMessageOptions.RequireReceiver)
   {
-    _ = methodName;
-    _ = value;
-    _ = options;
+    bool found = false;
+    var args = value is not null ? new[] { value } : Array.Empty<object>();
+    var argTypes = value is not null ? new[] { value.GetType() } : Type.EmptyTypes;
+
+    foreach (var comp in _components)
+    {
+      if (comp is null) continue;
+      var type = comp.GetType();
+      var method = type.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, argTypes, null);
+      if (method is null && value is null)
+      {
+        method = type.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+      }
+      if (method is not null)
+      {
+        found = true;
+        try
+        {
+          var parameters = method.GetParameters();
+          if (parameters.Length == 0)
+          {
+            method.Invoke(comp, null);
+          }
+          else if (parameters.Length == 1 && value is not null)
+          {
+            method.Invoke(comp, args);
+          }
+        }
+        catch { }
+      }
+    }
+
+    if (!found && options == SendMessageOptions.RequireReceiver)
+    {
+      Debug.LogWarning($"SendMessage: method '{methodName}' not found on {name}");
+    }
   }
 
   public void SendMessageUpwards(string methodName, object? value = null, SendMessageOptions options = SendMessageOptions.RequireReceiver)
   {
     SendMessage(methodName, value, options);
+    if (transform.parent is not null && transform.parent.gameObject is not null)
+    {
+      transform.parent.gameObject.SendMessageUpwards(methodName, value, options);
+    }
   }
 
   public void BroadcastMessage(string methodName, object? value = null, SendMessageOptions options = SendMessageOptions.RequireReceiver)
   {
     SendMessage(methodName, value, options);
+    for (int i = 0; i < transform.childCount; i++)
+    {
+      var child = transform.GetChild(i);
+      child.gameObject?.BroadcastMessage(methodName, value, options);
+    }
   }
 
   private static void AddToScene(GameObject go)

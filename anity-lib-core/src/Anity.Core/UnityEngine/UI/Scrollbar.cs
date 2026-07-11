@@ -278,9 +278,6 @@ public class Scrollbar : Selectable, IBeginDragHandler, IDragHandler, IEndDragHa
     {
         _ = eventData;
     }
-
-    Transform ICanvasElement.transform => transform;
-    bool ICanvasElement.IsDestroyed() => this == null;
 }
 
 [Serializable]

@@ -6,8 +6,14 @@ namespace UnityEngine;
 public class Shader
 {
     private static readonly Dictionary<string, Shader> _cache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, object> _properties = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _globalKeywords = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<int, string> _propertyNames = new();
+    private static readonly Dictionary<string, int> _propertyIDs = new();
+    private static readonly Dictionary<int, object> _globalProperties = new();
+    private static readonly HashSet<string> _globalKeywords = new(StringComparer.OrdinalIgnoreCase);
+    private static int _nextPropertyID = 1;
+    private static readonly Dictionary<string, int> _tagCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<int, string> _tagNames = new();
+    private static int _nextTagID = 1;
 
     public string name { get; set; }
     public int renderQueue { get; set; } = 2000;
@@ -15,6 +21,11 @@ public class Shader
     public bool isSupported { get; set; } = true;
     public int maximumLOD { get; set; } = 600;
     public static int globalMaximumLOD { get; set; } = 600;
+    public static bool globalKeywordsDirty { get; set; }
+    public static bool warmupStarted { get; private set; }
+    public static bool isWarmUpSupported { get; } = true;
+    private static string _globalRenderPipeline = "UniversalPipeline";
+    public static string globalRenderPipeline { get => _globalRenderPipeline; set => _globalRenderPipeline = value; }
 
     private Shader(string name)
     {
@@ -34,80 +45,79 @@ public class Shader
         return cached;
     }
 
-    public object GetProperty(string name)
+    public static Shader FindWithTag(string tagName, string tagValue)
     {
-        _properties.TryGetValue(name, out var val);
-        return val;
+        return null;
     }
 
-    public void SetProperty(string name, object value)
+    public static int PropertyToID(string name)
     {
-        _properties[name] = value;
+        if (string.IsNullOrEmpty(name)) return 0;
+        if (_propertyIDs.TryGetValue(name, out var id))
+            return id;
+
+        id = _nextPropertyID++;
+        _propertyIDs[name] = id;
+        _propertyNames[id] = name;
+        return id;
     }
 
-    public bool HasProperty(string propertyName)
+    public static string GetPropertyName(int nameID)
     {
-        return _properties.ContainsKey(propertyName);
+        return _propertyNames.TryGetValue(nameID, out var name) ? name : string.Empty;
     }
 
-    public int FindPropertyIndex(string propertyName)
+    public static object GetPropertyNameDefaultValue(int nameID)
     {
-        int i = 0;
-        foreach (var kvp in _properties)
-        {
-            if (string.Equals(kvp.Key, propertyName, StringComparison.OrdinalIgnoreCase))
-                return i;
-            i++;
-        }
-        return -1;
+        return null;
     }
 
-    public string GetPropertyName(int propertyIndex)
+    public static int TagToID(string tagName)
     {
-        int i = 0;
-        foreach (var kvp in _properties)
-        {
-            if (i == propertyIndex)
-                return kvp.Key;
-            i++;
-        }
-        return string.Empty;
+        if (string.IsNullOrEmpty(tagName)) return 0;
+        if (_tagCache.TryGetValue(tagName, out var id))
+            return id;
+
+        id = _nextTagID++;
+        _tagCache[tagName] = id;
+        _tagNames[id] = tagName;
+        return id;
     }
 
-    public ShaderPropertyType GetPropertyType(int propertyIndex)
+    public static string IDToTag(int tagID)
     {
-        return ShaderPropertyType.Color;
+        return _tagNames.TryGetValue(tagID, out var name) ? name : string.Empty;
     }
 
-    public static void SetGlobalFloat(int nameID, float value) { }
-    public static void SetGlobalFloat(string name, float value) { }
-    public static float GetGlobalFloat(string name) => 0f;
-    public static float GetGlobalFloat(int nameID) => 0f;
+    public static void SetGlobalFloat(int nameID, float value) => _globalProperties[nameID] = value;
+    public static void SetGlobalFloat(string name, float value) => SetGlobalFloat(PropertyToID(name), value);
+    public static float GetGlobalFloat(string name) => GetGlobalFloat(PropertyToID(name));
+    public static float GetGlobalFloat(int nameID) => _globalProperties.TryGetValue(nameID, out var v) && v is float f ? f : 0f;
 
-    public static void SetGlobalInt(int nameID, int value) { }
-    public static void SetGlobalInt(string name, int value) { }
-    public static int GetGlobalInt(string name) => 0;
-    public static int GetGlobalInt(int nameID) => 0;
+    public static void SetGlobalInt(int nameID, int value) => _globalProperties[nameID] = value;
+    public static void SetGlobalInt(string name, int value) => SetGlobalInt(PropertyToID(name), value);
+    public static int GetGlobalInt(string name) => GetGlobalInt(PropertyToID(name));
+    public static int GetGlobalInt(int nameID) => _globalProperties.TryGetValue(nameID, out var v) && v is int i ? i : 0;
 
-    public static void SetGlobalColor(int nameID, Color value) { }
-    public static void SetGlobalColor(string name, Color value) { }
-    public static Color GetGlobalColor(string name) => Color.white;
-    public static Color GetGlobalColor(int nameID) => Color.white;
+    public static void SetGlobalColor(int nameID, Color value) => _globalProperties[nameID] = value;
+    public static void SetGlobalColor(string name, Color value) => SetGlobalColor(PropertyToID(name), value);
+    public static Color GetGlobalColor(string name) => GetGlobalColor(PropertyToID(name));
+    public static Color GetGlobalColor(int nameID) => _globalProperties.TryGetValue(nameID, out var v) && v is Color c ? c : Color.white;
 
-    public static void SetGlobalVector(int nameID, Vector4 value) { }
-    public static void SetGlobalVector(string name, Vector4 value) { }
-    public static Vector4 GetGlobalVector(string name) => Vector4.zero;
-    public static Vector4 GetGlobalVector(int nameID) => Vector4.zero;
+    public static void SetGlobalVector(int nameID, Vector4 value) => _globalProperties[nameID] = value;
+    public static void SetGlobalVector(string name, Vector4 value) => SetGlobalVector(PropertyToID(name), value);
+    public static Vector4 GetGlobalVector(string name) => GetGlobalVector(PropertyToID(name));
+    public static Vector4 GetGlobalVector(int nameID) => _globalProperties.TryGetValue(nameID, out var v) && v is Vector4 vec ? vec : Vector4.zero;
 
-    public static void SetGlobalMatrix(int nameID, Matrix4x4 value) { }
-    public static void SetGlobalMatrix(string name, Matrix4x4 value) { }
-    public static Matrix4x4 GetGlobalMatrix(string name) => Matrix4x4.identity;
-    public static Matrix4x4 GetGlobalMatrix(int nameID) => Matrix4x4.identity;
+    public static void SetGlobalMatrix(int nameID, Matrix4x4 value) => _globalProperties[nameID] = value;
+    public static void SetGlobalMatrix(string name, Matrix4x4 value) => SetGlobalMatrix(PropertyToID(name), value);
+    public static Matrix4x4 GetGlobalMatrix(string name) => GetGlobalMatrix(PropertyToID(name));
+    public static Matrix4x4 GetGlobalMatrix(int nameID) => _globalProperties.TryGetValue(nameID, out var v) && v is Matrix4x4 m ? m : Matrix4x4.identity;
 
-    public static void SetGlobalTexture(int nameID, Texture value) { }
-    public static void SetGlobalTexture(string name, Texture value) { }
-    public static Texture GetGlobalTexture(string name) => null;
-    public static Texture GetGlobalTexture(int nameID) => null;
+    public static void SetGlobalTexture(int nameID, Texture value) => _globalProperties[nameID] = value;
+    public static void SetGlobalTexture(string name, Texture value) => SetGlobalTexture(PropertyToID(name), value);
+    public static Texture GetGlobalTexture(string name) => GetGlobalTexture(PropertyToID(name));
+    public static Texture GetGlobalTexture(int nameID) => _globalProperties.TryGetValue(nameID, out var v) && v is Texture t ? t : null;
 
     public static void SetGlobalFloatArray(int nameID, float[] values) { }
     public static void SetGlobalFloatArray(string name, float[] values) { }
@@ -124,39 +134,44 @@ public class Shader
     public static void SetGlobalMatrixArray(int nameID, List<Matrix4x4> values) { }
     public static void SetGlobalMatrixArray(string name, List<Matrix4x4> values) { }
 
-    public static void EnableKeyword(string keyword) { }
-    public static void DisableKeyword(string keyword) { }
-    public static bool IsKeywordEnabled(string keyword) => false;
-
+    public static void EnableKeyword(string keyword) => _globalKeywords.Add(keyword);
+    public static void DisableKeyword(string keyword) => _globalKeywords.Remove(keyword);
+    public static bool IsKeywordEnabled(string keyword) => _globalKeywords.Contains(keyword);
     public static void SetKeyword(string keyword, bool value)
     {
-        if (value)
-            EnableKeyword(keyword);
-        else
-            DisableKeyword(keyword);
+        if (value) EnableKeyword(keyword);
+        else DisableKeyword(keyword);
     }
 
-    public static bool globalKeywordsDirty { get; set; }
-    public static bool warmupStarted { get; }
-
-    public static int PropertyToID(string name)
-    {
-        return name?.GetHashCode() ?? 0;
-    }
-
-    public static string IdToProperty(int id)
-    {
-        return id.ToString();
-    }
-
+    public static void WarmupAllShaders() { warmupStarted = true; }
     public static void ParseSurfaceShaders() { }
+    public static string FindPassName(int passNameHash) => string.Empty;
 
-    public static string FindPassName(int passNameHash)
+    public object GetProperty(string name)
     {
-        return string.Empty;
+        _globalProperties.TryGetValue(PropertyToID(name), out var val);
+        return val;
     }
 
-    public static bool isWarmUpSupported { get; } = true;
+    public void SetProperty(string name, object value)
+    {
+        _globalProperties[PropertyToID(name)] = value;
+    }
+
+    public bool HasProperty(string propertyName)
+    {
+        return _propertyIDs.ContainsKey(propertyName);
+    }
+
+    public int FindPropertyIndex(string propertyName)
+    {
+        return _propertyIDs.TryGetValue(propertyName, out var id) ? id : -1;
+    }
+
+    public ShaderPropertyType GetPropertyType(int propertyIndex)
+    {
+        return ShaderPropertyType.Color;
+    }
 }
 
 public enum ShaderPropertyType
@@ -176,109 +191,4 @@ public enum RenderQueue
     AlphaTest = 2450,
     Transparent = 3000,
     Overlay = 4000
-}
-
-public class ComputeShader : Object
-{
-    public string name { get; set; }
-    public int kernelCount { get; }
-
-    public int FindKernel(string name)
-    {
-        return 0;
-    }
-
-    public void SetFloat(string name, float val) { }
-    public void SetFloat(int nameID, float val) { }
-    public void SetInt(string name, int val) { }
-    public void SetInt(int nameID, int val) { }
-    public void SetVector(string name, Vector4 val) { }
-    public void SetVector(int nameID, Vector4 val) { }
-    public void SetMatrix(string name, Matrix4x4 val) { }
-    public void SetMatrix(int nameID, Matrix4x4 val) { }
-    public void SetTexture(int kernelIndex, string name, Texture texture) { }
-    public void SetTexture(int kernelIndex, int nameID, Texture texture) { }
-    public void SetBuffer(int kernelIndex, string name, ComputeBuffer buffer) { }
-    public void SetBuffer(int kernelIndex, int nameID, ComputeBuffer buffer) { }
-    public void SetFloatArray(string name, float[] values) { }
-    public void SetFloatArray(int nameID, float[] values) { }
-    public void SetVectorArray(string name, Vector4[] values) { }
-    public void SetVectorArray(int nameID, Vector4[] values) { }
-    public void SetMatrixArray(string name, Matrix4x4[] values) { }
-    public void SetMatrixArray(int nameID, Matrix4x4[] values) { }
-
-    public void Dispatch(int kernelIndex, int threadGroupsX, int threadGroupsY, int threadGroupsZ) { }
-
-    public void GetKernelThreadGroupSizes(int kernelIndex, out uint x, out uint y, out uint z)
-    {
-        x = 1; y = 1; z = 1;
-    }
-
-    public bool HasKernel(string name) => true;
-}
-
-public class ComputeBuffer : IDisposable
-{
-    public int count { get; }
-    public int stride { get; }
-    public ComputeBufferType type { get; }
-    public string name { get; set; }
-    public bool enableRandomWrite { get; set; } = true;
-
-    public ComputeBuffer(int count, int stride)
-    {
-        this.count = count;
-        this.stride = stride;
-        this.type = ComputeBufferType.Default;
-    }
-
-    public ComputeBuffer(int count, int stride, ComputeBufferType type)
-    {
-        this.count = count;
-        this.stride = stride;
-        this.type = type;
-    }
-
-    public void SetData(Array data) { }
-    public void SetData<T>(T[] data) where T : struct { }
-    public void SetData<T>(List<T> data) where T : struct { }
-    public void SetData(Array data, int managedBufferStartIndex, int computeBufferStartIndex, int count) { }
-
-    public void GetData(Array data) { }
-    public void GetData<T>(T[] data) where T : struct { }
-    public void GetData(Array data, int managedBufferStartIndex, int computeBufferStartIndex, int count) { }
-
-    public IntPtr GetNativeBufferPtr() => IntPtr.Zero;
-
-    public void Dispose()
-    {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing) { }
-
-    ~ComputeBuffer() => Dispose(false);
-
-    public static void CopyCount(ComputeBuffer src, ComputeBuffer dst, int dstOffsetBytes) { }
-}
-
-public enum ComputeBufferType
-{
-    Default = 0,
-    Raw = 1,
-    Append = 2,
-    Counter = 4,
-    Constant = 8,
-    Structured = 16,
-    DrawIndirect = 256,
-    GPUMemory = 512
-}
-
-public enum ComputeBufferMode
-{
-    Immutable,
-    Dynamic,
-    Ring,
-    StreamOut
 }

@@ -206,3 +206,30 @@ public enum VerticalWrapMode
     Truncate = 0,
     Overflow = 1,
 }
+
+public class AssetImporter : Object
+{
+    public string assetPath { get; protected set; } = string.Empty;
+}
+
+public class ComputeBuffer : IDisposable
+{
+    public ComputeBuffer(int count, int stride) { }
+    public ComputeBuffer(int count, int stride, ComputeBufferType type) { }
+    public int count { get; }
+    public int stride { get; }
+    public void SetData(System.Array data) { }
+    public void GetData(System.Array data) { }
+    public void Release() { }
+    public void Dispose() { }
+}
+
+public enum ComputeBufferType
+{
+    Default,
+    Raw,
+    Append,
+    Counter,
+    IndirectArguments,
+    Structured
+}

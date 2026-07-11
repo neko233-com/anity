@@ -1,94 +1,8 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering
 {
-  public abstract class RenderPipelineAsset : ScriptableObject
-  {
-    public abstract Type pipelineType { get; }
-    public virtual string[] renderingLayerMaskNames => new string[32];
-    public virtual string[] prefixedRenderingLayerMaskNames => new string[32];
-    public virtual int terrainBrushPassIndex => -1;
-
-    public virtual Material defaultMaterial => null;
-    public virtual Shader defaultShader => null;
-    public virtual Material defaultParticleMaterial => null;
-    public virtual Material defaultLineMaterial => null;
-    public virtual Material defaultTerrainMaterial => null;
-    public virtual Material defaultUIMaterial => null;
-    public virtual Material defaultUIOverdrawMaterial => null;
-    public virtual Material defaultUIETC1SupportedMaterial => null;
-    public virtual Material default2DMaskMaterial => null;
-    public virtual Shader defaultTextMeshProShader => null;
-    public virtual Shader defaultTextShader => null;
-
-    public virtual bool autoreleaseResources
-    {
-      get => true;
-      set { }
-    }
-
-    public virtual int shadowCascadeCount => 4;
-
-    public virtual string[] ComputeSystemShadersKeywords(string[] userKeywords)
-    {
-      return Array.Empty<string>();
-    }
-
-    public virtual string[] GetTerrainCompatibleLitShaderKeywords()
-    {
-      return Array.Empty<string>();
-    }
-
-    protected abstract RenderPipeline CreatePipeline();
-  }
-
-  public abstract class RenderPipeline : IDisposable
-  {
-    public static RenderPipeline? current { get; internal set; }
-    public bool disposed { get; private set; }
-
-    public void Dispose()
-    {
-      Dispose(true);
-      GC.SuppressFinalize(this);
-      disposed = true;
-    }
-
-    protected virtual void Dispose(bool disposing) { }
-
-    public virtual void Render(ScriptableRenderContext context, Camera[] cameras)
-    {
-      if (cameras == null) throw new ArgumentNullException(nameof(cameras));
-      Render(context, new List<Camera>(cameras));
-    }
-
-    public virtual void Render(ScriptableRenderContext context, List<Camera> cameras)
-    {
-      if (disposed) throw new ObjectDisposedException(nameof(RenderPipeline));
-      RenderInternal(context, cameras);
-    }
-
-    internal virtual void RenderInternal(ScriptableRenderContext context, List<Camera> cameras)
-    {
-      Render(context, cameras);
-    }
-
-    protected static void BeginFrameRendering(ScriptableRenderContext context, Camera[] cameras)
-    {
-      RenderPipelineManager.InvokeBeginFrameRendering(context);
-      RenderPipelineManager.InvokeBeginCameraRendering(context, cameras);
-    }
-
-    protected static void EndFrameRendering(ScriptableRenderContext context, Camera[] cameras)
-    {
-      RenderPipelineManager.InvokeEndCameraRendering(context, cameras);
-      RenderPipelineManager.InvokeEndFrameRendering(context);
-    }
-  }
-
   public struct RenderingData
   {
     public CameraData cameraData;
@@ -98,7 +12,6 @@ namespace UnityEngine.Rendering
     public bool supportsDynamicBatching;
     public bool supportsInstancing;
     public bool postProcessingEnabled;
-    public CommandBufferPool commandBufferPool;
   }
 
   public struct CameraData
@@ -125,14 +38,14 @@ namespace UnityEngine.Rendering
     public bool viewTransformIsIdentity;
     public bool projectionMatrixIsIdentity;
     public float volumeLayerMask;
-    public VolumeStack volumeStack;
+    public object volumeStack;
     public bool isDefaultViewport;
     public Rect pixelRect;
     public Rect normalizedViewPort;
     public int pixelWidth;
     public int pixelHeight;
     public int rendererIndex;
-    public ScriptableRenderer renderer;
+    public object renderer;
     public bool postProcessEnabled;
     public int antiAliasing;
     public bool isStopNaNEnabled;
@@ -154,82 +67,51 @@ namespace UnityEngine.Rendering
     public int maxPerObjectAdditionalLightsCount;
     public bool additionalLightsPerVertex;
     public bool supportsMixedLighting;
-    public bool supportsSubtractiveMixedLighting;
-    public bool supportsDynamicLightmapTextures;
-    public LightCategory mainLightCategory;
-    public bool mainLightIsImportant;
+    public bool useScreenSpaceShadows;
+    public bool supportsSoftShadows;
+    public float shadowDistance;
+    public int shadowCascadeCount;
+    public float shadowCascade2Split;
+    public Vector2 shadowCascade3Splits;
+    public Vector3 shadowCascade4Splits;
+    public float shadowDepthBias;
+    public float shadowNormalBias;
+    public float shadowNearPlaneOffset;
   }
 
   public struct ShadowData
   {
-    public ShadowQuality mainLightShadowsQuality;
-    public ShadowResolution mainLightShadowmapResolution;
-    public ShadowQuality additionalLightsShadowsQuality;
-    public ShadowResolution additionalLightsShadowmapResolution;
-    public int shadowCascadesCount;
+    public bool supportsSoftShadows;
     public float shadowDistance;
-    public float shadowCascade2Split;
-    public Vector3 shadowCascade4Split;
-    public float shadowNearPlaneOffset;
-    public float shadowCascadeBorder;
+    public int shadowmapDepthBufferBits;
+    public int mainShadowmapWidth;
+    public int mainShadowmapHeight;
+    public int additionalShadowmapWidth;
+    public int additionalShadowmapHeight;
     public bool supportsMainLightShadows;
     public bool supportsAdditionalLightShadows;
-    public bool supportsSoftShadows;
+    public int mainShadowCascadeCount;
   }
 
   public struct PostProcessingData
   {
-    public bool isStopNaNEnabled;
-    public bool isGrainEnabled;
-    public PostProcessingToneMapingMode toneMAP;
+    public ColorGradingMode colorGradingMode;
+    public int lutSize;
+    public bool useFastSRGBLinearConversion;
   }
 
-  public enum PostProcessingToneMapingMode
+  public enum ColorGradingMode
+  {
+    LowDynamicRange,
+    HighDynamicRange
+  }
+
+  public enum SortingCriteria
   {
     None = 0,
-    GradingOnly = 1,
-    Neutral = 2,
-    ACES = 3,
-    External = 4
-  }
-
-  public enum ShadowQuality
-  {
-    Disable = 0,
-    HardShadows = 1,
-    All = 2
-  }
-
-  public enum LightCategory
-  {
-    Pixel = 0,
-    Vertex = 1
-  }
-
-  public struct ScriptableCullingParameters
-  {
-    public Camera camera;
-    public Matrix4x4 worldToCameraMatrix;
-    public Matrix4x4 projectionMatrix;
-    public Plane[] cullingPlanes;
-    public int cullingMask;
-    public int layerMask;
-    public float isOrthographic;
-    public bool isShadowCaster;
-    public float shadowDistance;
-    public float shadowNearPlaneOffset;
-    public int shadowCascades;
-  }
-
-  public sealed class CommandBufferPool
-  {
-    public static CommandBuffer Get(string name = "")
-    {
-      return new CommandBuffer(name);
-    }
-
-    public static void Release(CommandBuffer buffer)
-    {
-    }
+    RendererPriority = 1,
+    Distance = 2,
+    CommonOpaque = 3,
+    CommonTransparent = 4
   }
 }

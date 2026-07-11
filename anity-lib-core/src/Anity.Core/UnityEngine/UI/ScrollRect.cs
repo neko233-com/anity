@@ -639,9 +639,6 @@ public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDr
     {
         return gameObject != null && gameObject.activeInHierarchy && enabled;
     }
-
-    Transform ICanvasElement.transform => transform;
-    bool ICanvasElement.IsDestroyed() => this == null;
 }
 
 [Serializable]

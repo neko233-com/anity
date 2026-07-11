@@ -1,52 +1,148 @@
-using UnityEngine;
+using System.Collections.Generic;
 
 namespace UnityEngine;
 
 public class Collider : Component
 {
-  public bool enabled { get; set; } = true;
-  public bool isTrigger { get; set; }
-  public Rigidbody? attachedRigidbody { get; set; }
-  public Bounds bounds { get; set; } = new Bounds(Vector3.zero, Vector3.one);
-  public object? sharedMaterial { get; set; }
-  public PhysicMaterial? sharedMaterialInstance;
+    private PhysicMaterial _material;
+    private bool _isTrigger;
+    private List<ContactPoint> _contactPoints = new();
+    private Rigidbody _attachedRigidbody;
+    private bool _enabled = true;
 
-  public Collider()
-  {
-    PhysicsWorld.Register(this);
-  }
+    public bool enabled
+    {
+        get => _enabled;
+        set => _enabled = value;
+    }
 
-  public virtual Vector3 ClosestPoint(Vector3 point)
-  {
-    return point;
-  }
+    public bool isActiveAndEnabled => _enabled && gameObject != null && gameObject.activeInHierarchy;
 
-  public virtual bool Raycast(Ray ray, out RaycastHit hitInfo, float maxDistance = 1000f)
-  {
-    hitInfo = new RaycastHit { point = ray.origin };
-    return Physics.Raycast(ray, out hitInfo, maxDistance);
-  }
+    public bool isTrigger
+    {
+        get => _isTrigger;
+        set => _isTrigger = value;
+    }
 
-  public Vector3 ClosestPointOnBounds(Vector3 position)
-  {
-    return ClosestPoint(position);
-  }
-}
+    public Rigidbody attachedRigidbody
+    {
+        get
+        {
+            if (_attachedRigidbody != null) return _attachedRigidbody;
+            return GetComponent<Rigidbody>();
+        }
+        internal set => _attachedRigidbody = value;
+    }
 
-public class PhysicMaterial
-{
-  public string name { get; set; } = string.Empty;
-  public float dynamicFriction { get; set; } = 0.6f;
-  public float staticFriction { get; set; } = 0.6f;
-  public float bounciness { get; set; }
-  public PhysicMaterialCombine frictionCombine { get; set; } = PhysicMaterialCombine.Average;
-  public PhysicMaterialCombine bounceCombine { get; set; } = PhysicMaterialCombine.Average;
-}
+    public PhysicMaterial material
+    {
+        get => _material ?? sharedMaterial;
+        set => _material = value;
+    }
 
-public enum PhysicMaterialCombine
-{
-  Average,
-  Minimum,
-  Maximum,
-  Multiply
+    public PhysicMaterial sharedMaterial
+    {
+        get => _material;
+        set => _material = value;
+    }
+
+    public virtual Bounds bounds
+    {
+        get
+        {
+            if (transform == null) return new Bounds(Vector3.zero, Vector3.one);
+            return new Bounds(transform.position, Vector3.one);
+        }
+    }
+
+    public float contactOffset { get; set; } = 0.01f;
+    public int layerOverridePriority { get; set; }
+    public bool hasModifiableContacts { get; set; }
+    public bool providesContacts { get; set; }
+
+    public Collider()
+    {
+        PhysicsWorld.Register(this);
+    }
+
+    ~Collider()
+    {
+        PhysicsWorld.UnregisterCollider(this);
+    }
+
+    public virtual Vector3 ClosestPoint(Vector3 position)
+    {
+        Bounds b = bounds;
+        return new Vector3(
+            Math.Clamp(position.x, b.min.x, b.max.x),
+            Math.Clamp(position.y, b.min.y, b.max.y),
+            Math.Clamp(position.z, b.min.z, b.max.z));
+    }
+
+    public Vector3 ClosestPointOnBounds(Vector3 position)
+    {
+        Bounds b = bounds;
+        return new Vector3(
+            Math.Clamp(position.x, b.min.x, b.max.x),
+            Math.Clamp(position.y, b.min.y, b.max.y),
+            Math.Clamp(position.z, b.min.z, b.max.z));
+    }
+
+    public virtual bool Raycast(Ray ray, out RaycastHit hitInfo, float maxDistance)
+    {
+        return Physics.Raycast(ray, out hitInfo, maxDistance);
+    }
+
+    public bool Raycast(Ray ray, out RaycastHit hitInfo)
+    {
+        return Raycast(ray, out hitInfo, float.PositiveInfinity);
+    }
+
+    public virtual ColliderShape GetShape()
+    {
+        if (transform == null) return new ColliderShape(ColliderShapeType.Box, Vector3.zero, Vector3.one, 0f, 0f, 0);
+        return new ColliderShape(ColliderShapeType.Box, transform.position, Vector3.one, 0f, 0f, 0);
+    }
+
+    public bool GetContact(int index, out ContactPoint contact)
+    {
+        if (index < 0 || index >= _contactPoints.Count)
+        {
+            contact = default;
+            return false;
+        }
+        contact = _contactPoints[index];
+        return true;
+    }
+
+    public int GetContacts(ContactPoint[] contacts)
+    {
+        if (contacts == null) return 0;
+        int count = Math.Min(_contactPoints.Count, contacts.Length);
+        for (int i = 0; i < count; i++)
+            contacts[i] = _contactPoints[i];
+        return count;
+    }
+
+    public int GetContacts(List<ContactPoint> contacts)
+    {
+        if (contacts == null) return 0;
+        contacts.AddRange(_contactPoints);
+        return _contactPoints.Count;
+    }
+
+    internal void ClearContacts()
+    {
+        _contactPoints.Clear();
+    }
+
+    internal void AddContact(ContactPoint cp)
+    {
+        _contactPoints.Add(cp);
+    }
+
+    public Vector3 ClosestPoint(Vector3 position, Vector3 colliderPosition, Quaternion colliderRotation)
+    {
+        return ClosestPoint(position);
+    }
 }

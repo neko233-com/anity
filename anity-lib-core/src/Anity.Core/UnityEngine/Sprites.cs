@@ -1,97 +1,5 @@
 namespace UnityEngine;
 
-public class SpriteRenderer : Renderer
-{
-    private Sprite _sprite;
-    private Color _color = Color.white;
-    private SpriteSortPoint _sortPoint = SpriteSortPoint.Center;
-    private SpriteDrawMode _drawMode = SpriteDrawMode.Simple;
-    private Vector2 _size = Vector2.one;
-    private SpriteTileMode _tileMode = SpriteTileMode.Continuous;
-    private SpriteMaskInteraction _maskInteraction = SpriteMaskInteraction.None;
-    private int _sortingOrder;
-    private int _sortingLayerID;
-    private string _sortingLayerName = "Default";
-    private bool _flipX;
-    private bool _flipY;
-
-    public Sprite sprite
-    {
-        get => _sprite;
-        set => _sprite = value;
-    }
-
-    public Color color
-    {
-        get => _color;
-        set => _color = value;
-    }
-
-    public SpriteSortPoint sortPoint
-    {
-        get => _sortPoint;
-        set => _sortPoint = value;
-    }
-
-    public SpriteDrawMode drawMode
-    {
-        get => _drawMode;
-        set => _drawMode = value;
-    }
-
-    public Vector2 size
-    {
-        get => _size;
-        set => _size = value;
-    }
-
-    public SpriteTileMode tileMode
-    {
-        get => _tileMode;
-        set => _tileMode = value;
-    }
-
-    public SpriteMaskInteraction maskInteraction
-    {
-        get => _maskInteraction;
-        set => _maskInteraction = value;
-    }
-
-    public bool flipX
-    {
-        get => _flipX;
-        set => _flipX = value;
-    }
-
-    public bool flipY
-    {
-        get => _flipY;
-        set => _flipY = value;
-    }
-
-    public new int sortingOrder
-    {
-        get => _sortingOrder;
-        set => _sortingOrder = value;
-    }
-
-    public new int sortingLayerID
-    {
-        get => _sortingLayerID;
-        set => _sortingLayerID = value;
-    }
-
-    public new string sortingLayerName
-    {
-        get => _sortingLayerName;
-        set => _sortingLayerName = value ?? "Default";
-    }
-
-    public SpriteRenderer()
-    {
-    }
-}
-
 public enum SpriteSortPoint
 {
     Center,
@@ -100,26 +8,6 @@ public enum SpriteSortPoint
     BottomRight,
     TopLeft,
     TopRight
-}
-
-public enum SpriteDrawMode
-{
-    Simple,
-    Sliced,
-    Tiled
-}
-
-public enum SpriteTileMode
-{
-    Continuous,
-    Adaptive
-}
-
-public enum SpriteMaskInteraction
-{
-    None,
-    VisibleInsideMask,
-    VisibleOutsideMask
 }
 
 public class SpriteMask : Renderer

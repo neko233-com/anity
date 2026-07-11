@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.Events;
 
 namespace UnityEngine.SceneManagement;
 
@@ -16,14 +17,20 @@ public static class SceneManager
     public int BuildIndex;
     public bool IsLoaded = true;
     public bool IsSubScene;
+    public string Path = string.Empty;
   }
 
   private static readonly Dictionary<int, SceneState> _scenes = new();
   private static readonly Dictionary<string, int> _nameToHandle = new(StringComparer.Ordinal);
+  private static readonly Dictionary<string, int> _pathToHandle = new(StringComparer.Ordinal);
   private static readonly Dictionary<int, int> _buildIndexToHandle = new();
   private static readonly List<int> _loadedOrder = new();
   private static int _nextHandle = 1;
   private static int _activeHandle;
+
+  public static event UnityAction<Scene, LoadSceneMode> sceneLoaded;
+  public static event UnityAction<Scene> sceneUnloaded;
+  public static event UnityAction<Scene, Scene> activeSceneChanged;
 
   static SceneManager()
   {
@@ -119,8 +126,10 @@ public static class SceneManager
       return;
     }
 
+    var previous = GetActiveScene();
     _activeHandle = state.Handle;
     PushLoaded(state.Handle);
+    activeSceneChanged?.Invoke(previous, scene);
   }
 
   public static AsyncOperation UnloadSceneAsync(string sceneName)
@@ -156,6 +165,27 @@ public static class SceneManager
     return GameObject.GetSceneRootGameObjects();
   }
 
+  public static void MergeScenes(Scene sourceScene, Scene targetScene)
+  {
+    _ = sourceScene;
+    _ = targetScene;
+  }
+
+  public static void MoveGameObjectToScene(GameObject go, Scene scene)
+  {
+    _ = go;
+    _ = scene;
+  }
+
+  public static Scene GetSceneByPath(string scenePath)
+  {
+    if (_pathToHandle.TryGetValue(scenePath, out var handle))
+    {
+      return GetSceneByHandle(handle);
+    }
+    return Scene.Invalid;
+  }
+
   private static Scene LoadSceneInternal(string sceneName, LoadSceneMode mode)
   {
     var name = string.IsNullOrWhiteSpace(sceneName) ? DefaultSceneName : sceneName;
@@ -176,7 +206,10 @@ public static class SceneManager
     _scenes[handle] = state;
     PushLoaded(handle);
 
-    return GetSceneByHandle(handle);
+    var scene = GetSceneByHandle(handle);
+    sceneLoaded?.Invoke(scene, mode);
+
+    return scene;
   }
 
   private static AsyncOperation UnloadByHandle(int handle)
@@ -187,6 +220,7 @@ public static class SceneManager
       return op;
     }
 
+    var scene = GetSceneByHandle(handle);
     state.IsLoaded = false;
     _scenes[handle] = state;
     _ = _loadedOrder.RemoveAll(x => x == handle);
@@ -195,6 +229,8 @@ public static class SceneManager
     {
       _activeHandle = _loadedOrder.Count == 0 ? GetDefaultSceneHandle() : _loadedOrder[^1];
     }
+
+    sceneUnloaded?.Invoke(scene);
 
     return op;
   }
@@ -248,7 +284,7 @@ public static class SceneManager
   private static Scene GetSceneByHandle(int handle)
   {
     return _scenes.TryGetValue(handle, out var state)
-      ? new Scene(state.Handle, state.Name, state.BuildIndex, state.IsLoaded, state.IsSubScene)
+      ? new Scene(state.Handle, state.Name, state.BuildIndex, state.IsLoaded, state.IsSubScene, state.Path)
       : Scene.Invalid;
   }
 

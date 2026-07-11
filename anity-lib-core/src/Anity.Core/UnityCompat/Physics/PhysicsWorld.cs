@@ -3,14 +3,14 @@ using System.Collections.Generic;
 
 namespace UnityEngine;
 
-internal enum ColliderShapeType
+public enum ColliderShapeType
 {
     Sphere,
     Box,
     Capsule
 }
 
-internal struct ColliderShape
+public struct ColliderShape
 {
     public ColliderShapeType Type;
     public Vector3 Center;
@@ -52,6 +52,8 @@ internal static class PhysicsWorld
 {
     private static readonly List<Collider> _colliders = new();
     private static readonly List<Rigidbody> _rigidbodies = new();
+    private static readonly List<Joint> _joints = new();
+    private static readonly List<WheelCollider> _wheels = new();
     private static readonly HashSet<CollisionPair> _collisionStates = new();
     private static readonly HashSet<CollisionPair> _triggerStates = new();
     private static readonly Dictionary<(Collider, Collider), bool> _ignoreCollisionPairs = new();
@@ -101,6 +103,26 @@ internal static class PhysicsWorld
         _rigidbodies.Remove(rb);
     }
 
+    public static void RegisterJoint(Joint joint)
+    {
+        if (!_joints.Contains(joint)) _joints.Add(joint);
+    }
+
+    public static void UnregisterJoint(Joint joint)
+    {
+        _joints.Remove(joint);
+    }
+
+    public static void RegisterWheel(WheelCollider wheel)
+    {
+        if (!_wheels.Contains(wheel)) _wheels.Add(wheel);
+    }
+
+    public static void UnregisterWheel(WheelCollider wheel)
+    {
+        _wheels.Remove(wheel);
+    }
+
     public static bool GetIgnoreLayerCollision(int layer1, int layer2)
     {
         layer1 = Math.Clamp(layer1, 0, 31);
@@ -137,26 +159,7 @@ internal static class PhysicsWorld
 
     private static ColliderShape GetWorldShape(Collider c)
     {
-        var t = c.transform;
-        var scale = t != null ? t.lossyScale : Vector3.one;
-        return c switch
-        {
-            SphereCollider sc => new ColliderShape(ColliderShapeType.Sphere,
-                TransformPoint(sc.center, t),
-                Vector3.one,
-                sc.radius * MathF.Max(MathF.Abs(scale.x), MathF.Max(MathF.Abs(scale.y), MathF.Abs(scale.z))),
-                0f, 0),
-            BoxCollider bc => new ColliderShape(ColliderShapeType.Box,
-                TransformPoint(bc.center, t),
-                new Vector3(bc.size.x * MathF.Abs(scale.x), bc.size.y * MathF.Abs(scale.y), bc.size.z * MathF.Abs(scale.z)),
-                0f, 0f, 0),
-            CapsuleCollider cc =>
-                new ColliderShape(ColliderShapeType.Capsule, TransformPoint(cc.center, t), Vector3.one,
-                    cc.radius * MathF.Max(MathF.Abs(scale.x), MathF.Abs(scale.z)),
-                    cc.height * MathF.Abs(cc.direction == 0 ? scale.x : cc.direction == 1 ? scale.y : scale.z),
-                    cc.direction),
-            _ => new ColliderShape(ColliderShapeType.Box, c.bounds.center, c.bounds.size, 0f, 0f, 0)
-        };
+        return c.GetShape();
     }
 
     public static bool Raycast(Ray ray, out RaycastHit hitInfo, float maxDistance, int layerMask)
@@ -176,7 +179,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (queryTriggerInteraction == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -219,7 +222,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (queryTriggerInteraction == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -385,7 +388,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -398,6 +401,26 @@ internal static class PhysicsWorld
         if (bestC == null) return false;
         hitInfo = new RaycastHit { collider = bestC, distance = closest, point = bestPt, normal = bestN, rigidbody = bestC.attachedRigidbody, transform = bestC.transform };
         return true;
+    }
+
+    public static RaycastHit[] SphereCastAll(Vector3 origin, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction qti)
+    {
+        direction = direction.normalized;
+        var hits = new List<RaycastHit>();
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null || !c.enabled) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            var shape = GetWorldShape(c);
+            if (SphereCastShape(origin, radius, direction, shape, maxDistance, out float t, out Vector3 pt, out Vector3 n))
+            {
+                hits.Add(new RaycastHit { collider = c, distance = t, point = pt, normal = n, rigidbody = c.attachedRigidbody, transform = c.transform });
+            }
+        }
+        return hits.ToArray();
     }
 
     private static bool SphereCastShape(Vector3 origin, float radius, Vector3 dir, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
@@ -441,17 +464,16 @@ internal static class PhysicsWorld
         float closest = maxDistance;
         Collider bestC = null;
         Vector3 bestPt = default, bestN = Vector3.up;
-        float inflate = MathF.Max(halfExtents.x, MathF.Max(halfExtents.y, halfExtents.z));
 
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
             var shape = GetWorldShape(c);
-            if (BoxCastShape(center, halfExtents, direction, shape, maxDistance, inflate, out float t, out Vector3 pt, out Vector3 n))
+            if (BoxCastShape(center, halfExtents, direction, shape, maxDistance, out float t, out Vector3 pt, out Vector3 n))
             {
                 if (t < closest) { closest = t; bestC = c; bestPt = pt; bestN = n; }
             }
@@ -461,7 +483,7 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool BoxCastShape(Vector3 center, Vector3 he, Vector3 dir, ColliderShape shape, float maxDist, float inflate, out float t, out Vector3 pt, out Vector3 n)
+    private static bool BoxCastShape(Vector3 center, Vector3 he, Vector3 dir, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
     {
         t = maxDist; pt = default; n = Vector3.up;
         if (shape.Type == ColliderShapeType.Sphere)
@@ -469,7 +491,7 @@ internal static class PhysicsWorld
             Vector3 expandedHe = he + new Vector3(shape.Radius, shape.Radius, shape.Radius);
             if (RaycastBox(center, dir, shape.Center, expandedHe, maxDist, out float td, out Vector3 p, out Vector3 nm))
             {
-                t = td; pt = p - nm * inflate; n = nm;
+                t = td; pt = p; n = nm;
                 return true;
             }
         }
@@ -479,7 +501,7 @@ internal static class PhysicsWorld
             Vector3 expandedHe = new Vector3(he.x + she.x, he.y + she.y, he.z + she.z);
             if (RaycastBox(center, dir, shape.Center, expandedHe, maxDist, out float td, out Vector3 p, out Vector3 nm))
             {
-                t = td; pt = p - nm * inflate; n = nm;
+                t = td; pt = p; n = nm;
                 return true;
             }
         }
@@ -488,7 +510,7 @@ internal static class PhysicsWorld
             Vector3 expandedHe = he + new Vector3(shape.Radius, shape.Radius, shape.Radius);
             if (RaycastBox(center, dir, shape.Center, expandedHe, maxDist, out float td, out Vector3 p, out Vector3 nm))
             {
-                t = td; pt = p - nm * inflate; n = nm;
+                t = td; pt = p; n = nm;
                 return true;
             }
         }
@@ -502,22 +524,16 @@ internal static class PhysicsWorld
         float closest = maxDistance;
         Collider bestC = null;
         Vector3 bestPt = default, bestN = Vector3.up;
-        Vector3 capCenter = (point1 + point2) * 0.5f;
-        float capHeight = Vector3.Distance(point1, point2);
-        int capDir = 1;
-        Vector3 axis = (point2 - point1).normalized;
-        if (MathF.Abs(Vector3.Dot(axis, Vector3.right)) > 0.9f) capDir = 0;
-        else if (MathF.Abs(Vector3.Dot(axis, Vector3.forward)) > 0.9f) capDir = 2;
 
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
             var shape = GetWorldShape(c);
-            if (CapsuleCastShape(capCenter, capHeight, radius, capDir, direction, shape, maxDistance, out float t, out Vector3 pt, out Vector3 n))
+            if (CapsuleCastShape(point1, point2, radius, direction, shape, maxDistance, out float t, out Vector3 pt, out Vector3 n))
             {
                 if (t < closest) { closest = t; bestC = c; bestPt = pt; bestN = n; }
             }
@@ -527,43 +543,24 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static bool CapsuleCastShape(Vector3 center, float height, float radius, int dir, Vector3 direction, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
+    private static bool CapsuleCastShape(Vector3 point0, Vector3 point1, float radius, Vector3 direction, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
     {
         t = maxDist; pt = default; n = Vector3.up;
-        float inflate = radius;
-        Vector3 axis = dir == 0 ? Vector3.right : dir == 1 ? Vector3.up : Vector3.forward;
-        float halfH = height * 0.5f - radius;
-        Vector3 p0 = center - axis * halfH;
-        Vector3 p1 = center + axis * halfH;
-        bool hit = false;
-        float bestT = maxDist;
-        Vector3 bestPt = default, bestN = Vector3.up;
-
-        if (shape.Type == ColliderShapeType.Sphere)
+        Vector3 center = (point0 + point1) * 0.5f;
+        float height = Vector3.Distance(point0, point1) + radius * 2f;
+        int dir = 1;
+        Vector3 axis = (point1 - point0).normalized;
+        if (MathF.Abs(Vector3.Dot(axis, Vector3.right)) > 0.9f) dir = 0;
+        else if (MathF.Abs(Vector3.Dot(axis, Vector3.forward)) > 0.9f) dir = 2;
+        var capShape = new ColliderShape(ColliderShapeType.Capsule, center, Vector3.one, radius, height, dir);
+        if (Intersect(capShape, shape, out Vector3 nm, out float pen))
         {
-            float sumR = radius + shape.Radius;
-            if (RaycastSphere(p0, direction, shape.Center, sumR, bestT, out float t0, out Vector3 p0p, out Vector3 n0) && t0 < bestT)
-            { bestT = t0; bestPt = p0p - n0 * inflate; bestN = n0; hit = true; }
-            if (RaycastSphere(p1, direction, shape.Center, sumR, bestT, out float t1, out Vector3 p1p, out Vector3 n1) && t1 < bestT)
-            { bestT = t1; bestPt = p1p - n1 * inflate; bestN = n1; hit = true; }
+            t = 0f;
+            pt = center;
+            n = nm;
+            return true;
         }
-        if (shape.Type == ColliderShapeType.Box)
-        {
-            Vector3 expandedHe = shape.Size * 0.5f + new Vector3(radius, radius, radius);
-            if (RaycastBox(center, direction, shape.Center, expandedHe, bestT, out float tb, out Vector3 pb, out Vector3 nb) && tb < bestT)
-            { bestT = tb; bestPt = pb - nb * inflate; bestN = nb; hit = true; }
-        }
-        if (shape.Type == ColliderShapeType.Capsule)
-        {
-            float sumR = radius + shape.Radius;
-            var expanded = new ColliderShape(ColliderShapeType.Capsule, shape.Center, shape.Size, sumR, shape.Height, shape.Direction);
-            if (RaycastCapsule(center, direction, expanded, bestT, out float tc, out Vector3 pc, out Vector3 nc) && tc < bestT)
-            { bestT = tc; bestPt = pc - nc * inflate; bestN = nc; hit = true; }
-        }
-
-        if (!hit) return false;
-        t = bestT; pt = bestPt; n = bestN;
-        return true;
+        return false;
     }
 
     public static Collider[] OverlapSphere(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti)
@@ -587,7 +584,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -618,7 +615,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -656,7 +653,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -671,7 +668,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -707,7 +704,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -733,7 +730,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count; i++)
         {
             var c = _colliders[i];
-            if (c == null) continue;
+            if (c == null || !c.enabled) continue;
             if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
             int layer = c.gameObject?.layer ?? 0;
             if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
@@ -926,45 +923,32 @@ internal static class PhysicsWorld
         return true;
     }
 
-    private static float CombineBounciness(float a, float b, PhysicMaterialCombine ca, PhysicMaterialCombine cb)
-    {
-        var mode = ca > cb ? ca : cb;
-        return mode switch
-        {
-            PhysicMaterialCombine.Average => (a + b) * 0.5f,
-            PhysicMaterialCombine.Minimum => MathF.Min(a, b),
-            PhysicMaterialCombine.Maximum => MathF.Max(a, b),
-            PhysicMaterialCombine.Multiply => a * b,
-            _ => (a + b) * 0.5f
-        };
-    }
-
-    private static float CombineFriction(float a, float b, PhysicMaterialCombine ca, PhysicMaterialCombine cb)
-    {
-        var mode = ca > cb ? ca : cb;
-        return mode switch
-        {
-            PhysicMaterialCombine.Average => (a + b) * 0.5f,
-            PhysicMaterialCombine.Minimum => MathF.Min(a, b),
-            PhysicMaterialCombine.Maximum => MathF.Max(a, b),
-            PhysicMaterialCombine.Multiply => a * b,
-            _ => (a + b) * 0.5f
-        };
-    }
-
     public static void Simulate(float step)
     {
-        for (int i = 0; i < _rigidbodies.Count; i++)
+        foreach (var rb in _rigidbodies)
         {
-            var rb = _rigidbodies[i];
-            if (rb == null || rb.isKinematic) continue;
-            rb.velocity += _gravity * step;
-            if (rb.transform != null)
-                rb.transform.position += rb.velocity * step;
+            if (rb != null) rb.ApplyForces(step);
+        }
+
+        ApplyJoints(step);
+
+        foreach (var rb in _rigidbodies)
+        {
+            if (rb != null) rb.Integrate(step);
+        }
+
+        foreach (var wheel in _wheels)
+        {
+            if (wheel != null) wheel.UpdateWheel(step);
         }
 
         var currentCollisions = new HashSet<CollisionPair>();
         var currentTriggers = new HashSet<CollisionPair>();
+
+        foreach (var c in _colliders)
+        {
+            if (c != null) c.ClearContacts();
+        }
 
         for (int i = 0; i < _colliders.Count; i++)
         {
@@ -972,7 +956,7 @@ internal static class PhysicsWorld
             {
                 var a = _colliders[i];
                 var b = _colliders[j];
-                if (a == null || b == null) continue;
+                if (a == null || b == null || !a.enabled || !b.enabled) continue;
                 if (GetIgnoreCollision(a, b)) continue;
                 int la = a.gameObject?.layer ?? 0;
                 int lb = b.gameObject?.layer ?? 0;
@@ -1005,16 +989,28 @@ internal static class PhysicsWorld
                     {
                         currentCollisions.Add(pair);
                         ResolveCollision(a, b, normal, pen);
+                        Vector3 relVel = Vector3.zero;
+                        var rbA = a.attachedRigidbody;
+                        var rbB = b.attachedRigidbody;
+                        if (rbA != null) relVel -= rbA.velocity;
+                        if (rbB != null) relVel += rbB.velocity;
+                        var cp = new ContactPoint(
+                            b.transform != null ? b.transform.position : Vector3.zero,
+                            normal, a, b, -pen);
+                        a.AddContact(cp);
+                        b.AddContact(new ContactPoint(
+                            a.transform != null ? a.transform.position : Vector3.zero,
+                            -normal, b, a, -pen));
                         if (!_collisionStates.Contains(pair))
                         {
                             _collisionStates.Add(pair);
-                            a.SendMessage("OnCollisionEnter", b);
-                            b.SendMessage("OnCollisionEnter", a);
+                            a.SendMessage("OnCollisionEnter", CreateCollision(a, b, normal, pen, relVel));
+                            b.SendMessage("OnCollisionEnter", CreateCollision(b, a, -normal, pen, -relVel));
                         }
                         else
                         {
-                            a.SendMessage("OnCollisionStay", b);
-                            b.SendMessage("OnCollisionStay", a);
+                            a.SendMessage("OnCollisionStay", CreateCollision(a, b, normal, pen, relVel));
+                            b.SendMessage("OnCollisionStay", CreateCollision(b, a, -normal, pen, -relVel));
                         }
                     }
                 }
@@ -1044,6 +1040,251 @@ internal static class PhysicsWorld
         _triggerStates.IntersectWith(currentTriggers);
     }
 
+    private static Collision CreateCollision(Collider a, Collider b, Vector3 normal, float pen, Vector3 relVel)
+    {
+        var col = new Collision();
+        col.SetFrom(a, b, normal, pen, relVel);
+        return col;
+    }
+
+    private static void ApplyJoints(float step)
+    {
+        foreach (var joint in _joints)
+        {
+            if (joint == null) continue;
+            if (joint is SpringJoint springJoint)
+            {
+                ApplySpringJoint(springJoint, step);
+            }
+            else if (joint is FixedJoint fixedJoint)
+            {
+                ApplyFixedJoint(fixedJoint, step);
+            }
+            else if (joint is HingeJoint hingeJoint)
+            {
+                ApplyHingeJoint(hingeJoint, step);
+            }
+            else if (joint is ConfigurableJoint configurableJoint)
+            {
+                ApplyConfigurableJoint(configurableJoint, step);
+            }
+            else if (joint is CharacterJoint characterJoint)
+            {
+                ApplyCharacterJoint(characterJoint, step);
+            }
+        }
+    }
+
+    private static void ApplyFixedJoint(FixedJoint joint, float step)
+    {
+        var connectedBody = joint.connectedBody;
+        if (connectedBody == null) return;
+        var ownBody = joint.GetComponent<Rigidbody>();
+        if (ownBody == null || ownBody.isKinematic) return;
+
+        Vector3 anchorPos = ownBody.transform != null ? ownBody.transform.TransformPoint(joint.anchor) : joint.anchor;
+        Vector3 connectedAnchorPos = connectedBody.transform != null ? connectedBody.transform.TransformPoint(joint.connectedAnchor) : joint.connectedAnchor;
+
+        Vector3 delta = anchorPos - connectedAnchorPos;
+        float dist = delta.magnitude;
+        if (dist < 1e-6f) return;
+
+        float invMassA = !ownBody.isKinematic ? 1f / ownBody.mass : 0f;
+        float invMassB = !connectedBody.isKinematic ? 1f / connectedBody.mass : 0f;
+        float totalInvMass = invMassA + invMassB;
+        if (totalInvMass <= 1e-6f) return;
+
+        Vector3 dir = delta / dist;
+        Vector3 relVel = ownBody.velocity - connectedBody.velocity;
+        float velAlongDir = Vector3.Dot(relVel, dir);
+
+        float stiffness = 1000f;
+        float damping = 50f;
+        float forceMag = (-dist * stiffness - velAlongDir * damping) / totalInvMass;
+        Vector3 force = dir * forceMag;
+
+        ownBody.AddForce(-force * invMassA);
+        if (!connectedBody.isKinematic) connectedBody.AddForce(force * invMassB);
+
+        Vector3 rA = anchorPos - ownBody.worldCenterOfMass;
+        Vector3 rB = connectedAnchorPos - connectedBody.worldCenterOfMass;
+        Vector3 torqueA = Vector3.Cross(rA, -force);
+        Vector3 torqueB = Vector3.Cross(rB, force);
+        ownBody.AddTorque(torqueA * invMassA);
+        if (!connectedBody.isKinematic) connectedBody.AddTorque(torqueB * invMassB);
+
+        joint.SetCurrentForce(force);
+    }
+
+    private static void ApplyHingeJoint(HingeJoint joint, float step)
+    {
+        var connectedBody = joint.connectedBody;
+        if (connectedBody == null) return;
+        var ownBody = joint.GetComponent<Rigidbody>();
+        if (ownBody == null || ownBody.isKinematic) return;
+
+        Vector3 anchorPos = ownBody.transform != null ? ownBody.transform.TransformPoint(joint.anchor) : joint.anchor;
+        Vector3 connectedAnchorPos = connectedBody.transform != null ? connectedBody.transform.TransformPoint(joint.connectedAnchor) : joint.connectedAnchor;
+
+        Vector3 delta = anchorPos - connectedAnchorPos;
+        float dist = delta.magnitude;
+        if (dist > 1e-6f)
+        {
+            float invMassA = !ownBody.isKinematic ? 1f / ownBody.mass : 0f;
+            float invMassB = !connectedBody.isKinematic ? 1f / connectedBody.mass : 0f;
+            float totalInvMass = invMassA + invMassB;
+            if (totalInvMass > 1e-6f)
+            {
+                Vector3 dir = delta / dist;
+                Vector3 relVel = ownBody.velocity - connectedBody.velocity;
+                float velAlongDir = Vector3.Dot(relVel, dir);
+                float stiffness = 800f;
+                float damping = 30f;
+                float forceMag = (-dist * stiffness - velAlongDir * damping) / totalInvMass;
+                Vector3 force = dir * forceMag;
+                ownBody.AddForce(-force * invMassA);
+                if (!connectedBody.isKinematic) connectedBody.AddForce(force * invMassB);
+                joint.SetCurrentForce(force);
+            }
+        }
+
+        if (joint.useSpring)
+        {
+            Vector3 axis = joint.axis;
+            if (ownBody.transform != null) axis = ownBody.transform.TransformDirection(joint.axis);
+            Vector3 connectedAxis = connectedBody.transform != null ? connectedBody.transform.TransformDirection(joint.axis) : joint.axis;
+            float angle = Vector3.Angle(axis, connectedAxis);
+            float angVel = Vector3.Dot(ownBody.angularVelocity, axis) - Vector3.Dot(connectedBody.angularVelocity, axis);
+            float springForce = (joint.spring.targetPosition - angle) * joint.spring.spring - angVel * joint.spring.damper;
+            Vector3 torque = axis * springForce;
+            ownBody.AddTorque(-torque);
+            if (!connectedBody.isKinematic) connectedBody.AddTorque(torque);
+            joint.SetCurrentTorque(torque);
+        }
+
+        if (joint.useMotor)
+        {
+            Vector3 axis = joint.axis;
+            if (ownBody.transform != null) axis = ownBody.transform.TransformDirection(joint.axis);
+            float currentAngVel = Vector3.Dot(ownBody.angularVelocity, axis) - (connectedBody != null ? Vector3.Dot(connectedBody.angularVelocity, axis) : 0f);
+            float velDiff = joint.motor.targetVelocity - currentAngVel;
+            float torqueMag = Math.Clamp(velDiff * joint.motor.force, -joint.motor.force, joint.motor.force);
+            Vector3 torque = axis * torqueMag;
+            ownBody.AddTorque(-torque);
+            if (connectedBody != null && !connectedBody.isKinematic) connectedBody.AddTorque(torque);
+        }
+    }
+
+    private static void ApplyConfigurableJoint(ConfigurableJoint joint, float step)
+    {
+        var connectedBody = joint.connectedBody;
+        if (connectedBody == null) return;
+        var ownBody = joint.GetComponent<Rigidbody>();
+        if (ownBody == null || ownBody.isKinematic) return;
+
+        Vector3 anchorPos = ownBody.transform != null ? ownBody.transform.TransformPoint(joint.anchor) : joint.anchor;
+        Vector3 connectedAnchorPos = connectedBody.transform != null ? connectedBody.transform.TransformPoint(joint.connectedAnchor) : joint.connectedAnchor;
+
+        Vector3 delta = anchorPos - connectedAnchorPos;
+        float dist = delta.magnitude;
+        if (dist > 1e-6f)
+        {
+            float invMassA = !ownBody.isKinematic ? 1f / ownBody.mass : 0f;
+            float invMassB = !connectedBody.isKinematic ? 1f / connectedBody.mass : 0f;
+            float totalInvMass = invMassA + invMassB;
+            if (totalInvMass > 1e-6f)
+            {
+                Vector3 dir = delta / dist;
+                Vector3 relVel = ownBody.velocity - connectedBody.velocity;
+                float velAlongDir = Vector3.Dot(relVel, dir);
+                float stiffness = 500f;
+                float damping = 20f;
+                float forceMag = (-dist * stiffness - velAlongDir * damping) / totalInvMass;
+                Vector3 force = dir * forceMag;
+                ownBody.AddForce(-force * invMassA);
+                if (!connectedBody.isKinematic) connectedBody.AddForce(force * invMassB);
+                joint.SetCurrentForce(force);
+            }
+        }
+    }
+
+    private static void ApplyCharacterJoint(CharacterJoint joint, float step)
+    {
+        var connectedBody = joint.connectedBody;
+        if (connectedBody == null) return;
+        var ownBody = joint.GetComponent<Rigidbody>();
+        if (ownBody == null || ownBody.isKinematic) return;
+
+        Vector3 anchorPos = ownBody.transform != null ? ownBody.transform.TransformPoint(joint.anchor) : joint.anchor;
+        Vector3 connectedAnchorPos = connectedBody.transform != null ? connectedBody.transform.TransformPoint(joint.connectedAnchor) : joint.connectedAnchor;
+
+        Vector3 delta = anchorPos - connectedAnchorPos;
+        float dist = delta.magnitude;
+        if (dist > 1e-6f)
+        {
+            float invMassA = !ownBody.isKinematic ? 1f / ownBody.mass : 0f;
+            float invMassB = !connectedBody.isKinematic ? 1f / connectedBody.mass : 0f;
+            float totalInvMass = invMassA + invMassB;
+            if (totalInvMass > 1e-6f)
+            {
+                Vector3 dir = delta / dist;
+                Vector3 relVel = ownBody.velocity - connectedBody.velocity;
+                float velAlongDir = Vector3.Dot(relVel, dir);
+                float stiffness = 600f;
+                float damping = 25f;
+                float forceMag = (-dist * stiffness - velAlongDir * damping) / totalInvMass;
+                Vector3 force = dir * forceMag;
+                ownBody.AddForce(-force * invMassA);
+                if (!connectedBody.isKinematic) connectedBody.AddForce(force * invMassB);
+                joint.SetCurrentForce(force);
+            }
+        }
+    }
+
+    private static void ApplySpringJoint(SpringJoint joint, float step)
+    {
+        var connectedBody = joint.connectedBody;
+        if (connectedBody == null) return;
+        var ownBody = joint.GetComponent<Rigidbody>();
+        if (ownBody == null || ownBody.isKinematic) return;
+
+        Vector3 anchorPos = ownBody.transform != null ? ownBody.transform.TransformPoint(joint.anchor) : joint.anchor;
+        Vector3 connectedAnchorPos = connectedBody.transform != null ? connectedBody.transform.TransformPoint(joint.connectedAnchor) : joint.connectedAnchor;
+
+        Vector3 delta = anchorPos - connectedAnchorPos;
+        float dist = delta.magnitude;
+        if (dist < 1e-6f) return;
+
+        Vector3 dir = delta / dist;
+        float minDist = joint.minDistance;
+        float maxDist = joint.maxDistance;
+
+        float springForce = 0f;
+        float damperForce = 0f;
+
+        if (dist > maxDist)
+        {
+            float error = dist - maxDist;
+            springForce = error * joint.spring;
+            Vector3 relVel = ownBody.velocity - connectedBody.velocity;
+            float velAlongDir = Vector3.Dot(relVel, dir);
+            damperForce = velAlongDir * joint.damper;
+        }
+        else if (dist < minDist && minDist > 0f)
+        {
+            float error = minDist - dist;
+            springForce = -error * joint.spring;
+            Vector3 relVel = ownBody.velocity - connectedBody.velocity;
+            float velAlongDir = Vector3.Dot(relVel, dir);
+            damperForce = velAlongDir * joint.damper;
+        }
+
+        Vector3 force = dir * (springForce - damperForce);
+        ownBody.AddForce(-force);
+        if (!connectedBody.isKinematic)
+            connectedBody.AddForce(force);
+    }
+
     private static void ResolveCollision(Collider a, Collider b, Vector3 normal, float penetration)
     {
         var rbA = a.attachedRigidbody;
@@ -1055,11 +1296,11 @@ internal static class PhysicsWorld
         float totalInvMass = invMassA + invMassB;
         if (totalInvMass <= 1e-6f) return;
 
-        PhysicMaterial matA = a.sharedMaterialInstance;
-        PhysicMaterial matB = b.sharedMaterialInstance;
-        float bounciness = CombineBounciness(matA?.bounciness ?? 0f, matB?.bounciness ?? 0f,
+        PhysicMaterial matA = a.sharedMaterial;
+        PhysicMaterial matB = b.sharedMaterial;
+        float bounciness = PhysicMaterial.CombineBounciness(matA?.bounciness ?? 0f, matB?.bounciness ?? 0f,
             matA?.bounceCombine ?? PhysicMaterialCombine.Average, matB?.bounceCombine ?? PhysicMaterialCombine.Average);
-        float friction = CombineFriction(matA?.dynamicFriction ?? 0.6f, matB?.dynamicFriction ?? 0.6f,
+        float friction = PhysicMaterial.CombineFriction(matA?.dynamicFriction ?? 0.6f, matB?.dynamicFriction ?? 0.6f,
             matA?.frictionCombine ?? PhysicMaterialCombine.Average, matB?.frictionCombine ?? PhysicMaterialCombine.Average);
 
         float correctionAmount = MathF.Max(penetration - _defaultContactOffset, 0f) / totalInvMass * 0.8f;
@@ -1073,10 +1314,19 @@ internal static class PhysicsWorld
         float velAlongNormal = Vector3.Dot(relVel, normal);
         if (velAlongNormal > 0f) return;
 
-        float impulseMag = -(1f + bounciness) * velAlongNormal / totalInvMass;
+        float bounceFactor = MathF.Abs(velAlongNormal) > _bounceThreshold ? bounciness : 0f;
+        float impulseMag = -(1f + bounceFactor) * velAlongNormal / totalInvMass;
         Vector3 impulse = normal * impulseMag;
-        if (rbA != null && invMassA > 0f) rbA.velocity += impulse * invMassA;
-        if (rbB != null && invMassB > 0f) rbB.velocity -= impulse * invMassB;
+        if (rbA != null && invMassA > 0f)
+        {
+            rbA.velocity += impulse * invMassA;
+            rbA.WakeUp();
+        }
+        if (rbB != null && invMassB > 0f)
+        {
+            rbB.velocity -= impulse * invMassB;
+            rbB.WakeUp();
+        }
 
         Vector3 tangent = relVel - normal * velAlongNormal;
         float tangentMag = tangent.magnitude;
@@ -1101,7 +1351,7 @@ internal static class PhysicsWorld
         for (int i = 0; i < _colliders.Count && count < results.Length; i++)
         {
             var other = _colliders[i];
-            if (other == null || other == collider) continue;
+            if (other == null || other == collider || !other.enabled) continue;
             if (Intersect(shape, GetWorldShape(other), out _, out _))
                 results[count++] = other;
         }

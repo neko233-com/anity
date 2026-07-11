@@ -111,6 +111,51 @@ namespace Unity.Collections
       Array.Copy(m_Data, other.m_Data, Math.Min(m_Length, other.Length));
     }
 
+    public static void Copy(NativeArray<T> src, NativeArray<T> dst)
+    {
+      Array.Copy(src.m_Data, dst.m_Data, Math.Min(src.Length, dst.Length));
+    }
+
+    public static void Copy(NativeArray<T> src, NativeArray<T> dst, int length)
+    {
+      Array.Copy(src.m_Data, dst.m_Data, length);
+    }
+
+    public static void Copy(T[] src, NativeArray<T> dst)
+    {
+      Array.Copy(src, dst.m_Data, Math.Min(src.Length, dst.Length));
+    }
+
+    public static void Copy(NativeArray<T> src, T[] dst)
+    {
+      Array.Copy(src.m_Data, dst, src.Length);
+    }
+
+    public static NativeArray<T> ConvertExistingDataToNativeArray(T[] data, int length, Allocator allocator)
+    {
+      return new NativeArray<T>(data, allocator);
+    }
+
+    public NativeArray<T>.ReadOnly AsReadOnly()
+    {
+      return new NativeArray<T>.ReadOnly(m_Data, m_Length);
+    }
+
+    public NativeSlice<T> Slice()
+    {
+      return new NativeSlice<T>(this);
+    }
+
+    public NativeSlice<T> Slice(int start)
+    {
+      return new NativeSlice<T>(this, start, m_Length - start);
+    }
+
+    public NativeSlice<T> Slice(int start, int length)
+    {
+      return new NativeSlice<T>(this, start, length);
+    }
+
     public NativeArray<T>.Enumerator GetEnumerator()
     {
       return new NativeArray<T>.Enumerator(ref this);
@@ -137,6 +182,15 @@ namespace Unity.Collections
     public static implicit operator NativeArray<T>(T[] array)
     {
       return new NativeArray<T>(array, Allocator.Temp);
+    }
+
+    public struct ReadOnly
+    {
+      private T[] m_Data;
+      private int m_Length;
+      public ReadOnly(T[] data, int length) { m_Data = data; m_Length = length; }
+      public int Length => m_Length;
+      public T this[int index] => m_Data[index];
     }
 
     public struct Enumerator : IEnumerator<T>
@@ -176,6 +230,7 @@ namespace Unity.Collections
     private bool m_IsCreated;
 
     public int Length => m_Length;
+    public int Count => m_Length;
     public int Capacity => m_Data.IsCreated ? m_Data.Length : 0;
     public bool IsCreated => m_IsCreated;
     public Allocator Allocator => m_Allocator;
@@ -234,6 +289,26 @@ namespace Unity.Collections
       m_Length = newLength;
     }
 
+    public void AddRange(NativeList<T> range)
+    {
+      AddRange(range.AsArray());
+    }
+
+    public void Insert(int index, T value)
+    {
+      if (index < 0 || index > m_Length) throw new ArgumentOutOfRangeException(nameof(index));
+      if (m_Length >= Capacity)
+      {
+        Resize(Math.Max(Capacity * 2, 16));
+      }
+      for (int i = m_Length; i > index; i--)
+      {
+        m_Data[i] = m_Data[i - 1];
+      }
+      m_Data[index] = value;
+      m_Length++;
+    }
+
     public void RemoveAt(int index)
     {
       if (index < 0 || index >= m_Length) throw new ArgumentOutOfRangeException(nameof(index));
@@ -241,6 +316,13 @@ namespace Unity.Collections
       {
         m_Data[i] = m_Data[i + 1];
       }
+      m_Length--;
+    }
+
+    public void RemoveAtSwapBack(int index)
+    {
+      if (index < 0 || index >= m_Length) throw new ArgumentOutOfRangeException(nameof(index));
+      m_Data[index] = m_Data[m_Length - 1];
       m_Length--;
     }
 
@@ -274,6 +356,7 @@ namespace Unity.Collections
         m_Data.Dispose();
       }
       m_Data = newData;
+      m_Length = newLength;
     }
 
     public void TrimExcess()
@@ -303,6 +386,16 @@ namespace Unity.Collections
       return m_Data;
     }
 
+    public NativeArray<T> AsDeferredJobArray()
+    {
+      return m_Data;
+    }
+
+    public ParallelReader AsParallelReader()
+    {
+      return new ParallelReader(m_Data);
+    }
+
     public void Dispose()
     {
       if (m_IsCreated)
@@ -323,6 +416,14 @@ namespace Unity.Collections
     public NativeList<T>.Enumerator GetEnumerator()
     {
       return new NativeList<T>.Enumerator(ref this);
+    }
+
+    public struct ParallelReader
+    {
+      private NativeArray<T> m_Data;
+      public ParallelReader(NativeArray<T> data) { m_Data = data; }
+      public T this[int index] => m_Data[index];
+      public int Length => m_Data.Length;
     }
 
     public struct Enumerator
@@ -360,6 +461,7 @@ namespace Unity.Collections
     private bool m_IsCreated;
 
     public int Count => m_Data?.Count ?? 0;
+    public int Capacity => m_Data?.Count ?? 0;
     public bool IsCreated => m_IsCreated;
     public Allocator Allocator => m_Allocator;
 
@@ -408,6 +510,16 @@ namespace Unity.Collections
       m_Data.Clear();
     }
 
+    public ReadOnly AsReadOnly()
+    {
+      return new ReadOnly(m_Data);
+    }
+
+    public Concurrent ToConcurrent()
+    {
+      return new Concurrent(m_Data);
+    }
+
     public void Dispose()
     {
       if (m_IsCreated)
@@ -437,6 +549,198 @@ namespace Unity.Collections
       }
       return new NativeKeyValueArrays<TKey, TValue>(keys, values);
     }
+
+    public Enumerator GetEnumerator()
+    {
+      return new Enumerator(m_Data.GetEnumerator());
+    }
+
+    public struct Enumerator
+    {
+      private Dictionary<TKey, TValue>.Enumerator m_Enumerator;
+      public Enumerator(Dictionary<TKey, TValue>.Enumerator enumerator) { m_Enumerator = enumerator; }
+      public KeyValuePair<TKey, TValue> Current => m_Enumerator.Current;
+      public bool MoveNext() => m_Enumerator.MoveNext();
+      public void Dispose() => m_Enumerator.Dispose();
+    }
+
+    public struct ReadOnly
+    {
+      private Dictionary<TKey, TValue> m_Data;
+      public ReadOnly(Dictionary<TKey, TValue> data) { m_Data = data; }
+      public int Count => m_Data.Count;
+      public bool TryGetValue(TKey key, out TValue value) => m_Data.TryGetValue(key, out value);
+      public bool ContainsKey(TKey key) => m_Data.ContainsKey(key);
+    }
+
+    public struct Concurrent
+    {
+      private Dictionary<TKey, TValue> m_Data;
+      public Concurrent(Dictionary<TKey, TValue> data) { m_Data = data; }
+      public bool TryAdd(TKey key, TValue value)
+      {
+        lock (m_Data)
+        {
+          if (m_Data.ContainsKey(key)) return false;
+          m_Data.Add(key, value);
+          return true;
+        }
+      }
+      public int Count => m_Data.Count;
+    }
+  }
+
+  public struct NativeMultiHashMap<TKey, TValue> : IDisposable
+    where TKey : struct, IEquatable<TKey>
+    where TValue : struct
+  {
+    private Dictionary<TKey, List<TValue>> m_Data;
+    private Allocator m_Allocator;
+    private bool m_IsCreated;
+    private int m_Count;
+
+    public int Count => m_Count;
+    public bool IsCreated => m_IsCreated;
+    public Allocator Allocator => m_Allocator;
+
+    public NativeMultiHashMap(int capacity, Allocator allocator)
+    {
+      m_Data = new Dictionary<TKey, List<TValue>>(capacity);
+      m_Allocator = allocator;
+      m_IsCreated = true;
+      m_Count = 0;
+    }
+
+    public void Add(TKey key, TValue value)
+    {
+      if (!m_Data.TryGetValue(key, out var list))
+      {
+        list = new List<TValue>();
+        m_Data[key] = list;
+      }
+      list.Add(value);
+      m_Count++;
+    }
+
+    public bool Remove(TKey key)
+    {
+      if (m_Data.TryGetValue(key, out var list))
+      {
+        m_Count -= list.Count;
+        return m_Data.Remove(key);
+      }
+      return false;
+    }
+
+    public void Remove(TKey key, TValue value)
+    {
+      if (m_Data.TryGetValue(key, out var list))
+      {
+        if (list.Remove(value))
+        {
+          m_Count--;
+          if (list.Count == 0)
+          {
+            m_Data.Remove(key);
+          }
+        }
+      }
+    }
+
+    public bool ContainsKey(TKey key)
+    {
+      return m_Data.ContainsKey(key);
+    }
+
+    public bool TryGetFirstValue(TKey key, out TValue item, out NativeMultiHashMapIterator<TKey> it)
+    {
+      it = default;
+      if (m_Data.TryGetValue(key, out var list) && list.Count > 0)
+      {
+        it.key = key;
+        it.entryIndex = 0;
+        item = list[0];
+        return true;
+      }
+      item = default;
+      return false;
+    }
+
+    public bool TryGetNextValue(out TValue item, ref NativeMultiHashMapIterator<TKey> it)
+    {
+      if (m_Data.TryGetValue(it.key, out var list) && it.entryIndex + 1 < list.Count)
+      {
+        it.entryIndex++;
+        item = list[it.entryIndex];
+        return true;
+      }
+      item = default;
+      return false;
+    }
+
+    public void Clear()
+    {
+      m_Data.Clear();
+      m_Count = 0;
+    }
+
+    public ReadOnly AsReadOnly()
+    {
+      return new ReadOnly(m_Data);
+    }
+
+    public Concurrent ToConcurrent()
+    {
+      return new Concurrent(m_Data);
+    }
+
+    public void Dispose()
+    {
+      if (m_IsCreated)
+      {
+        m_Data = null;
+        m_IsCreated = false;
+        m_Count = 0;
+      }
+    }
+
+    public JobHandle Dispose(JobHandle dependsOn)
+    {
+      dependsOn.Complete();
+      Dispose();
+      return new JobHandle { m_IsCompleted = true };
+    }
+
+    public struct ReadOnly
+    {
+      private Dictionary<TKey, List<TValue>> m_Data;
+      public ReadOnly(Dictionary<TKey, List<TValue>> data) { m_Data = data; }
+      public bool ContainsKey(TKey key) => m_Data.ContainsKey(key);
+    }
+
+    public struct Concurrent
+    {
+      private Dictionary<TKey, List<TValue>> m_Data;
+      public Concurrent(Dictionary<TKey, List<TValue>> data) { m_Data = data; }
+      public void Add(TKey key, TValue value)
+      {
+        lock (m_Data)
+        {
+          if (!m_Data.TryGetValue(key, out var list))
+          {
+            list = new List<TValue>();
+            m_Data[key] = list;
+          }
+          list.Add(value);
+        }
+      }
+    }
+  }
+
+  public struct NativeMultiHashMapIterator<TKey> where TKey : struct, IEquatable<TKey>
+  {
+    internal TKey key;
+    internal int entryIndex;
   }
 
   public struct NativeKeyValueArrays<TKey, TValue> : IDisposable
@@ -502,6 +806,11 @@ namespace Unity.Collections
       m_Data.Clear();
     }
 
+    public ParallelWriter AsParallelWriter()
+    {
+      return new ParallelWriter(m_Data);
+    }
+
     public void Dispose()
     {
       if (m_IsCreated)
@@ -521,6 +830,24 @@ namespace Unity.Collections
     public NativeArray<T> ToArray(Allocator allocator)
     {
       return new NativeArray<T>(m_Data.ToArray(), allocator);
+    }
+
+    public T[] ToArray()
+    {
+      return m_Data.ToArray();
+    }
+
+    public struct ParallelWriter
+    {
+      private Queue<T> m_Data;
+      public ParallelWriter(Queue<T> data) { m_Data = data; }
+      public void Enqueue(T value)
+      {
+        lock (m_Data)
+        {
+          m_Data.Enqueue(value);
+        }
+      }
     }
   }
 
@@ -561,6 +888,16 @@ namespace Unity.Collections
         result[i] = m_Array[m_Start + i];
       }
       return result;
+    }
+
+    public NativeSlice<T> Slice(int start)
+    {
+      return new NativeSlice<T>(m_Array, m_Start + start, m_Length - start);
+    }
+
+    public NativeSlice<T> Slice(int start, int length)
+    {
+      return new NativeSlice<T>(m_Array, m_Start + start, length);
     }
 
     public static implicit operator NativeSlice<T>(NativeArray<T> array)

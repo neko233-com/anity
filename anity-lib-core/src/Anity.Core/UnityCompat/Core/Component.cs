@@ -8,7 +8,16 @@ public class Component : Object
   public GameObject? gameObject { get; internal set; }
   public Transform? transform => gameObject?.transform;
 
-  public T? GetComponent<T>() where T : Component
+  public string tag
+  {
+    get => gameObject?.tag ?? "Untagged";
+    set
+    {
+      if (gameObject is not null) gameObject.tag = value;
+    }
+  }
+
+  public T? GetComponent<T>() where T : class
   {
     return gameObject?.GetComponent<T>();
   }
@@ -18,7 +27,7 @@ public class Component : Object
     return gameObject?.GetComponent(componentType);
   }
 
-  public T[] GetComponents<T>() where T : Component
+  public T[] GetComponents<T>() where T : class
   {
     return gameObject?.GetComponents<T>() ?? Array.Empty<T>();
   }
@@ -28,17 +37,29 @@ public class Component : Object
     return gameObject?.GetComponents(componentType) ?? Array.Empty<Component>();
   }
 
+  public void GetComponents<T>(List<T> results) where T : class
+  {
+    if (gameObject is not null)
+    {
+      gameObject.GetComponents(results);
+    }
+    else
+    {
+      results.Clear();
+    }
+  }
+
   public Component[] GetComponentsInChildren(Type componentType, bool includeInactive = true)
   {
     return gameObject?.GetComponentsInChildren(componentType, includeInactive) ?? Array.Empty<Component>();
   }
 
-  public T[] GetComponentsInChildren<T>(bool includeInactive = true) where T : Component
+  public T[] GetComponentsInChildren<T>(bool includeInactive = true) where T : class
   {
     return gameObject?.GetComponentsInChildren<T>(includeInactive) ?? Array.Empty<T>();
   }
 
-  public T[] GetComponentsInParent<T>(bool includeInactive = true) where T : Component
+  public T[] GetComponentsInParent<T>(bool includeInactive = true) where T : class
   {
     return gameObject?.GetComponentsInParent<T>(includeInactive) ?? Array.Empty<T>();
   }
@@ -48,15 +69,29 @@ public class Component : Object
     return gameObject?.GetComponentInParent(componentType);
   }
 
-  public T? GetComponentInParent<T>() where T : Component
+  public T? GetComponentInParent<T>() where T : class
   {
     return gameObject?.GetComponentInParent<T>();
   }
 
-  public bool TryGetComponent<T>(out T? component) where T : Component
+  public Component? GetComponentInChildren(Type componentType, bool includeInactive = true)
   {
-    component = GetComponent<T>();
-    return component is not null;
+    return gameObject?.GetComponentInChildren(componentType, includeInactive);
+  }
+
+  public T? GetComponentInChildren<T>(bool includeInactive = true) where T : class
+  {
+    return gameObject?.GetComponentInChildren<T>(includeInactive);
+  }
+
+  public bool TryGetComponent<T>(out T? component) where T : class
+  {
+    if (gameObject is not null)
+    {
+      return gameObject.TryGetComponent(out component);
+    }
+    component = default;
+    return false;
   }
 
   public bool CompareTag(string tag)
@@ -66,19 +101,17 @@ public class Component : Object
 
   public void SendMessage(string methodName, object? value = null, SendMessageOptions options = SendMessageOptions.RequireReceiver)
   {
-    _ = methodName;
-    _ = value;
-    _ = options;
+    gameObject?.SendMessage(methodName, value, options);
   }
 
   public void SendMessageUpwards(string methodName, object? value = null, SendMessageOptions options = SendMessageOptions.RequireReceiver)
   {
-    SendMessage(methodName, value, options);
+    gameObject?.SendMessageUpwards(methodName, value, options);
   }
 
   public void BroadcastMessage(string methodName, object? value = null, SendMessageOptions options = SendMessageOptions.RequireReceiver)
   {
-    SendMessage(methodName, value, options);
+    gameObject?.BroadcastMessage(methodName, value, options);
   }
 
   public bool IsActive()

@@ -78,28 +78,55 @@ public enum TextureWrapMode
 
 public class Texture2D : Texture
 {
-    private readonly Color[] _pixels;
+    private Color[] _pixels;
     private Color32[] _pixels32;
     private bool _isLoaded;
     public TextureFormat format { get; set; }
     public override bool isReadable => true;
+    public int mipmapCount { get; private set; } = 1;
 
-    public Texture2D() : this(4, 4, TextureFormat.RGBA32)
+    public Texture2D() : this(4, 4, TextureFormat.RGBA32, false)
     {
     }
 
-    public Texture2D(int width, int height) : this(width, height, TextureFormat.RGBA32)
+    public Texture2D(int width, int height) : this(width, height, TextureFormat.RGBA32, false)
     {
     }
 
-    public Texture2D(int width, int height, TextureFormat format)
+    public Texture2D(int width, int height, TextureFormat format) : this(width, height, format, false)
+    {
+    }
+
+    public Texture2D(int width, int height, TextureFormat format, bool mipmapChain)
     {
         this.width = width;
         this.height = height;
         this.format = format;
-        _pixels = new Color[Math.Max(1, width * height)];
-        _pixels32 = new Color32[Math.Max(1, width * height)];
+        mipmapCount = mipmapChain ? GenerateMipsCount(width, height) : 1;
+        int pixelCount = Math.Max(1, width * height);
+        _pixels = new Color[pixelCount];
+        _pixels32 = new Color32[pixelCount];
         dimension = TextureDimension.Tex2D;
+    }
+
+    public Color GetPixel(int x, int y)
+    {
+        if (x < 0 || y < 0 || x >= width || y >= height)
+        {
+            return Color.clear;
+        }
+        return _pixels[y * width + x];
+    }
+
+    public Color GetPixelBilinear(float u, float v)
+    {
+        u = u - (int)u;
+        v = v - (int)v;
+        if (u < 0) u += 1f;
+        if (v < 0) v += 1f;
+        int x = (int)(u * (width - 1));
+        int y = (int)(v * (height - 1));
+        return GetPixel(x, y);
     }
 
     public void SetPixel(int x, int y, Color color)
@@ -108,19 +135,8 @@ public class Texture2D : Texture
         {
             return;
         }
-
         _pixels[y * width + x] = color;
         _pixels32[y * width + x] = color;
-    }
-
-    public Color GetPixel(int x, int y)
-    {
-        if (x < 0 || y < 0 || x >= width || y >= height)
-        {
-            return default;
-        }
-
-        return _pixels[y * width + x];
     }
 
     public Color[] GetPixels()
@@ -130,28 +146,41 @@ public class Texture2D : Texture
         return clone;
     }
 
+    public Color[] GetPixels(int miplevel)
+    {
+        return GetPixels();
+    }
+
     public void SetPixels(Color[] colors)
     {
         if (colors == null) throw new ArgumentNullException(nameof(colors));
-        if (colors.Length > _pixels.Length)
-            throw new ArgumentException("Color array is larger than texture size.");
-        Array.Copy(colors, _pixels, colors.Length);
-        for (int i = 0; i < colors.Length; i++)
+        int count = Math.Min(colors.Length, _pixels.Length);
+        Array.Copy(colors, _pixels, count);
+        for (int i = 0; i < count; i++)
         {
             _pixels32[i] = colors[i];
         }
     }
 
+    public void SetPixels(Color[] colors, int miplevel)
+    {
+        SetPixels(colors);
+    }
+
     public void SetPixels32(Color32[] colors)
     {
         if (colors == null) throw new ArgumentNullException(nameof(colors));
-        if (colors.Length > _pixels32.Length)
-            throw new ArgumentException("Color32 array is larger than texture size.");
-        Array.Copy(colors, _pixels32, colors.Length);
-        for (int i = 0; i < colors.Length; i++)
+        int count = Math.Min(colors.Length, _pixels32.Length);
+        Array.Copy(colors, _pixels32, count);
+        for (int i = 0; i < count; i++)
         {
             _pixels[i] = colors[i];
         }
+    }
+
+    public void SetPixels32(Color32[] colors, int miplevel)
+    {
+        SetPixels32(colors);
     }
 
     public Color32[] GetPixels32()
@@ -161,22 +190,57 @@ public class Texture2D : Texture
         return clone;
     }
 
+    public Color32[] GetPixels32(int miplevel)
+    {
+        return GetPixels32();
+    }
+
     public void Apply()
     {
-        // no-op placeholder
+        Apply(true, false);
     }
 
     public void Apply(bool updateMipmaps)
     {
-        // no-op placeholder
+        Apply(updateMipmaps, false);
     }
 
     public void Apply(bool updateMipmaps, bool makeNoLongerReadable)
     {
-        // no-op placeholder
+        _isLoaded = true;
     }
 
+    public bool Resize(int width, int height)
+    {
+        return Resize(width, height, format, false);
+    }
+
+    public bool Resize(int width, int height, TextureFormat format, bool hasMipMap)
+    {
+        this.width = width;
+        this.height = height;
+        this.format = format;
+        int pixelCount = Math.Max(1, width * height);
+        _pixels = new Color[pixelCount];
+        _pixels32 = new Color32[pixelCount];
+        return true;
+    }
+
+    public void Compress(bool highQuality) { }
+
+    public void ReadPixels(Rect source, int destX, int destY)
+    {
+        ReadPixels(source, destX, destY, true);
+    }
+
+    public void ReadPixels(Rect source, int destX, int destY, bool recalculateMipMaps) { }
+
     public bool LoadImage(byte[] data)
+    {
+        return LoadImage(data, false);
+    }
+
+    public bool LoadImage(byte[] data, bool markNonReadable)
     {
         if (data == null || data.Length == 0) return false;
         _isLoaded = true;
@@ -185,19 +249,25 @@ public class Texture2D : Texture
 
     public byte[] EncodeToPNG()
     {
-        // stub
         return Array.Empty<byte>();
     }
 
-    public byte[] EncodeToJPG(int quality = 75)
+    public byte[] EncodeToJPG()
     {
-        // stub
+        return EncodeToJPG(75);
+    }
+
+    public byte[] EncodeToJPG(int quality)
+    {
         return Array.Empty<byte>();
     }
 
     public byte[] GetRawTextureData()
     {
-        // stub
         return Array.Empty<byte>();
     }
+
+    public static void CopyTexture(Texture src, Texture dst) { }
+    public static void CopyTexture(Texture src, int srcElement, int srcMip, Texture dst, int dstElement, int dstMip) { }
+    public static void CopyTexture(Texture src, int srcElement, int srcMip, int srcX, int srcY, int srcWidth, int srcHeight, Texture dst, int dstElement, int dstMip, int dstX, int dstY) { }
 }

@@ -9,20 +9,14 @@ public class Transform : Component, IEnumerable<Transform>
 {
   private readonly List<Transform> _children = new();
   private Transform? _parent;
-  private Vector3 _position;
   private Vector3 _localPosition;
-  private Quaternion _rotation = Quaternion.identity;
   private Quaternion _localRotation = Quaternion.identity;
   private Vector3 _localScale = Vector3.one;
-  private Vector3 _eulerAngles;
-  private Vector3 _localEulerAngles;
   private bool _hasChanged;
 
   public Transform()
   {
-    position = Vector3.zero;
-    _eulerAngles = QuaternionToEuler(_rotation);
-    _localEulerAngles = _eulerAngles;
+    _localPosition = Vector3.zero;
   }
 
   public bool hasChanged
@@ -40,21 +34,25 @@ public class Transform : Component, IEnumerable<Transform>
     }
   }
 
+  public Transform root => _parent is null ? this : _parent.root;
+
   public Vector3 position
   {
-    get => _position;
+    get
+    {
+      if (_parent is null) return _localPosition;
+      return _parent.TransformPoint(_localPosition);
+    }
     set
     {
-      _position = value;
       if (_parent is null)
       {
         _localPosition = value;
       }
       else
       {
-        _localPosition = value - _parent.position;
+        _localPosition = _parent.InverseTransformPoint(value);
       }
-
       _hasChanged = true;
     }
   }
@@ -65,26 +63,27 @@ public class Transform : Component, IEnumerable<Transform>
     set
     {
       _localPosition = value;
-      if (_parent is null)
-      {
-        _position = value;
-      }
-      else
-      {
-        _position = _parent.position + value;
-      }
-
       _hasChanged = true;
     }
   }
 
   public Quaternion rotation
   {
-    get => _rotation;
+    get
+    {
+      if (_parent is null) return _localRotation;
+      return _parent.rotation * _localRotation;
+    }
     set
     {
-      _rotation = value;
-      _eulerAngles = QuaternionToEuler(value);
+      if (_parent is null)
+      {
+        _localRotation = value;
+      }
+      else
+      {
+        _localRotation = Quaternion.Inverse(_parent.rotation) * value;
+      }
       _hasChanged = true;
     }
   }
@@ -95,12 +94,6 @@ public class Transform : Component, IEnumerable<Transform>
     set
     {
       _localRotation = value;
-      _localEulerAngles = QuaternionToEuler(value);
-      if (_parent is null)
-      {
-        _rotation = value;
-      }
-
       _hasChanged = true;
     }
   }
@@ -111,52 +104,46 @@ public class Transform : Component, IEnumerable<Transform>
     set
     {
       _localScale = value;
-      if (_parent is null)
-      {
-        _hasChanged = true;
-      }
+      _hasChanged = true;
+    }
+  }
+
+  public Vector3 lossyScale
+  {
+    get
+    {
+      if (_parent is null) return _localScale;
+      var parentScale = _parent.lossyScale;
+      return new Vector3(
+        parentScale.x * _localScale.x,
+        parentScale.y * _localScale.y,
+        parentScale.z * _localScale.z);
     }
   }
 
   public Vector3 eulerAngles
   {
-    get => _eulerAngles;
-    set
-    {
-      _eulerAngles = value;
-      _rotation = Quaternion.Euler(value.x, value.y, value.z);
-      _hasChanged = true;
-    }
+    get => QuaternionToEuler(rotation);
+    set => rotation = Quaternion.Euler(value.x, value.y, value.z);
   }
 
   public Vector3 localEulerAngles
   {
-    get => _localEulerAngles;
-    set
-    {
-      _localEulerAngles = value;
-      _localRotation = Quaternion.Euler(value.x, value.y, value.z);
-      if (_parent is null)
-      {
-        _rotation = _localRotation;
-      }
-
-      _hasChanged = true;
-    }
+    get => QuaternionToEuler(_localRotation);
+    set => _localRotation = Quaternion.Euler(value.x, value.y, value.z);
   }
 
   public int childCount => _children.Count;
 
+  public Vector3 forward => rotation * Vector3.forward;
+  public Vector3 up => rotation * Vector3.up;
+  public Vector3 right => rotation * Vector3.right;
+
+  public Matrix4x4 localToWorldMatrix => Matrix4x4.TRS(position, rotation, lossyScale);
+  public Matrix4x4 worldToLocalMatrix => localToWorldMatrix.inverse;
+
   public IEnumerator<Transform> GetEnumerator() => _children.GetEnumerator();
   IEnumerator IEnumerable.GetEnumerator() => _children.GetEnumerator();
-
-  public Vector3 forward => Vector3.forward;
-  public Vector3 up => Vector3.up;
-  public Vector3 right => Vector3.right;
-  public Vector3 lossyScale => _localScale;
-
-  public Matrix4x4 worldToLocalMatrix => Matrix4x4.identity;
-  public Matrix4x4 localToWorldMatrix => Matrix4x4.TRS(position, rotation, localScale);
 
   public int GetSiblingIndex()
   {
@@ -198,6 +185,28 @@ public class Transform : Component, IEnumerable<Transform>
 
   public Transform? Find(string name)
   {
+    if (name.Contains('/'))
+    {
+      var parts = name.Split('/');
+      Transform current = this;
+      foreach (var part in parts)
+      {
+        bool found = false;
+        for (int i = 0; i < current.childCount; i++)
+        {
+          var child = current.GetChild(i);
+          if (string.Equals(child.gameObject?.name, part, StringComparison.Ordinal))
+          {
+            current = child;
+            found = true;
+            break;
+          }
+        }
+        if (!found) return null;
+      }
+      return current;
+    }
+
     foreach (var child in _children)
     {
       if (string.Equals(child.gameObject?.name, name, StringComparison.Ordinal))
@@ -233,7 +242,12 @@ public class Transform : Component, IEnumerable<Transform>
     return false;
   }
 
-  public void SetParent(Transform? parent, bool worldPositionStays = true)
+  public void SetParent(Transform? parent)
+  {
+    SetParent(parent, true);
+  }
+
+  public void SetParent(Transform? parent, bool worldPositionStays)
   {
     if (ReferenceEquals(_parent, parent))
     {
@@ -245,14 +259,17 @@ public class Transform : Component, IEnumerable<Transform>
       return;
     }
 
-    var previousPosition = _position;
-    var previousRotation = _rotation;
+    Vector3 prevPosition = position;
+    Quaternion prevRotation = rotation;
+    Vector3 prevScale = lossyScale;
 
     if (_parent is not null)
     {
       _parent._children.Remove(this);
+      try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged"); } catch { }
     }
 
+    Transform? oldParent = _parent;
     _parent = parent;
 
     if (_parent is not null)
@@ -264,28 +281,38 @@ public class Transform : Component, IEnumerable<Transform>
 
       if (worldPositionStays)
       {
-        _localPosition = previousPosition - _parent.position;
-        _localRotation = previousRotation;
+        _localPosition = _parent.InverseTransformPoint(prevPosition);
+        _localRotation = Quaternion.Inverse(_parent.rotation) * prevRotation;
+        var parentScale = _parent.lossyScale;
+        _localScale = new Vector3(
+          MathF.Abs(parentScale.x) > 1e-6f ? prevScale.x / parentScale.x : prevScale.x,
+          MathF.Abs(parentScale.y) > 1e-6f ? prevScale.y / parentScale.y : prevScale.y,
+          MathF.Abs(parentScale.z) > 1e-6f ? prevScale.z / parentScale.z : prevScale.z);
       }
-      else
-      {
-        _position = _parent.position + _localPosition;
-        _rotation = _localRotation;
-      }
-
-      _localEulerAngles = QuaternionToEuler(_localRotation);
     }
     else
     {
-      _position = previousPosition;
-      _rotation = previousRotation;
-      _localPosition = _position;
-      _localRotation = _rotation;
-      _eulerAngles = QuaternionToEuler(_rotation);
-      _localEulerAngles = _eulerAngles;
+      _localPosition = prevPosition;
+      _localRotation = prevRotation;
+      _localScale = prevScale;
     }
 
     _hasChanged = true;
+    try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged"); } catch { }
+    for (int i = 0; i < childCount; i++)
+    {
+      _children[i].OnParentTransformChanged();
+    }
+  }
+
+  private void OnParentTransformChanged()
+  {
+    _hasChanged = true;
+    try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged"); } catch { }
+    for (int i = 0; i < childCount; i++)
+    {
+      _children[i].OnParentTransformChanged();
+    }
   }
 
   public void DetachChildren()
@@ -298,53 +325,119 @@ public class Transform : Component, IEnumerable<Transform>
     _children.Clear();
   }
 
-  public void AddChild(Transform child)
+  public void Translate(float x, float y, float z)
   {
-    if (child is null)
-    {
-      return;
-    }
-
-    child.SetParent(this, true);
+    Translate(x, y, z, Space.Self);
   }
 
-  public void Translate(float x, float y, float z, bool relativeToWorld = false)
+  public void Translate(float x, float y, float z, Space relativeTo)
   {
-    Translate(new Vector3(x, y, z), relativeToWorld);
+    Translate(new Vector3(x, y, z), relativeTo);
   }
 
-  public void Translate(Vector3 translation, bool relativeToWorld = false)
+  public void Translate(Vector3 translation)
   {
-    if (relativeToWorld)
+    Translate(translation, Space.Self);
+  }
+
+  public void Translate(Vector3 translation, Space relativeTo)
+  {
+    if (relativeTo == Space.World)
     {
       position = position + translation;
     }
     else
     {
-      localPosition = localPosition + translation;
+      position = position + TransformDirection(translation);
     }
   }
 
-  public void Rotate(Vector3 eulerAngles, bool relativeToWorld = false)
+  public void Translate(float x, float y, float z, Transform? relativeTo)
   {
-    Rotate(eulerAngles.x, eulerAngles.y, eulerAngles.z, relativeToWorld);
+    Translate(new Vector3(x, y, z), relativeTo);
   }
 
-  public void Rotate(float xAngle, float yAngle, float zAngle, bool relativeToWorld = false)
+  public void Translate(Vector3 translation, Transform? relativeTo)
   {
-    _ = relativeToWorld;
-    var added = _eulerAngles + new Vector3(xAngle, yAngle, zAngle);
-    eulerAngles = added;
+    if (relativeTo is null)
+    {
+      Translate(translation, Space.Self);
+    }
+    else
+    {
+      position = position + relativeTo.TransformDirection(translation);
+    }
+  }
+
+  public void Rotate(Vector3 eulerAngles, Space relativeTo = Space.Self)
+  {
+    Rotate(eulerAngles.x, eulerAngles.y, eulerAngles.z, relativeTo);
+  }
+
+  public void Rotate(float xAngle, float yAngle, float zAngle, Space relativeTo = Space.Self)
+  {
+    var rot = Quaternion.Euler(xAngle, yAngle, zAngle);
+    if (relativeTo == Space.Self)
+    {
+      _localRotation = _localRotation * rot;
+    }
+    else
+    {
+      rotation = rot * rotation;
+    }
+    _hasChanged = true;
+  }
+
+  public void Rotate(Vector3 axis, float angle, Space relativeTo = Space.Self)
+  {
+    if (relativeTo == Space.Self)
+    {
+      _localRotation = _localRotation * Quaternion.AngleAxis(angle, axis);
+    }
+    else
+    {
+      rotation = Quaternion.AngleAxis(angle, axis) * rotation;
+    }
     _hasChanged = true;
   }
 
   public void RotateAround(Vector3 point, Vector3 axis, float angle)
   {
-    var direction = position - point;
-    var offset = axis.magnitude < 1e-6f ? Vector3.zero : axis.normalized * (angle * 0.001f);
-    position = point + direction + offset;
-    eulerAngles = new Vector3(angle, angle, angle);
+    var q = Quaternion.AngleAxis(angle, axis);
+    var dir = position - point;
+    dir = q * dir;
+    position = point + dir;
+    rotation = q * rotation;
     _hasChanged = true;
+  }
+
+  public void RotateAround(Vector3 axis, float angle)
+  {
+    RotateAround(position, axis, angle);
+  }
+
+  public void LookAt(Vector3 worldPosition, Vector3 worldUp)
+  {
+    var dir = worldPosition - position;
+    if (dir.sqrMagnitude < 1e-6f) return;
+    rotation = Quaternion.LookRotation(dir, worldUp);
+  }
+
+  public void LookAt(Vector3 worldPosition)
+  {
+    LookAt(worldPosition, Vector3.up);
+  }
+
+  public void LookAt(Transform? target, Vector3 worldUp)
+  {
+    if (target is null) return;
+    LookAt(target.position, worldUp);
+  }
+
+  public void LookAt(Transform? target)
+  {
+    if (target is null) return;
+    LookAt(target.position, Vector3.up);
   }
 
   public void SetPositionAndRotation(Vector3 position, Quaternion rotation)
@@ -355,70 +448,112 @@ public class Transform : Component, IEnumerable<Transform>
 
   public void SetLocalPositionAndRotation(Vector3 localPosition, Quaternion localRotation)
   {
-    this.localPosition = localPosition;
-    this.localRotation = localRotation;
+    _localPosition = localPosition;
+    _localRotation = localRotation;
+    _hasChanged = true;
+  }
+
+  public void GetPositionAndRotation(out Vector3 position, out Quaternion rotation)
+  {
+    position = this.position;
+    rotation = this.rotation;
+  }
+
+  public void GetLocalPositionAndRotation(out Vector3 localPosition, out Quaternion localRotation)
+  {
+    localPosition = _localPosition;
+    localRotation = _localRotation;
   }
 
   public Vector3 TransformDirection(Vector3 direction)
   {
-    return direction;
+    return rotation * direction;
+  }
+
+  public Vector3 TransformDirection(float x, float y, float z)
+  {
+    return TransformDirection(new Vector3(x, y, z));
   }
 
   public Vector3 InverseTransformDirection(Vector3 direction)
   {
-    return direction;
+    return Quaternion.Inverse(rotation) * direction;
+  }
+
+  public Vector3 InverseTransformDirection(float x, float y, float z)
+  {
+    return InverseTransformDirection(new Vector3(x, y, z));
+  }
+
+  public Vector3 TransformVector(Vector3 vector)
+  {
+    var mat = localToWorldMatrix;
+    return mat.MultiplyVector(vector);
+  }
+
+  public Vector3 TransformVector(float x, float y, float z)
+  {
+    return TransformVector(new Vector3(x, y, z));
+  }
+
+  public Vector3 InverseTransformVector(Vector3 vector)
+  {
+    return worldToLocalMatrix.MultiplyVector(vector);
+  }
+
+  public Vector3 InverseTransformVector(float x, float y, float z)
+  {
+    return InverseTransformVector(new Vector3(x, y, z));
   }
 
   public Vector3 TransformPoint(Vector3 position)
   {
-    return this.position + position;
+    var mat = localToWorldMatrix;
+    return mat.MultiplyPoint(position);
+  }
+
+  public Vector3 TransformPoint(float x, float y, float z)
+  {
+    return TransformPoint(new Vector3(x, y, z));
   }
 
   public Vector3 InverseTransformPoint(Vector3 position)
   {
-    return position - this.position;
+    return worldToLocalMatrix.MultiplyPoint(position);
   }
 
-  public void LookAt(Vector3 worldPosition, Vector3 worldUp)
+  public Vector3 InverseTransformPoint(float x, float y, float z)
   {
-    _ = worldUp;
-    LookAt(worldPosition);
+    return InverseTransformPoint(new Vector3(x, y, z));
   }
 
-  public void LookAt(Vector3 worldPosition)
+  internal static Vector3 QuaternionToEuler(Quaternion q)
   {
-    var direction = worldPosition - position;
-    if (direction.magnitude < 1e-6f)
-    {
-      return;
-    }
+    q = q.normalized;
+    float sinr_cosp = 2f * (q.w * q.x + q.y * q.z);
+    float cosr_cosp = 1f - 2f * (q.x * q.x + q.y * q.y);
+    float roll = MathF.Atan2(sinr_cosp, cosr_cosp);
 
-    var flat = new Vector3(direction.x, direction.y, direction.z);
-    var yaw = 0f;
-    var pitch = 0f;
-    if (Math.Abs(flat.x) > 1e-6f || Math.Abs(flat.z) > 1e-6f)
-    {
-      yaw = MathF.Atan2(flat.x, flat.z) * (180f / MathF.PI);
-    }
+    float sinp = 2f * (q.w * q.y - q.z * q.x);
+    float pitch;
+    if (MathF.Abs(sinp) >= 1f)
+      pitch = Math.Sign(sinp) * (MathF.PI / 2f);
+    else
+      pitch = MathF.Asin(sinp);
 
-    pitch = MathF.Atan2(flat.y, new Vector3(flat.x, 0f, flat.z).magnitude) * (180f / MathF.PI);
-    rotation = Quaternion.Euler(pitch, yaw, 0f);
+    float siny_cosp = 2f * (q.w * q.z + q.x * q.y);
+    float cosy_cosp = 1f - 2f * (q.y * q.y + q.z * q.z);
+    float yaw = MathF.Atan2(siny_cosp, cosy_cosp);
+
+    return new Vector3(
+      pitch * (180f / MathF.PI),
+      yaw * (180f / MathF.PI),
+      roll * (180f / MathF.PI));
   }
+}
 
-  public void LookAt(Transform? target, Vector3 up = default)
-  {
-    _ = up;
-    if (target?.gameObject is null)
-    {
-      return;
-    }
-
-    LookAt(target.position);
-  }
-
-  private static Vector3 QuaternionToEuler(Quaternion rotation)
-  {
-    _ = rotation;
-    return Vector3.zero;
-  }
+public enum Space
+{
+  World,
+  Self
 }

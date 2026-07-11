@@ -42,13 +42,13 @@ public interface ILayoutTransform
 
 public struct RectOffset
 {
-  public int left { get; set; }
-  public int right { get; set; }
-  public int top { get; set; }
-  public int bottom { get; set; }
+  public float left { get; set; }
+  public float right { get; set; }
+  public float top { get; set; }
+  public float bottom { get; set; }
 
   public RectOffset() { }
-  public RectOffset(int left, int right, int top, int bottom)
+  public RectOffset(float left, float right, float top, float bottom)
   {
     this.left = left;
     this.right = right;
@@ -56,6 +56,6 @@ public struct RectOffset
     this.bottom = bottom;
   }
 
-  public int horizontal => left + right;
-  public int vertical => top + bottom;
+  public float horizontal => left + right;
+  public float vertical => top + bottom;
 }

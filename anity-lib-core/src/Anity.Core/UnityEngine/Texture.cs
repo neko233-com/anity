@@ -4,9 +4,16 @@ namespace UnityEngine;
 
 public class Texture : Object
 {
+    private string _name = string.Empty;
+
+    public new string name
+    {
+        get => _name;
+        set => _name = value;
+    }
+
     public int width { get; protected set; }
     public int height { get; protected set; }
-    public string name { get; set; } = string.Empty;
     public FilterMode filterMode { get; set; } = FilterMode.Bilinear;
     public TextureWrapMode wrapMode { get; set; } = TextureWrapMode.Repeat;
     public TextureWrapMode wrapModeU { get; set; } = TextureWrapMode.Repeat;
@@ -14,11 +21,11 @@ public class Texture : Object
     public TextureWrapMode wrapModeW { get; set; } = TextureWrapMode.Repeat;
     public float mipMapBias { get; set; }
     public int anisoLevel { get; set; } = 1;
-    public bool mipmapCount { get; protected set; }
+    public int mipmapCount { get; protected set; } = 1;
     public TextureDimension dimension { get; set; } = TextureDimension.Tex2D;
     public GraphicsFormat graphicsFormat { get; set; } = GraphicsFormat.R8G8B8A8_UNorm;
     public virtual bool isReadable { get; }
-    public int texelSize { get; }
+    public int texelSize { get; protected set; } = 4;
     public Hash128 imageContentsHash { get; set; }
 
     public Texture()

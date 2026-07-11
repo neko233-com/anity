@@ -430,4 +430,71 @@ public static class EditorGUILayout
 
   public static void BeginChangeCheck() => EditorGUI.BeginChangeCheck();
   public static bool EndChangeCheck() => EditorGUI.EndChangeCheck();
+
+  public static Vector4 Vector4Field(string label, Vector4 value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    GUILayout.Label(label);
+    return value;
+  }
+
+  public static Bounds BoundsField(string label, Bounds value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    GUILayout.Label(label);
+    return value;
+  }
+
+  public static AnimationCurve CurveField(string label, AnimationCurve value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    GUILayout.Label(label);
+    return value;
+  }
+
+  public static Gradient GradientField(string label, Gradient value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    GUILayout.Label(label);
+    return value;
+  }
+
+  public static int MaskField(string label, int mask, string[] displayedOptions, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    GUILayout.Label(label);
+    return mask;
+  }
+
+  public static void ProgressBar(float value, string text)
+  {
+    GUILayout.Label(text);
+  }
+
+  public static bool InspectorTitlebar(bool expanded, Object targetObj)
+  {
+    return expanded;
+  }
+
+  public static bool InspectorTitlebar(bool expanded, Object[] targetObjs)
+  {
+    return expanded;
+  }
+
+  public static long LongField(string label, long value, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    GUILayout.Label(label);
+    return value;
+  }
+
+  public static void DelayedDoubleField(string label, double value)
+  {
+    GUILayout.Label(label);
+  }
+
+  public static void EnumFlagsField(string label, System.Enum value)
+  {
+    GUILayout.Label(label);
+  }
 }

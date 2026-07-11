@@ -1,11 +1,56 @@
 using System;
+using System.Collections.Generic;
 
 namespace UnityEngine.Rendering;
 
+public abstract class RenderPipelineAsset
+{
+    protected abstract RenderPipeline CreatePipeline();
+    public virtual Type pipelineType => GetType();
+
+    internal RenderPipeline InternalCreatePipeline()
+    {
+        return CreatePipeline();
+    }
+}
+
+public abstract class RenderPipeline : IDisposable
+{
+    internal static RenderPipeline current;
+    public virtual void Render(ScriptableRenderContext context, Camera[] cameras) { }
+    public virtual void Render(ScriptableRenderContext context, List<Camera> cameras) { }
+    public void Dispose() { }
+}
+
+public struct ScriptableCullingParameters
+{
+    public Camera camera;
+    public float shadowDistance;
+}
+
 public static class GraphicsSettings
 {
-    public static RenderPipelineAsset? currentRenderPipeline => QualitySettings.renderPipeline ?? defaultRenderPipeline;
-    public static RenderPipelineAsset? defaultRenderPipeline { get; set; }
+    private static RenderPipelineAsset? _defaultRenderPipeline;
+    private static RenderPipeline? _currentPipelineInstance;
+    private static readonly List<Action<RenderPipelineAsset, RenderPipelineAsset>> _renderPipelineChangedListeners = new();
+
+    public static RenderPipelineAsset? currentRenderPipeline => QualitySettings.renderPipeline ?? _defaultRenderPipeline;
+
+    public static RenderPipelineAsset? defaultRenderPipeline
+    {
+        get => _defaultRenderPipeline;
+        set
+        {
+            if (_defaultRenderPipeline == value) return;
+            var oldAsset = _defaultRenderPipeline;
+            _defaultRenderPipeline = value;
+
+            if (QualitySettings.renderPipeline == null)
+                SwitchPipeline(oldAsset, value);
+        }
+    }
+
+    public static RenderPipeline? currentRenderPipelineInstance => _currentPipelineInstance;
     public static Shader? defaultShader { get; set; }
     public static Material? defaultSpatialMaterial { get; set; }
     public static bool useScriptableRenderPipeline => currentRenderPipeline != null;
@@ -13,9 +58,49 @@ public static class GraphicsSettings
     public static bool logWhenShaderIsCompiled { get; set; }
     public static bool disableBuiltinKeywordRenderPipeline { get; set; }
     public static bool disableBuiltinKeywordAmbientObscurance { get; set; }
+    public static bool lightsUseColorTemperature { get; set; }
+    public static bool lightsUseLinearIntensity { get; set; }
+    public static TransparencySortMode transparencySortMode { get; set; } = TransparencySortMode.Default;
+    public static Vector3 transparencySortAxis { get; set; } = Vector3.forward;
+    public static bool realtimeDirectRectangularAreaLights { get; set; }
+    public static bool realtimeIndirectRectangularAreaLights { get; set; }
+    public static bool defaultRenderingLayerMask { get; set; } = true;
+
+    public static event Action<RenderPipelineAsset, RenderPipelineAsset> renderPipelineChanged
+    {
+        add => _renderPipelineChangedListeners.Add(value);
+        remove => _renderPipelineChangedListeners.Remove(value);
+    }
 
     public static int shaderRenderPipelineAssetCount { get; }
     public static int customRenderPipelineAssetCount { get; }
+
+    internal static void OnQualityPipelineChanged(RenderPipelineAsset? oldAsset, RenderPipelineAsset? newAsset)
+    {
+        SwitchPipeline(oldAsset, newAsset);
+    }
+
+    private static void SwitchPipeline(RenderPipelineAsset? oldAsset, RenderPipelineAsset? newAsset)
+    {
+        if (_currentPipelineInstance != null)
+        {
+            _currentPipelineInstance.Dispose();
+            _currentPipelineInstance = null;
+        }
+
+        RenderPipelineManager.SetCurrentPipeline(null);
+
+        if (newAsset != null)
+        {
+            _currentPipelineInstance = newAsset.InternalCreatePipeline();
+            RenderPipelineManager.SetCurrentPipeline(_currentPipelineInstance);
+        }
+
+        foreach (var listener in _renderPipelineChangedListeners)
+        {
+            try { listener(oldAsset, newAsset); } catch { }
+        }
+    }
 
     public static void RegisterRenderPipelineSettings<T>(T settings) where T : RenderPipelineAsset { }
     public static void UnregisterRenderPipelineSettings<T>(T settings) where T : RenderPipelineAsset { }
@@ -26,18 +111,139 @@ public static class GraphicsSettings
         _ = define;
         return false;
     }
+
+    internal static void UpdateCurrentPipeline()
+    {
+        var asset = currentRenderPipeline;
+        SwitchPipeline(_defaultRenderPipeline, asset);
+    }
 }
 
 public static class QualitySettings
 {
-    public static RenderPipelineAsset? renderPipeline { get; set; }
+    private static RenderPipelineAsset? _renderPipeline;
+    private static int _currentQualityLevel;
+    private static readonly string[] _names = { "Low", "Medium", "High", "Ultra" };
+
+    public static RenderPipelineAsset? renderPipeline
+    {
+        get => _renderPipeline;
+        set
+        {
+            if (_renderPipeline == value) return;
+            var old = _renderPipeline;
+            _renderPipeline = value;
+            GraphicsSettings.OnQualityPipelineChanged(old, value);
+        }
+    }
+
     public static int pixelLightCount { get; set; } = 4;
-    public static int shadowResolution { get; set; } = 1024;
-    public static int shadowCascades { get; set; } = 2;
     public static float shadowDistance { get; set; } = 150f;
-    public static int vSyncCount { get; set; }
+    public static float shadowNearPlaneOffset { get; set; } = 3f;
+    public static int shadowCascades { get; set; } = 1;
+    public static float shadowCascade2Split { get; set; } = 1f / 3f;
+    public static Vector3 shadowCascade4Split { get; set; } = new(0.067f, 0.2f, 0.467f);
+    public static ShadowResolution shadowResolution { get; set; } = ShadowResolution.Medium;
+    public static ShadowProjection shadowProjection { get; set; } = ShadowProjection.CloseFit;
+    public static ShadowQuality shadows { get; set; } = ShadowQuality.All;
+    public static ShadowmaskMode shadowmaskMode { get; set; } = ShadowmaskMode.DistanceShadowmask;
+    public static bool softParticles { get; set; }
+    public static bool softVegetation { get; set; } = true;
+    public static bool realtimeReflectionProbes { get; set; } = true;
+    public static bool billboardsFaceCameraPosition { get; set; } = true;
+    public static int vSyncCount { get; set; } = 1;
     public static int antiAliasing { get; set; }
-    public static int desiredColorSpace { get; set; }
+    public static MSAA antiAliasingValue => (MSAA)(antiAliasing > 0 ? antiAliasing : 1);
+    public static float lodBias { get; set; } = 2f;
+    public static int maximumLODLevel { get; set; }
+    public static AnisotropicFiltering anisotropicFiltering { get; set; } = AnisotropicFiltering.Enable;
+    public static int masterTextureLimit { get; set; }
+    public static int particleRaycastBudget { get; set; } = 256;
+    public static int asyncUploadTimeSlice { get; set; } = 2;
+    public static int asyncUploadBufferSize { get; set; } = 16;
+    public static bool streamingMipmapsActive { get; set; }
+    public static bool streamingMipmapsAddAllCameras { get; set; } = true;
+    public static float streamingMipmapsMemoryBudget { get; set; } = 512f;
+    public static int streamingMipmapsRenderersPerFrame { get; set; } = 512;
+    public static int streamingMipmapsMaxLevelReduction { get; set; } = 2;
+    public static int streamingMipmapsMaxFileIORequests { get; set; } = 1024;
+    public static string[] names => _names;
+    public static int count => _names.Length;
+
+    public static ColorSpace activeColorSpace { get; set; } = ColorSpace.Gamma;
+    public static ColorSpace desiredColorSpace { get; set; } = ColorSpace.Gamma;
+    public static bool hdr { get; set; }
+
+    public static void SetQualityLevel(int index)
+    {
+        _currentQualityLevel = Mathf.Clamp(index, 0, _names.Length - 1);
+    }
+
+    public static void SetQualityLevel(int index, bool applyExpensiveChanges)
+    {
+        SetQualityLevel(index);
+    }
+
+    public static int GetQualityLevel() => _currentQualityLevel;
+    public static void IncreaseLevel(bool applyExpensiveChanges = false) => SetQualityLevel(_currentQualityLevel + 1);
+    public static void DecreaseLevel(bool applyExpensiveChanges = false) => SetQualityLevel(_currentQualityLevel - 1);
+}
+
+public enum TransparencySortMode
+{
+    Default = 0,
+    Perspective = 1,
+    Orthographic = 2,
+    CustomAxis = 3
+}
+
+public enum ShadowResolution
+{
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    VeryHigh = 3
+}
+
+public enum ShadowProjection
+{
+    CloseFit = 0,
+    StableFit = 1
+}
+
+public enum ShadowQuality
+{
+    Disable = 0,
+    HardShadows = 1,
+    All = 2
+}
+
+public enum ShadowmaskMode
+{
+    Shadowmask = 0,
+    DistanceShadowmask = 1
+}
+
+public enum AnisotropicFiltering
+{
+    Disable = 0,
+    Enable = 1,
+    ForceEnable = 2
+}
+
+public enum MSAA
+{
+    None = 1,
+    _2x = 2,
+    _4x = 4,
+    _8x = 8
+}
+
+public enum ColorSpace
+{
+    Uninitialized = -1,
+    Gamma = 0,
+    Linear = 1
 }
 
 public enum GraphicsDeviceType
@@ -168,8 +374,8 @@ public enum RenderingLayerMask
 public struct RenderingLayerMaskValue
 {
     public uint value;
-    public static RenderingLayerMaskValue everything => new RenderingLayerMaskValue { value = uint.MaxValue };
-    public static RenderingLayerMaskValue nothing => new RenderingLayerMaskValue { value = 0 };
+    public static RenderingLayerMaskValue everything => new() { value = uint.MaxValue };
+    public static RenderingLayerMaskValue nothing => new() { value = 0 };
 }
 
 public enum ShaderRenderPipeline
@@ -269,4 +475,58 @@ public enum StencilUsage
     All = -1,
 }
 
+public enum CubemapFace
+{
+    Unknown = -1,
+    PositiveX = 0,
+    NegativeX = 1,
+    PositiveY = 2,
+    NegativeY = 3,
+    PositiveZ = 4,
+    NegativeZ = 5
+}
 
+public enum ShadowCastingMode2
+{
+    Off = 0,
+    On = 1,
+    TwoSided = 2,
+    ShadowsOnly = 3
+}
+
+public struct VisibleLight
+{
+    public Light light;
+    public LightType lightType;
+    public Color finalColor;
+    public Vector3 lightPosition;
+    public Vector3 lightDirection;
+    public float range;
+    public float spotAngle;
+    public int visibleLightIndex;
+    public int sortingKey;
+    public Rect screenRect;
+}
+
+public struct VisibleReflectionProbe
+{
+    public ReflectionProbe probe;
+    public Vector3 center;
+    public Vector3 size;
+    public int probeIndex;
+    public Bounds bounds;
+}
+
+public struct ShadowDrawingData
+{
+    public CullingResults cullingResults;
+    public int lightIndex;
+    public ShadowSplitData[] splits;
+}
+
+public struct ShadowSplitData
+{
+    public Matrix4x4 cullingMatrix;
+    public Vector4 cullingSphere;
+    public float shadowSplitNearPlaneOffset;
+}

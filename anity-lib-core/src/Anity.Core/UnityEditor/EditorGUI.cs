@@ -554,6 +554,142 @@ public static class EditorGUI
     _ = center;
     _ = size;
   }
+
+  public static Vector4 Vector4Field(string label, Vector4 value)
+  {
+    _ = label;
+    return value;
+  }
+
+  public static Vector4 Vector4Field(Rect position, string label, Vector4 value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static Bounds BoundsField(string label, Bounds value)
+  {
+    _ = label;
+    return value;
+  }
+
+  public static Bounds BoundsField(Rect position, string label, Bounds value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static AnimationCurve CurveField(string label, AnimationCurve value)
+  {
+    _ = label;
+    return value;
+  }
+
+  public static AnimationCurve CurveField(Rect position, string label, AnimationCurve value)
+  {
+    _ = position;
+    _ = label;
+    return value;
+  }
+
+  public static Gradient GradientField(string label, Gradient value)
+  {
+    _ = label;
+    return value;
+  }
+
+  public static int MaskField(string label, int mask, string[] displayedOptions)
+  {
+    _ = label;
+    _ = displayedOptions;
+    return mask;
+  }
+
+  public static int MaskField(Rect position, string label, int mask, string[] displayedOptions)
+  {
+    _ = position;
+    _ = label;
+    _ = displayedOptions;
+    return mask;
+  }
+
+  public static void ProgressBar(Rect position, float value, string text)
+  {
+    _ = position;
+    _ = value;
+    _ = text;
+  }
+
+  public static bool InspectorTitlebar(Rect position, bool expanded, Object targetObj)
+  {
+    _ = position;
+    _ = targetObj;
+    return expanded;
+  }
+
+  public static bool InspectorTitlebar(Rect position, bool expanded, Object[] targetObjs)
+  {
+    _ = position;
+    _ = targetObjs;
+    return expanded;
+  }
+
+  public static void DrawTexture(Rect position, Texture image)
+  {
+    _ = position;
+    _ = image;
+  }
+
+  public static void DrawPreviewTexture(Rect position, Texture image)
+  {
+    _ = position;
+    _ = image;
+  }
+
+  public static bool DropdownButton(Rect position, GUIContent content, FocusType focusType)
+  {
+    _ = position;
+    _ = content;
+    _ = focusType;
+    return false;
+  }
+
+  public static int BeginBuildTargetSelectionGrouping()
+  {
+    return 0;
+  }
+
+  public static void EndBuildTargetSelectionGrouping() {}
+
+  public static void HandleUtilityAddDefaultControl(int controlId)
+  {
+    _ = controlId;
+  }
+
+  public static Rect DragWindow(Rect position)
+  {
+    return position;
+  }
+
+  public static void SelectableLabel(Rect position, string text)
+  {
+    _ = position;
+    _ = text;
+  }
+
+  public static void HelpBox(Rect position, string message, MessageType type)
+  {
+    _ = position;
+    _ = message;
+    _ = type;
+  }
+
+  public static class MixedValueContent
+  {
+    public static readonly GUIContent content = new("—");
+  }
 }
 
 public enum FocusType

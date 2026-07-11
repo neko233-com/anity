@@ -4,6 +4,68 @@ using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI;
 
+public enum CanvasUpdate
+{
+  Prelayout = 0,
+  Layout = 1,
+  PostLayout = 2,
+  PreRender = 3,
+  LatePreRender = 4,
+  MaxUpdateValue = 5
+}
+
+public enum ScaleMode
+{
+  ConstantPixelSize,
+  ScaleWithScreenSize,
+  ConstantPhysicalSize
+}
+
+public enum ScreenMatchMode
+{
+  MatchWidthOrHeight = 0,
+  Expand = 1,
+  Shrink = 2
+}
+
+public enum Unit
+{
+  Centimeters,
+  Millimeters,
+  Inches,
+  Points,
+  Picas
+}
+
+public enum BlockingObjects
+{
+  None = 0,
+  TwoD = 1,
+  ThreeD = 2,
+  All = 3
+}
+
+public struct UIVertex
+{
+  public Vector3 position;
+  public Vector3 normal;
+  public Vector4 tangent;
+  public Color32 color;
+  public Vector4 uv0;
+  public Vector4 uv1;
+  public Vector4 uv2;
+  public Vector4 uv3;
+
+  public static UIVertex simpleVert = new()
+  {
+    position = Vector3.zero,
+    normal = new Vector3(0f, 0f, -1f),
+    tangent = new Vector4(1f, 0f, 0f, -1f),
+    color = new Color32(255, 255, 255, 255),
+    uv0 = new Vector4(0f, 0f, 0f, 1f)
+  };
+}
+
 public abstract class Graphic : UIBehaviour, ICanvasElement
 {
   private Color _color = Color.white;
@@ -165,6 +227,9 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
     }
   }
 
+  public virtual void LayoutComplete() { }
+  public virtual void GraphicUpdateComplete() { }
+
   public override bool IsDestroyed() => this == null;
 
   protected virtual void UpdateGeometry() { }
@@ -244,146 +309,323 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
   }
 }
 
-public enum CanvasUpdate
-{
-  Prelayout = 0,
-  Layout = 1,
-  PostLayout = 2,
-  PreRender = 3,
-  LatePreRender = 4,
-  MaxUpdateValue = 5
-}
-
-public struct UIVertex
-{
-  public Vector3 position;
-  public Vector3 normal;
-  public Vector4 tangent;
-  public Color32 color;
-  public Vector4 uv0;
-  public Vector4 uv1;
-  public Vector4 uv2;
-  public Vector4 uv3;
-
-  public static UIVertex simpleVert = new()
-  {
-    position = Vector3.zero,
-    normal = new Vector3(0f, 0f, -1f),
-    tangent = new Vector4(1f, 0f, 0f, -1f),
-    color = new Color32(255, 255, 255, 255),
-    uv0 = new Vector4(0f, 0f, 0f, 1f)
-  };
-}
-
 public class CanvasRenderer : MonoBehaviour
 {
-  public bool cull { get; set; }
-  public bool hasPopInstruction { get; set; }
-  public int materialCount { get; set; } = 1;
-  public int popMaterialCount { get; set; }
-  public int absoluteDepth { get; set; }
+  private Color _color = Color.white;
+  private float _alpha = 1f;
+  private bool _cull;
+  private bool _hasPopInstruction;
+  private bool _hasMasks;
+  private int _materialCount = 1;
+  private int _popMaterialCount;
+  private int _absoluteDepth;
+  private Mesh? _mesh;
+  private Material? _material;
+  private Texture? _alphaTexture;
+  private List<UIVertex>? _vertices;
+
+  public bool cull
+  {
+    get => _cull;
+    set => _cull = value;
+  }
+
+  public bool hasPopInstruction
+  {
+    get => _hasPopInstruction;
+    set => _hasPopInstruction = value;
+  }
+
+  public bool hasMasks
+  {
+    get => _hasMasks;
+    set => _hasMasks = value;
+  }
+
+  public int materialCount
+  {
+    get => _materialCount;
+    set => _materialCount = value;
+  }
+
+  public int popMaterialCount
+  {
+    get => _popMaterialCount;
+    set => _popMaterialCount = value;
+  }
+
+  public int absoluteDepth
+  {
+    get => _absoluteDepth;
+    set => _absoluteDepth = value;
+  }
+
   public bool hasMoved { get; set; }
 
   public void SetMaterial(Material? material, int index)
   {
-    _ = material;
-    _ = index;
+    if (index == 0)
+      _material = material;
   }
 
   public Material? GetMaterial(int index)
   {
-    _ = index;
-    return null;
+    return index == 0 ? _material : null;
+  }
+
+  public void SetAlphaTexture(Texture? texture)
+  {
+    _alphaTexture = texture;
   }
 
   public void SetAlpha(float alpha)
   {
-    _ = alpha;
+    _alpha = alpha;
   }
 
   public float GetAlpha()
   {
-    return 1f;
+    var finalAlpha = _alpha;
+    var groups = GetComponentsInParent<CanvasGroup>();
+    if (groups != null)
+    {
+      var ignoreParent = false;
+      for (var i = groups.Length - 1; i >= 0; i--)
+      {
+        var group = groups[i];
+        if (ignoreParent && !group.ignoreParentGroups) continue;
+        finalAlpha *= group.alpha;
+        ignoreParent = group.ignoreParentGroups;
+      }
+    }
+    return finalAlpha;
   }
 
   public void SetColor(Color color)
   {
-    _ = color;
+    _color = color;
   }
 
   public Color GetColor()
   {
-    return Color.white;
+    return _color;
+  }
+
+  public void SetMesh(Mesh mesh)
+  {
+    _mesh = mesh;
+    _vertices = null;
   }
 
   public void Clear()
   {
+    _mesh = null;
+    _vertices = null;
   }
 
   public void SetVertices(List<UIVertex> vertices)
   {
-    _ = vertices;
+    _vertices = vertices;
+    _mesh = null;
   }
 
   public void SetVertices(List<UIVertex> vertices, int size)
   {
-    _ = vertices;
-    _ = size;
-  }
-
-  public void SetVertices(List<UIVertex> vertices, int size, bool canTrimVertices)
-  {
-    _ = vertices;
-    _ = size;
-    _ = canTrimVertices;
+    if (_vertices == null) _vertices = new List<UIVertex>();
+    _vertices.Clear();
+    for (var i = 0; i < size && i < vertices.Count; i++)
+      _vertices.Add(vertices[i]);
+    _mesh = null;
   }
 
   public int GetVertexCount()
   {
-    return 0;
+    if (_mesh != null) return _mesh.vertexCount;
+    return _vertices?.Count ?? 0;
   }
 
   public UIVertex GetUIVertex(int index)
   {
-    _ = index;
+    if (_vertices != null && index >= 0 && index < _vertices.Count)
+      return _vertices[index];
     return default;
+  }
+
+  public Material? GetDesignerMaterial()
+  {
+    return _material;
   }
 }
 
 public class CanvasScaler : UIBehaviour
 {
-  public ScaleMode uiScaleMode { get; set; } = ScaleMode.ConstantPixelSize;
-  public Vector2 referenceResolution { get; set; } = new Vector2(1920, 1080);
-  public ScreenMatchMode screenMatchMode { get; set; } = ScreenMatchMode.MatchWidthOrHeight;
-  public float matchWidthOrHeight { get; set; }
-  public float scaleFactor { get; set; } = 1f;
-  public float referencePixelsPerUnit { get; set; } = 100f;
-  public float defaultUnit { get; set; } = 1f;
-  public float fallbackScreenDPI { get; set; } = 96f;
-  public Unit physicalUnit { get; set; } = Unit.Centimeters;
-}
+  private ScaleMode _uiScaleMode = ScaleMode.ConstantPixelSize;
+  private Vector2 _referenceResolution = new(1920f, 1080f);
+  private ScreenMatchMode _screenMatchMode = ScreenMatchMode.MatchWidthOrHeight;
+  private float _matchWidthOrHeight;
+  private float _scaleFactor = 1f;
+  private float _referencePixelsPerUnit = 100f;
+  private float _dynamicPixelsPerUnit = 1f;
+  private float _fallbackScreenDPI = 96f;
+  private float _defaultSpriteDPI = 96f;
+  private Unit _physicalUnit = Unit.Points;
+  private Canvas? _canvas;
 
-public enum ScaleMode
-{
-  ConstantPixelSize,
-  ScaleWithScreenSize,
-  ConstantPhysicalSize
-}
+  public ScaleMode uiScaleMode
+  {
+    get => _uiScaleMode;
+    set { _uiScaleMode = value; Handle(); }
+  }
 
-public enum ScreenMatchMode
-{
-  MatchWidthOrHeight,
-  Expand,
-  Shrink
-}
+  public Vector2 referenceResolution
+  {
+    get => _referenceResolution;
+    set { _referenceResolution = value; Handle(); }
+  }
 
-public enum Unit
-{
-  Centimeters,
-  Millimeters,
-  Inches,
-  Points,
-  Picas
+  public ScreenMatchMode screenMatchMode
+  {
+    get => _screenMatchMode;
+    set { _screenMatchMode = value; Handle(); }
+  }
+
+  public float matchWidthOrHeight
+  {
+    get => _matchWidthOrHeight;
+    set { _matchWidthOrHeight = Mathf.Clamp01(value); Handle(); }
+  }
+
+  public float scaleFactor
+  {
+    get => _scaleFactor;
+    set { _scaleFactor = value; Handle(); }
+  }
+
+  public float referencePixelsPerUnit
+  {
+    get => _referencePixelsPerUnit;
+    set { _referencePixelsPerUnit = value; Handle(); }
+  }
+
+  public float dynamicPixelsPerUnit
+  {
+    get => _dynamicPixelsPerUnit;
+    set => _dynamicPixelsPerUnit = value;
+  }
+
+  public float fallbackScreenDPI
+  {
+    get => _fallbackScreenDPI;
+    set => _fallbackScreenDPI = value;
+  }
+
+  public float defaultSpriteDPI
+  {
+    get => _defaultSpriteDPI;
+    set => _defaultSpriteDPI = value;
+  }
+
+  public Unit physicalUnit
+  {
+    get => _physicalUnit;
+    set => _physicalUnit = value;
+  }
+
+  protected override void OnEnable()
+  {
+    base.OnEnable();
+    _canvas = GetComponent<Canvas>();
+    Handle();
+  }
+
+  protected override void OnDisable()
+  {
+    base.OnDisable();
+  }
+
+  protected override void OnCanvasHierarchyChanged()
+  {
+    base.OnCanvasHierarchyChanged();
+    _canvas = GetComponent<Canvas>();
+    Handle();
+  }
+
+  protected virtual void Update()
+  {
+    Handle();
+  }
+
+  protected virtual void Handle()
+  {
+    if (_canvas == null || !_canvas.isRootCanvas) return;
+
+    switch (_uiScaleMode)
+    {
+      case ScaleMode.ConstantPixelSize:
+        HandleConstantPixelSize();
+        break;
+      case ScaleMode.ScaleWithScreenSize:
+        HandleScaleWithScreenSize();
+        break;
+      case ScaleMode.ConstantPhysicalSize:
+        HandleConstantPhysicalSize();
+        break;
+    }
+  }
+
+  protected virtual void HandleConstantPixelSize()
+  {
+    _canvas.scaleFactor = _scaleFactor;
+    _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+  }
+
+  protected virtual void HandleScaleWithScreenSize()
+  {
+    var screenWidth = (float)Screen.width;
+    var screenHeight = (float)Screen.height;
+
+    var scaleFactorWidth = screenWidth / _referenceResolution.x;
+    var scaleFactorHeight = screenHeight / _referenceResolution.y;
+
+    float scaleFactor;
+    switch (_screenMatchMode)
+    {
+      case ScreenMatchMode.MatchWidthOrHeight:
+        scaleFactor = Mathf.Lerp(scaleFactorWidth, scaleFactorHeight, _matchWidthOrHeight);
+        break;
+      case ScreenMatchMode.Expand:
+        scaleFactor = Mathf.Min(scaleFactorWidth, scaleFactorHeight);
+        break;
+      case ScreenMatchMode.Shrink:
+        scaleFactor = Mathf.Max(scaleFactorWidth, scaleFactorHeight);
+        break;
+      default:
+        scaleFactor = scaleFactorWidth;
+        break;
+    }
+
+    _canvas.scaleFactor = scaleFactor;
+    _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+  }
+
+  protected virtual void HandleConstantPhysicalSize()
+  {
+    var dpi = Screen.dpi;
+    if (dpi == 0f) dpi = _fallbackScreenDPI;
+
+    float unitMultiplier = _physicalUnit switch
+    {
+      Unit.Centimeters => 2.54f,
+      Unit.Millimeters => 25.4f,
+      Unit.Inches => 1f,
+      Unit.Points => 72f,
+      Unit.Picas => 6f,
+      _ => 1f
+    };
+
+    _canvas.scaleFactor = dpi / (_defaultSpriteDPI / unitMultiplier);
+    _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+  }
 }
 
 public class GraphicRaycaster : BaseRaycaster
@@ -526,12 +768,4 @@ public class GraphicRaycaster : BaseRaycaster
     base.OnEnable();
     _canvas = GetComponent<Canvas>();
   }
-}
-
-public enum BlockingObjects
-{
-  None = 0,
-  TwoD = 1,
-  ThreeD = 2,
-  All = 3
 }

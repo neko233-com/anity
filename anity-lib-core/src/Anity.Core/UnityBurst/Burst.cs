@@ -26,6 +26,12 @@ public sealed class BurstCompileAttribute : Attribute
     }
 }
 
+public static class BurstCompiler
+{
+    public static bool IsSupported => true;
+    public static void Compile<T>() where T : struct { }
+}
+
 /// <summary>
 /// Burst-compatible math library.
 /// </summary>

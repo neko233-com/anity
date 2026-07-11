@@ -100,17 +100,6 @@ public static class GeometryUtility
     }
 }
 
-public sealed class LightProbes : Object
-{
-    public SphericalHarmonicsL2[] probes { get; } = Array.Empty<SphericalHarmonicsL2>();
-    public int count { get; }
-
-    public void GetPositions(Vector3[] outPositions) { }
-    public void GetProbes(SphericalHarmonicsL2[] outProbes) { }
-
-    public static LightProbes tetrahedralLattice { get; } = new LightProbes();
-}
-
 public struct SphericalHarmonicsL2
 {
     private float[] _coefficients;

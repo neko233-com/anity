@@ -259,4 +259,41 @@ public partial class ParticleSystem
             this.probability = 1f;
         }
     }
+
+    [Serializable]
+    public struct EmitParams
+    {
+        public Vector3 position;
+        public Vector3 velocity;
+        public Vector3 axisOfRotation;
+        public float startLifetime;
+        public float startSpeed;
+        public float startSize;
+        public float startSizeY;
+        public float startSizeZ;
+        public float startRotation;
+        public float startRotationY;
+        public float startRotationZ;
+        public float randomSeed;
+        public Color32 startColor;
+        public bool applyShapeToPosition;
+
+        public void Reset()
+        {
+            position = Vector3.zero;
+            velocity = Vector3.zero;
+            axisOfRotation = Vector3.up;
+            startLifetime = 0f;
+            startSpeed = 0f;
+            startSize = 0f;
+            startSizeY = 0f;
+            startSizeZ = 0f;
+            startRotation = 0f;
+            startRotationY = 0f;
+            startRotationZ = 0f;
+            randomSeed = 0f;
+            startColor = new Color32(255, 255, 255, 255);
+            applyShapeToPosition = false;
+        }
+    }
 }

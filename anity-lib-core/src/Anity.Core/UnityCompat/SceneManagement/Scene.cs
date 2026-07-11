@@ -12,8 +12,10 @@ public readonly struct Scene
   public int buildIndex { get; }
   public bool isLoaded { get; }
   public bool isSubScene { get; }
+  public string path { get; }
+  public bool isValid => IsValid();
 
-  internal Scene(int handle, string name, int buildIndex, bool isLoaded = true, bool isSubScene = false)
+  internal Scene(int handle, string name, int buildIndex, bool isLoaded = true, bool isSubScene = false, string path = "")
   {
     if (handle < 0)
     {
@@ -25,6 +27,7 @@ public readonly struct Scene
     this.buildIndex = buildIndex;
     this.isLoaded = isLoaded;
     this.isSubScene = isSubScene;
+    this.path = path ?? string.Empty;
   }
 
   public Scene(string name, int buildIndex = 0, bool isLoaded = true)

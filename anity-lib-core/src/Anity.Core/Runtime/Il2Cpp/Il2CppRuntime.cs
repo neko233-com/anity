@@ -1,157 +1,139 @@
 using System;
-using System.Runtime.CompilerServices;
+using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace Anity.Core.Runtime.Il2Cpp;
 
-/// <summary>
-/// IL2CPP runtime support for AOT compilation.
-/// Provides platform-specific optimizations and workarounds for IL2CPP builds.
-/// </summary>
+public enum Platform
+{
+  Interpreter,
+  Mono,
+  IL2CPP,
+  WebGL
+}
+
 public static class Il2CppRuntime
 {
-  private static bool _isIl2Cpp;
   private static bool _initialized;
+  private static Platform _currentPlatform = Platform.Mono;
 
-  /// <summary>
-  /// Gets whether the current runtime is IL2CPP.
-  /// </summary>
-  public static bool IsIl2Cpp
+  public static bool IsIl2Cpp => CurrentPlatform == Platform.IL2CPP;
+  public static bool IsMono => CurrentPlatform == Platform.Mono;
+  public static bool IsInterpreter => CurrentPlatform == Platform.Interpreter;
+  public static bool IsWebGL => CurrentPlatform == Platform.WebGL;
+
+  public static Platform CurrentPlatform
   {
-    get
-    {
-      if (!_initialized)
-      {
-        _isIl2Cpp = DetectIl2Cpp();
-        _initialized = true;
-      }
-
-      return _isIl2Cpp;
-    }
+    get => _currentPlatform;
+    set => _currentPlatform = value;
   }
 
-  /// <summary>
-  /// Gets whether the current platform supports JIT compilation.
-  /// </summary>
-  public static bool SupportsJit => !IsIl2Cpp || !RuntimeInformation.IsOSPlatform(OSPlatform.Create("IOS"));
+  public static string AOTSuffix => IsIl2Cpp ? "_AOT" : string.Empty;
 
-  /// <summary>
-  /// Gets whether the current platform is iOS (no JIT).
-  /// </summary>
-  public static bool IsIos => RuntimeInformation.IsOSPlatform(OSPlatform.Create("IOS"));
-
-  /// <summary>
-  /// Gets whether the current platform is Android.
-  /// </summary>
-  public static bool IsAndroid => RuntimeInformation.IsOSPlatform(OSPlatform.Create("Android"));
-
-  /// <summary>
-  /// Gets whether the current platform is WebGL (no JIT, no threads).
-  /// </summary>
-  public static bool IsWebGL => IsBrowser();
-
-  /// <summary>
-  /// Gets the current platform type.
-  /// </summary>
-  public static PlatformType Platform
-  {
-    get
-    {
-      if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        return PlatformType.Windows;
-      if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        return PlatformType.MacOS;
-      if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        return PlatformType.Linux;
-      if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("IOS")))
-        return PlatformType.IOS;
-      if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("Android")))
-        return PlatformType.Android;
-      if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("WEBBROWSER")))
-        return PlatformType.WebGL;
-
-      return PlatformType.Unknown;
-    }
-  }
-
-  /// <summary>
-  /// Initializes IL2CPP runtime support.
-  /// Must be called early in the application lifecycle.
-  /// </summary>
   public static void Initialize()
   {
-    if (_initialized)
-    {
-      return;
-    }
+    if (_initialized) return;
 
-    _isIl2Cpp = DetectIl2Cpp();
-    _initialized = true;
-
-    if (_isIl2Cpp)
-    {
-      ConfigureForIl2Cpp();
-    }
-  }
-
-  /// <summary>
-  /// Configures the runtime for IL2CPP builds.
-  /// </summary>
-  private static void ConfigureForIl2Cpp()
-  {
-    // Configure for AOT environments
-    // - Disable reflection emit
-    // - Configure code generation options
-    // - Set up metadata preservation
-  }
-
-  private static bool DetectIl2Cpp()
-  {
-    // In a real IL2CPP environment, this would check for IL2CPP-specific indicators
-    // For now, we check if we're in an AOT-compiled environment
     try
     {
-      // Check for AOT indicators
-      var runtimeType = Type.GetType("Mono.Runtime");
-      if (runtimeType is not null)
+      var monoRuntime = Type.GetType("Mono.Runtime");
+      if (monoRuntime != null)
       {
-        return false; // Mono runtime, not IL2CPP
+        _currentPlatform = Platform.Mono;
       }
-
-      // Check for CoreCLR indicators
-      var coreClrType = Type.GetType("System.Runtime.RuntimeImports");
-      if (coreClrType is not null)
+      else if (IsBrowser())
       {
-        return false; // CoreCLR, not IL2CPP
+        _currentPlatform = Platform.WebGL;
       }
-
-      // Default to false for non-IL2CPP environments
-      return false;
+      else
+      {
+        _currentPlatform = Platform.Mono;
+      }
     }
     catch
     {
-      return false;
+      _currentPlatform = Platform.Mono;
     }
+
+    _initialized = true;
+  }
+
+  public static MethodInfo? GetGenericMethod(Type type, string methodName, Type[] typeArguments, Type[] parameterTypes)
+  {
+    if (type == null) throw new ArgumentNullException(nameof(type));
+    if (string.IsNullOrEmpty(methodName)) throw new ArgumentNullException(nameof(methodName));
+
+    var methods = type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+    foreach (var method in methods)
+    {
+      if (method.Name != methodName || !method.IsGenericMethodDefinition) continue;
+      var parameters = method.GetParameters();
+      if (parameters.Length != parameterTypes.Length) continue;
+
+      var match = true;
+      for (var i = 0; i < parameters.Length; i++)
+      {
+        if (parameters[i].ParameterType.IsGenericParameter) continue;
+        if (parameters[i].ParameterType != parameterTypes[i])
+        {
+          match = false;
+          break;
+        }
+      }
+
+      if (match)
+      {
+        return method.MakeGenericMethod(typeArguments);
+      }
+    }
+
+    return null;
+  }
+
+  public static MethodInfo? ImplementGeneric(Type genericTypeDefinition, Type[] typeArguments)
+  {
+    if (genericTypeDefinition == null) throw new ArgumentNullException(nameof(genericTypeDefinition));
+    if (typeArguments == null || typeArguments.Length == 0) throw new ArgumentNullException(nameof(typeArguments));
+
+    var constructedType = genericTypeDefinition.MakeGenericType(typeArguments);
+    return constructedType.GetMethod("Invoke", BindingFlags.Public | BindingFlags.Instance);
+  }
+
+  public static IntPtr GetMethodPointer(MethodInfo method)
+  {
+    return IntPtr.Zero;
+  }
+
+  public static IntPtr ResolveInternalCall(string name)
+  {
+    return IntPtr.Zero;
+  }
+
+  public static IntPtr ResolvePInvoke(string libraryName, string entryPoint)
+  {
+    return IntPtr.Zero;
+  }
+
+  public static IEnumerable<string> GetRequiredGenericTypes()
+  {
+    return Array.Empty<string>();
+  }
+
+  public static void RegisterGenericTypeForAOT(Type type)
+  {
+  }
+
+  public static void EnsureGenericMethod<T>(Func<T> method)
+  {
+  }
+
+  public static void EnsureGenericMethod<T1, T2>(Func<T1, T2> method)
+  {
   }
 
   private static bool IsBrowser()
   {
-    // In a real implementation, this would check for WebGL/browser environment
-    // For now, return false
-    return false;
+    return RuntimeInformation.IsOSPlatform(OSPlatform.Create("BROWSER"));
   }
-}
-
-/// <summary>
-/// Platform types for Anity runtime.
-/// </summary>
-public enum PlatformType
-{
-  Unknown,
-  Windows,
-  MacOS,
-  Linux,
-  IOS,
-  Android,
-  WebGL
 }

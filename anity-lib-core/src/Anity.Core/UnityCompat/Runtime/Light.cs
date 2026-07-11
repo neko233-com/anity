@@ -1,8 +1,13 @@
+using System.Collections.Generic;
+using UnityEngine.Rendering;
+
 namespace UnityEngine;
 
 public class Light : Behaviour
 {
-  public LightType type { get; set; } = LightType.Spot;
+  private readonly List<CommandBuffer> _commandBuffers = new();
+
+  public LightType type { get; set; } = LightType.Point;
   public Color color { get; set; } = Color.white;
   public float intensity { get; set; } = 1f;
   public float range { get; set; } = 10f;
@@ -12,9 +17,11 @@ public class Light : Behaviour
   public Texture? cookie { get; set; }
   public LightShadows shadows { get; set; } = LightShadows.None;
   public float shadowStrength { get; set; } = 1f;
+  public UnityEngine.Rendering.ShadowResolution shadowResolution { get; set; } = ShadowResolution.Medium;
   public float shadowBias { get; set; } = 0.05f;
   public float shadowNormalBias { get; set; } = 0.4f;
   public float shadowNearPlane { get; set; } = 0.2f;
+  public int shadowCustomResolution { get; set; }
   public float bounceIntensity { get; set; } = 1f;
   public float colorTemperature { get; set; } = 6570f;
   public bool useColorTemperature { get; set; }
@@ -23,11 +30,53 @@ public class Light : Behaviour
   public LightmappingMode mapping { get; set; } = LightmappingMode.Auto;
   public int cookieLightID { get; set; }
   public bool useViewFrustumForShadowCasterCull { get; set; } = true;
-  public int renderMode { get; set; }
+  public LightRenderMode renderMode { get; set; } = LightRenderMode.Auto;
   public int cullingMask { get; set; } = -1;
+  public bool alreadyLightmapped { get; set; }
+  public Vector2 areaSize { get; set; } = new(1f, 1f);
+  public Flare flare { get; set; }
+  public Bounds bounds => new(transform.position, new Vector3(range * 2f, range * 2f, range * 2f));
+  public int commandBufferCount => _commandBuffers.Count;
 
-  public void GetCommandBuffer()
+  public void AddCommandBuffer(LightEvent evt, CommandBuffer buffer)
   {
+    if (buffer != null && !_commandBuffers.Contains(buffer))
+      _commandBuffers.Add(buffer);
+  }
+
+  public void AddCommandBufferAsync(LightEvent evt, CommandBuffer buffer, ComputeQueueType queueType)
+  {
+    AddCommandBuffer(evt, buffer);
+  }
+
+  public void RemoveCommandBuffer(LightEvent evt, CommandBuffer buffer)
+  {
+    _commandBuffers.Remove(buffer);
+  }
+
+  public void RemoveCommandBuffers(LightEvent evt)
+  {
+    _commandBuffers.Clear();
+  }
+
+  public CommandBuffer[] GetCommandBuffers(LightEvent evt)
+  {
+    return _commandBuffers.ToArray();
+  }
+
+  public void RemoveAllCommandBuffers()
+  {
+    _commandBuffers.Clear();
+  }
+
+  public static Light[] GetLights(LightType type, int layer)
+  {
+    var all = FindObjectsOfType<Light>();
+    var result = new List<Light>();
+    for (var i = 0; i < all.Length; i++)
+      if (all[i].type == type && (all[i].cullingMask & (1 << layer)) != 0)
+        result.Add(all[i]);
+    return result.ToArray();
   }
 }
 
@@ -46,6 +95,13 @@ public enum LightShadows
   None = 0,
   Hard = 1,
   Soft = 2
+}
+
+public enum LightRenderMode
+{
+  Auto = 0,
+  ForcePixel = 1,
+  ForceVertex = 2
 }
 
 public enum LightmapBakeType

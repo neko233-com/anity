@@ -147,10 +147,7 @@ public struct MeshDataArray : IDisposable
 
 public partial class Mesh
 {
-    public IndexFormat indexFormat { get; set; } = IndexFormat.UInt16;
-    public bool isReadable { get; set; } = true;
     public int indexBufferTarget { get; set; }
-    public MeshTopology topology { get; set; } = MeshTopology.Triangles;
 
     public void SetIndexBufferParams(int indexCount, IndexFormat format) { indexFormat = format; }
     public void SetVertexBufferParams(int vertexCount, params VertexAttributeDescriptor[] attributes) { }
@@ -168,16 +165,13 @@ public partial class Mesh
     public void SetSubMeshes(SubmeshDescriptor[] subMeshes) { }
     public void SetSubMeshes(SubmeshDescriptor[] subMeshes, bool _ = false) { }
 
-    public void CombineMeshes(CombineInstance[] combine) { }
-    public void CombineMeshes(CombineInstance[] combine, bool mergeSubMeshes = true, bool useMatrices = true) { }
-
     public void RecalculateUVDistribution(int channel) { }
     public void RecalculateUVDistribution(params int[] channels) { }
 
     public int GetIndexCount(int submesh) => 0;
     public int GetIndexStart(int submesh) => 0;
     public int GetBaseVertex(int submesh) => 0;
-    public SubmeshDescriptor GetSubMesh(int submesh) => default;
+    public new SubmeshDescriptor GetSubMesh(int submesh) => default;
 
     public void SetIndexBufferData<T>(NativeArray<T> data, int indexStart, int indexCount, int submesh = 0) where T : struct { }
     public void SetVertexBufferData<T>(NativeArray<T> data, int start, int count, int stream = 0) where T : struct { }

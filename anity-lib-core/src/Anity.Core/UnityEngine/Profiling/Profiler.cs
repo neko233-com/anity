@@ -78,6 +78,28 @@ public static class Profiler
     return Unity.Profiling.Profiler.GetAllocatedMemoryForGraphicsDriver();
   }
 
+  public static long usedHeapSizeLong => GetTotalAllocatedMemoryLong();
+  public static long residentMemorySizeLong => GetTotalReservedMemoryLong();
+  public static long monoUsedSizeLong => GetMonoUsedSizeLong();
+
+  public static void SetTempAllocatorSize(int size)
+  {
+    _ = size;
+  }
+
+  public static void AddFrames(int count)
+  {
+    _ = count;
+  }
+
+  public static void BeginThreadProfiling(string threadGroupName, string threadName)
+  {
+    _ = threadGroupName;
+    _ = threadName;
+  }
+
+  public static void EndThreadProfiling() { }
+
   public static void AddFramesFromFile(string filepath)
   {
     Unity.Profiling.Profiler.AddFramesFromFile(filepath);

@@ -17,6 +17,26 @@ public readonly struct Quaternion
 
   public static Quaternion identity => new Quaternion(0f, 0f, 0f, 1f);
 
+  public Vector3 eulerAngles
+  {
+    get
+    {
+      float sinp = 2f * (w * y - z * x);
+      float pitch;
+      if (MathF.Abs(sinp) >= 1f)
+        pitch = Math.Sign(sinp) * (MathF.PI / 2f);
+      else
+        pitch = MathF.Asin(sinp);
+      float siny_cosp = 2f * (w * z + x * y);
+      float cosy_cosp = 1f - 2f * (y * y + z * z);
+      float yaw = MathF.Atan2(siny_cosp, cosy_cosp);
+      float sinx_cosp = 2f * (w * x + y * z);
+      float cosx_cosp = 1f - 2f * (x * x + y * y);
+      float roll = MathF.Atan2(sinx_cosp, cosx_cosp);
+      return new Vector3(pitch * Mathf.Rad2Deg, yaw * Mathf.Rad2Deg, roll * Mathf.Rad2Deg);
+    }
+  }
+
   public static Quaternion Euler(float x, float y, float z)
   {
     var radX = x * (MathF.PI / 180f);
@@ -73,6 +93,17 @@ public readonly struct Quaternion
       var inv = 1f / mag;
       return new Quaternion(x * inv, y * inv, z * inv, w * inv);
     }
+  }
+
+  public static Quaternion AngleAxis(float angle, Vector3 axis)
+  {
+    if (axis.sqrMagnitude < 1e-6f) return identity;
+    axis = axis.normalized;
+    float rad = angle * (MathF.PI / 180f);
+    float halfRad = rad * 0.5f;
+    float s = MathF.Sin(halfRad);
+    float c = MathF.Cos(halfRad);
+    return new Quaternion(axis.x * s, axis.y * s, axis.z * s, c);
   }
 
   public static Quaternion LookRotation(Vector3 forward)
