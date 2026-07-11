@@ -19,6 +19,9 @@ public class BuildSummary
   public string? name { get; set; }
   public BuildResult result { get; set; } = BuildResult.Unknown;
   public Guid buildGuid { get; set; }
+  public BuildTarget platform { get; set; }
+  public BuildTargetGroup platformGroup { get; set; }
+  public string platformDefaultExtension { get; set; }
 }
 
 public class BuildStep

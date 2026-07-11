@@ -6,11 +6,16 @@ namespace UnityEngine;
 
 public static class Application
 {
+  private static RuntimePlatform? _overridePlatform;
   public static string dataPath => AppContext.BaseDirectory;
   public static string streamingAssetsPath => Path.Combine(AppContext.BaseDirectory, "StreamingAssets");
   public static string persistentDataPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Anity");
   public static string temporaryCachePath => Path.GetTempPath();
-  public static RuntimePlatform platform => RuntimePlatformFromOS();
+  public static RuntimePlatform platform
+  {
+    get => _overridePlatform ?? GetRuntimePlatform();
+    set => _overridePlatform = value;
+  }
   public static bool isPlaying => true;
   public static bool isEditor => false;
   public static bool isFocused { get; set; } = true;
@@ -134,7 +139,7 @@ public static class Application
     pauseStatusChanged?.Invoke(pause);
   }
 
-  private static RuntimePlatform RuntimePlatformFromOS()
+  private static RuntimePlatform GetRuntimePlatform()
   {
     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return RuntimePlatform.WindowsPlayer;
     if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return RuntimePlatform.OSXPlayer;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using UnityEditor.Build.Reporting;
 
@@ -22,16 +23,30 @@ public static class BuildPipeline
 
   public static BuildReport BuildPlayer(BuildPlayerOptions buildPlayerOptions)
   {
+    var sw = Stopwatch.StartNew();
+    var target = buildPlayerOptions.target;
+    var group = buildPlayerOptions.targetGroup ?? EditorUserBuildSettings.BuildTargetToBuildTargetGroup(target);
+    var ext = GetPlatformExtension(target);
+    var outputPath = NormalizeOutputPath(buildPlayerOptions.locationPathName, target, ext);
+
+    if (!string.IsNullOrEmpty(Path.GetDirectoryName(outputPath)))
+      Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+
+    var sceneCount = buildPlayerOptions.scenes?.Length ?? 0;
     var report = new BuildReport
     {
       summary =
       {
         result = BuildResult.Succeeded,
-        outputPath = NormalizePath(buildPlayerOptions.locationPathName),
-        totalSize = 0L,
+        outputPath = outputPath,
+        totalSize = (ulong)(sceneCount * 10L * 1024 * 1024),
         totalTime = TimeSpan.Zero,
         totalErrors = 0,
-        totalWarnings = 0
+        totalWarnings = 0,
+        platform = target,
+        platformGroup = group,
+        platformDefaultExtension = ext,
+        buildGuid = Guid.NewGuid()
       }
     };
 
@@ -41,8 +56,29 @@ public static class BuildPipeline
       report.summary.totalErrors = 1;
     }
 
+    sw.Stop();
+    report.summary.totalTime = sw.Elapsed;
     _lastBuildReports[buildPlayerOptions.locationPathName ?? string.Empty] = report;
     return report;
+  }
+
+  private static string GetPlatformExtension(BuildTarget target) => target switch
+  {
+    BuildTarget.StandaloneWindows or BuildTarget.StandaloneWindows64 => ".exe",
+    BuildTarget.Android => ".apk",
+    BuildTarget.StandaloneOSX => ".app",
+    BuildTarget.StandaloneLinux64 => ".x86_64",
+    _ => ""
+  };
+
+  private static string NormalizeOutputPath(string path, BuildTarget target, string ext)
+  {
+    if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+    var normalized = NormalizePath(path);
+    if (target == BuildTarget.WebGL || target == BuildTarget.iOS) return normalized;
+    if (!string.IsNullOrEmpty(ext) && !normalized.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+      normalized += ext;
+    return normalized;
   }
 
   public static void BuildPlayer(BuildPlayerOptions options, Action<BuildReport>? callback)

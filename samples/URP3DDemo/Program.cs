@@ -1,11 +1,15 @@
 using System;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using UnityEditor;
+using UnityEditor.Build.Reporting;
 using Anity.Demos.URP3D;
 
 Console.WriteLine("=== Anity URP 3D Demo ===");
@@ -24,6 +28,8 @@ Console.WriteLine("[URP] Render pipeline configured");
 
 Application.targetFrameRate = 60;
 Application.runInBackground = true;
+
+EditorBuildSettings.scenes = new[] { new EditorBuildSettings.EditorBuildSettingsScene("Assets/Scenes/URP3DDemo.unity", true) };
 
 var scene = DemoScene.Build();
 SceneManager.SetActiveScene(scene);
@@ -76,3 +82,42 @@ Console.WriteLine($"ParticleSystems: {DemoScene.ParticleSystemCount}");
 Console.WriteLine($"Colliders: {DemoScene.ColliderCount}");
 Console.WriteLine($"AudioSources: {DemoScene.AudioSourceCount}");
 Console.WriteLine($"All API calls verified - Build PASSED");
+
+Console.WriteLine();
+Console.WriteLine("=== Multi-Platform Build Verification ===");
+
+var targets = new (BuildTarget target, string name, GraphicsDeviceType[] gfxAPIs)[]
+{
+    (BuildTarget.StandaloneWindows64, "Windows x64 (D3D12)", new[] { GraphicsDeviceType.Direct3D12, GraphicsDeviceType.Direct3D11 }),
+    (BuildTarget.StandaloneWindows64, "Windows x64 (Vulkan)", new[] { GraphicsDeviceType.Vulkan }),
+    (BuildTarget.iOS, "iOS (Metal)", new[] { GraphicsDeviceType.Metal }),
+    (BuildTarget.Android, "Android (Vulkan)", new[] { GraphicsDeviceType.Vulkan }),
+    (BuildTarget.Android, "Android (GLES3)", new[] { GraphicsDeviceType.OpenGLES3 }),
+    (BuildTarget.WebGL, "WebGL 2.0", new[] { GraphicsDeviceType.WebGL2 }),
+};
+
+int buildOK = 0, buildFail = 0;
+foreach (var (target, name, gfxAPIs) in targets)
+{
+    var group = EditorUserBuildSettings.BuildTargetToBuildTargetGroup(target);
+    PlayerSettings.SetGraphicsAPIs(group, gfxAPIs);
+    EditorUserBuildSettings.SwitchActiveBuildTarget(group, target);
+
+    string ext = target switch { BuildTarget.StandaloneWindows64 or BuildTarget.StandaloneWindows => ".exe", BuildTarget.Android => ".apk", BuildTarget.WebGL or BuildTarget.iOS => "", _ => "" };
+    string outPath = Path.Combine("Build", name.Replace(" ", "_").Replace("(", "").Replace(")", ""));
+    if (!string.IsNullOrEmpty(ext)) outPath += ext;
+    var outDir = Path.GetDirectoryName(outPath);
+    if (!string.IsNullOrEmpty(outDir)) Directory.CreateDirectory(outDir);
+
+    var scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
+    var opts = new BuildPlayerOptions { scenes = scenes, locationPathName = outPath, target = target, options = BuildOptions.None };
+    var report = BuildPipeline.BuildPlayer(opts);
+    var ok = report.summary.result == BuildResult.Succeeded;
+    Console.WriteLine($"  [{(ok ? "OK" : "FAIL")}] {name,-25} GFX={SystemInfo.graphicsDeviceType,-12} Platform={Application.platform,-13} Device={SystemInfo.deviceType} -> {report.summary.outputPath}");
+    if (ok) buildOK++; else buildFail++;
+}
+
+Console.WriteLine();
+Console.WriteLine($"Build results: {buildOK} passed, {buildFail} failed");
+if (buildFail == 0) Console.WriteLine("All platform builds PASSED");
+else Console.WriteLine("Some builds FAILED");

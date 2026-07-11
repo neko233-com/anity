@@ -18,6 +18,7 @@ public enum CopyTextureSupport
 public static class SystemInfo
 {
     private static string _deviceUniqueIdentifier;
+    internal static DeviceType? _overrideDeviceType;
 
     public static string deviceUniqueIdentifier
     {
@@ -33,7 +34,7 @@ public static class SystemInfo
 
     public static string deviceName => Environment.MachineName;
     public static string deviceModel => "Anity Device";
-    public static DeviceType deviceType => DeviceType.Desktop;
+    public static DeviceType deviceType => _overrideDeviceType ?? DeviceType.Desktop;
     public static string operatingSystem => RuntimeInformation.OSDescription;
     public static OperatingSystemFamily operatingSystemFamily => GetOSFamily();
     public static string processorType => RuntimeInformation.ProcessArchitecture.ToString();
@@ -44,9 +45,12 @@ public static class SystemInfo
     public static string graphicsDeviceVendor => "Anity";
     public static int graphicsDeviceID => 0;
     public static int graphicsDeviceVendorID => 0;
-    public static string graphicsDeviceVersion => "1.0";
+    public static string graphicsDeviceVersion => GetGraphicsDeviceVersion(graphicsDeviceType);
     public static int graphicsMemorySize => 4096;
-    public static GraphicsDeviceType graphicsDeviceType => GetGraphicsDeviceType();
+    public static GraphicsDeviceType? overrideGraphicsDeviceType { get; set; }
+    public static GraphicsDeviceType graphicsDeviceType => overrideGraphicsDeviceType ?? GetGraphicsDeviceType();
+    public static bool IsWebGL => graphicsDeviceType == GraphicsDeviceType.WebGL2 || graphicsDeviceType == GraphicsDeviceType.OpenGLES2;
+    public static bool IsMobile => deviceType == DeviceType.Handheld;
     public static int graphicsShaderLevel => 50;
     public static bool graphicsMultiThreaded => false;
     public static CopyTextureSupport copyTextureSupport => CopyTextureSupport.Basic | CopyTextureSupport.Copy3D | CopyTextureSupport.DifferentTypes | CopyTextureSupport.TextureToRT | CopyTextureSupport.RTToTexture;
@@ -116,6 +120,20 @@ public static class SystemInfo
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return GraphicsDeviceType.Metal;
         return GraphicsDeviceType.OpenGLCore;
     }
+
+    private static string GetGraphicsDeviceVersion(GraphicsDeviceType type) => type switch
+    {
+        GraphicsDeviceType.Direct3D11 => "11.0",
+        GraphicsDeviceType.Direct3D12 => "12.0",
+        GraphicsDeviceType.Vulkan => "Vulkan 1.3",
+        GraphicsDeviceType.Metal => "Apple GPU Family 8",
+        GraphicsDeviceType.OpenGLCore => "OpenGL 4.5",
+        GraphicsDeviceType.OpenGLES2 => "OpenGL ES 2.0",
+        GraphicsDeviceType.OpenGLES3 => "OpenGL ES 3.0",
+        GraphicsDeviceType.WebGL2 => "WebGL 2.0 (OpenGL ES 3.0)",
+        GraphicsDeviceType.Null => "Null",
+        _ => "Unknown"
+    };
 }
 
 public enum OperatingSystemFamily

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace UnityEditor;
 
@@ -15,6 +17,16 @@ public static class PlayerSettings
   {
     [BuildTargetGroup.Standalone] = ScriptingImplementation.Mono2x
   };
+
+  private static readonly Dictionary<BuildTargetGroup, GraphicsDeviceType[]> _graphicsAPIs = new()
+  {
+    [BuildTargetGroup.Standalone] = new[] { GraphicsDeviceType.Direct3D11, GraphicsDeviceType.Direct3D12, GraphicsDeviceType.Vulkan, GraphicsDeviceType.OpenGLCore },
+    [BuildTargetGroup.iOS] = new[] { GraphicsDeviceType.Metal },
+    [BuildTargetGroup.Android] = new[] { GraphicsDeviceType.Vulkan, GraphicsDeviceType.OpenGLES3, GraphicsDeviceType.OpenGLES2 },
+    [BuildTargetGroup.WebGL] = new[] { GraphicsDeviceType.WebGL2, GraphicsDeviceType.OpenGLES2 }
+  };
+
+  private static readonly Dictionary<BuildTargetGroup, bool> _useDefaultGraphicsAPIs = new();
 
   public static string productName { get; set; } = "Anity Product";
   public static string companyName { get; set; } = "Anity";
@@ -180,6 +192,31 @@ public static class PlayerSettings
   public static void Apply()
   {
   }
+
+  public static void SetGraphicsAPIs(BuildTargetGroup targetGroup, GraphicsDeviceType[]? apis)
+  {
+    if (apis == null || apis.Length == 0) { _useDefaultGraphicsAPIs[targetGroup] = true; return; }
+    _useDefaultGraphicsAPIs[targetGroup] = false;
+    _graphicsAPIs[targetGroup] = apis;
+  }
+
+  public static GraphicsDeviceType[] GetGraphicsAPIs(BuildTargetGroup targetGroup)
+  {
+    if (_graphicsAPIs.TryGetValue(targetGroup, out var apis)) return apis.ToArray();
+    return targetGroup switch
+    {
+      BuildTargetGroup.iOS => new[] { GraphicsDeviceType.Metal },
+      BuildTargetGroup.Android => new[] { GraphicsDeviceType.Vulkan, GraphicsDeviceType.OpenGLES3 },
+      BuildTargetGroup.WebGL => new[] { GraphicsDeviceType.WebGL2 },
+      _ => new[] { GraphicsDeviceType.Direct3D11 }
+    };
+  }
+
+  public static bool GetUseDefaultGraphicsAPIs(BuildTargetGroup targetGroup) =>
+    !_useDefaultGraphicsAPIs.TryGetValue(targetGroup, out var v) || v;
+
+  public static bool IsMobilePlatform(BuildTarget target) => target == BuildTarget.iOS || target == BuildTarget.Android;
+  public static bool IsBuildTargetSupported(BuildTargetGroup group) { _ = group; return true; }
 }
 
 public enum StandaloneBuildSubtarget
