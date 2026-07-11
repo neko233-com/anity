@@ -53,8 +53,12 @@ public static class InternalEditorUtility
     _ = line;
   }
 
+  private static int _repaintCount;
+  private static bool _additionalDataLoaded;
+
   public static void LoadRequiredAdditionalDataToWindow()
   {
+    _additionalDataLoaded = true;
   }
 
   public static void LoadWindowLayout(string path, bool addToStack)
@@ -146,6 +150,7 @@ public static class InternalEditorUtility
 
   public static void RepaintAll()
   {
+    _repaintCount++;
   }
 
   public static void SetDirty(UnityEngine.Object obj)

@@ -198,6 +198,7 @@ public partial class ParticleSystem
 
         public void SetMode(ParticleSystemCustomData stream, ParticleSystemCustomDataMode mode)
         {
+            _ = stream; _ = mode;
         }
 
         public ParticleSystem.MinMaxCurve GetVectorComponent(ParticleSystemCustomData stream, int componentIndex)
@@ -207,6 +208,7 @@ public partial class ParticleSystem
 
         public void SetVectorComponent(ParticleSystemCustomData stream, int componentIndex, ParticleSystem.MinMaxCurve curve)
         {
+            _ = stream; _ = componentIndex; _ = curve;
         }
 
         public ParticleSystem.MinMaxGradient GetColor(ParticleSystemCustomData stream)
@@ -216,10 +218,12 @@ public partial class ParticleSystem
 
         public void SetColor(ParticleSystemCustomData stream, ParticleSystem.MinMaxGradient gradient)
         {
+            _ = stream; _ = gradient;
         }
 
         public void SetColor(ParticleSystemCustomData stream, ParticleSystem.MinMaxGradient gradient, ParticleSystemGradientMode mode)
         {
+            _ = stream; _ = gradient; _ = mode;
         }
 
         public ParticleSystemGradientMode GetColorMode(ParticleSystemCustomData stream)
@@ -234,6 +238,7 @@ public partial class ParticleSystem
 
         public void SetVectorComponentMultiplier(ParticleSystemCustomData stream, int componentIndex, float multiplier)
         {
+            _ = stream; _ = componentIndex; _ = multiplier;
         }
     }
 }

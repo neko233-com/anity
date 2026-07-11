@@ -272,8 +272,48 @@ public class Animation : Behaviour, IEnumerable
         return clips.ToArray();
     }
 
-    public void StopLayer(int layer) { }
-    public void RewindLayer(int layer) { }
+    public void StopLayer(int layer)
+    {
+        bool hasLayer = false;
+        foreach (var state in _states.Values)
+        {
+            if (state.layer == layer)
+            {
+                state.enabled = false;
+                state.time = 0f;
+                state.normalizedTime = 0f;
+                hasLayer = true;
+                if (_playingState == state)
+                {
+                    _playingState = null;
+                }
+            }
+        }
+        if (layer == 0 || !hasLayer)
+        {
+            if (_playingState != null && _playingState.layer == layer)
+            {
+                _playingState = null;
+                _isPlaying = false;
+            }
+        }
+    }
+
+    public void RewindLayer(int layer)
+    {
+        foreach (var state in _states.Values)
+        {
+            if (state.layer == layer)
+            {
+                state.time = 0f;
+                state.normalizedTime = 0f;
+            }
+        }
+        if ((_playingState == null || _playingState.layer == layer) && layer == 0)
+        {
+            _time = 0f;
+        }
+    }
     public bool IsPlaying(int layer) { _ = layer; return isPlaying; }
 }
 

@@ -3,25 +3,6 @@ using System.Collections.Generic;
 
 namespace UnityEngine.Rendering;
 
-public abstract class RenderPipelineAsset
-{
-    protected abstract RenderPipeline CreatePipeline();
-    public virtual Type pipelineType => GetType();
-
-    internal RenderPipeline InternalCreatePipeline()
-    {
-        return CreatePipeline();
-    }
-}
-
-public abstract class RenderPipeline : IDisposable
-{
-    internal static RenderPipeline current;
-    public virtual void Render(ScriptableRenderContext context, Camera[] cameras) { }
-    public virtual void Render(ScriptableRenderContext context, List<Camera> cameras) { }
-    public void Dispose() { }
-}
-
 public struct ScriptableCullingParameters
 {
     public Camera camera;
@@ -363,44 +344,6 @@ public enum ShadowMapPass
     Spot = 3,
 }
 
-[Flags]
-public enum RenderingLayerMask
-{
-    Default = 1,
-    Everything = ~0,
-    Nothing = 0,
-}
-
-public struct RenderingLayerMaskValue
-{
-    public uint value;
-    public static RenderingLayerMaskValue everything => new() { value = uint.MaxValue };
-    public static RenderingLayerMaskValue nothing => new() { value = 0 };
-}
-
-public enum ShaderRenderPipeline
-{
-    BuiltIn = 0,
-    Universal = 1,
-    HD = 2,
-}
-
-[Flags]
-public enum PerObjectData
-{
-    None = 0,
-    LightProbe = 1,
-    ReflectionProbes = 2,
-    LightProbeProxyVolume = 4,
-    Lightmaps = 8,
-    LightData = 16,
-    LightIndices = 32,
-    ReflectionProbeData = 64,
-    OcclusionProbe = 128,
-    OcclusionProbeProxyVolume = 256,
-    ShadowMask = 512
-}
-
 public struct VolumePriority : IComparable<VolumePriority>, IEquatable<VolumePriority>
 {
     private float _value;
@@ -475,58 +418,3 @@ public enum StencilUsage
     All = -1,
 }
 
-public enum CubemapFace
-{
-    Unknown = -1,
-    PositiveX = 0,
-    NegativeX = 1,
-    PositiveY = 2,
-    NegativeY = 3,
-    PositiveZ = 4,
-    NegativeZ = 5
-}
-
-public enum ShadowCastingMode2
-{
-    Off = 0,
-    On = 1,
-    TwoSided = 2,
-    ShadowsOnly = 3
-}
-
-public struct VisibleLight
-{
-    public Light light;
-    public LightType lightType;
-    public Color finalColor;
-    public Vector3 lightPosition;
-    public Vector3 lightDirection;
-    public float range;
-    public float spotAngle;
-    public int visibleLightIndex;
-    public int sortingKey;
-    public Rect screenRect;
-}
-
-public struct VisibleReflectionProbe
-{
-    public ReflectionProbe probe;
-    public Vector3 center;
-    public Vector3 size;
-    public int probeIndex;
-    public Bounds bounds;
-}
-
-public struct ShadowDrawingData
-{
-    public CullingResults cullingResults;
-    public int lightIndex;
-    public ShadowSplitData[] splits;
-}
-
-public struct ShadowSplitData
-{
-    public Matrix4x4 cullingMatrix;
-    public Vector4 cullingSphere;
-    public float shadowSplitNearPlaneOffset;
-}

@@ -6,6 +6,7 @@ namespace UnityEngine;
 public static class Lightmapping
 {
     private static readonly Dictionary<string, object> _settings = new();
+    private static readonly List<LightmapData> _bakedLightmaps = new();
     private static LightmapData[] _lightmaps = Array.Empty<LightmapData>();
     private static bool _isBaking;
     private static float _bakeProgress;
@@ -158,10 +159,19 @@ public static class Lightmapping
     public static event Action? onCompleted;
     public static event Action<bool>? onBakeCompleted;
 
-    public static void Clear() { }
-    public static void ClearDiskCache() { }
-    public static void ClearLightingDataAsset() { }
-    public static void ClearBakedData() { }
+    public static void Clear()
+    {
+        _bakedLightmaps.Clear();
+        _lightmaps = Array.Empty<LightmapData>();
+        Cancel();
+    }
+    public static void ClearDiskCache() { _bakedLightmaps.Clear(); }
+    public static void ClearLightingDataAsset() { _settings.Clear(); lightingDataAsset = null; }
+    public static void ClearBakedData()
+    {
+        _bakedLightmaps.Clear();
+        _lightmaps = Array.Empty<LightmapData>();
+    }
 
     public static void Bake()
     {

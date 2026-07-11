@@ -22,6 +22,9 @@ public partial class Mesh : Object
     private MeshTopology _topology = MeshTopology.Triangles;
     private bool _isReadable = true;
     private IndexFormat _indexFormat = IndexFormat.UInt16;
+    private bool _isDynamic;
+    private bool _blendShapesDirty;
+    private bool _optimized;
 
     public string name { get; set; } = string.Empty;
     public bool isReadable { get => _isReadable; set => _isReadable = value; }
@@ -156,9 +159,9 @@ public partial class Mesh : Object
         indexBufferSize = 0;
     }
 
-    public void ClearBlendShapes() { }
+    public void ClearBlendShapes() { _blendShapesDirty = true; }
 
-    public void MarkDynamic() { }
+    public void MarkDynamic() { _isDynamic = true; }
 
     public void MarkModified()
     {
@@ -248,9 +251,9 @@ public partial class Mesh : Object
         _tangents.AddRange(tangents);
     }
 
-    public void Optimize() { }
-    public void OptimizeIndexBuffers() { }
-    public void OptimizeReorderVertexBuffer() { }
+    public void Optimize() { _optimized = true; }
+    public void OptimizeIndexBuffers() { _optimized = true; }
+    public void OptimizeReorderVertexBuffer() { _optimized = true; }
 
     public int[] GetTriangles(int submesh)
     {

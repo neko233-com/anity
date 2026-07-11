@@ -2,6 +2,8 @@ namespace UnityEngine.UI;
 
 public abstract class UIBehaviour : MonoBehaviour
 {
+  public RectTransform rectTransform => transform as RectTransform;
+
   protected virtual void Awake() {}
   protected virtual void OnEnable() {}
   protected virtual void OnDisable() {}

@@ -29,6 +29,31 @@ public struct Bounds
       point.z >= minP.z && point.z <= maxP.z;
   }
 
+  public void Encapsulate(Vector3 point)
+  {
+    var currentMin = min;
+    var currentMax = max;
+    currentMin.x = Mathf.Min(currentMin.x, point.x);
+    currentMin.y = Mathf.Min(currentMin.y, point.y);
+    currentMin.z = Mathf.Min(currentMin.z, point.z);
+    currentMax.x = Mathf.Max(currentMax.x, point.x);
+    currentMax.y = Mathf.Max(currentMax.y, point.y);
+    currentMax.z = Mathf.Max(currentMax.z, point.z);
+    SetMinMax(currentMin, currentMax);
+  }
+
+  public void Encapsulate(Bounds bounds)
+  {
+    Encapsulate(bounds.min);
+    Encapsulate(bounds.max);
+  }
+
+  public void SetMinMax(Vector3 min, Vector3 max)
+  {
+    center = (min + max) * 0.5f;
+    size = max - min;
+  }
+
   public override string ToString()
   {
     return $"Center={center}, Size={size}";

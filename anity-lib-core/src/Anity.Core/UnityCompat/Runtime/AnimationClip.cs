@@ -16,6 +16,7 @@ public class AnimationClip : Motion
     private float _length;
     private readonly List<AnimationCurveBinding> _bindings = new();
     private readonly List<AnimationEvent> _events = new();
+    private bool _quaternionContinuityEnsured;
 
     public AnimationClip()
     {
@@ -236,6 +237,7 @@ public class AnimationClip : Motion
 
     public void EnsureQuaternionContinuity()
     {
+        _quaternionContinuityEnsured = true;
     }
 
     public void ClearCurves()

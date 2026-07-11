@@ -246,8 +246,15 @@ public static class PrefabUtility
       return false;
     }
 
-    // Check if this is part of a prefab asset (not an instance)
-    return targetObject is GameObject go && _loadedPrefabs.ContainsValue(go);
+    var go = targetObject as GameObject ?? (targetObject as Component)?.gameObject;
+    return go is not null && _loadedPrefabs.ContainsValue(go);
+  }
+
+  public static bool IsPrefabAsset(Object targetObject)
+  {
+    if (targetObject is null) return false;
+    var assetPath = AssetDatabase.GetAssetPath(targetObject);
+    return !string.IsNullOrEmpty(assetPath) && assetPath.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase);
   }
 
   public static string SaveAsPrefabAsset(GameObject root, string savePath)

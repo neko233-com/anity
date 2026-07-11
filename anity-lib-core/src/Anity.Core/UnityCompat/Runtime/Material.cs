@@ -9,6 +9,7 @@ public class Material : Object
     private readonly HashSet<string> _keywords = new(StringComparer.OrdinalIgnoreCase);
     private Vector2 _mainTextureOffset;
     private Vector2 _mainTextureScale = Vector2.one;
+    private int _currentPass;
 
     public Shader? shader { get; set; }
     public int renderQueue { get; set; } = -1;
@@ -186,7 +187,7 @@ public class Material : Object
 
     public string GetPassName(int pass) => pass == 0 ? "FORWARD" : string.Empty;
     public int passCount => shader?.passCount ?? 1;
-    public void SetPass(int pass) { }
+    public void SetPass(int pass) { _currentPass = pass; }
 
     public string GetTag(string tag, bool searchFallbacks, string defaultValue) => defaultValue;
     public string GetTag(string tag, bool searchFallbacks) => string.Empty;

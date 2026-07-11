@@ -201,8 +201,80 @@ public sealed class CompositeCollider2D : Collider2D
     public CompositeCollider2D.GenerationType geometryType { get; set; } = CompositeCollider2D.GenerationType.Polygons;
     public float vertexDistance { get; set; } = 0.0005f;
     public float offsetDistance { get; set; } = 0.005f;
+    private List<Vector2[]> _paths = new();
+    private Vector2[] _generatedPoints = Array.Empty<Vector2>();
 
-    public void GenerateGeometry() { }
+    public int pathCount => _paths.Count;
+
+    public void GenerateGeometry()
+    {
+        _paths.Clear();
+        if (transform == null)
+        {
+            _generatedPoints = new Vector2[]
+            {
+                new Vector2(-0.5f, -0.5f),
+                new Vector2(0.5f, -0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(-0.5f, 0.5f)
+            };
+            _paths.Add(_generatedPoints);
+            return;
+        }
+
+        var colliders = GetComponents<Collider2D>();
+        var allPoints = new List<Vector2>();
+        foreach (var col in colliders)
+        {
+            if (col == this || col == null || !col.enabled) continue;
+            var shape = col.GetShape();
+            switch (shape.type)
+            {
+                case ColliderShapeType2D.Box:
+                    var half = shape.size * 0.5f;
+                    allPoints.Add(shape.offset + new Vector2(-half.x, -half.y));
+                    allPoints.Add(shape.offset + new Vector2(half.x, -half.y));
+                    allPoints.Add(shape.offset + new Vector2(half.x, half.y));
+                    allPoints.Add(shape.offset + new Vector2(-half.x, half.y));
+                    break;
+                case ColliderShapeType2D.Polygon:
+                case ColliderShapeType2D.Edge:
+                    if (shape.points != null && shape.points.Length > 0)
+                        allPoints.AddRange(shape.points);
+                    break;
+            }
+        }
+
+        if (allPoints.Count < 3)
+        {
+            _generatedPoints = new Vector2[]
+            {
+                new Vector2(-0.5f, -0.5f),
+                new Vector2(0.5f, -0.5f),
+                new Vector2(0.5f, 0.5f),
+                new Vector2(-0.5f, 0.5f)
+            };
+        }
+        else
+        {
+            _generatedPoints = allPoints.ToArray();
+        }
+        _paths.Add(_generatedPoints);
+    }
+
+    public int GetPath(int index, List<Vector2> points)
+    {
+        if (points == null || index < 0 || index >= _paths.Count) return 0;
+        points.Clear();
+        points.AddRange(_paths[index]);
+        return _paths[index].Length;
+    }
+
+    public Vector2[] GetPath(int index)
+    {
+        if (index < 0 || index >= _paths.Count) return Array.Empty<Vector2>();
+        return (Vector2[])_paths[index].Clone();
+    }
 
     public enum GenerationType
     {
@@ -212,7 +284,8 @@ public sealed class CompositeCollider2D : Collider2D
 
     internal override ColliderShape2D GetShape()
     {
-        return new ColliderShape2D(ColliderShapeType2D.Polygon, offset, Vector2.one, 0f);
+        if (_generatedPoints.Length == 0) GenerateGeometry();
+        return new ColliderShape2D(ColliderShapeType2D.Polygon, offset, Vector2.one, 0f, _generatedPoints, CapsuleDirection2D.Vertical, _paths);
     }
 }
 

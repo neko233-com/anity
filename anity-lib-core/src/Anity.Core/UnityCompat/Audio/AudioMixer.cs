@@ -7,6 +7,7 @@ namespace UnityEngine.Audio;
 public class AudioMixer : Object
 {
     private readonly AudioMixerController _controller;
+    private bool _trueSoundRestored;
 
     public AudioMixer()
     {
@@ -42,6 +43,7 @@ public class AudioMixer : Object
 
     public void RestoreTrueSound()
     {
+        _trueSoundRestored = true;
     }
 
     public void TransitionToSnapshots(AudioMixerSnapshot[] snapshots, float[] weights, float timeToReach)

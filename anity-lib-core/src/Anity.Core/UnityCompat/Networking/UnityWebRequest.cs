@@ -8,6 +8,7 @@ namespace UnityEngine.Networking;
 public class UnityWebRequest : IDisposable
 {
     private readonly Dictionary<string, string> _requestHeaders = new();
+    private readonly Dictionary<string, string> _responseHeaders = new();
     private bool _disposed;
 
     public string url { get; set; } = string.Empty;
@@ -95,6 +96,9 @@ public class UnityWebRequest : IDisposable
                 }
             }
 
+            _responseHeaders["Content-Type"] = downloadHandler is DownloadHandlerTexture ? "image/png" : "application/octet-stream";
+            _responseHeaders["Content-Length"] = (downloadedBytes).ToString();
+
             responseCode = 200;
             isDone = true;
             isNetworkError = false;
@@ -136,8 +140,19 @@ public class UnityWebRequest : IDisposable
         return new Dictionary<string, string>(_requestHeaders);
     }
 
+    public string GetResponseHeader(string name)
+    {
+        return _responseHeaders.TryGetValue(name, out var value) ? value : null;
+    }
+
+    public Dictionary<string, string> GetResponseHeaders()
+    {
+        return new Dictionary<string, string>(_responseHeaders);
+    }
+
     public void ClearCookieCache()
     {
+        _requestHeaders.Remove("Cookie");
     }
 
     public void ClearCookieCache(Uri uri)
@@ -222,6 +237,8 @@ public enum SecureProtocol
 
 public abstract class CertificateHandler : IDisposable
 {
+    private bool _disposed;
+
     protected abstract bool ValidateCertificate(byte[] certificateData);
 
     public void Dispose()
@@ -232,6 +249,8 @@ public abstract class CertificateHandler : IDisposable
 
     protected virtual void Dispose(bool disposing)
     {
+        _ = disposing;
+        _disposed = true;
     }
 }
 

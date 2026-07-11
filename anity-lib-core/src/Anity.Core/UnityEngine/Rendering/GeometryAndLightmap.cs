@@ -128,10 +128,26 @@ public struct SphericalHarmonicsL2
 
     public void AddAmbientLight(Color color)
     {
+        if (_coefficients == null) _coefficients = new float[27];
+        for (int c = 0; c < 3; c++)
+        {
+            float v = c == 0 ? color.r : c == 1 ? color.g : color.b;
+            _coefficients[c * 9 + 0] += v;
+        }
     }
 
     public void AddDirectionalLight(Vector3 direction, Color color, float intensity)
     {
+        if (_coefficients == null) _coefficients = new float[27];
+        for (int c = 0; c < 3; c++)
+        {
+            float v = (c == 0 ? color.r : c == 1 ? color.g : color.b) * intensity;
+            int offset = c * 9;
+            _coefficients[offset + 0] += v;
+            _coefficients[offset + 1] += v * direction.y;
+            _coefficients[offset + 2] += v * direction.z;
+            _coefficients[offset + 3] += v * direction.x;
+        }
     }
 
     public static SphericalHarmonicsL2 operator +(SphericalHarmonicsL2 lhs, SphericalHarmonicsL2 rhs)

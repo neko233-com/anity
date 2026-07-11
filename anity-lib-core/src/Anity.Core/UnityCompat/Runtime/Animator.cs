@@ -27,6 +27,19 @@ public class Animator : Behaviour
     private Quaternion _deltaRotation = Quaternion.identity;
     private Vector3 _velocity;
     private Vector3 _angularVelocity;
+    private float _lookAtWeight;
+    private float _bodyWeight;
+    private float _headWeight;
+    private float _eyesWeight;
+    private float _clampWeight;
+    private readonly Dictionary<HumanBodyBones, Quaternion> _boneRotations = new();
+    private readonly Dictionary<HumanBodyBones, Transform> _boneTransforms = new();
+    private AvatarTarget _target;
+    private float _targetNormalizedTime;
+    private TargetRotation _targetRotation;
+    private TargetPosition _targetPosition;
+    private readonly Dictionary<AvatarIKGoal, IkData> _ikGoals = new();
+    private readonly Dictionary<AvatarIKHint, IkHintData> _ikHints = new();
 
     public RuntimeAnimatorController controller
     {
@@ -210,13 +223,22 @@ public class Animator : Behaviour
 
     public AnimatorTransitionInfo GetAnimatorTransitionInfo(int layerIndex)
     {
-        if (IsInTransition(layerIndex))
+        if (IsInTransition(layerIndex) && _nextStates.TryGetValue(layerIndex, out var nextState))
         {
             float dur = 0f;
             _transitionDurations.TryGetValue(layerIndex, out dur);
             float time = 0f;
             _transitionTimes.TryGetValue(layerIndex, out time);
-            return new AnimatorTransitionInfo();
+            float normalizedTime = dur > 0f ? 1f - (time / dur) : 0f;
+            return new AnimatorTransitionInfo(
+                nextState.nameHash,
+                nextState.nameHash,
+                nextState.nameHash,
+                true,
+                normalizedTime,
+                dur,
+                false
+            );
         }
         return default;
     }
@@ -529,6 +551,11 @@ public class Animator : Behaviour
 
     private void SampleClipWithWeight(AnimationClip clip, float time, float weight)
     {
+        if (clip == null || gameObject == null) return;
+        if (weight > 0.001f)
+        {
+            clip.SampleAnimation(gameObject, time);
+        }
     }
 
     private void SampleBlendTree(BlendTree bt, float time, float weight)
@@ -695,16 +722,76 @@ public class Animator : Behaviour
     }
 
     public void SetLookAtPosition(Vector3 lookAtPosition) { this.lookAtPosition = lookAtPosition; }
-    public void SetLookAtWeight(float weight) { }
-    public void SetLookAtWeight(float weight, float bodyWeight) { }
-    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight) { }
-    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight, float eyesWeight) { }
-    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight, float eyesWeight, float clampWeight) { }
+    public void SetLookAtWeight(float weight)
+    {
+        _lookAtWeight = Mathf.Clamp01(weight);
+        _bodyWeight = 0f;
+        _headWeight = 1f;
+        _eyesWeight = 0f;
+        _clampWeight = 0.5f;
+    }
+
+    public void SetLookAtWeight(float weight, float bodyWeight)
+    {
+        _lookAtWeight = Mathf.Clamp01(weight);
+        _bodyWeight = Mathf.Clamp01(bodyWeight);
+        _headWeight = 1f;
+        _eyesWeight = 0f;
+        _clampWeight = 0.5f;
+    }
+
+    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight)
+    {
+        _lookAtWeight = Mathf.Clamp01(weight);
+        _bodyWeight = Mathf.Clamp01(bodyWeight);
+        _headWeight = Mathf.Clamp01(headWeight);
+        _eyesWeight = 0f;
+        _clampWeight = 0.5f;
+    }
+
+    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight, float eyesWeight)
+    {
+        _lookAtWeight = Mathf.Clamp01(weight);
+        _bodyWeight = Mathf.Clamp01(bodyWeight);
+        _headWeight = Mathf.Clamp01(headWeight);
+        _eyesWeight = Mathf.Clamp01(eyesWeight);
+        _clampWeight = 0.5f;
+    }
+
+    public void SetLookAtWeight(float weight, float bodyWeight, float headWeight, float eyesWeight, float clampWeight)
+    {
+        _lookAtWeight = Mathf.Clamp01(weight);
+        _bodyWeight = Mathf.Clamp01(bodyWeight);
+        _headWeight = Mathf.Clamp01(headWeight);
+        _eyesWeight = Mathf.Clamp01(eyesWeight);
+        _clampWeight = Mathf.Clamp01(clampWeight);
+    }
+
     public bool LookAtPosition(Vector3 position, float weight) => false;
 
-    public Transform GetBoneTransform(HumanBodyBones humanBoneId) => null;
-    public void SetBoneLocalRotation(HumanBodyBones humanBoneId, Quaternion rotation) { }
-    public void ApplyBuiltinRootMotion() { }
+    public Transform GetBoneTransform(HumanBodyBones humanBoneId)
+    {
+        _boneTransforms.TryGetValue(humanBoneId, out var t);
+        return t;
+    }
+
+    public void SetBoneLocalRotation(HumanBodyBones humanBoneId, Quaternion rotation)
+    {
+        _boneRotations[humanBoneId] = rotation;
+    }
+
+    public void ApplyBuiltinRootMotion()
+    {
+        if (transform != null)
+        {
+            transform.localPosition += _rootPosition;
+            transform.localRotation = _rootRotation * transform.localRotation;
+        }
+        _deltaPosition = _rootPosition;
+        _deltaRotation = _rootRotation;
+        _rootPosition = Vector3.zero;
+        _rootRotation = Quaternion.identity;
+    }
 
     public bool HasState(int layerIndex, int stateID)
     {
@@ -721,18 +808,95 @@ public class Animator : Behaviour
         isMatchingTarget = false;
     }
 
-    public void SetTarget(AvatarTarget targetIndex, float targetNormalizedTime) { }
-    public TargetRotation GetTargetRotation() => default;
-    public TargetPosition GetTargetPosition() => default;
+    public void SetTarget(AvatarTarget targetIndex, float targetNormalizedTime)
+    {
+        _target = targetIndex;
+        _targetNormalizedTime = targetNormalizedTime;
+    }
 
-    public Vector3 IkPosition(AvatarIKGoal goal) => Vector3.zero;
-    public Quaternion IkRotation(AvatarIKGoal goal) => Quaternion.identity;
-    public void SetIkPosition(AvatarIKGoal goal, Vector3 position) { }
-    public void SetIkRotation(AvatarIKGoal goal, Quaternion rotation) { }
-    public void SetIkPositionWeight(AvatarIKGoal goal, float value) { }
-    public void SetIkRotationWeight(AvatarIKGoal goal, float value) { }
-    public void SetIkHint(AvatarIKHint hint, Vector3 position) { }
-    public void SetIkHintWeight(AvatarIKHint hint, float value) { }
+    public TargetRotation GetTargetRotation()
+    {
+        return _targetRotation;
+    }
+
+    public TargetPosition GetTargetPosition()
+    {
+        return _targetPosition;
+    }
+
+    public Vector3 IkPosition(AvatarIKGoal goal)
+    {
+        if (_ikGoals.TryGetValue(goal, out var data))
+            return data.position;
+        return Vector3.zero;
+    }
+
+    public Quaternion IkRotation(AvatarIKGoal goal)
+    {
+        if (_ikGoals.TryGetValue(goal, out var data))
+            return data.rotation;
+        return Quaternion.identity;
+    }
+
+    public void SetIkPosition(AvatarIKGoal goal, Vector3 position)
+    {
+        if (!_ikGoals.TryGetValue(goal, out var data))
+        {
+            data = new IkData();
+            _ikGoals[goal] = data;
+        }
+        data.position = position;
+    }
+
+    public void SetIkRotation(AvatarIKGoal goal, Quaternion rotation)
+    {
+        if (!_ikGoals.TryGetValue(goal, out var data))
+        {
+            data = new IkData();
+            _ikGoals[goal] = data;
+        }
+        data.rotation = rotation;
+    }
+
+    public void SetIkPositionWeight(AvatarIKGoal goal, float value)
+    {
+        if (!_ikGoals.TryGetValue(goal, out var data))
+        {
+            data = new IkData();
+            _ikGoals[goal] = data;
+        }
+        data.positionWeight = Mathf.Clamp01(value);
+    }
+
+    public void SetIkRotationWeight(AvatarIKGoal goal, float value)
+    {
+        if (!_ikGoals.TryGetValue(goal, out var data))
+        {
+            data = new IkData();
+            _ikGoals[goal] = data;
+        }
+        data.rotationWeight = Mathf.Clamp01(value);
+    }
+
+    public void SetIkHint(AvatarIKHint hint, Vector3 position)
+    {
+        if (!_ikHints.TryGetValue(hint, out var data))
+        {
+            data = new IkHintData();
+            _ikHints[hint] = data;
+        }
+        data.position = position;
+    }
+
+    public void SetIkHintWeight(AvatarIKHint hint, float value)
+    {
+        if (!_ikHints.TryGetValue(hint, out var data))
+        {
+            data = new IkHintData();
+            _ikHints[hint] = data;
+        }
+        data.weight = Mathf.Clamp01(value);
+    }
 }
 
 public struct MatchTargetWeightMask
@@ -757,6 +921,20 @@ public struct TargetPosition
 {
     public bool active;
     public Vector3 position;
+}
+
+public struct IkData
+{
+    public Vector3 position;
+    public Quaternion rotation;
+    public float positionWeight;
+    public float rotationWeight;
+}
+
+public struct IkHintData
+{
+    public Vector3 position;
+    public float weight;
 }
 
 public enum AvatarTarget

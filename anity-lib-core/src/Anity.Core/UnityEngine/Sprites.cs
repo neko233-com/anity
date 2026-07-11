@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace UnityEngine;
 
 public enum SpriteSortPoint
@@ -137,11 +139,14 @@ public class SpriteAtlas : Object
 public class SpriteAtlasManager
 {
     public static SpriteAtlasManager instance { get; } = new SpriteAtlasManager();
+    private readonly List<SpriteAtlas> _registeredAtlases = new();
 
     public event System.Action<string, System.Action<SpriteAtlas>> atlasRequested;
 
     public void Register(SpriteAtlas atlas)
     {
+        if (atlas != null && !_registeredAtlases.Contains(atlas))
+            _registeredAtlases.Add(atlas);
     }
 }
 

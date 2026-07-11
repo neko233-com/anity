@@ -13,6 +13,7 @@ namespace Unity.Collections
     private int m_MinIndex;
     private int m_MaxIndex;
     private bool m_DisposeOnJobCompletion;
+    private bool m_Disposed;
 
     public int Length => m_Length;
     public bool IsCreated => m_IsCreated;
@@ -33,6 +34,7 @@ namespace Unity.Collections
       m_MinIndex = 0;
       m_MaxIndex = length - 1;
       m_DisposeOnJobCompletion = false;
+      m_Disposed = false;
       if (options == NativeArrayOptions.ClearMemory)
       {
         Array.Clear(m_Data, 0, length);
@@ -48,6 +50,7 @@ namespace Unity.Collections
       m_MinIndex = 0;
       m_MaxIndex = m_Length - 1;
       m_DisposeOnJobCompletion = false;
+      m_Disposed = false;
     }
 
     public NativeArray(NativeArray<T> other, Allocator allocator)
@@ -60,15 +63,24 @@ namespace Unity.Collections
       m_MinIndex = 0;
       m_MaxIndex = m_Length - 1;
       m_DisposeOnJobCompletion = false;
+      m_Disposed = false;
     }
 
     public void Dispose()
     {
+      if (m_Disposed && (m_Allocator == Allocator.TempJob || m_Allocator == Allocator.Persistent))
+      {
+        throw new InvalidOperationException("NativeArray already disposed.");
+      }
       if (m_IsCreated)
       {
         m_Data = null;
         m_IsCreated = false;
         m_Length = 0;
+        if (m_Allocator == Allocator.TempJob || m_Allocator == Allocator.Persistent)
+        {
+          m_Disposed = true;
+        }
       }
     }
 
@@ -197,6 +209,7 @@ namespace Unity.Collections
     {
       private NativeArray<T> m_Array;
       private int m_Index;
+      private bool m_Disposed;
 
       public T Current => m_Array[m_Index];
       object System.Collections.IEnumerator.Current => Current;
@@ -218,7 +231,7 @@ namespace Unity.Collections
         m_Index = -1;
       }
 
-      public void Dispose() { }
+      public void Dispose() { m_Disposed = true; m_Index = -2; }
     }
   }
 
@@ -856,6 +869,7 @@ namespace Unity.Collections
     private NativeArray<T> m_Array;
     private int m_Start;
     private int m_Length;
+    private bool m_Disposed;
 
     public int Length => m_Length;
     public int Stride => 1;
@@ -898,6 +912,11 @@ namespace Unity.Collections
     public NativeSlice<T> Slice(int start, int length)
     {
       return new NativeSlice<T>(m_Array, m_Start + start, length);
+    }
+
+    public void Dispose()
+    {
+      m_Disposed = true;
     }
 
     public static implicit operator NativeSlice<T>(NativeArray<T> array)

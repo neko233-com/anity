@@ -9,16 +9,21 @@ namespace Anity.Core.Runtime.HotUpdate;
 
 internal sealed class DefaultAssemblyLoadContext : AssemblyLoadContext
 {
-  public DefaultAssemblyLoadContext(string name, bool isCollectible)
+  public DefaultAssemblyLoadContext(string name, bool isCollectible) : base()
   {
     _name = name;
     _isCollectible = isCollectible;
   }
   private readonly string _name;
   private readonly bool _isCollectible;
+  private bool _unloaded;
   public override string ToString() => _name;
   protected override Assembly Load(AssemblyName assemblyName) => null;
-  public void Unload() { }
+  public new void Unload()
+  {
+    if (_unloaded) return;
+    _unloaded = true;
+  }
 }
 
 public sealed class HotUpdateContext : IDisposable

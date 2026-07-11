@@ -9,6 +9,7 @@ public static class EditorApplication
   private static readonly DateTime _start = DateTime.UtcNow;
   private static readonly Queue<Action> _delayQueue = new();
   private static bool _isPlayerChanging;
+  private static int _lockCount;
 
   public static event Action? update;
   public static event Action? projectChanged;
@@ -92,8 +93,9 @@ public static class EditorApplication
     _ = menuPath;
   }
 
-  public static void LockReloadAssemblies() {}
-  public static void UnlockReloadAssemblies() {}
+  public static void LockReloadAssemblies() => _lockCount++;
+  public static void UnlockReloadAssemblies() { if (_lockCount > 0) _lockCount--; }
+  public static bool isAssemblyReloadLocked => _lockCount > 0;
 
   public static void LoadLevelInPlayMode(string levelName, bool mustReload = true)
   {

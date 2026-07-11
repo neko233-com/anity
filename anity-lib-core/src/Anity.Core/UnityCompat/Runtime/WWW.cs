@@ -42,7 +42,7 @@ public class WWW : IDisposable
     public AudioClip? audioClip { get; private set; }
     public MovieTexture? movie { get; private set; }
     public int size => bytes.Length;
-    public Dictionary<string, string> responseHeaders => _webRequest?.GetRequestHeaders() ?? new Dictionary<string, string>();
+    public Dictionary<string, string> responseHeaders => _webRequest?.GetResponseHeaders() ?? new Dictionary<string, string>();
 
     public WWW(string url)
     {
@@ -216,10 +216,12 @@ public class MovieTexture : Texture
     public bool isReadyToPlay => true;
     public bool loop { get; set; }
     public AudioClip audioClip { get; set; } = new AudioClip();
+    private bool _isPlaying;
+    private bool _isPaused;
 
-    public void Play() { }
-    public void Stop() { }
-    public void Pause() { }
+    public void Play() { _isPlaying = true; _isPaused = false; }
+    public void Stop() { _isPlaying = false; _isPaused = false; }
+    public void Pause() { _isPaused = true; }
 }
 
 public enum ThreadPriority

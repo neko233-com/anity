@@ -14,6 +14,7 @@ public static class PhysicsSceneExtensions
 
 public static class Physics
 {
+    private static bool _transformsSynced;
     public static Vector3 gravity
     {
         get => PhysicsWorld.gravity;
@@ -340,6 +341,7 @@ public static class Physics
 
     public static void SyncTransforms()
     {
+        _transformsSynced = true;
     }
 
     public static void Simulate(float deltaTime)

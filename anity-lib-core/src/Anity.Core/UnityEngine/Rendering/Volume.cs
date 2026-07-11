@@ -209,10 +209,12 @@ namespace UnityEngine.Rendering
 
     public virtual void Override(VolumeComponent state, float interpFactor)
     {
+      _ = state; _ = interpFactor;
     }
 
     public void SetAllOverridesTo(bool state)
     {
+      _ = state;
     }
   }
 
@@ -252,6 +254,7 @@ namespace UnityEngine.Rendering
 
     public void Interp(object from, object to, float t)
     {
+      _ = from; _ = to; _ = t;
     }
   }
 
@@ -481,6 +484,7 @@ namespace UnityEngine.Rendering
 
     void IDisposable.Dispose()
     {
+      Clear();
     }
   }
 
@@ -491,6 +495,7 @@ namespace UnityEngine.Rendering
 
     private VolumeStack m_Stack;
     private readonly List<Volume> m_Volumes = new();
+    private readonly List<VolumeStack> m_Stacks = new();
     private VolumeStack m_DefaultStack;
 
     public VolumeStack stack
@@ -510,8 +515,21 @@ namespace UnityEngine.Rendering
       m_DefaultStack = CreateStack();
     }
 
-    public VolumeStack CreateStack() => new VolumeStack();
-    public void DestroyStack(VolumeStack stack) { }
+    public VolumeStack CreateStack()
+    {
+      var s = new VolumeStack();
+      m_Stacks.Add(s);
+      return s;
+    }
+
+    public void DestroyStack(VolumeStack stack)
+    {
+      if (stack == null) return;
+      m_Stacks.Remove(stack);
+      if (m_Stack == stack) m_Stack = null;
+      if (m_DefaultStack == stack) m_DefaultStack = null;
+      (stack as IDisposable)?.Dispose();
+    }
 
     public void Register(Volume volume)
     {

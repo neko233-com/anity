@@ -76,8 +76,10 @@ public static class Profiler
     _ = filepath;
   }
 
+  private static int _frameMetaCount;
   public static void EmitFrameMeta()
   {
+    _frameMetaCount++;
   }
 
   public static void SetAreaEnabled(ProfilerArea area, params string[] channels)
@@ -154,7 +156,7 @@ public readonly struct ProfilerMarkerAutoScope : IDisposable
   }
 }
 
-public readonly struct ProfilerRecorder : IDisposable
+public struct ProfilerRecorder : IDisposable
 {
   private readonly string _statisticName;
   public readonly bool IsValid;
@@ -163,14 +165,17 @@ public readonly struct ProfilerRecorder : IDisposable
   {
     _statisticName = statisticName;
     IsValid = true;
-    sampleCount = 0;
+    _sampleCount = 0;
     _capacity = Math.Max(1, capacity);
     _lastValue = 0;
+    _disposed = false;
   }
 
   private readonly int _capacity;
   private readonly long _lastValue;
-  public long sampleCount { get; }
+  private long _sampleCount;
+  private bool _disposed;
+  public long sampleCount => _sampleCount;
   public long LastValue => _lastValue;
 
   public static ProfilerRecorder StartNew(ProfilerCategory category, string statName, int capacity = 0)
@@ -182,5 +187,11 @@ public readonly struct ProfilerRecorder : IDisposable
 
   public long LastValueAsLong() => _lastValue;
   public long GetSample(int index) => index < 0 ? 0 : _lastValue;
-  public void Dispose() {}
+  public void Dispose()
+  {
+    if (!_disposed)
+    {
+      _disposed = true;
+    }
+  }
 }

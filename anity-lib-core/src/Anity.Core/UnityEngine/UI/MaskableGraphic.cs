@@ -51,6 +51,37 @@ public abstract class MaskableGraphic : Graphic, IMaskable, IMaterialModifier, I
   public virtual void RecalculateMasking()
   {
     _shouldRecalculateStencil = true;
+    SetMaterialDirty();
+  }
+
+  public virtual void RecalculateClipping()
+  {
+    if (!IsActive())
+      return;
+
+    _maskCanvas = null;
+    _maskCanvasRenderer = null;
+    _maskForced = false;
+    _stencilDepth = 0;
+
+    var t = transform;
+    while (t != null)
+    {
+      var mask = t.GetComponent<Mask>();
+      if (mask != null && mask.MaskEnabled())
+      {
+        _maskCanvas = mask.canvas;
+        _maskCanvasRenderer = mask.canvasRenderer;
+        _maskForced = true;
+        _stencilDepth++;
+      }
+      var rectMask = t.GetComponent<RectMask2D>();
+      if (rectMask != null)
+      {
+        _stencilDepth++;
+      }
+      t = t.parent;
+    }
   }
 
   public virtual Material GetModifiedMaterial(Material baseMaterial)
@@ -72,6 +103,12 @@ public abstract class MaskableGraphic : Graphic, IMaskable, IMaterialModifier, I
   {
     _clipRect = clipRect;
     _clipRectValid = validRect;
+
+    if (canvasRenderer == null || canvasRenderer.cull == !validRect)
+      return;
+
+    var cull = !validRect || !clipRect.Overlaps(canvasRenderer is { } cr ? new Rect(cr.transform.position.x - 100f, cr.transform.position.y - 100f, 200f, 200f) : default);
+    canvasRenderer.cull = cull;
   }
 
   public virtual void SetClipRect(Rect value, bool validRect)
@@ -126,6 +163,7 @@ public interface IMaterialModifier
 
 public interface IClippable
 {
+  void RecalculateClipping();
   void Cull(Rect clipRect, bool validRect);
   void SetClipRect(Rect value, bool validRect);
   void SetClipSoftness(Vector2 clipSoftness);
@@ -176,6 +214,19 @@ public class Mask : MaskableGraphic, IClipper
 
   public virtual void PerformClipping()
   {
+    if (!MaskEnabled())
+      return;
+
+    var clippables = GetComponentsInChildren<IClippable>();
+    var rect = rectTransform != null ? rectTransform.rect : default;
+    var validRect = isActiveAndEnabled;
+
+    foreach (var clippable in clippables)
+    {
+      if (clippable == this) continue;
+      clippable.Cull(rect, validRect);
+      clippable.SetClipRect(rect, validRect);
+    }
   }
 
   protected override void OnEnable()

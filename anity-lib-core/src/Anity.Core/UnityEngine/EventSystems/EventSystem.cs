@@ -132,8 +132,20 @@ public class EventSystem : UIBehaviour
     {
         for (var i = 0; i < _systemInputModules.Count; i++)
         {
-            if (_systemInputModules[i] is not null)
-                _systemInputModules[i].UpdateModule();
+            var module = _systemInputModules[i];
+            if (module is null) continue;
+            module.UpdateModule();
+            if (module.IsModuleSupported() && module.ShouldActivateModule())
+            {
+                if (_currentModule != module)
+                {
+                    if (_currentModule != null)
+                        _currentModule.DeactivateModule();
+                    _currentModule = module;
+                    _currentModule.ActivateModule();
+                }
+                _currentModule.Process();
+            }
         }
     }
 
@@ -146,10 +158,22 @@ public class EventSystem : UIBehaviour
             if (module != null)
             {
                 _systemInputModules.Add(module);
-                _currentModule ??= module;
             }
         }
-        _currentModule ??= FindObjectOfType<BaseInputModule>();
+        if (_systemInputModules.Count > 0)
+        {
+            _currentModule = _systemInputModules[0];
+            _currentModule.ActivateModule();
+        }
+        else
+        {
+            _currentModule = FindObjectOfType<BaseInputModule>();
+            if (_currentModule != null)
+            {
+                _systemInputModules.Add(_currentModule);
+                _currentModule.ActivateModule();
+            }
+        }
     }
 
     public void UpdateRaycasters()

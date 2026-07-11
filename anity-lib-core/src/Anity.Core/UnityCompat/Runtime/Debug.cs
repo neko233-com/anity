@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace UnityEngine;
 
@@ -139,15 +141,32 @@ internal class ConsoleLogHandler : ILogHandler
   }
 }
 
+public struct DebugLine
+{
+  public Vector3 start;
+  public Vector3 end;
+  public Color color;
+  public float duration;
+  public bool depthTest;
+}
+
 public static class Debug
 {
   private static readonly ILogger _unityLogger = new Logger(new ConsoleLogHandler());
+  private static readonly List<DebugLine> _debugLines = new();
 
   public static ILogger unityLogger => _unityLogger;
   public static ILogger logger => _unityLogger;
   public static bool isDebugBuild => true;
   public static bool developerConsoleEnabled => true;
   public static bool isDebugBuildEnabled => true;
+
+  internal static IReadOnlyList<DebugLine> debugLines => _debugLines.AsReadOnly();
+
+  internal static void ClearLines()
+  {
+    _debugLines.Clear();
+  }
 
   public static void Log(object? message) => unityLogger.Log(LogType.Log, message);
   public static void Log(object? message, Object? context) => unityLogger.Log(LogType.Log, message, context);
@@ -186,16 +205,58 @@ public static class Debug
   public static void LogErrorFormat(string format, params object[] args) => unityLogger.LogErrorFormat(format, args);
   public static void LogFormat(LogType logType, Object? context, string format, params object[] args) => unityLogger.LogFormat(logType, context, format, args);
 
-  public static void DrawLine(Vector3 start, Vector3 end) {}
-  public static void DrawLine(Vector3 start, Vector3 end, Color color) {}
-  public static void DrawLine(Vector3 start, Vector3 end, Color color, float duration) {}
-  public static void DrawLine(Vector3 start, Vector3 end, Color color, float duration, bool depthTest) {}
-  public static void DrawRay(Vector3 start, Vector3 dir) {}
-  public static void DrawRay(Vector3 start, Vector3 dir, Color color) {}
-  public static void DrawRay(Vector3 start, Vector3 dir, Color color, float duration) {}
-  public static void DrawRay(Vector3 start, Vector3 dir, Color color, float duration, bool depthTest) {}
+  public static void DrawLine(Vector3 start, Vector3 end)
+  {
+    DrawLine(start, end, Color.white, 0f, true);
+  }
 
-  public static void Break() {}
+  public static void DrawLine(Vector3 start, Vector3 end, Color color)
+  {
+    DrawLine(start, end, color, 0f, true);
+  }
+
+  public static void DrawLine(Vector3 start, Vector3 end, Color color, float duration)
+  {
+    DrawLine(start, end, color, duration, true);
+  }
+
+  public static void DrawLine(Vector3 start, Vector3 end, Color color, float duration, bool depthTest)
+  {
+    _debugLines.Add(new DebugLine
+    {
+      start = start,
+      end = end,
+      color = color,
+      duration = duration,
+      depthTest = depthTest
+    });
+  }
+
+  public static void DrawRay(Vector3 start, Vector3 dir)
+  {
+    DrawLine(start, start + dir, Color.white, 0f, true);
+  }
+
+  public static void DrawRay(Vector3 start, Vector3 dir, Color color)
+  {
+    DrawLine(start, start + dir, color, 0f, true);
+  }
+
+  public static void DrawRay(Vector3 start, Vector3 dir, Color color, float duration)
+  {
+    DrawLine(start, start + dir, color, duration, true);
+  }
+
+  public static void DrawRay(Vector3 start, Vector3 dir, Color color, float duration, bool depthTest)
+  {
+    DrawLine(start, start + dir, color, duration, depthTest);
+  }
+
+  public static void Break()
+  {
+    Debugger.Break();
+  }
+
   public static void DebugBreak() => Break();
   public static void LogAssertionFormat(string format, params object[] args) => unityLogger.LogFormat(LogType.Assert, format, args);
 }

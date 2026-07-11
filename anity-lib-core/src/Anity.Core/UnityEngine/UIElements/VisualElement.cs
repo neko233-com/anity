@@ -832,9 +832,39 @@ public class BindableElement : VisualElement, IBinding
   public IBinding binding { get; set; }
   public string path { get; set; }
 
-  public virtual void PreUpdate() { }
-  public virtual void Update() { }
-  public virtual void Release() { }
+  public virtual void PreUpdate()
+  {
+    if (binding != null)
+      binding.PreUpdate();
+    for (var i = 0; i < childCount; i++)
+    {
+      if (ElementAt(i) is IBinding childBinding)
+        childBinding.PreUpdate();
+    }
+  }
+
+  public virtual void Update()
+  {
+    if (binding != null)
+      binding.Update();
+    for (var i = 0; i < childCount; i++)
+    {
+      if (ElementAt(i) is IBinding childBinding)
+        childBinding.Update();
+    }
+  }
+
+  public virtual void Release()
+  {
+    if (binding != null)
+      binding.Release();
+    for (var i = 0; i < childCount; i++)
+    {
+      if (ElementAt(i) is IBinding childBinding)
+        childBinding.Release();
+    }
+  }
+
   public virtual bool IsDirty() => false;
 }
 

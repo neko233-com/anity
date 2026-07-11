@@ -5,6 +5,7 @@ namespace UnityEngine;
 public class Texture : Object
 {
     private string _name = string.Empty;
+    private uint _updateCount;
 
     public new string name
     {
@@ -34,6 +35,7 @@ public class Texture : Object
 
     public virtual void IncrementUpdateCount()
     {
+        _updateCount++;
     }
 
     public static int GenerateMipsCount(int w, int h)

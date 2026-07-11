@@ -97,28 +97,11 @@ namespace UnityEngine.Rendering.Universal
 
     public UniversalRenderPipeline() { }
 
-    public override void Render(ScriptableRenderContext context, Camera[] cameras)
+    protected override void ExecuteRender(ScriptableRenderContext context, Camera camera)
     {
-      BeginFrameRendering(context, cameras);
-      foreach (var camera in cameras)
-      {
-        BeginCameraRendering(context, camera);
-        RenderSingleCamera(context, camera);
-        EndCameraRendering(context, camera);
-      }
-      EndFrameRendering(context, cameras);
-    }
-
-    public override void Render(ScriptableRenderContext context, List<Camera> cameras)
-    {
-      BeginFrameRendering(context, cameras);
-      foreach (var camera in cameras)
-      {
-        BeginCameraRendering(context, camera);
-        RenderSingleCamera(context, camera);
-        EndCameraRendering(context, camera);
-      }
-      EndFrameRendering(context, cameras);
+      beginCameraRendering?.Invoke(context, camera);
+      RenderSingleCamera(context, camera);
+      endCameraRendering?.Invoke(context, camera);
     }
 
     public static void RenderSingleCamera(ScriptableRenderContext context, Camera camera)
@@ -129,26 +112,6 @@ namespace UnityEngine.Rendering.Universal
     public static event Action<ScriptableRenderContext, Camera> endCameraRendering;
     public static event Action<ScriptableRenderContext, IList<Camera>> beginFrameRendering;
     public static event Action<ScriptableRenderContext, IList<Camera>> endFrameRendering;
-
-    private void BeginCameraRendering(ScriptableRenderContext context, Camera camera)
-    {
-      beginCameraRendering?.Invoke(context, camera);
-    }
-
-    private void EndCameraRendering(ScriptableRenderContext context, Camera camera)
-    {
-      endCameraRendering?.Invoke(context, camera);
-    }
-
-    private void BeginFrameRendering(ScriptableRenderContext context, IList<Camera> cameras)
-    {
-      beginFrameRendering?.Invoke(context, cameras);
-    }
-
-    private void EndFrameRendering(ScriptableRenderContext context, IList<Camera> cameras)
-    {
-      endFrameRendering?.Invoke(context, cameras);
-    }
   }
 
   public enum ShadowQuality
@@ -199,5 +162,24 @@ namespace UnityEngine.Rendering.Universal
     _2xBilinear,
     _4xBox,
     _4xBilinear
+  }
+
+  public struct CameraData
+  {
+    public Camera camera;
+    public RenderTextureDescriptor cameraTargetDescriptor;
+    public bool isHdrEnabled;
+    public bool isSceneViewCamera;
+    public int msaaSamples;
+    public float renderScale;
+  }
+
+  public struct RenderingData
+  {
+    public CameraData cameraData;
+    public CullingResults cullResults;
+    public bool supportsDynamicBatching;
+    public bool supportsInstancing;
+    public PerObjectData perObjectData;
   }
 }

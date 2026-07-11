@@ -127,8 +127,10 @@ public partial class ParticleSystem : Component
 
     public void Emit(ParticleSystem.EmitParams emitParams, int count)
     {
-        _ = emitParams;
-        Emit(count);
+        for (int i = 0; i < count; i++)
+        {
+            EmitParticle(emitParams);
+        }
     }
 
     public void Simulate(float t)
@@ -151,15 +153,20 @@ public partial class ParticleSystem : Component
         float deltaTime = t - _time;
         if (deltaTime > 0)
         {
+            bool wasPlaying = _isPlaying;
+            _isPlaying = true;
             InternalSimulate(deltaTime);
+            if (!wasPlaying && !_isPaused)
+            {
+                _isPlaying = false;
+                _isStopped = true;
+            }
         }
         _time = t;
     }
 
     private void InternalSimulate(float deltaTime)
     {
-        if (!_isPlaying && !_isPaused) return;
-
         if (main.loop)
         {
             while (_time >= main.duration)
@@ -190,6 +197,7 @@ public partial class ParticleSystem : Component
             }
         }
 
+        float normalizedLifetime = 0f;
         for (int i = _particles.Count - 1; i >= 0; i--)
         {
             var p = _particles[i];
@@ -200,15 +208,26 @@ public partial class ParticleSystem : Component
                 continue;
             }
 
+            normalizedLifetime = p.startLifetime > 0f ? 1f - (p.remainingLifetime / p.startLifetime) : 0f;
+
             Vector3 velocity = p.velocity;
-            velocity.y -= main.gravityModifier.Evaluate(p.startLifetime - p.remainingLifetime) * Physics.gravity.magnitude * deltaTime;
+            float gravity = main.gravityModifier.Evaluate(normalizedLifetime);
+            velocity.y -= gravity * 9.81f * deltaTime;
 
             if (forceOverLifetime.enabled)
             {
                 velocity += new Vector3(
-                    forceOverLifetime.x.Evaluate(0f),
-                    forceOverLifetime.y.Evaluate(0f),
-                    forceOverLifetime.z.Evaluate(0f)) * deltaTime;
+                    forceOverLifetime.x.Evaluate(normalizedLifetime),
+                    forceOverLifetime.y.Evaluate(normalizedLifetime),
+                    forceOverLifetime.z.Evaluate(normalizedLifetime)) * deltaTime;
+            }
+
+            if (velocityOverLifetime.enabled)
+            {
+                velocity += new Vector3(
+                    velocityOverLifetime.x.Evaluate(normalizedLifetime),
+                    velocityOverLifetime.y.Evaluate(normalizedLifetime),
+                    velocityOverLifetime.z.Evaluate(normalizedLifetime)) * deltaTime;
             }
 
             p.velocity = velocity;
@@ -219,15 +238,47 @@ public partial class ParticleSystem : Component
 
     private void EmitParticle(EmitParams @params)
     {
+        if (_particles.Count >= main.maxParticles) return;
+
+        bool useDefaults = @params.startLifetime <= 0f;
+        float random = UnityEngine.Random.value;
+        float lifetime = useDefaults ? main.startLifetime.Evaluate(random) : @params.startLifetime;
+        float size = useDefaults ? main.startSize.Evaluate(random) : @params.startSize;
+        float speed = useDefaults ? main.startSpeed.Evaluate(random) : @params.startSpeed;
+        Color color = main.startColor.Evaluate(0f);
+        float rotation = useDefaults ? main.startRotation.Evaluate(random) : @params.startRotation;
+        Vector3 pos = useDefaults ? transform.position : @params.position;
+        Vector3 vel = useDefaults ? UnityEngine.Random.insideUnitSphere * speed : @params.velocity;
+
+        if (@params.applyShapeToPosition && shape.enabled)
+        {
+            pos += UnityEngine.Random.insideUnitSphere * shape.radius;
+        }
+
         var particle = new Particle
         {
-            position = transform.position,
-            velocity = UnityEngine.Random.insideUnitSphere * main.startSpeed.Evaluate(UnityEngine.Random.value),
-            startSize = main.startSize.Evaluate(UnityEngine.Random.value),
-            startColor = main.startColor.Evaluate(UnityEngine.Random.value),
-            startLifetime = main.duration * UnityEngine.Random.value,
-            remainingLifetime = main.duration * UnityEngine.Random.value,
-            rotation = UnityEngine.Random.value * 360f,
+            position = pos,
+            velocity = vel,
+            startSize = size,
+            startColor = useDefaults ? new Color32((byte)(color.r * 255), (byte)(color.g * 255), (byte)(color.b * 255), (byte)(color.a * 255)) : @params.startColor,
+            startLifetime = lifetime,
+            remainingLifetime = lifetime,
+            rotation = rotation * Mathf.Rad2Deg,
+            startRotation = rotation,
+            startSpeed = speed,
+            lifetime = lifetime,
+            scale = Vector3.one * size,
+            totalSize3D = Vector3.one * size,
+            startSize3D = Vector3.one * size,
+            axisOfRotation = @params.axisOfRotation != Vector3.zero ? @params.axisOfRotation : Vector3.up,
+            seed = @params.randomSeed > 0f ? (uint)@params.randomSeed : (uint)UnityEngine.Random.Range(0, int.MaxValue),
+            meshIndex = 0,
+            angularVelocity = 0f,
+            rotationVelocity = 0f,
+            radialVelocity = 0f,
+            animatedVelocity = Vector3.zero,
+            rotation3D = new Vector3(0f, 0f, rotation),
+            angularVelocity3D = Vector3.zero,
         };
         _particles.Add(particle);
     }

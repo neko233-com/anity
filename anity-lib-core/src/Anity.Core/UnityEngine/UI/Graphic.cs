@@ -210,6 +210,18 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
   {
     switch (executing)
     {
+      case CanvasUpdate.Layout:
+        if (this is ILayoutElement layoutElement)
+        {
+          layoutElement.CalculateLayoutInputHorizontal();
+          layoutElement.CalculateLayoutInputVertical();
+        }
+        if (this is ILayoutController layoutController)
+        {
+          layoutController.SetLayoutHorizontal();
+          layoutController.SetLayoutVertical();
+        }
+        break;
       case CanvasUpdate.PreRender:
         if (_verticesDirty)
         {
@@ -222,8 +234,6 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
           _materialDirty = false;
         }
         break;
-      case CanvasUpdate.Layout:
-        break;
     }
   }
 
@@ -232,20 +242,50 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
 
   public override bool IsDestroyed() => this == null;
 
-  protected virtual void UpdateGeometry() { }
+  protected virtual void UpdateGeometry()
+  {
+    if (canvasRenderer is null) return;
+    var vh = new VertexHelper();
+    OnPopulateMesh(vh);
+    var modifiers = GetComponents<IMeshModifier>();
+    for (var i = 0; i < modifiers.Length; i++)
+    {
+      modifiers[i]?.ModifyMesh(vh);
+    }
+    var verts = new List<UIVertex>();
+    vh.GetUIVertexStream(verts);
+    canvasRenderer.SetVertices(verts);
+    vh.Dispose();
+  }
 
-  protected virtual void UpdateMaterial() { }
+  protected virtual void UpdateMaterial()
+  {
+    if (canvasRenderer is null) return;
+    var mat = material;
+    if (this is IMaterialModifier materialModifier)
+      mat = materialModifier.GetModifiedMaterial(mat);
+    canvasRenderer.SetMaterial(mat, 0);
+    canvasRenderer.SetColor(color);
+    if (mainTexture != null)
+      canvasRenderer.SetAlphaTexture(mainTexture);
+  }
 
   public virtual void CrossFadeColor(Color targetColor, float duration, bool ignoreTimeScale, bool useAlpha)
   {
+    color = targetColor;
   }
 
   public virtual void CrossFadeAlpha(float alpha, float duration, bool ignoreTimeScale)
   {
+    var c = color;
+    c.a = alpha;
+    color = c;
   }
 
   public virtual void OnCullStateChanged(bool cull)
   {
+    if (canvasRenderer != null)
+      canvasRenderer.cull = cull;
   }
 
   public virtual bool IsRaycastLocationValid(Vector2 sp, Camera? eventCamera)
@@ -257,9 +297,23 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
   {
   }
 
-  public virtual void OnFillVh(List<UIVertex> vh)
+  public virtual void OnPopulateMesh(VertexHelper vh)
   {
-    _ = vh;
+    vh.Clear();
+    var rect = rectTransform != null ? rectTransform.rect : new Rect(0f, 0f, 100f, 100f);
+    var color32 = (Color32)color;
+    AddQuad(vh, rect.xMin, rect.yMin, rect.xMax, rect.yMax, color32, 0f, 0f, 1f, 1f);
+  }
+
+  private static void AddQuad(VertexHelper vh, float xMin, float yMin, float xMax, float yMax, Color32 color, float uvMinX, float uvMinY, float uvMaxX, float uvMaxY)
+  {
+    var startIndex = vh.currentVertCount;
+    vh.AddVert(new Vector3(xMin, yMin, 0f), color, new Vector4(uvMinX, uvMinY, 0f, 1f));
+    vh.AddVert(new Vector3(xMin, yMax, 0f), color, new Vector4(uvMinX, uvMaxY, 0f, 1f));
+    vh.AddVert(new Vector3(xMax, yMax, 0f), color, new Vector4(uvMaxX, uvMaxY, 0f, 1f));
+    vh.AddVert(new Vector3(xMax, yMin, 0f), color, new Vector4(uvMaxX, uvMinY, 0f, 1f));
+    vh.AddTriangle(startIndex, startIndex + 1, startIndex + 2);
+    vh.AddTriangle(startIndex, startIndex + 2, startIndex + 3);
   }
 
   protected override void OnEnable()

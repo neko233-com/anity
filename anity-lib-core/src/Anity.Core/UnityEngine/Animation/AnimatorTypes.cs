@@ -59,6 +59,17 @@ public struct AnimatorTransitionInfo
     public float duration { get; }
     public bool anyState { get; }
 
+    public AnimatorTransitionInfo(int fullPathHash, int userNameHash, int nameHash, bool hasExitTime, float normalizedTime, float duration, bool anyState)
+    {
+        this.fullPathHash = fullPathHash;
+        this.userNameHash = userNameHash;
+        this.nameHash = nameHash;
+        this.hasExitTime = hasExitTime;
+        this.normalizedTime = normalizedTime;
+        this.duration = duration;
+        this.anyState = anyState;
+    }
+
     public bool IsName(string name)
     {
         return fullPathHash == Animator.StringToHash(name) || nameHash == Animator.StringToHash(name);

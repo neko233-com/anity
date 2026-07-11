@@ -114,6 +114,7 @@ public class MainModule
     public bool playOnAwake { get; set; } = true;
     public bool prewarm { get; set; }
     public MinMaxCurve startDelay { get; set; } = new MinMaxCurve(0f);
+    public MinMaxCurve startLifetime { get; set; } = new MinMaxCurve(5f);
     public MinMaxCurve startSpeed { get; set; } = new MinMaxCurve(5f);
     public MinMaxCurve startSize { get; set; } = new MinMaxCurve(1f);
     public MinMaxGradient startColor { get; set; } = Color.white;

@@ -13,6 +13,7 @@ public class Renderer : Component
     private Material[] _materials = Array.Empty<Material>();
     private MaterialPropertyBlock? _propertyBlock;
     private int _sortingLayerID;
+    private int _renderCount;
     private string _sortingLayerName = string.Empty;
     private int _sortingOrder;
     private bool _receiveShadows = true;
@@ -256,13 +257,15 @@ public class Renderer : Component
         return mats;
     }
 
-    public void Render() { }
-    public void Render(int materialPass) { }
+    public void Render() { _renderCount++; }
+    public void Render(int materialPass) { _renderCount++; }
 }
 
 public class MaterialPropertyBlock
 {
     private readonly Dictionary<int, object> _properties = new();
+    private float[] _shCoefficients = Array.Empty<float>();
+    private float[] _occlusionProbes = Array.Empty<float>();
 
     public bool isEmpty => _properties.Count == 0;
 
@@ -304,10 +307,10 @@ public class MaterialPropertyBlock
 
     public void Clear() => _properties.Clear();
 
-    public void CopySHCoefficientArraysFrom(float[]? coefficients) { }
-    public void CopySHCoefficientArraysFrom(List<float>? coefficients) { }
-    public void CopyProbeOcclusionArrayFrom(float[]? occlusionProbes) { }
-    public void CopyProbeOcclusionArrayFrom(List<float>? occlusionProbes) { }
+    public void CopySHCoefficientArraysFrom(float[]? coefficients) { if (coefficients != null) _shCoefficients = coefficients; }
+    public void CopySHCoefficientArraysFrom(List<float>? coefficients) { if (coefficients != null) _shCoefficients = coefficients.ToArray(); }
+    public void CopyProbeOcclusionArrayFrom(float[]? occlusionProbes) { if (occlusionProbes != null) _occlusionProbes = occlusionProbes; }
+    public void CopyProbeOcclusionArrayFrom(List<float>? occlusionProbes) { if (occlusionProbes != null) _occlusionProbes = occlusionProbes.ToArray(); }
 
     internal void CopyFrom(MaterialPropertyBlock other)
     {
@@ -506,7 +509,7 @@ public partial class TrailRenderer : Renderer
     public Gradient colorGradient { get; set; } = new Gradient();
     public int numCapVertices { get; set; }
     public int numCornerVertices { get; set; }
-    public void Clear() { }
+    public void Clear() { time = 0f; widthMultiplier = 1f; }
     public void AddPosition(Vector3 position) { _ = position; }
     public void Embed(Vector3 point) { AddPosition(point); }
     public Vector3 GetPosition(int index) => Vector3.zero;

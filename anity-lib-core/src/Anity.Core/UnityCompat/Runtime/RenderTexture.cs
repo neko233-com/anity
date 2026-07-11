@@ -98,6 +98,9 @@ public struct RenderTextureDescriptor
 public class RenderTexture : Texture
 {
     private bool _isCreated;
+    private bool _contentsDiscarded;
+    private bool _mipsDirty;
+    private bool _restoreExpected;
     private static readonly Stack<RenderTexture> _activeTemporary = new();
 
     public new int width { get; set; }
@@ -199,18 +202,18 @@ public class RenderTexture : Texture
         _isCreated = false;
     }
 
-    public void DiscardContents() { }
-    public void DiscardContents(bool discardColor, bool discardDepth) { }
+    public void DiscardContents() { _contentsDiscarded = true; }
+    public void DiscardContents(bool discardColor, bool discardDepth) { _contentsDiscarded = discardColor || discardDepth; }
 
     public static bool SupportsStencil(RenderTexture rt) => rt != null;
 
     public new IntPtr GetNativeTexturePtr() => IntPtr.Zero;
     public IntPtr GetDepthStencilNativeTexturePtr() => IntPtr.Zero;
 
-    public void GenerateMips() { }
-    public void SetGlobalShaderProperty(string propertyName) { }
+    public void GenerateMips() { _mipsDirty = true; }
+    public void SetGlobalShaderProperty(string propertyName) { _ = propertyName; }
 
-    public void MarkRestoreExpected() { }
+    public void MarkRestoreExpected() { _restoreExpected = true; }
 
     public static RenderTexture GetTemporary(RenderTextureDescriptor desc)
     {
@@ -258,7 +261,8 @@ public class RenderTexture : Texture
 
 public struct RenderBuffer
 {
-    public RenderTextureFormat format { get; }
+    public RenderTextureFormat format { get; set; }
+    private bool _debugModeLoaded;
     public IntPtr GetNativeRenderBufferPtr() => IntPtr.Zero;
-    public void LoadStoreActionDebugModeSettings() { }
+    public void LoadStoreActionDebugModeSettings() { _debugModeLoaded = true; }
 }

@@ -4,13 +4,15 @@ using System.Collections.Generic;
 namespace UnityEngine.Tilemaps;
 
 [AddComponentMenu("2D Object/Tilemap")]
-public class Tilemap : GridLayout
+public class Tilemap : GridLayout, ITilemap
 {
     private readonly Dictionary<Vector3Int, TileBase> _tiles = new();
     private Vector3Int _origin;
     private Vector3Int _size;
     private Matrix4x4 _transformMatrix = Matrix4x4.identity;
     private TilemapRenderer _renderer;
+
+    Tilemap ITilemap.tilemap => this;
 
     public Vector3Int origin => _origin;
     public Vector3Int size => _size;
@@ -80,10 +82,20 @@ public class Tilemap : GridLayout
 
     public void RefreshTile(Vector3Int position)
     {
-        _ = position;
+        if (_tiles.TryGetValue(position, out var tile) && tile != null)
+        {
+            tile.RefreshTile(position, this);
+        }
     }
 
-    public void RefreshAllTiles() { }
+    public void RefreshAllTiles()
+    {
+        var positions = new List<Vector3Int>(_tiles.Keys);
+        foreach (var pos in positions)
+        {
+            RefreshTile(pos);
+        }
+    }
 
     public void SwapTile(TileBase changeTile, TileBase newTile)
     {
@@ -234,8 +246,20 @@ public class TilemapRenderer : Renderer
 
 public class TileBase : ScriptableObject
 {
-    public virtual void RefreshTile(Vector3Int position, ITilemap tilemap) { }
-    public virtual void GetTileData(Vector3Int position, ITilemap tilemap, ref TileData tileData) { }
+    public virtual void RefreshTile(Vector3Int position, ITilemap tilemap)
+    {
+    }
+
+    public virtual void GetTileData(Vector3Int position, ITilemap tilemap, ref TileData tileData)
+    {
+        tileData.sprite = null;
+        tileData.color = Color.white;
+        tileData.transform = Matrix4x4.identity;
+        tileData.gameObject = null;
+        tileData.flags = TileFlags.None;
+        tileData.colliderType = TileColliderType.None;
+    }
+
     public virtual bool GetTileAnimationData(Vector3Int position, ITilemap tilemap, ref TileAnimationData tileAnimationData) => false;
     public virtual bool StartUp(Vector3Int position, ITilemap tilemap, GameObject go) => false;
 }

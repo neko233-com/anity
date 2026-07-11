@@ -8,6 +8,7 @@ public class Terrain : Behaviour
     private TerrainData? _terrainData;
     private Material? _materialTemplate;
     private float _heightmapPixelError = 5.0f;
+    private bool _delayedHeightmapApplied;
     private float _basemapDistance = 1000f;
     private float _detailObjectDistance = 80.0f;
     private float _treeDistance = 5000.0f;
@@ -114,7 +115,7 @@ public class Terrain : Behaviour
         height = 0f;
     }
 
-    public void ApplyDelayedHeightmapModification() { }
+    public void ApplyDelayedHeightmapModification() { _delayedHeightmapApplied = true; }
 
     public void CollectDetailPatches(float height, int layer) { _ = height; _ = layer; }
 

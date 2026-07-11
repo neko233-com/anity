@@ -16,6 +16,12 @@ public struct ContactFilter2D
 
   public void NoFilter()
   {
+    useTriggers = false;
+    useLayerMask = false;
+    useDepth = false;
+    useNormalAngle = false;
+    useOutsidePoint = false;
+    useOutsideDistance = false;
   }
 
   public bool IsFiltering()

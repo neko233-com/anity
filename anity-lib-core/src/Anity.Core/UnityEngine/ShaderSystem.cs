@@ -9,6 +9,7 @@ public class Shader
     private static readonly Dictionary<int, string> _propertyNames = new();
     private static readonly Dictionary<string, int> _propertyIDs = new();
     private static readonly Dictionary<int, object> _globalProperties = new();
+    private static readonly Dictionary<int, Array> _globalArrays = new();
     private static readonly HashSet<string> _globalKeywords = new(StringComparer.OrdinalIgnoreCase);
     private static int _nextPropertyID = 1;
     private static readonly Dictionary<string, int> _tagCache = new(StringComparer.OrdinalIgnoreCase);
@@ -119,20 +120,32 @@ public class Shader
     public static Texture GetGlobalTexture(string name) => GetGlobalTexture(PropertyToID(name));
     public static Texture GetGlobalTexture(int nameID) => _globalProperties.TryGetValue(nameID, out var v) && v is Texture t ? t : null;
 
-    public static void SetGlobalFloatArray(int nameID, float[] values) { }
-    public static void SetGlobalFloatArray(string name, float[] values) { }
-    public static void SetGlobalFloatArray(int nameID, List<float> values) { }
-    public static void SetGlobalFloatArray(string name, List<float> values) { }
+    public static void SetGlobalFloatArray(int nameID, float[] values) { if (values != null) _globalArrays[nameID] = (float[])values.Clone(); else _globalArrays.Remove(nameID); }
+    public static void SetGlobalFloatArray(string name, float[] values) => SetGlobalFloatArray(PropertyToID(name), values);
+    public static void SetGlobalFloatArray(int nameID, List<float> values) { if (values != null) _globalArrays[nameID] = values.ToArray(); else _globalArrays.Remove(nameID); }
+    public static void SetGlobalFloatArray(string name, List<float> values) => SetGlobalFloatArray(PropertyToID(name), values);
+    public static float[] GetGlobalFloatArray(int nameID) => _globalArrays.TryGetValue(nameID, out var arr) && arr is float[] f ? (float[])f.Clone() : Array.Empty<float>();
+    public static float[] GetGlobalFloatArray(string name) => GetGlobalFloatArray(PropertyToID(name));
+    public static void GetGlobalFloatArray(int nameID, List<float> values) { values?.Clear(); var arr = GetGlobalFloatArray(nameID); values?.AddRange(arr); }
+    public static void GetGlobalFloatArray(string name, List<float> values) => GetGlobalFloatArray(PropertyToID(name), values);
 
-    public static void SetGlobalVectorArray(int nameID, Vector4[] values) { }
-    public static void SetGlobalVectorArray(string name, Vector4[] values) { }
-    public static void SetGlobalVectorArray(int nameID, List<Vector4> values) { }
-    public static void SetGlobalVectorArray(string name, List<Vector4> values) { }
+    public static void SetGlobalVectorArray(int nameID, Vector4[] values) { if (values != null) _globalArrays[nameID] = (Vector4[])values.Clone(); else _globalArrays.Remove(nameID); }
+    public static void SetGlobalVectorArray(string name, Vector4[] values) => SetGlobalVectorArray(PropertyToID(name), values);
+    public static void SetGlobalVectorArray(int nameID, List<Vector4> values) { if (values != null) _globalArrays[nameID] = values.ToArray(); else _globalArrays.Remove(nameID); }
+    public static void SetGlobalVectorArray(string name, List<Vector4> values) => SetGlobalVectorArray(PropertyToID(name), values);
+    public static Vector4[] GetGlobalVectorArray(int nameID) => _globalArrays.TryGetValue(nameID, out var arr) && arr is Vector4[] v ? (Vector4[])v.Clone() : Array.Empty<Vector4>();
+    public static Vector4[] GetGlobalVectorArray(string name) => GetGlobalVectorArray(PropertyToID(name));
+    public static void GetGlobalVectorArray(int nameID, List<Vector4> values) { values?.Clear(); var arr = GetGlobalVectorArray(nameID); values?.AddRange(arr); }
+    public static void GetGlobalVectorArray(string name, List<Vector4> values) => GetGlobalVectorArray(PropertyToID(name), values);
 
-    public static void SetGlobalMatrixArray(int nameID, Matrix4x4[] values) { }
-    public static void SetGlobalMatrixArray(string name, Matrix4x4[] values) { }
-    public static void SetGlobalMatrixArray(int nameID, List<Matrix4x4> values) { }
-    public static void SetGlobalMatrixArray(string name, List<Matrix4x4> values) { }
+    public static void SetGlobalMatrixArray(int nameID, Matrix4x4[] values) { if (values != null) _globalArrays[nameID] = (Matrix4x4[])values.Clone(); else _globalArrays.Remove(nameID); }
+    public static void SetGlobalMatrixArray(string name, Matrix4x4[] values) => SetGlobalMatrixArray(PropertyToID(name), values);
+    public static void SetGlobalMatrixArray(int nameID, List<Matrix4x4> values) { if (values != null) _globalArrays[nameID] = values.ToArray(); else _globalArrays.Remove(nameID); }
+    public static void SetGlobalMatrixArray(string name, List<Matrix4x4> values) => SetGlobalMatrixArray(PropertyToID(name), values);
+    public static Matrix4x4[] GetGlobalMatrixArray(int nameID) => _globalArrays.TryGetValue(nameID, out var arr) && arr is Matrix4x4[] m ? (Matrix4x4[])m.Clone() : Array.Empty<Matrix4x4>();
+    public static Matrix4x4[] GetGlobalMatrixArray(string name) => GetGlobalMatrixArray(PropertyToID(name));
+    public static void GetGlobalMatrixArray(int nameID, List<Matrix4x4> values) { values?.Clear(); var arr = GetGlobalMatrixArray(nameID); values?.AddRange(arr); }
+    public static void GetGlobalMatrixArray(string name, List<Matrix4x4> values) => GetGlobalMatrixArray(PropertyToID(name), values);
 
     public static void EnableKeyword(string keyword) => _globalKeywords.Add(keyword);
     public static void DisableKeyword(string keyword) => _globalKeywords.Remove(keyword);
@@ -144,7 +157,8 @@ public class Shader
     }
 
     public static void WarmupAllShaders() { warmupStarted = true; }
-    public static void ParseSurfaceShaders() { }
+    private static string _surfaceShaderStatus = "unparsed";
+    internal static void ParseSurfaceShaders() { _surfaceShaderStatus = "parsed"; }
     public static string FindPassName(int passNameHash) => string.Empty;
 
     public object GetProperty(string name)

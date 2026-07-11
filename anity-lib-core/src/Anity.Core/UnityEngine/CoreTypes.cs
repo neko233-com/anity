@@ -214,14 +214,73 @@ public class AssetImporter : Object
 
 public class ComputeBuffer : IDisposable
 {
-    public ComputeBuffer(int count, int stride) { }
-    public ComputeBuffer(int count, int stride, ComputeBufferType type) { }
-    public int count { get; }
-    public int stride { get; }
-    public void SetData(System.Array data) { }
-    public void GetData(System.Array data) { }
-    public void Release() { }
-    public void Dispose() { }
+    private int _count;
+    private int _stride;
+    private ComputeBufferType _type;
+    private byte[] _data;
+    private bool _released;
+    private bool _disposed;
+
+    public ComputeBuffer(int count, int stride) : this(count, stride, ComputeBufferType.Default)
+    {
+    }
+
+    public ComputeBuffer(int count, int stride, ComputeBufferType type)
+    {
+        if (count <= 0) throw new ArgumentException("Count must be greater than zero.", nameof(count));
+        if (stride <= 0) throw new ArgumentException("Stride must be greater than zero.", nameof(stride));
+
+        _count = count;
+        _stride = stride;
+        _type = type;
+        _data = new byte[count * stride];
+        _released = false;
+        _disposed = false;
+    }
+
+    public int count => _count;
+    public int stride => _stride;
+    public ComputeBufferType type => _type;
+
+    public void SetData(Array data)
+    {
+        if (_released) throw new InvalidOperationException("ComputeBuffer has been released.");
+        if (data == null) throw new ArgumentNullException(nameof(data));
+
+        int totalBytes = System.Buffer.ByteLength(data);
+        int bytesToCopy = Math.Min(totalBytes, _data.Length);
+        System.Buffer.BlockCopy(data, 0, _data, 0, bytesToCopy);
+    }
+
+    public void GetData(Array data)
+    {
+        if (_released) throw new InvalidOperationException("ComputeBuffer has been released.");
+        if (data == null) throw new ArgumentNullException(nameof(data));
+
+        int totalBytes = System.Buffer.ByteLength(data);
+        int bytesToCopy = Math.Min(_data.Length, totalBytes);
+        System.Buffer.BlockCopy(_data, 0, data, 0, bytesToCopy);
+    }
+
+    public void Release()
+    {
+        if (!_released)
+        {
+            _data = null;
+            _count = 0;
+            _stride = 0;
+            _released = true;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            Release();
+            _disposed = true;
+        }
+    }
 }
 
 public enum ComputeBufferType
@@ -233,3 +292,68 @@ public enum ComputeBufferType
     IndirectArguments,
     Structured
 }
+
+public class ComputeShader : Object
+{
+    private readonly Dictionary<int, float> _floats = new();
+    private readonly Dictionary<int, int> _ints = new();
+    private readonly Dictionary<int, Vector4> _vectors = new();
+    private readonly Dictionary<int, Matrix4x4> _matrices = new();
+    private readonly Dictionary<int, Texture> _textures = new();
+    private readonly Dictionary<int, ComputeBuffer> _buffers = new();
+    private readonly HashSet<string> _kernelNames = new();
+    private int _dispatchCount;
+
+    public bool HasKernel(string name)
+    {
+        return _kernelNames.Contains(name);
+    }
+
+    public int FindKernel(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return -1;
+        _kernelNames.Add(name);
+        return name.GetHashCode();
+    }
+
+    public void SetFloat(int nameID, float val)
+    {
+        _floats[nameID] = val;
+    }
+
+    public void SetInt(int nameID, int val)
+    {
+        _ints[nameID] = val;
+    }
+
+    public void SetVector(int nameID, Vector4 val)
+    {
+        _vectors[nameID] = val;
+    }
+
+    public void SetMatrix(int nameID, Matrix4x4 val)
+    {
+        _matrices[nameID] = val;
+    }
+
+    public void SetTexture(int kernelIndex, int nameID, Texture texture)
+    {
+        _textures[nameID] = texture;
+    }
+
+    public void SetBuffer(int kernelIndex, int nameID, ComputeBuffer buffer)
+    {
+        _buffers[nameID] = buffer;
+    }
+
+    public void Dispatch(int kernelIndex, int threadGroupsX, int threadGroupsY, int threadGroupsZ)
+    {
+        _dispatchCount++;
+    }
+}
+
+public class Flare : Object
+{
+    public Texture texture { get; set; }
+}
+

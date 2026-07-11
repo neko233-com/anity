@@ -55,6 +55,12 @@ public class BlendTree : Motion
     public bool useAutomaticThresholds { get; set; } = true;
 
     private ChildMotion[] _children = Array.Empty<ChildMotion>();
+    private bool _synced;
+
+    public void Sync()
+    {
+        _synced = true;
+    }
 
     public ChildMotion[] children
     {
@@ -249,10 +255,6 @@ public class BlendTree : Motion
         {
             weights[i] = 1f;
         }
-    }
-
-    public void Sync()
-    {
     }
 }
 

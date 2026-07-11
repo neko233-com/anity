@@ -153,31 +153,8 @@ internal static class Physics2DWorld
       if (rb is null || rb.IsDestroyed || !rb.simulated) continue;
       if (rb.bodyType == RigidbodyType2D.Static) continue;
 
-      if (rb.bodyType == RigidbodyType2D.Dynamic)
-      {
-        rb.velocity += Physics2D.gravity * rb.gravityScale * deltaTime;
-
-        if (rb.drag > 0f)
-          rb.velocity *= Math.Max(0f, 1f - rb.drag * deltaTime);
-
-        if (rb.angularDrag > 0f)
-          rb.angularVelocity *= Math.Max(0f, 1f - rb.angularDrag * deltaTime);
-      }
-
-      var transform = rb.transform;
-      if (transform is null) continue;
-
-      var pos = transform.localPosition;
-      pos.x += rb.velocity.x * deltaTime;
-      pos.y += rb.velocity.y * deltaTime;
-      transform.localPosition = pos;
-
-      if (rb.bodyType == RigidbodyType2D.Dynamic && !rb.freezeRotation && MathF.Abs(rb.angularVelocity) > 1e-6f)
-      {
-        var angles = transform.localEulerAngles;
-        angles.z += rb.angularVelocity * deltaTime;
-        transform.localEulerAngles = angles;
-      }
+      rb.ApplyForces(deltaTime);
+      rb.Integrate(deltaTime);
     }
   }
 
@@ -185,6 +162,11 @@ internal static class Physics2DWorld
   {
     _ = deltaTime;
     var count = _colliders.Count;
+
+    foreach (var c in _colliders)
+    {
+      if (c != null) c.ClearContacts();
+    }
 
     for (var i = 0; i < count; i++)
     {
@@ -233,6 +215,14 @@ internal static class Physics2DWorld
             DispatchCollisionStay(a, b, normal);
           }
           colState.stay = true;
+
+          Vector2 worldPosA = GetWorldPosition(a, a.GetShape().offset);
+          Vector2 worldPosB = GetWorldPosition(b, b.GetShape().offset);
+          Vector2 point = Vector2.Lerp(worldPosA, worldPosB, 0.5f);
+          var cpA = new ContactPoint2D(a, b, normal, point, -penetration);
+          var cpB = new ContactPoint2D(b, a, -normal, point, -penetration);
+          a.AddContact(cpA);
+          b.AddContact(cpB);
 
           ResolveCollision(a, b, normal, penetration);
         }
@@ -326,7 +316,7 @@ internal static class Physics2DWorld
     return false;
   }
 
-  private static void GetCapsuleTransform(ColliderShape2D shape, Vector2 pos, out Vector2 center, out Vector2 axis, out float radius, out float halfHeight)
+  internal static void GetCapsuleTransform(ColliderShape2D shape, Vector2 pos, out Vector2 center, out Vector2 axis, out float radius, out float halfHeight)
   {
     center = pos;
     radius = shape.capsuleDirection == CapsuleDirection2D.Vertical ? shape.size.x * 0.5f : shape.size.y * 0.5f;
@@ -680,7 +670,7 @@ internal static class Physics2DWorld
     return TransformPoints(shape.points, pos);
   }
 
-  private static Vector2[] TransformPoints(Vector2[] points, Vector2 offset)
+  internal static Vector2[] TransformPoints(Vector2[] points, Vector2 offset)
   {
     if (points.Length == 0) return points;
     var result = new Vector2[points.Length];
@@ -768,7 +758,7 @@ internal static class Physics2DWorld
     return true;
   }
 
-  private static Vector2 ClosestPointOnSegment(Vector2 point, Vector2 a, Vector2 b)
+  internal static Vector2 ClosestPointOnSegment(Vector2 point, Vector2 a, Vector2 b)
   {
     var ab = b - a;
     var denom = Vector2.Dot(ab, ab);
@@ -951,8 +941,8 @@ internal static class Physics2DWorld
 
     var matA = a.sharedMaterial;
     var matB = b.sharedMaterial;
-    var bounciness = CombineBounciness(matA?.bounciness ?? 0f, matB?.bounciness ?? 0f);
-    var friction = CombineFriction(matA?.friction ?? 0.4f, matB?.friction ?? 0.4f);
+    var bounciness = CombineBounciness(matA?.bounciness ?? 0f, matB?.bounciness ?? 0f, matA?.bouncinessCombine ?? PhysicsMaterialCombine2D.Average, matB?.bouncinessCombine ?? PhysicsMaterialCombine2D.Average);
+    var friction = CombineFriction(matA?.friction ?? 0.4f, matB?.friction ?? 0.4f, matA?.frictionCombine ?? PhysicsMaterialCombine2D.Average, matB?.frictionCombine ?? PhysicsMaterialCombine2D.Average);
 
     var percent = 0.8f;
     var slop = 0.01f;
@@ -980,18 +970,26 @@ internal static class Physics2DWorld
 
     if (velAlongNormal > 0f) return;
 
-    var impulseScalar = -(1f + bounciness) * velAlongNormal / totalInvMass;
+    var bounceThreshold = 2f;
+    var bounceFactor = MathF.Abs(velAlongNormal) > bounceThreshold ? bounciness : 0f;
+    var impulseScalar = -(1f + bounceFactor) * velAlongNormal / totalInvMass;
     var impulse = normal * impulseScalar;
 
     if (rbA is not null && invMassA > 0f)
+    {
       rbA.velocity += impulse * invMassA;
+      rbA.WakeUp();
+    }
     if (rbB is not null && invMassB > 0f)
+    {
       rbB.velocity -= impulse * invMassB;
+      rbB.WakeUp();
+    }
 
     var tangent = new Vector2(-normal.y, normal.x).normalized;
     var velAlongTangent = Vector2.Dot(relVel, tangent);
     var frictionImpulseScalar = -velAlongTangent / totalInvMass;
-    frictionImpulseScalar = Math.Clamp(frictionImpulseScalar, -impulseScalar * friction, impulseScalar * friction);
+    frictionImpulseScalar = Math.Clamp(frictionImpulseScalar, -MathF.Abs(impulseScalar) * friction, MathF.Abs(impulseScalar) * friction);
     var frictionImpulse = tangent * frictionImpulseScalar;
 
     if (rbA is not null && invMassA > 0f)
@@ -1000,14 +998,30 @@ internal static class Physics2DWorld
       rbB.velocity -= frictionImpulse * invMassB;
   }
 
-  private static float CombineBounciness(float a, float b)
+  private static float CombineBounciness(float a, float b, PhysicsMaterialCombine2D ca, PhysicsMaterialCombine2D cb)
   {
-    return MathF.Max(a, b);
+    var mode = ca > cb ? ca : cb;
+    return mode switch
+    {
+      PhysicsMaterialCombine2D.Average => (a + b) * 0.5f,
+      PhysicsMaterialCombine2D.Minimum => MathF.Min(a, b),
+      PhysicsMaterialCombine2D.Maximum => MathF.Max(a, b),
+      PhysicsMaterialCombine2D.Multiply => a * b,
+      _ => (a + b) * 0.5f
+    };
   }
 
-  private static float CombineFriction(float a, float b)
+  private static float CombineFriction(float a, float b, PhysicsMaterialCombine2D ca, PhysicsMaterialCombine2D cb)
   {
-    return (a + b) * 0.5f;
+    var mode = ca > cb ? ca : cb;
+    return mode switch
+    {
+      PhysicsMaterialCombine2D.Average => (a + b) * 0.5f,
+      PhysicsMaterialCombine2D.Minimum => MathF.Min(a, b),
+      PhysicsMaterialCombine2D.Maximum => MathF.Max(a, b),
+      PhysicsMaterialCombine2D.Multiply => a * b,
+      _ => (a + b) * 0.5f
+    };
   }
 
   private static void DispatchCollisionEnter(Collider2D a, Collider2D b, Vector2 normal)

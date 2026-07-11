@@ -31,13 +31,24 @@ public abstract class BaseInputModule : UIBehaviour
 
     public virtual bool IsModuleSupported() => true;
     public virtual bool ShouldActivateModule() => isActiveAndEnabled && gameObject.activeInHierarchy;
-    public virtual void ActivateModule() { }
-    public virtual void DeactivateModule() { }
-    public virtual void UpdateModule() { }
+
+    public virtual void ActivateModule()
+    {
+    }
+
+    public virtual void DeactivateModule()
+    {
+    }
+
+    public virtual void UpdateModule()
+    {
+    }
 
     public virtual bool IsPointerOverGameObject(int pointerId) => false;
 
-    public virtual void Process() { }
+    public virtual void Process()
+    {
+    }
 
     protected static void ExecuteEventsExecute<T>(GameObject target, BaseEventData eventData, ExecuteEvents.EventFunction<T> functor) where T : class, IEventSystemHandler
     {

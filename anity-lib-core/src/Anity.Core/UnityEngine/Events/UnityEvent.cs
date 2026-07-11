@@ -6,13 +6,28 @@ namespace UnityEngine.Events;
 public abstract class UnityEventBase
 {
     private readonly List<object> _calls = new();
+    private readonly List<UnityEventCallState> _persistentStates = new();
 
-    public int GetPersistentEventCount() => 0;
+    public int GetPersistentEventCount() => _persistentStates.Count;
     public object GetPersistentTarget(int index) => null;
     public string GetPersistentMethodName(int index) => string.Empty;
     public string GetPersistentTargetName(int index) => string.Empty;
 
-    public void SetPersistentListenerState(int index, UnityEventCallState state) { }
+    public void SetPersistentListenerState(int index, UnityEventCallState state)
+    {
+        if (index < 0) return;
+        while (_persistentStates.Count <= index)
+        {
+            _persistentStates.Add(UnityEventCallState.RuntimeOnly);
+        }
+        _persistentStates[index] = state;
+    }
+
+    public UnityEventCallState GetPersistentListenerState(int index)
+    {
+        if (index < 0 || index >= _persistentStates.Count) return UnityEventCallState.RuntimeOnly;
+        return _persistentStates[index];
+    }
 
     public void RemoveAllListeners()
     {

@@ -4,6 +4,7 @@ public class Event
 {
   public UnityEngine.EventType type { get; set; }
   public Vector2 mousePosition { get; set; }
+  public Vector2 delta { get; set; }
   public int button { get; set; }
   public KeyCode keyCode { get; set; }
   public char character { get; set; }
@@ -27,7 +28,33 @@ public class Event
 
   public Event() {}
   public Event(int displayIndex) { this.displayIndex = displayIndex; }
-  public Event(Event other) {}
+  public Event(Event other)
+  {
+    if (other == null) return;
+    type = other.type;
+    mousePosition = other.mousePosition;
+    delta = other.delta;
+    button = other.button;
+    keyCode = other.keyCode;
+    character = other.character;
+    commandName = other.commandName;
+    clickCount = other.clickCount;
+    shift = other.shift;
+    control = other.control;
+    alt = other.alt;
+    command = other.command;
+    capsLock = other.capsLock;
+    numeric = other.numeric;
+    functionKey = other.functionKey;
+    isMouse = other.isMouse;
+    isKey = other.isKey;
+    isScrollWheel = other.isScrollWheel;
+    displayIndex = other.displayIndex;
+    mouseRay = other.mouseRay;
+    modifiers = other.modifiers;
+    use = other.use;
+    pointerType = other.pointerType;
+  }
   public static Event current { get; set; }
 
   public UnityEngine.EventType GetTypeForControl(int controlID)
@@ -43,12 +70,12 @@ public class Event
 
   public Vector2 Delta()
   {
-    return Vector2.zero;
+    return delta;
   }
 
   public Vector2 DeltaMagnitude()
   {
-    return Vector2.zero;
+    return delta;
   }
 
   public bool IsRaycastableObject()
@@ -64,7 +91,7 @@ public class Event
   public Vector2 HandleDragAndDrop(int id)
   {
     _ = id;
-    return Vector2.zero;
+    return delta;
   }
 }
 

@@ -321,11 +321,3 @@ public enum BuildCompression
     LZ4HC,
     Uncompressed
 }
-
-public enum TextureImporterCompression
-{
-    Uncompressed,
-    Compressed,
-    CompressedHQ,
-    CompressedLQ
-}

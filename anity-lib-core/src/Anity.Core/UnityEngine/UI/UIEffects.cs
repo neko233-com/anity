@@ -49,7 +49,11 @@ public class VertexHelper : IDisposable
     public int currentVertCount => _verts.Count;
     public int currentIndexCount => (_verts.Count / 4) * 6;
 
-    public void Clear() => _verts.Clear();
+    public void Clear()
+    {
+        _verts.Clear();
+        _indices.Clear();
+    }
 
     public void AddVert(Vector3 position, Color32 color, Vector4 uv0)
     {
@@ -69,7 +73,14 @@ public class VertexHelper : IDisposable
         });
     }
 
-    public void AddTriangle(int idx0, int idx1, int idx2) { }
+    private readonly List<int> _indices = new();
+
+    public void AddTriangle(int idx0, int idx1, int idx2)
+    {
+        _indices.Add(idx0);
+        _indices.Add(idx1);
+        _indices.Add(idx2);
+    }
 
     public void AddUIVertexTriangleStream(List<UIVertex> verts)
     {
@@ -81,7 +92,12 @@ public class VertexHelper : IDisposable
     {
         if (stream is null) return;
         stream.Clear();
-        stream.AddRange(_verts);
+        for (var i = 0; i < _indices.Count; i++)
+        {
+            var idx = _indices[i];
+            if (idx >= 0 && idx < _verts.Count)
+                stream.Add(_verts[idx]);
+        }
     }
 
     public void PopulateUIVertex(ref UIVertex vertex, int index)
@@ -99,10 +115,37 @@ public class VertexHelper : IDisposable
     public void FillMesh(Mesh mesh)
     {
         if (mesh is null) return;
-        mesh.vertices = Array.Empty<Vector3>();
+        var verts = new List<UIVertex>();
+        GetUIVertexStream(verts);
+        var positions = new Vector3[verts.Count];
+        var colors = new Color32[verts.Count];
+        var uvs = new Vector2[verts.Count];
+        var normals = new Vector3[verts.Count];
+        var tangents = new Vector4[verts.Count];
+        for (var i = 0; i < verts.Count; i++)
+        {
+            positions[i] = verts[i].position;
+            colors[i] = verts[i].color;
+            uvs[i] = new Vector2(verts[i].uv0.x, verts[i].uv0.y);
+            normals[i] = verts[i].normal;
+            tangents[i] = verts[i].tangent;
+        }
+        var indicesArray = new int[verts.Count];
+        for (var i = 0; i < verts.Count; i++)
+            indicesArray[i] = i;
+        mesh.vertices = positions;
+        mesh.normals = normals;
+        mesh.tangents = tangents;
+        mesh.colors32 = colors;
+        mesh.uv = uvs;
+        mesh.triangles = indicesArray;
     }
 
-    public void Dispose() => Clear();
+    public void Dispose()
+    {
+        Clear();
+        _indices.Clear();
+    }
 }
 
 [AddComponentMenu("UI/Effects/Outline")]

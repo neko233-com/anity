@@ -4,9 +4,11 @@ namespace UnityEngine;
 
 public abstract class ScriptableObject : Object
 {
-  public static T CreateInstance<T>() where T : ScriptableObject, new()
+  private bool _dirty;
+
+  public static T CreateInstance<T>() where T : ScriptableObject
   {
-    var instance = new T();
+    var instance = Activator.CreateInstance<T>();
     instance.name = typeof(T).Name;
     return instance;
   }
@@ -79,10 +81,12 @@ public abstract class ScriptableObject : Object
 
   public void SetDirty()
   {
+    _dirty = true;
   }
 
   public void Save()
   {
+    _dirty = false;
   }
 
   public static ScriptableObject[] LoadAll(string type)

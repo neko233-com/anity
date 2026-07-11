@@ -39,16 +39,42 @@ public enum TouchType
 
 public class LocationService
 {
-    public bool isEnabledByUser => false;
-    public LocationServiceStatus status => LocationServiceStatus.Stopped;
-    public LocationInfo lastData => default;
-    public double desiredAccuracyInMeters => 10;
-    public double updateDistanceInMeters => 10;
+    private bool _isEnabledByUser;
+    private LocationServiceStatus _status = LocationServiceStatus.Stopped;
+    private LocationInfo _lastData;
+    private double _desiredAccuracyInMeters = 10;
+    private double _updateDistanceInMeters = 10;
 
-    public void Start() {}
-    public void Start(float desiredAccuracyInMeters) {}
-    public void Start(float desiredAccuracyInMeters, float updateDistanceInMeters) {}
-    public void Stop() {}
+    public bool isEnabledByUser => _isEnabledByUser;
+    public LocationServiceStatus status => _status;
+    public LocationInfo lastData => _lastData;
+    public double desiredAccuracyInMeters => _desiredAccuracyInMeters;
+    public double updateDistanceInMeters => _updateDistanceInMeters;
+
+    public void Start()
+    {
+        Start(10f, 10f);
+    }
+
+    public void Start(float desiredAccuracyInMeters)
+    {
+        Start(desiredAccuracyInMeters, 10f);
+    }
+
+    public void Start(float desiredAccuracyInMeters, float updateDistanceInMeters)
+    {
+        _desiredAccuracyInMeters = desiredAccuracyInMeters;
+        _updateDistanceInMeters = updateDistanceInMeters;
+        _isEnabledByUser = true;
+        _status = LocationServiceStatus.Running;
+        _lastData = default;
+    }
+
+    public void Stop()
+    {
+        _isEnabledByUser = false;
+        _status = LocationServiceStatus.Stopped;
+    }
 }
 
 public enum LocationServiceStatus

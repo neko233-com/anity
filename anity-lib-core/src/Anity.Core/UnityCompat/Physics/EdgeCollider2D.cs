@@ -18,11 +18,16 @@ public class EdgeCollider2D : Collider2D
     public Vector2[] points
     {
         get => _points;
-        set => _points = value ?? Array.Empty<Vector2>();
+        set
+        {
+            _points = value ?? Array.Empty<Vector2>();
+            _pointCount = _points.Length;
+            _edgeCount = Math.Max(0, _points.Length - 1);
+        }
     }
 
-    public int edgeCount => _edgeCount;
-    public int pointCount => _pointCount;
+    public int edgeCount => Math.Max(0, _points.Length - 1);
+    public int pointCount => _points.Length;
 
     public bool useAdjacentStartPoint
     {
@@ -52,16 +57,30 @@ public class EdgeCollider2D : Collider2D
 
     public int GetPoints(List<Vector2> points)
     {
-        _ = points;
-        return 0;
+        if (points == null) return 0;
+        points.Clear();
+        points.AddRange(_points);
+        return _points.Length;
     }
 
     public void SetPoints(List<Vector2> points)
     {
         _points = points?.ToArray() ?? Array.Empty<Vector2>();
+        _pointCount = _points.Length;
+        _edgeCount = Math.Max(0, _points.Length - 1);
     }
 
-    public void Reset() { }
+    public void Reset()
+    {
+        _points = new Vector2[] { new Vector2(-0.5f, 0f), new Vector2(0.5f, 0f) };
+        _pointCount = 2;
+        _edgeCount = 1;
+        _useAdjacentStartPoint = false;
+        _useAdjacentEndPoint = false;
+        _adjacentStartPoint = Vector2.zero;
+        _adjacentEndPoint = Vector2.zero;
+        edgeRadius = 0f;
+    }
 
     internal override ColliderShape2D GetShape()
     {

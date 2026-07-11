@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -17,6 +18,8 @@ public static class Il2CppRuntime
 {
   private static bool _initialized;
   private static Platform _currentPlatform = Platform.Mono;
+  private static readonly HashSet<Type> _registeredGenericTypes = new();
+  private static readonly HashSet<string> _registeredGenericMethods = new();
 
   public static bool IsIl2Cpp => CurrentPlatform == Platform.IL2CPP;
   public static bool IsMono => CurrentPlatform == Platform.Mono;
@@ -117,19 +120,27 @@ public static class Il2CppRuntime
 
   public static IEnumerable<string> GetRequiredGenericTypes()
   {
-    return Array.Empty<string>();
+    return _registeredGenericTypes.Select(t => t.AssemblyQualifiedName ?? t.FullName ?? t.Name).ToArray();
   }
 
   public static void RegisterGenericTypeForAOT(Type type)
   {
+    if (type == null) return;
+    _registeredGenericTypes.Add(type);
   }
 
   public static void EnsureGenericMethod<T>(Func<T> method)
   {
+    if (method == null) return;
+    var key = $"{method.Method.DeclaringType?.FullName}::{method.Method.Name}<{typeof(T).FullName}>";
+    _registeredGenericMethods.Add(key);
   }
 
   public static void EnsureGenericMethod<T1, T2>(Func<T1, T2> method)
   {
+    if (method == null) return;
+    var key = $"{method.Method.DeclaringType?.FullName}::{method.Method.Name}<{typeof(T1).FullName},{typeof(T2).FullName}>";
+    _registeredGenericMethods.Add(key);
   }
 
   private static bool IsBrowser()

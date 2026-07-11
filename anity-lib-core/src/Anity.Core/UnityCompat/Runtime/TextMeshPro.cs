@@ -29,7 +29,7 @@ public class TMP_Text : UnityEngine.UI.Text
         set { _text = value ?? string.Empty; SetVerticesDirty(); }
     }
 
-    public float fontSize { get => _fontSize; set => _fontSize = value; }
+    public new float fontSize { get => _fontSize; set => _fontSize = value; }
     public bool autoSizeTextContainer { get => _autoSizeTextContainer; set => _autoSizeTextContainer = value; }
     public TextAlignmentOptions alignment { get => _alignment; set => _alignment = value; }
     public TextOverflowModes overflowMode { get => _overflowMode; set => _overflowMode = value; }
@@ -43,6 +43,33 @@ public class TMP_Text : UnityEngine.UI.Text
     public Material[]? fontSharedMaterials { get; set; }
     public bool havePropertiesChanged { get; set; }
     public TMP_TextInfo? textInfo { get; set; }
+
+    public override float preferredWidth
+    {
+        get
+        {
+            var charWidth = _fontSize * 0.5f;
+            var maxLineWidth = 0f;
+            var lines = _text.Split('\n');
+            foreach (var line in lines)
+            {
+                var lineWidth = line.Length * charWidth;
+                if (lineWidth > maxLineWidth) maxLineWidth = lineWidth;
+            }
+            return maxLineWidth;
+        }
+    }
+
+    public override float preferredHeight
+    {
+        get
+        {
+            var lineHeight = _fontSize * 1.2f;
+            var lines = _text.Split('\n');
+            var numLines = lines.Length == 0 ? 1 : lines.Length;
+            return numLines * lineHeight;
+        }
+    }
 
     public void ForceMeshUpdate(bool ignoreActiveState = false, bool forceTextReparsing = false) { _ = ignoreActiveState; _ = forceTextReparsing; }
     public void UpdateGeometry(Mesh mesh, int index) { _ = mesh; _ = index; }

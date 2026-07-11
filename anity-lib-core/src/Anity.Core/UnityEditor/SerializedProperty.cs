@@ -158,9 +158,39 @@ public sealed class SerializedProperty
     set => SetValue(value);
   }
 
+  public Vector4 vector4Value
+  {
+    get => rawValue is Vector4 value ? value : default;
+    set => SetValue(value);
+  }
+
   public Quaternion quaternionValue
   {
     get => rawValue is Quaternion value ? value : default;
+    set => SetValue(value);
+  }
+
+  public Rect rectValue
+  {
+    get => rawValue is Rect value ? value : default;
+    set => SetValue(value);
+  }
+
+  public Bounds boundsValue
+  {
+    get => rawValue is Bounds value ? value : default;
+    set => SetValue(value);
+  }
+
+  public AnimationCurve animationCurveValue
+  {
+    get => rawValue as AnimationCurve ?? new AnimationCurve();
+    set => SetValue(value);
+  }
+
+  public Gradient gradientValue
+  {
+    get => rawValue as Gradient ?? new Gradient();
     set => SetValue(value);
   }
 
@@ -177,6 +207,7 @@ public sealed class SerializedProperty
       string => SerializedPropertyType.String,
       Vector2 => SerializedPropertyType.Vector2,
       Vector3 => SerializedPropertyType.Vector3,
+      Vector4 => SerializedPropertyType.Vector4,
       Quaternion => SerializedPropertyType.Quaternion,
       Rect => SerializedPropertyType.Rect,
       Color => SerializedPropertyType.Color,
@@ -633,11 +664,22 @@ public enum SerializedPropertyType
   Color,
   ObjectReference,
   LayerMask,
-  Rect,
+  Enum,
   Vector2,
   Vector3,
-  Quaternion,
+  Vector4,
+  Rect,
+  ArraySize,
+  Character,
   AnimationCurve,
-  Enum,
-  Generic
+  Bounds,
+  Gradient,
+  Quaternion,
+  Generic,
+  ExposedReference,
+  FixedBufferSize,
+  Vector2Int,
+  Vector3Int,
+  RectInt,
+  BoundsInt
 }

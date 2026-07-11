@@ -471,3 +471,32 @@ public enum OffMeshLinkType
     LinkTypeDropDown,
     LinkTypeJumpAcross
 }
+
+public enum NavMeshObstacleShape
+{
+    Capsule,
+    Box
+}
+
+public class NavMeshObstacle : Behaviour
+{
+    private Vector3 _center;
+    private Vector3 _size = Vector3.one;
+    private float _radius = 0.5f;
+    private float _height = 2f;
+    private bool _carve;
+    private float _carveMoveThreshold = 0.1f;
+    private float _carveTimeThreshold = 0.5f;
+    private bool _carveOnlyStationary = true;
+    private NavMeshObstacleShape _shape = NavMeshObstacleShape.Capsule;
+
+    public Vector3 center { get => _center; set => _center = value; }
+    public Vector3 size { get => _size; set => _size = value; }
+    public float radius { get => _radius; set => _radius = Math.Max(0.01f, value); }
+    public float height { get => _height; set => _height = Math.Max(0.01f, value); }
+    public bool carve { get => _carve; set => _carve = value; }
+    public float carveMoveThreshold { get => _carveMoveThreshold; set => _carveMoveThreshold = Math.Max(0f, value); }
+    public float carveTimeThreshold { get => _carveTimeThreshold; set => _carveTimeThreshold = Math.Max(0f, value); }
+    public bool carveOnlyStationary { get => _carveOnlyStationary; set => _carveOnlyStationary = value; }
+    public NavMeshObstacleShape shape { get => _shape; set => _shape = value; }
+}

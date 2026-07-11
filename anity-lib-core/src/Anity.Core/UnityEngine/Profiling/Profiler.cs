@@ -1,10 +1,14 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 
 namespace UnityEngine.Profiling;
 
 public static class Profiler
 {
   private static long _sampleDepth;
+  private static readonly HashSet<int> _profiledThreads = new();
+  private static readonly object _threadLock = new();
 
   public static bool enabled
   {
@@ -96,9 +100,19 @@ public static class Profiler
   {
     _ = threadGroupName;
     _ = threadName;
+    lock (_threadLock)
+    {
+      _profiledThreads.Add(Thread.CurrentThread.ManagedThreadId);
+    }
   }
 
-  public static void EndThreadProfiling() { }
+  public static void EndThreadProfiling()
+  {
+    lock (_threadLock)
+    {
+      _profiledThreads.Remove(Thread.CurrentThread.ManagedThreadId);
+    }
+  }
 
   public static void AddFramesFromFile(string filepath)
   {
@@ -126,13 +140,15 @@ public static class Profiler
   }
 }
 
-public readonly struct ProfilerMarker : IDisposable
+public struct ProfilerMarker : IDisposable
 {
   private readonly Unity.Profiling.ProfilerMarker _marker;
+  private bool _disposed;
 
   public ProfilerMarker(string name, ProfilerCategory category = ProfilerCategory.Internal)
   {
     _marker = new Unity.Profiling.ProfilerMarker(name, (Unity.Profiling.ProfilerCategory)(int)category);
+    _disposed = false;
   }
 
   public ProfilerMarkerAutoScope Auto()
@@ -152,7 +168,11 @@ public readonly struct ProfilerMarker : IDisposable
 
   public void Dispose()
   {
-    // no-op for compatibility
+    if (!_disposed)
+    {
+      _marker.End();
+      _disposed = true;
+    }
   }
 }
 
