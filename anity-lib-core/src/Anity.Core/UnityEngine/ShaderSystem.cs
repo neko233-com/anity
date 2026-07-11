@@ -18,6 +18,7 @@ public class Shader : Object
     private static readonly Dictionary<int, Array> _globalArrays = new();
     private static readonly HashSet<string> _globalKeywords = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, ComputeBuffer> _globalBuffers = new();
+    private static readonly Dictionary<int, (ComputeBuffer buffer, int offset, int size)> _globalConstantBuffersMap = new();
     private static int _nextPropertyID = 1;
     private static readonly Dictionary<string, int> _tagCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, string> _tagNames = new();
@@ -302,8 +303,8 @@ public class Shader : Object
     public static ComputeBuffer GetGlobalBuffer(int nameID) => _globalBuffers.TryGetValue(nameID, out var b) ? b : null;
     public static ComputeBuffer GetGlobalBuffer(string name) => GetGlobalBuffer(PropertyToID(name));
 
-    public static void SetGlobalBuffer(int nameID, GraphicsBuffer value) { }
-    public static void SetGlobalBuffer(string name, GraphicsBuffer value) { }
+    public static void SetGlobalBuffer(int nameID, GraphicsBuffer value) { if (value != null) _globalProperties[nameID] = value; else _globalProperties.Remove(nameID); }
+    public static void SetGlobalBuffer(string name, GraphicsBuffer value) => SetGlobalBuffer(PropertyToID(name), value);
 
     public static void SetGlobalFloatArray(int nameID, float[] values) { if (values != null) _globalArrays[nameID] = (float[])values.Clone(); else _globalArrays.Remove(nameID); }
     public static void SetGlobalFloatArray(string name, float[] values) => SetGlobalFloatArray(PropertyToID(name), values);
@@ -377,7 +378,50 @@ public class Shader : Object
     public void SetPropertyFlags(int propertyIndex, ShaderPropertyFlags flags) { if (propertyIndex >= 0 && propertyIndex < _properties.Count) { var p = _properties[propertyIndex]; p.flags = flags; _properties[propertyIndex] = p; } }
     public void GetPropertyRangeLimits(int propertyIndex, out float min, out float max) { min = 0f; max = 1f; if (propertyIndex >= 0 && propertyIndex < _properties.Count) { min = _properties[propertyIndex].rangeMin; max = _properties[propertyIndex].rangeMax; } }
     public Vector2 GetPropertyTextureDimension(int propertyIndex) => new(0, 0);
+    public TextureDimension GetTexDim(int propertyIndex)
+    {
+        if (propertyIndex < 0 || propertyIndex >= _properties.Count) return TextureDimension.None;
+        var prop = _properties[propertyIndex];
+        if (prop.type != ShaderPropertyType.Texture) return TextureDimension.None;
+        var defaultTexName = prop.defaultTextureName?.ToLowerInvariant() ?? string.Empty;
+        if (defaultTexName.Contains("cube")) return TextureDimension.Cube;
+        if (defaultTexName.Contains("3d")) return TextureDimension.Tex3D;
+        if (defaultTexName.Contains("array")) return TextureDimension.Tex2DArray;
+        return TextureDimension.Tex2D;
+    }
+    public object GetPropertyTypeDefaultValue(int propertyIndex) => propertyIndex >= 0 && propertyIndex < _properties.Count ? _properties[propertyIndex].defaultValue : null;
+    public bool IsPassEnabled(int passIndex) => passIndex >= 0 && passIndex < _passes.Count && _passes[passIndex].enabled;
+    public void SetPassEnabled(int passIndex, bool enabled) { if (passIndex >= 0 && passIndex < _passes.Count) _passes[passIndex].enabled = enabled; }
     public string GetPropertyTextureDefaultName(int propertyIndex) => propertyIndex >= 0 && propertyIndex < _properties.Count ? _properties[propertyIndex].defaultTextureName : "white";
+    public string[] GetShaderKeywords() => _keywords.Concat(_dependencyKeywords).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    public int GetStencilRefForPass(int passIndex) => passIndex >= 0 && passIndex < _passes.Count ? _passes[passIndex].stencilRef : 0;
+    public void GetBlendFactors(int passIndex, out BlendMode src, out BlendMode dst, out BlendMode srcA, out BlendMode dstA)
+    {
+        src = BlendMode.One; dst = BlendMode.Zero; srcA = BlendMode.One; dstA = BlendMode.Zero;
+        if (passIndex >= 0 && passIndex < _passes.Count)
+        {
+            var pass = _passes[passIndex];
+            src = pass.blendState.sourceBlend;
+            dst = pass.blendState.destinationBlend;
+            srcA = pass.blendState.sourceBlendAlpha;
+            dstA = pass.blendState.destinationBlendAlpha;
+        }
+    }
+    public CompareFunction GetZTest(int passIndex) => passIndex >= 0 && passIndex < _passes.Count ? _passes[passIndex].zTest : CompareFunction.LessEqual;
+    public bool GetZWrite(int passIndex) => passIndex >= 0 && passIndex < _passes.Count ? _passes[passIndex].zWrite : true;
+    public CullMode GetCullMode(int passIndex) => passIndex >= 0 && passIndex < _passes.Count ? _passes[passIndex].cullMode : CullMode.Back;
+    public void GetStencilOp(int passIndex, out StencilOp fail, out StencilOp zfail, out StencilOp zpass)
+    {
+        fail = StencilOp.Keep; zfail = StencilOp.Keep; zpass = StencilOp.Keep;
+        if (passIndex >= 0 && passIndex < _passes.Count)
+        {
+            var pass = _passes[passIndex];
+            fail = pass.stencilState.failOperationFront;
+            zfail = pass.stencilState.zFailOperationFront;
+            zpass = pass.stencilState.passOperationFront;
+        }
+    }
+    public CompareFunction GetStencilComp(int passIndex) => passIndex >= 0 && passIndex < _passes.Count ? _passes[passIndex].stencilState.compareFunctionFront : CompareFunction.Always;
 
     public bool ParseShaderSource(string source)
     {
@@ -1036,28 +1080,169 @@ half4 frag(Varyings input) : SV_Target { UNITY_SETUP_INSTANCE_ID(input); half4 c
         return shader;
     }
 
-    public void SetBuffer(int nameID, GraphicsBuffer buffer) { }
-    public void SetBuffer(string name, GraphicsBuffer buffer) { }
+    public void SetBuffer(int nameID, GraphicsBuffer buffer)
+    {
+        if (buffer == null)
+        {
+            _properties.RemoveAll(p => p.nameID == nameID);
+            return;
+        }
+        for (int i = 0; i < _properties.Count; i++)
+        {
+            if (_properties[i].nameID == nameID)
+            {
+                var prop = _properties[i];
+                prop.defaultValue = buffer;
+                _properties[i] = prop;
+                return;
+            }
+        }
+        _properties.Add(new ShaderProperty
+        {
+            name = GetPropertyName(nameID),
+            nameID = nameID,
+            defaultValue = buffer,
+            type = ShaderPropertyType.Int
+        });
+    }
+    public void SetBuffer(string name, GraphicsBuffer buffer) => SetBuffer(PropertyToID(name), buffer);
 
-    public static void SetGlobalConstantBuffer(ComputeBuffer buffer, int offset, int size) { }
-    public static void SetGlobalConstantBuffer(ComputeBuffer buffer, string name, int offset, int size) { }
+    public static void SetGlobalConstantBuffer(ComputeBuffer buffer, int nameID, int offset, int size)
+    {
+        if (buffer != null)
+            _globalConstantBuffersMap[nameID] = (buffer, offset, size);
+        else
+            _globalConstantBuffersMap.Remove(nameID);
+    }
+    public static void SetGlobalConstantBuffer(ComputeBuffer buffer, string name, int offset, int size)
+        => SetGlobalConstantBuffer(buffer, PropertyToID(name), offset, size);
 
     internal static void AddGlobalConstantBuffer(ConstantBuffer cb)
     {
         _globalConstantBuffers.RemoveAll(b => b.name == cb.name);
         _globalConstantBuffers.Add(cb);
     }
+
+    internal static void ClearCache()
+    {
+        _cache.Clear();
+        _propertyNames.Clear();
+        _propertyIDs.Clear();
+        _globalProperties.Clear();
+        _globalArrays.Clear();
+        _globalBuffers.Clear();
+        _globalConstantBuffersMap.Clear();
+        _tagCache.Clear();
+        _tagNames.Clear();
+        _globalKeywords.Clear();
+        _globalKeywordObjects.Clear();
+        _globalConstantBuffers.Clear();
+        _allShaders.Clear();
+        _nextPropertyID = 1;
+        _nextTagID = 1;
+    }
+
+    public static TextureDimension GetGlobalTextureDimension(int nameID)
+    {
+        var tex = GetGlobalTexture(nameID);
+        return tex?.dimension ?? TextureDimension.None;
+    }
+
+    public static byte CalculateFogStencil(bool fogEnabled)
+    {
+        return fogEnabled ? (byte)1 : (byte)0;
+    }
 }
 
 public static class ShaderUtil
 {
+    private static ShaderVariantCollection _shaderVariantCollection;
+
     public static Shader FindShader(string name) => Shader.Find(name);
     public static int GetPropertyCount(Shader shader) => shader?.GetPropertyCount() ?? 0;
     public static ShaderPropertyType GetPropertyType(Shader shader, int propertyIndex) => shader?.GetPropertyType(propertyIndex) ?? ShaderPropertyType.Float;
     public static string GetPropertyName(Shader shader, int propertyIndex) => shader?.GetPropertyDescription(propertyIndex) ?? string.Empty;
+    public static string GetPropertyDescription(Shader shader, int propertyIndex) => shader?.GetPropertyDescription(propertyIndex) ?? string.Empty;
+    public static void GetRangeLimits(Shader shader, int propertyIndex, out float min, out float max) { min = 0f; max = 1f; shader?.GetPropertyRangeLimits(propertyIndex, out min, out max); }
+    public static TextureDimension GetTexDim(Shader shader, int propertyIndex) => shader?.GetTexDim(propertyIndex) ?? TextureDimension.None;
+    public static object GetPropertyTypeDefaultValue(Shader shader, int propertyIndex) => shader?.GetPropertyTypeDefaultValue(propertyIndex);
+    public static bool IsPassEnabled(Shader shader, int passIndex) => shader?.IsPassEnabled(passIndex) ?? false;
+    public static void SetPassEnabled(Shader shader, int passIndex, bool enabled) => shader?.SetPassEnabled(passIndex, enabled);
+    public static MaterialProperty[] GetMaterialProperties(Material[] mats)
+    {
+        if (mats == null || mats.Length == 0 || mats[0] == null || mats[0].shader == null)
+            return Array.Empty<MaterialProperty>();
+        var shader = mats[0].shader;
+        var props = new List<MaterialProperty>();
+        foreach (var sp in shader.properties)
+        {
+            var mp = new MaterialProperty
+            {
+                name = sp.name,
+                nameID = sp.nameID,
+                type = (MaterialPropertyType)sp.type,
+                flags = (MaterialPropertyFlags)sp.flags,
+                rangeLimits = new Vector2(sp.rangeMin, sp.rangeMax),
+                textureDimension = shader.GetTexDim(shader.properties.ToList().IndexOf(sp))
+            };
+            var firstMat = mats[0];
+            switch (sp.type)
+            {
+                case ShaderPropertyType.Float:
+                case ShaderPropertyType.Range:
+                case ShaderPropertyType.Int:
+                    mp.floatValue = firstMat.GetFloat(sp.nameID);
+                    break;
+                case ShaderPropertyType.Color:
+                    mp.colorValue = firstMat.GetColor(sp.nameID);
+                    break;
+                case ShaderPropertyType.Vector:
+                    mp.vectorValue = firstMat.GetVector(sp.nameID);
+                    break;
+                case ShaderPropertyType.Texture:
+                    mp.textureValue = firstMat.GetTexture(sp.nameID);
+                    break;
+            }
+            props.Add(mp);
+        }
+        return props.ToArray();
+    }
+    public static MaterialProperty GetMaterialProperty(Shader shader, int propertyIndex)
+    {
+        if (shader == null || propertyIndex < 0 || propertyIndex >= shader.properties.Count)
+            return default;
+        var sp = shader.properties[propertyIndex];
+        return new MaterialProperty
+        {
+            name = sp.name,
+            nameID = sp.nameID,
+            type = (MaterialPropertyType)sp.type,
+            flags = (MaterialPropertyFlags)sp.flags,
+            rangeLimits = new Vector2(sp.rangeMin, sp.rangeMax),
+            textureDimension = shader.GetTexDim(propertyIndex)
+        };
+    }
+    public static void ApplyMaterialPropertyBlock(MaterialPropertyBlock props, Material mat)
+    {
+        props?.ApplyToMaterial(mat);
+    }
+    public static object ExtractCachedProperty(Material mat, int nameID)
+    {
+        return mat?.ExtractProperty(nameID);
+    }
+    public static byte CalculateFogStencil(bool fogEnabled) => Shader.CalculateFogStencil(fogEnabled);
+    public static int GetStencilRefForPass(Shader shader, int pass) => shader?.GetStencilRefForPass(pass) ?? 0;
+    public static void GetBlendFactors(Shader shader, int pass, out BlendMode src, out BlendMode dst, out BlendMode srcA, out BlendMode dstA) { src = BlendMode.One; dst = BlendMode.Zero; srcA = BlendMode.One; dstA = BlendMode.Zero; shader?.GetBlendFactors(pass, out src, out dst, out srcA, out dstA); }
+    public static CompareFunction GetZTest(Shader shader, int pass) => shader?.GetZTest(pass) ?? CompareFunction.LessEqual;
+    public static bool GetZWrite(Shader shader, int pass) => shader?.GetZWrite(pass) ?? true;
+    public static CullMode GetCullMode(Shader shader, int pass) => shader?.GetCullMode(pass) ?? CullMode.Back;
+    public static void GetStencilOp(Shader shader, int pass, out StencilOp fail, out StencilOp zfail, out StencilOp zpass) { fail = StencilOp.Keep; zfail = StencilOp.Keep; zpass = StencilOp.Keep; shader?.GetStencilOp(pass, out fail, out zfail, out zpass); }
+    public static CompareFunction GetStencilComp(Shader shader, int pass) => shader?.GetStencilComp(pass) ?? CompareFunction.Always;
+    public static string[] GetShaderKeywords(Shader shader) => shader?.GetShaderKeywords() ?? Array.Empty<string>();
+    public static TextureDimension GetGlobalTextureDimension(int nameID) => Shader.GetGlobalTextureDimension(nameID);
     public static bool IsShaderPropertyHidden(Shader shader, int propertyIndex) => shader != null && shader.GetPropertyFlags(propertyIndex).HasFlag(ShaderPropertyFlags.HideInInspector);
-    public static void SetShaderVariantCollection(ShaderVariantCollection collection) { }
-    public static void ClearShaderCache() { }
+    public static void SetShaderVariantCollection(ShaderVariantCollection collection) { _shaderVariantCollection = collection; }
+    public static void ClearShaderCache() { _shaderVariantCollection = null; Shader.ClearCache(); }
     public static CompiledShader CompileShader(Shader shader, ShaderCompilerPlatform platform) => shader?.Compile(platform);
     public static int GetComboCount(Shader shader) => shader != null ? shader.passes.Sum(p => p.keywords.Length) : 0;
     public static string GetDependency(Shader shader, string dependencyName) => string.Empty;
@@ -1145,6 +1330,7 @@ public class ShaderPass
     public string[] keywords = Array.Empty<string>();
     public bool supportsInstancing;
     public bool useSRPBatcher = true;
+    public bool enabled = true;
     public int stencilRef;
     public int stencilReadMask = 255;
     public int stencilWriteMask = 255;
@@ -1362,6 +1548,7 @@ public class GraphicsBuffer : IDisposable
     private GraphicsBuffer.Target _target;
     private byte[] _data;
     private bool _released;
+    private uint _counterValue;
 
     public int count { get => _count; set => _count = value; }
     public int stride => _stride;
@@ -1417,7 +1604,7 @@ public class GraphicsBuffer : IDisposable
             System.Buffer.BlockCopy(_data, srcOffset, data, dstOffset, byteCount);
     }
 
-    public void SetCounterValue(uint counterValue) { }
+    public void SetCounterValue(uint counterValue) { _counterValue = counterValue; }
     public void SetData<T>(List<T> data) where T : struct { if (data != null) SetData(data.ToArray()); }
     public void GetData<T>(List<T> data) where T : struct { _ = data; }
 
@@ -1458,9 +1645,20 @@ public class AsyncGPUReadbackRequest
     public bool hasError;
     public int layerCount;
     private Action<AsyncGPUReadbackRequest> _callback;
+    private int _frameCount;
+    private const int FramesToComplete = 3;
 
     public void WaitForCompletion() { done = true; _callback?.Invoke(this); }
-    public void Update() { }
+    public void Update()
+    {
+        if (done) return;
+        _frameCount++;
+        if (_frameCount >= FramesToComplete)
+        {
+            done = true;
+            _callback?.Invoke(this);
+        }
+    }
     public void Dispose() { done = true; }
     public NativeArray<byte> GetData<T>(int layer = 0) where T : struct => default;
     public NativeArray<byte> ToNativeArray<T>(int layer = 0) where T : struct => default;
@@ -1476,4 +1674,67 @@ public static class AsyncGPUReadback
     public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, int x, int width, int y, int height, int z, int depth, Rendering.RenderTextureFormat dstFormat) => new() { done = true };
     public static AsyncGPUReadbackRequest Request(ComputeBuffer src, int size, int offset) => new() { done = true };
     public static AsyncGPUReadbackRequest Request(GraphicsBuffer src, int size, int offset) => new() { done = true };
+}
+
+public struct MaterialProperty
+{
+    public string name;
+    public int nameID;
+    public MaterialPropertyType type;
+    public float floatValue;
+    public Color colorValue;
+    public Vector4 vectorValue;
+    public Texture textureValue;
+    public MaterialPropertyFlags flags;
+    public Vector2 rangeLimits;
+    public TextureDimension textureDimension;
+
+    public Vector2 textureScaleOffset { get; set; }
+
+    public MaterialProperty(Shader shader, int propertyIndex)
+    {
+        name = string.Empty;
+        nameID = 0;
+        type = MaterialPropertyType.Float;
+        floatValue = 0f;
+        colorValue = Color.white;
+        vectorValue = Vector4.zero;
+        textureValue = null;
+        flags = MaterialPropertyFlags.None;
+        rangeLimits = Vector2.zero;
+        textureDimension = TextureDimension.Tex2D;
+        textureScaleOffset = Vector2.one;
+
+        if (shader == null || propertyIndex < 0 || propertyIndex >= shader.properties.Count)
+            return;
+
+        var sp = shader.properties[propertyIndex];
+        name = sp.name;
+        nameID = sp.nameID;
+        type = (MaterialPropertyType)sp.type;
+        flags = (MaterialPropertyFlags)sp.flags;
+        rangeLimits = new Vector2(sp.rangeMin, sp.rangeMax);
+        textureDimension = shader.GetTexDim(propertyIndex);
+        textureScaleOffset = Vector2.one;
+
+        if (sp.defaultValue is float f) floatValue = f;
+        else if (sp.defaultValue is int i) floatValue = i;
+        else if (sp.defaultValue is Color c) colorValue = c;
+        else if (sp.defaultValue is Vector4 v) vectorValue = v;
+        else if (sp.defaultValue is Texture t) textureValue = t;
+    }
+}
+
+[Flags]
+public enum MaterialPropertyFlags
+{
+    None = 0,
+    HDR = 1 << 0,
+    Gamma = 1 << 1,
+    Normal = 1 << 2,
+    HideInInspector = 1 << 3,
+    NoScaleOffset = 1 << 4,
+    PerRendererData = 1 << 5,
+    MainTexture = 1 << 6,
+    MainColor = 1 << 7,
 }

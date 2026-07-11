@@ -18,11 +18,17 @@ public static class EditorGUI
   private static readonly Stack<FoldoutHeaderScope> _foldoutHeaderStack = new();
   private static readonly Stack<int> _buildTargetStack = new();
   private static readonly Stack<ScrollViewScope> _scrollViewStack = new();
+  private static readonly Stack<int> _indentLevelStack = new();
   private static int _nextControlId = 1000;
+  private static int _indentLevel;
 
   public static bool Enabled { get; set; } = true;
   public static bool showMixedValue { get; set; }
-  public static int indentLevel { get; set; }
+  public static int indentLevel
+  {
+    get => _indentLevel;
+    set => _indentLevel = Math.Max(0, value);
+  }
   public static Utility.PrefixLabelMode PrefixLabelMode { get; set; }
   public static float fieldWidth { get; set; } = -1f;
   public static float labelWidth { get; set; } = -1f;

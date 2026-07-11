@@ -1,3 +1,5 @@
+using UnityEngine.UI;
+
 namespace UnityEngine;
 
 public enum Axis
@@ -176,10 +178,20 @@ public class RectTransform : Transform
     }
   }
 
-  public void ForceUpdateRects() {}
+  public void ForceUpdateRects()
+  {
+    LayoutRebuilder.ForceRebuildLayoutImmediate(this);
+    Canvas.ForceUpdateCanvases();
+  }
 
   public static void ForceUpdateRects(RectTransform[] rectTransforms)
   {
-    _ = rectTransforms;
+    if (rectTransforms == null) return;
+    foreach (var rt in rectTransforms)
+    {
+      if (rt != null)
+        LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+    }
+    Canvas.ForceUpdateCanvases();
   }
 }

@@ -18,6 +18,8 @@ public sealed class SettingsProvider
   public Action<string, object>? activateHandler;
   public Action? deactivateHandler;
   public Func<string, bool>? searchHandler;
+  public Action? saveAction;
+  public Action? loadAction;
 
   public SettingsProvider(string path, SettingsScope scopes, IEnumerable<string>? keywords = null, Action? guiHandler = null)
   {
@@ -101,14 +103,17 @@ public sealed class SettingsProvider
 
   public void Repaint()
   {
+    Editor.repaintRequested = true;
   }
 
   public void SaveSettings()
   {
+    saveAction?.Invoke();
   }
 
   public void LoadSettings()
   {
+    loadAction?.Invoke();
   }
 }
 

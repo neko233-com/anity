@@ -80,4 +80,23 @@ public static class Selection
     activeContext = null;
     selectionChanged?.Invoke();
   }
+
+  public static void SetSelection(Object[] objects)
+  {
+    _objects.Clear();
+    if (objects != null)
+    {
+      foreach (var obj in objects)
+      {
+        if (obj != null && !_objects.Contains(obj))
+          _objects.Add(obj);
+      }
+      activeObject = _objects.Count > 0 ? _objects[0] : null;
+    }
+    else
+    {
+      activeObject = null;
+    }
+    selectionChanged?.Invoke();
+  }
 }

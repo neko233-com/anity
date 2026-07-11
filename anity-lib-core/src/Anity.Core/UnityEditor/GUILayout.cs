@@ -8,9 +8,16 @@ public static class GUILayout
 {
   private static readonly Stack<string> _scope = new();
 
-  public static void Space(int pixels) {}
+  public static void Space(int pixels)
+  {
+    _ = pixels;
+    _scope.Push("space");
+  }
 
-  public static void FlexibleSpace() {}
+  public static void FlexibleSpace()
+  {
+    _scope.Push("flexibleSpace");
+  }
 
   public static void Label(string text, params GUILayoutOption[]? options)
   {
@@ -275,11 +282,13 @@ public static class GUILayout
     _ = scrollViewRect;
     _ = scrollPosition;
     _ = viewRect;
+    BeginScope("scrollView");
   }
 
   public static Vector2 BeginScrollView(Vector2 scrollPosition, params GUILayoutOption[]? options)
   {
     _ = options;
+    BeginScope("scrollView");
     return scrollPosition;
   }
 
@@ -291,10 +300,14 @@ public static class GUILayout
     _ = verticalScrollbar;
     _ = background;
     _ = options;
+    BeginScope("scrollView");
     return scrollPosition;
   }
 
-  public static void EndScrollView() {}
+  public static void EndScrollView()
+  {
+    EndScope();
+  }
 
   public static void BeginArea(Rect screenRect, string text = "", GUIStyle? style = null, params GUILayoutOption[]? options)
   {
@@ -302,9 +315,13 @@ public static class GUILayout
     _ = text;
     _ = style;
     _ = options;
+    BeginScope("area");
   }
 
-  public static void EndArea() {}
+  public static void EndArea()
+  {
+    EndScope();
+  }
 
   public static void BeginDisabledGroup()
   {
@@ -331,9 +348,9 @@ public static class GUILayout
   public static GUILayoutOption ExpandWidth(bool value = true) => new("expandWidth", value);
   public static GUILayoutOption ExpandSize(bool width = true, bool height = true) => new("expandSize", new Vector2(width ? 1f : 0f, height ? 1f : 0f));
 
-  private static bool BeginScope()
+  private static bool BeginScope(string type = "scope")
   {
-    _scope.Push("scope");
+    _scope.Push(type);
     return true;
   }
 

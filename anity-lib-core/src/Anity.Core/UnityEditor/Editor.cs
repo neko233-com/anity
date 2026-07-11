@@ -7,6 +7,8 @@ namespace UnityEditor;
 
 public abstract class Editor
 {
+  public static bool repaintRequested { get; set; }
+
   public object? target { get; private set; }
   public object[]? targets { get; private set; }
   public SerializedObject? serializedObject { get; private set; }
@@ -153,6 +155,7 @@ public abstract class Editor
 
   public void Repaint()
   {
+    repaintRequested = true;
   }
 
   internal void SetTargetObject(object? target)

@@ -14,6 +14,7 @@ public static class GraphicsSettings
     private static RenderPipelineAsset? _defaultRenderPipeline;
     private static RenderPipeline? _currentPipelineInstance;
     private static readonly List<Action<RenderPipelineAsset, RenderPipelineAsset>> _renderPipelineChangedListeners = new();
+    private static readonly Dictionary<Type, RenderPipelineAsset> _renderPipelineSettings = new();
 
     public static RenderPipelineAsset? currentRenderPipeline => QualitySettings.renderPipeline ?? _defaultRenderPipeline;
 
@@ -83,8 +84,22 @@ public static class GraphicsSettings
         }
     }
 
-    public static void RegisterRenderPipelineSettings<T>(T settings) where T : RenderPipelineAsset { }
-    public static void UnregisterRenderPipelineSettings<T>(T settings) where T : RenderPipelineAsset { }
+    public static void RegisterRenderPipelineSettings<T>(T settings) where T : RenderPipelineAsset
+    {
+        _renderPipelineSettings[typeof(T)] = settings;
+    }
+
+    public static void UnregisterRenderPipelineSettings<T>(T settings) where T : RenderPipelineAsset
+    {
+        _renderPipelineSettings.Remove(typeof(T));
+    }
+
+    public static T? GetRenderPipelineSettings<T>() where T : RenderPipelineAsset
+    {
+        if (_renderPipelineSettings.TryGetValue(typeof(T), out var settings))
+            return settings as T;
+        return null;
+    }
 
     public static bool HasShaderDefine(GraphicsDeviceType graphicsDeviceType, BuiltinShaderDefine define)
     {

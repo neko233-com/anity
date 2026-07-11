@@ -6,6 +6,9 @@ namespace UnityEditor;
 
 public static class Handles
 {
+  private static readonly Stack<Matrix4x4> _matrixStack = new();
+  private static readonly Stack<Camera?> _cameraStack = new();
+
   public static Color color { get; set; } = Color.white;
   public static Color handleColor => color;
   public static Matrix4x4 matrix { get; set; } = Matrix4x4.identity;
@@ -95,8 +98,20 @@ public static class Handles
     return position;
   }
 
-  public static void BeginGUI() {}
-  public static void EndGUI() {}
+  public static void BeginGUI()
+  {
+    _matrixStack.Push(matrix);
+    _cameraStack.Push(CurrentCamera);
+    matrix = Matrix4x4.identity;
+  }
+
+  public static void EndGUI()
+  {
+    if (_matrixStack.Count > 0)
+      matrix = _matrixStack.Pop();
+    if (_cameraStack.Count > 0)
+      CurrentCamera = _cameraStack.Pop();
+  }
 
   public static void BeginChangeCheck() => EditorGUI.BeginChangeCheck();
   public static bool EndChangeCheck() => EditorGUI.EndChangeCheck();

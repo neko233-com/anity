@@ -27,6 +27,8 @@ public class Material : Object
     private MaterialGlobalIlluminationFlags _globalIlluminationFlags;
     private MaterialPropertyBlock? _propertyBlock;
     private HideFlags _hideFlags;
+    private ComputeBuffer instancingBuffer;
+    private string[] shaderPassNames;
 
     public Shader? shader
     {
@@ -341,11 +343,11 @@ public class Material : Object
     public GraphicsBuffer GetGraphicsBuffer(int nameID) => null;
     public GraphicsBuffer GetGraphicsBuffer(string name) => GetGraphicsBuffer(Shader.PropertyToID(name));
 
-    public void SetInstancingBuffer(ComputeBuffer buffer) { }
+    public void SetInstancingBuffer(ComputeBuffer buffer) { instancingBuffer = buffer; }
     public bool HasInstancingVariant => enableInstancing;
 
     public int GetPass(int pass) => pass >= 0 && pass < passCount ? pass : -1;
-    public void SetShaderPassNames(string[] names) { }
+    public void SetShaderPassNames(string[] names) { shaderPassNames = names; }
 
     public void SetTexture(int nameID, RenderTexture value, Rendering.RenderTextureSubElement element) => SetTexture(nameID, value);
     public void SetTexture(string name, Texture value, Rendering.RenderTextureSubElement element) => SetTexture(name, value);
@@ -373,6 +375,18 @@ public class Material : Object
 
     public IReadOnlyDictionary<string, string> TagMap => _tags;
     public int currentPass => _currentPass;
+
+    public object ExtractProperty(int nameID)
+    {
+        if (_properties.TryGetValue(nameID, out var val))
+            return val;
+        if (shader != null)
+        {
+            var prop = shader.properties.FirstOrDefault(p => p.nameID == nameID);
+            return prop.defaultValue;
+        }
+        return null;
+    }
 }
 
 public enum MaterialGlobalIlluminationFlags
@@ -393,5 +407,6 @@ public enum MaterialPropertyType
     Texture = 4,
     Color = -1,
     ConstantBuffer = 5,
-    ComputeBuffer = 6
+    ComputeBuffer = 6,
+    Range = 7
 }

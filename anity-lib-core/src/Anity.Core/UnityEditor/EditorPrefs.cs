@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 
 namespace UnityEditor;
 
@@ -59,6 +61,23 @@ public static class EditorPrefs
     _boolPrefs.Clear();
   }
 
-  public static void Save() {}
+  public static void Save()
+  {
+    try
+    {
+      var tempPath = Path.GetTempPath();
+      var prefsPath = Path.Combine(tempPath, "anity-editorprefs.json");
+      var data = new
+      {
+        IntPrefs = _intPrefs,
+        FloatPrefs = _floatPrefs,
+        StringPrefs = _stringPrefs,
+        BoolPrefs = _boolPrefs
+      };
+      var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
+      File.WriteAllText(prefsPath, json);
+    }
+    catch { }
+  }
 }
 

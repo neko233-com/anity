@@ -46,9 +46,9 @@ public static class EditorSceneManager
     return true;
   }
 
-  public static void SaveCurrentModifiedScenesIfUserWantsTo()
+  public static bool SaveCurrentModifiedScenesIfUserWantsTo()
   {
-    // shell no-op
+    return true;
   }
 
   public static void MarkSceneDirty(Scene scene)

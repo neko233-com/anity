@@ -411,6 +411,11 @@ public static class PrefabUtility
     _ = instanceRoot;
   }
 
+  public static bool IsPartOfAnyPrefab(Object targetObject)
+  {
+    return IsPartOfPrefabInstance(targetObject) || IsPartOfPrefabAsset(targetObject);
+  }
+
   public static PrefabAssetType GetPrefabAssetType(GameObject gameObject)
   {
     if (gameObject is null) return PrefabAssetType.Missing;

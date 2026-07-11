@@ -106,7 +106,7 @@ public class MonoBehaviour : Behaviour
 
     if (coroutine.WaitingForEndOfFrame)
     {
-      coroutine.WaitingForEndOfFrame = false;
+      return true;
     }
 
     bool moveNext;
@@ -185,6 +185,18 @@ public class MonoBehaviour : Behaviour
 
   internal void TickEndOfFrameCoroutines()
   {
+    for (int i = _coroutines.Count - 1; i >= 0; i--)
+    {
+      var coroutine = _coroutines[i];
+      if (coroutine.WaitingForEndOfFrame)
+      {
+        coroutine.WaitingForEndOfFrame = false;
+        if (!TickCoroutine(coroutine))
+        {
+          _coroutines.RemoveAt(i);
+        }
+      }
+    }
   }
 
   public Coroutine StartCoroutine(IEnumerator routine)

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 
 namespace UnityEditor;
@@ -9,6 +10,7 @@ namespace UnityEditor;
 public static class EditorUtility
 {
   private static readonly Dictionary<string, bool> _focusState = new(StringComparer.OrdinalIgnoreCase);
+  private static readonly Dictionary<int, UnityEngine.Object> _instanceIDToObject = new();
   private static string _progressTitle = string.Empty;
   private static string _progressInfo = string.Empty;
   private static float _progress;
@@ -206,6 +208,19 @@ public static class EditorUtility
   public static void SetDirtyIfNotDirty(object? target)
   {
     _ = target;
+  }
+
+  public static UnityEngine.Object InstanceIDToObject(int instanceID)
+  {
+    if (instanceID == 0) return null;
+    _instanceIDToObject.TryGetValue(instanceID, out var obj);
+    return obj;
+  }
+
+  public static void RegisterInstanceID(UnityEngine.Object obj)
+  {
+    if (obj == null) return;
+    _instanceIDToObject[obj.GetInstanceID()] = obj;
   }
 
   private static string Normalize(string path)

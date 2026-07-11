@@ -379,6 +379,38 @@ public class MaterialPropertyBlock
         _occlusionProbes = (float[])other._occlusionProbes.Clone();
         _lightProbeUsage = (Vector4[])other._lightProbeUsage.Clone();
     }
+
+    public void ApplyToMaterial(Material mat)
+    {
+        if (mat == null) return;
+        foreach (var kvp in _properties)
+        {
+            var id = kvp.Key;
+            var val = kvp.Value;
+            switch (val)
+            {
+                case float f: mat.SetFloat(id, f); break;
+                case int i: mat.SetInt(id, i); break;
+                case Color c: mat.SetColor(id, c); break;
+                case Vector4 v: mat.SetVector(id, v); break;
+                case Matrix4x4 m: mat.SetMatrix(id, m); break;
+                case Texture t: mat.SetTexture(id, t); break;
+                case ComputeBuffer cb: mat.SetBuffer(id, cb); break;
+            }
+        }
+        foreach (var kvp in _arrays)
+        {
+            var id = kvp.Key;
+            var arr = kvp.Value;
+            switch (arr)
+            {
+                case float[] fa: mat.SetFloatArray(id, fa); break;
+                case Vector4[] va: mat.SetVectorArray(id, va); break;
+                case Matrix4x4[] ma: mat.SetMatrixArray(id, ma); break;
+                case int[] ia: mat.SetIntArray(id, ia); break;
+            }
+        }
+    }
 }
 
 public class MeshFilter : Component

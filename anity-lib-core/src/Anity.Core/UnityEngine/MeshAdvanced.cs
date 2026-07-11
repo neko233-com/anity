@@ -464,8 +464,106 @@ public partial class Mesh
         return default;
     }
 
-    public void SetIndexBufferData<T>(NativeArray<T> data, int indexStart, int indexCount, int submesh = 0) where T : struct { }
-    public void SetVertexBufferData<T>(NativeArray<T> data, int start, int count, int stream = 0) where T : struct { }
+    public void SetIndexBufferData<T>(NativeArray<T> data, int indexStart, int indexCount, int submesh = 0) where T : struct
+    {
+        if (!data.IsCreated) return;
+        int copyCount = Math.Min(indexCount, data.Length);
+        if (copyCount <= 0) return;
+
+        while (_subMeshIndices.Count <= submesh)
+            _subMeshIndices.Add(Array.Empty<int>());
+
+        int[] newIndices = new int[indexStart + copyCount];
+        if (submesh < _subMeshIndices.Count && _subMeshIndices[submesh] != null)
+        {
+            int existingLen = _subMeshIndices[submesh].Length;
+            if (existingLen > 0)
+                Array.Copy(_subMeshIndices[submesh], newIndices, Math.Min(existingLen, indexStart + copyCount));
+        }
+
+        var srcArray = data.ToArray();
+        for (int i = 0; i < copyCount && indexStart + i < newIndices.Length; i++)
+        {
+            newIndices[indexStart + i] = Convert.ToInt32(srcArray[i]);
+        }
+
+        _subMeshIndices[submesh] = newIndices;
+        if (submesh == 0)
+        {
+            _triangles.Clear();
+            _triangles.AddRange(newIndices);
+        }
+        UpdateBufferSizes();
+    }
+
+    public void SetVertexBufferData<T>(NativeArray<T> data, int start, int count, int stream = 0) where T : struct
+    {
+        if (!data.IsCreated) return;
+        int copyCount = Math.Min(count, data.Length);
+        if (copyCount <= 0) return;
+
+        var srcArray = data.ToArray();
+
+        if (typeof(T) == typeof(Vector3))
+        {
+            if (stream == 0)
+            {
+                while (_vertices.Count < start + copyCount)
+                    _vertices.Add(Vector3.zero);
+                for (int i = 0; i < copyCount && start + i < _vertices.Count; i++)
+                    _vertices[start + i] = (Vector3)(object)srcArray[i]!;
+                RecalculateBounds();
+            }
+            else if (stream == 1)
+            {
+                while (_normals.Count < start + copyCount)
+                    _normals.Add(Vector3.up);
+                for (int i = 0; i < copyCount && start + i < _normals.Count; i++)
+                    _normals[start + i] = (Vector3)(object)srcArray[i]!;
+            }
+        }
+        else if (typeof(T) == typeof(Vector2))
+        {
+            var uvList = stream switch
+            {
+                0 => _uv,
+                1 => _uv2,
+                2 => _uv3,
+                3 => _uv4,
+                _ => null
+            };
+            if (uvList != null)
+            {
+                while (uvList.Count < start + copyCount)
+                    uvList.Add(Vector2.zero);
+                for (int i = 0; i < copyCount && start + i < uvList.Count; i++)
+                    uvList[start + i] = (Vector2)(object)srcArray[i]!;
+            }
+        }
+        else if (typeof(T) == typeof(Vector4))
+        {
+            while (_tangents.Count < start + copyCount)
+                _tangents.Add(new Vector4(1, 0, 0, 1));
+            for (int i = 0; i < copyCount && start + i < _tangents.Count; i++)
+                _tangents[start + i] = (Vector4)(object)srcArray[i]!;
+        }
+        else if (typeof(T) == typeof(Color))
+        {
+            while (_colors.Count < start + copyCount)
+                _colors.Add(Color.white);
+            for (int i = 0; i < copyCount && start + i < _colors.Count; i++)
+                _colors[start + i] = (Color)(object)srcArray[i]!;
+        }
+        else if (typeof(T) == typeof(Color32))
+        {
+            while (_colors32.Count < start + copyCount)
+                _colors32.Add(new Color32(255, 255, 255, 255));
+            for (int i = 0; i < copyCount && start + i < _colors32.Count; i++)
+                _colors32[start + i] = (Color32)(object)srcArray[i]!;
+        }
+
+        UpdateBufferSizes();
+    }
 
     public bool HasVertexAttribute(VertexAttribute attr) => _vertexAttributeDescriptors.Exists(d => d.attribute == attr);
 
