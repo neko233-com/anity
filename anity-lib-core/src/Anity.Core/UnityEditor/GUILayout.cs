@@ -338,6 +338,24 @@ public static class GUILayout
     Space((int)pixels);
   }
 
+  public static float HorizontalSlider(float value, float leftValue, float rightValue, params GUILayoutOption[] options)
+  {
+    _ = options;
+    return EditorGUI.HorizontalSlider(GUILayoutUtility.GetRect(0f, 16f, options), value, leftValue, rightValue);
+  }
+
+  public static float HorizontalSlider(float value, float leftValue, float rightValue, GUIStyle slider, GUIStyle thumb, params GUILayoutOption[] options)
+  {
+    _ = slider; _ = thumb; _ = options;
+    return EditorGUI.HorizontalSlider(GUILayoutUtility.GetRect(0f, 16f, options), value, leftValue, rightValue);
+  }
+
+  public static float VerticalSlider(float value, float topValue, float bottomValue, params GUILayoutOption[] options)
+  {
+    _ = options;
+    return EditorGUI.VerticalSlider(GUILayoutUtility.GetRect(16f, 0f, options), value, topValue, bottomValue);
+  }
+
   public static GUILayoutOption Width(float width) => new("width", width);
   public static GUILayoutOption Height(float height) => new("height", height);
   public static GUILayoutOption MinWidth(float minWidth) => new("minWidth", minWidth);

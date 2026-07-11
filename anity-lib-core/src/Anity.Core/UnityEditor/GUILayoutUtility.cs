@@ -43,6 +43,26 @@ public static class GUILayoutUtility
     return GetRect(height);
   }
 
+  public static Rect GetRect(float width, float height, params GUILayoutOption[] options)
+  {
+    float w = width, h = height;
+    if (options != null)
+    {
+      foreach (var opt in options)
+      {
+        if (opt == null) continue;
+        switch (opt.name)
+        {
+          case "width": w = (float)opt.value; break;
+          case "height": h = (float)opt.value; break;
+          case "minWidth": w = Mathf.Max(w, (float)opt.value); break;
+          case "minHeight": h = Mathf.Max(h, (float)opt.value); break;
+        }
+      }
+    }
+    return GetRect(w <= 0 ? 200f : w, h <= 0 ? 18f : h);
+  }
+
   public static Rect GetLastRect()
   {
     return _lastRect;

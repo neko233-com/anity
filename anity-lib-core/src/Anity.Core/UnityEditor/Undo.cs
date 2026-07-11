@@ -146,6 +146,19 @@ public static class Undo
     _group = group;
   }
 
+  public static void RevertAllDownToGroup(int group)
+  {
+    while (_undo.Count > 0)
+    {
+      var record = _undo.Peek();
+      if (record.Group < group)
+        break;
+      var popped = _undo.Pop();
+      _redo.Push(popped);
+    }
+    undoRedoPerformed?.Invoke();
+  }
+
   public static void RegisterFullObjectHierarchyUndo(Object objectToUndo, string name)
   {
     RecordObject(objectToUndo, name);

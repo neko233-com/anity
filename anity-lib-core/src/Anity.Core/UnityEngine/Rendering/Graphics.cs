@@ -508,6 +508,30 @@ public struct ScriptableRenderContext
         });
     }
 
+    public void DrawSkybox(Camera camera)
+    {
+        _drawCommands ??= new List<DrawCommand>();
+    }
+
+    public void DrawGizmos(Camera camera, GizmoSubset gizmoSubset)
+    {
+        _drawCommands ??= new List<DrawCommand>();
+    }
+
+    public void DrawUIOverlay(Camera camera)
+    {
+        _drawCommands ??= new List<DrawCommand>();
+    }
+
+    public void SetupCameraProperties(Camera camera)
+    {
+        if (camera == null) return;
+        var cmd = CommandBufferPool.Get("Setup Camera Properties");
+        cmd.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
+        ExecuteCommandBuffer(cmd);
+        CommandBufferPool.Release(cmd);
+    }
+
     public void Cull(ref ScriptableCullingParameters parameters, out CullingResults results)
     {
         results = new CullingResults
@@ -521,6 +545,29 @@ public struct ScriptableRenderContext
         _cullingResults = results;
         _hasCullingResults = true;
     }
+}
+
+public enum GizmoSubset
+{
+    PreImageEffects,
+    PostImageEffects
+}
+
+public struct RenderingLayerMask
+{
+    public uint value;
+
+    public RenderingLayerMask(uint value)
+    {
+        this.value = value;
+    }
+
+    public static implicit operator uint(RenderingLayerMask mask) => mask.value;
+    public static implicit operator RenderingLayerMask(uint value) => new RenderingLayerMask(value);
+
+    public static RenderingLayerMask GetMask(params string[] layerNames) => new RenderingLayerMask(0xFFFFFFFF);
+    public static int NameToLayer(string layerName) => 0;
+    public static string LayerToName(int layer) => "Default";
 }
 
 public struct CullingResults
@@ -540,10 +587,12 @@ public struct CullingResults
 
 public struct DrawingSettings
 {
+    private ShaderTagId[] m_ShaderTagIds;
     public SortingCriteria sortingCriteria { get; set; }
     public PerObjectData renderingLayerMask { get; set; }
     public bool enableDynamicBatching { get; set; }
     public bool enableInstancing { get; set; }
+    public int shaderPassCount => m_ShaderTagIds?.Length ?? 0;
 
     public DrawingSettings(ShaderTagId shaderTagId, SortingCriteria sortingCriteria)
     {
@@ -551,7 +600,23 @@ public struct DrawingSettings
         renderingLayerMask = PerObjectData.None;
         enableDynamicBatching = false;
         enableInstancing = false;
-        _ = shaderTagId;
+        m_ShaderTagIds = new[] { shaderTagId };
+    }
+
+    public void SetShaderPassName(int index, ShaderTagId shaderPassName)
+    {
+        if (m_ShaderTagIds == null)
+            m_ShaderTagIds = new ShaderTagId[index + 1];
+        else if (index >= m_ShaderTagIds.Length)
+            Array.Resize(ref m_ShaderTagIds, index + 1);
+        m_ShaderTagIds[index] = shaderPassName;
+    }
+
+    public ShaderTagId GetShaderPassName(int index)
+    {
+        if (m_ShaderTagIds != null && index >= 0 && index < m_ShaderTagIds.Length)
+            return m_ShaderTagIds[index];
+        return default;
     }
 }
 
@@ -565,6 +630,13 @@ public struct FilteringSettings
     {
         renderQueueRange = range;
         layerMask = -1;
+        sortingLayerRange = SortingLayerRange.all;
+    }
+
+    public FilteringSettings(RenderQueueRange range, int layerMask)
+    {
+        renderQueueRange = range;
+        this.layerMask = layerMask;
         sortingLayerRange = SortingLayerRange.all;
     }
 }

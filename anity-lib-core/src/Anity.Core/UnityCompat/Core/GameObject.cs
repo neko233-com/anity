@@ -92,21 +92,33 @@ public class GameObject : Object
 
   public static GameObject[] FindObjectsOfType(Type componentType)
   {
+    return FindObjectsOfType(componentType, true);
+  }
+
+  public static GameObject[] FindObjectsOfType(Type componentType, bool includeInactive)
+  {
     if (componentType is null)
     {
       return Array.Empty<GameObject>();
     }
 
     return _allObjects
-      .Where(go => !go.IsDestroyed && go.GetComponent(componentType) is not null)
+      .Where(go => !go.IsDestroyed && (includeInactive || go.activeInHierarchy) && go.GetComponent(componentType) is not null)
       .ToArray();
   }
 
   public static T[] FindObjectsOfType<T>() where T : class
   {
+    return FindObjectsOfType<T>(true);
+  }
+
+  public static T[] FindObjectsOfType<T>(bool includeInactive) where T : class
+  {
     var result = new List<T>();
     foreach (var go in _allObjects.Where(go => !go.IsDestroyed))
     {
+      if (!includeInactive && !go.activeInHierarchy)
+        continue;
       var component = go.GetComponent<T>();
       if (component is not null)
       {

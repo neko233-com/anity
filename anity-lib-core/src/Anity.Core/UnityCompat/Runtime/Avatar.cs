@@ -10,6 +10,8 @@ public class Avatar : Object
   public int avatarSize { get; set; }
   public int muscleCount { get; set; } = 95;
   public Transform? rootBone { get; set; }
+  public Vector3 bodyPosition { get; set; }
+  public Quaternion bodyRotation { get; set; } = Quaternion.identity;
 
   public static Avatar Build(RawAvatar avatar)
   {
@@ -26,9 +28,13 @@ public class Avatar : Object
 
   public HumanDescription humanDescription { get; set; }
 
-  public String BoneNameToHumanBoneName(string boneName)
+  public string BoneNameToHumanBoneName(string boneName)
   {
-    _ = boneName;
+    if (humanDescription.human == null) return string.Empty;
+    foreach (var hb in humanDescription.human)
+    {
+      if (hb.boneName == boneName) return hb.humanName;
+    }
     return string.Empty;
   }
 }
@@ -64,6 +70,7 @@ public struct RawAvatar
 public struct HumanBone
 {
   public string boneName { get; set; }
+  public string humanName { get; set; }
   public HumanLimit limit { get; set; }
 }
 

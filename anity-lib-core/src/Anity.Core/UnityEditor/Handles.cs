@@ -379,6 +379,105 @@ public static class Handles
   {
     _ = control;
   }
+
+  public static Quaternion FreeRotateHandle(Quaternion rotation, Vector3 position, float size)
+  {
+    _ = position;
+    _ = size;
+    return rotation;
+  }
+
+  public static bool Button(Vector3 position, Quaternion direction, float size, float pickSize, HandlesCapFunction capFunction)
+  {
+    _ = direction;
+    _ = size;
+    _ = pickSize;
+    _ = capFunction;
+    _ = position;
+    return false;
+  }
+
+  public static void ArrowHandleCap(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType)
+  {
+    _ = controlID;
+    _ = position;
+    _ = rotation;
+    _ = size;
+    _ = eventType;
+  }
+
+  public static void ConeHandleCap(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType)
+  {
+    _ = controlID;
+    _ = position;
+    _ = rotation;
+    _ = size;
+    _ = eventType;
+  }
+
+  public static void CubeHandleCap(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType)
+  {
+    _ = controlID;
+    _ = position;
+    _ = rotation;
+    _ = size;
+    _ = eventType;
+  }
+
+  public static void CylinderHandleCap(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType)
+  {
+    _ = controlID;
+    _ = position;
+    _ = rotation;
+    _ = size;
+    _ = eventType;
+  }
+
+  public static void DotHandleCap(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType)
+  {
+    _ = controlID;
+    _ = position;
+    _ = rotation;
+    _ = size;
+    _ = eventType;
+  }
+
+  public static void RectangleHandleCap(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType)
+  {
+    _ = controlID;
+    _ = position;
+    _ = rotation;
+    _ = size;
+    _ = eventType;
+  }
+
+  public static void SphereHandleCap(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType)
+  {
+    _ = controlID;
+    _ = position;
+    _ = rotation;
+    _ = size;
+    _ = eventType;
+  }
+
+  public static void CircleHandleCap(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType)
+  {
+    _ = controlID;
+    _ = position;
+    _ = rotation;
+    _ = size;
+    _ = eventType;
+  }
+
+  public static float Slider(float value, float min, float max, float size, HandlesCapFunction? slider, float snap)
+  {
+    _ = min;
+    _ = max;
+    _ = size;
+    _ = slider;
+    _ = snap;
+    return value;
+  }
 }
 
 public delegate void HandlesCapFunction(int controlID, Vector3 position, Quaternion rotation, float size, EventType eventType);

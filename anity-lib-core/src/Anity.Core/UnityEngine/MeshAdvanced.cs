@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Unity.Collections;
 using Unity.Jobs;
 
@@ -113,8 +114,7 @@ public struct MeshData : IDisposable
     private List<Vector3> _normals;
     private List<Vector4> _tangents;
     private List<Color> _colors;
-    private List<Vector2> _uv0;
-    private List<Vector2> _uv1;
+    private List<Vector2>[] _uvChannels;
     private List<int> _indices;
 
     public IndexFormat indexFormat
@@ -126,6 +126,7 @@ public struct MeshData : IDisposable
     public int vertexCount => _vertexCount;
     public int indexCount => _indexCount;
     public int subMeshCount => _subMeshes?.Count ?? 0;
+    public int vertexBufferCount => _vertexAttributes != null ? _vertexAttributes.Select(a => a.stream).Distinct().Count() : 1;
 
     public VertexAttributeDescriptor[] GetVertexAttributes()
     {
@@ -151,16 +152,21 @@ public struct MeshData : IDisposable
         _normals = new List<Vector3>(count);
         _tangents = new List<Vector4>(count);
         _colors = new List<Color>(count);
-        _uv0 = new List<Vector2>(count);
-        _uv1 = new List<Vector2>(count);
+        _uvChannels = new List<Vector2>[8];
+        for (int ch = 0; ch < 8; ch++)
+        {
+            _uvChannels[ch] = new List<Vector2>(count);
+        }
         for (int i = 0; i < count; i++)
         {
             _positions.Add(Vector3.zero);
             _normals.Add(Vector3.up);
             _tangents.Add(new Vector4(1, 0, 0, 1));
             _colors.Add(Color.white);
-            _uv0.Add(Vector2.zero);
-            _uv1.Add(Vector2.zero);
+            for (int ch = 0; ch < 8; ch++)
+            {
+                _uvChannels[ch].Add(Vector2.zero);
+            }
         }
     }
 
@@ -199,6 +205,96 @@ public struct MeshData : IDisposable
         return arr;
     }
 
+    public NativeArray<T> GetVertices<T>() where T : struct
+    {
+        if (_positions == null) return new NativeArray<T>(0, Allocator.Persistent);
+        var result = new NativeArray<T>(_positions.Count, Allocator.Persistent);
+        if (typeof(T) == typeof(Vector3))
+        {
+            for (int i = 0; i < _positions.Count; i++)
+            {
+                result[i] = (T)(object)_positions[i];
+            }
+        }
+        return result;
+    }
+
+    public NativeArray<T> GetNormals<T>() where T : struct
+    {
+        if (_normals == null) return new NativeArray<T>(0, Allocator.Persistent);
+        var result = new NativeArray<T>(_normals.Count, Allocator.Persistent);
+        if (typeof(T) == typeof(Vector3))
+        {
+            for (int i = 0; i < _normals.Count; i++)
+            {
+                result[i] = (T)(object)_normals[i];
+            }
+        }
+        return result;
+    }
+
+    public NativeArray<T> GetTangents<T>() where T : struct
+    {
+        if (_tangents == null) return new NativeArray<T>(0, Allocator.Persistent);
+        var result = new NativeArray<T>(_tangents.Count, Allocator.Persistent);
+        if (typeof(T) == typeof(Vector4))
+        {
+            for (int i = 0; i < _tangents.Count; i++)
+            {
+                result[i] = (T)(object)_tangents[i];
+            }
+        }
+        return result;
+    }
+
+    public NativeArray<T> GetColors<T>() where T : struct
+    {
+        if (_colors == null) return new NativeArray<T>(0, Allocator.Persistent);
+        var result = new NativeArray<T>(_colors.Count, Allocator.Persistent);
+        if (typeof(T) == typeof(Color))
+        {
+            for (int i = 0; i < _colors.Count; i++)
+            {
+                result[i] = (T)(object)_colors[i];
+            }
+        }
+        return result;
+    }
+
+    public NativeArray<T> GetUVs<T>(int channel) where T : struct
+    {
+        if (_uvChannels == null || channel < 0 || channel >= 8) return new NativeArray<T>(0, Allocator.Persistent);
+        var uvList = _uvChannels[channel];
+        if (uvList == null) return new NativeArray<T>(0, Allocator.Persistent);
+        var result = new NativeArray<T>(uvList.Count, Allocator.Persistent);
+        if (typeof(T) == typeof(Vector2))
+        {
+            for (int i = 0; i < uvList.Count; i++)
+            {
+                result[i] = (T)(object)uvList[i];
+            }
+        }
+        return result;
+    }
+
+    public NativeArray<T> GetIndices<T>(int submesh) where T : struct
+    {
+        if (_indices == null) return new NativeArray<T>(0, Allocator.Persistent);
+        var subMeshDesc = GetSubMesh(submesh);
+        int start = subMeshDesc.indexStart;
+        int count = subMeshDesc.indexCount > 0 ? subMeshDesc.indexCount : _indices.Count;
+        if (start + count > _indices.Count) count = _indices.Count - start;
+        var result = new NativeArray<T>(Math.Max(0, count), Allocator.Persistent);
+        if (typeof(T) == typeof(int) || typeof(T) == typeof(ushort) || typeof(T) == typeof(uint))
+        {
+            for (int i = 0; i < count; i++)
+            {
+                result[i] = (T)Convert.ChangeType(_indices[start + i], typeof(T));
+            }
+        }
+        return result;
+    }
+
     public void SetSubMesh(int index, SubmeshDescriptor subMesh, MeshUpdateFlags flags = MeshUpdateFlags.Default)
     {
         _ = flags;
@@ -219,7 +315,22 @@ public struct MeshData : IDisposable
         _subMeshes = subMeshes != null ? new List<SubmeshDescriptor>(subMeshes) : new List<SubmeshDescriptor>();
     }
 
+    public void AddSubMesh(SubmeshDescriptor subMesh, MeshUpdateFlags flags = MeshUpdateFlags.Default)
+    {
+        _ = flags;
+        if (_subMeshes == null) _subMeshes = new List<SubmeshDescriptor>();
+        _subMeshes.Add(subMesh);
+    }
+
     internal List<Vector3> GetPositions() => _positions ?? new List<Vector3>();
+    internal List<Vector3> GetNormalsList() => _normals ?? new List<Vector3>();
+    internal List<Vector4> GetTangentsList() => _tangents ?? new List<Vector4>();
+    internal List<Color> GetColorsList() => _colors ?? new List<Color>();
+    internal List<Vector2> GetUVsList(int channel)
+    {
+        if (_uvChannels == null || channel < 0 || channel >= 8) return new List<Vector2>();
+        return _uvChannels[channel] ?? new List<Vector2>();
+    }
     internal List<int> GetIndices() => _indices ?? new List<int>();
 
     public void Dispose()
@@ -230,8 +341,13 @@ public struct MeshData : IDisposable
         _normals?.Clear();
         _tangents?.Clear();
         _colors?.Clear();
-        _uv0?.Clear();
-        _uv1?.Clear();
+        if (_uvChannels != null)
+        {
+            for (int ch = 0; ch < 8; ch++)
+            {
+                _uvChannels[ch]?.Clear();
+            }
+        }
         _indices?.Clear();
         _vertexAttributes?.Clear();
         _subMeshes?.Clear();

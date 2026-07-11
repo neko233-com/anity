@@ -694,20 +694,26 @@ public sealed class SceneView : EditorWindow
     }
 
     public static bool showGrid
+  {
+    get
     {
-        get
-        {
-            var sv = lastActiveSceneView;
-            return sv != null && sv._showGrid;
-        }
-        set
-        {
-            foreach (var sv in _all)
-            {
-                sv._showGrid = value;
-            }
-        }
+      var sv = lastActiveSceneView;
+      return sv != null && sv._showGrid;
     }
+    set
+    {
+      foreach (var sv in _all)
+      {
+        sv._showGrid = value;
+      }
+    }
+  }
+
+  [MenuItem("Window/General/Scene")]
+  public static SceneView ShowWindow()
+  {
+    return GetWindow<SceneView>("Scene");
+  }
 
     public static SceneView DrawCreate(Rect position, string title)
     {

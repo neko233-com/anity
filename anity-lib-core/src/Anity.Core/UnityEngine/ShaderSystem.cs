@@ -1667,11 +1667,11 @@ public class AsyncGPUReadbackRequest
 public static class AsyncGPUReadback
 {
     public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex = 0) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, Rendering.RenderTextureFormat dstFormat) => new() { done = true };
+    public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, RenderTextureFormat dstFormat) => new() { done = true };
     public static AsyncGPUReadbackRequest Request(ComputeBuffer src) => new() { done = true };
     public static AsyncGPUReadbackRequest Request(GraphicsBuffer src) => new() { done = true };
     public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, TextureFormat dstFormat) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, int x, int width, int y, int height, int z, int depth, Rendering.RenderTextureFormat dstFormat) => new() { done = true };
+    public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, int x, int width, int y, int height, int z, int depth, RenderTextureFormat dstFormat) => new() { done = true };
     public static AsyncGPUReadbackRequest Request(ComputeBuffer src, int size, int offset) => new() { done = true };
     public static AsyncGPUReadbackRequest Request(GraphicsBuffer src, int size, int offset) => new() { done = true };
 }

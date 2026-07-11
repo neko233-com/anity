@@ -783,3 +783,35 @@ public class GizmoIconAttribute : Attribute
     this.iconPath = iconPath;
   }
 }
+
+[Flags]
+public enum GizmoType
+{
+  None = 0,
+  Selected = 1,
+  NotSelected = 2,
+  Active = 4,
+  Inactive = 8,
+  Pickable = 16,
+  SelectionBase = 32,
+  Always = Selected | NotSelected | Active | Inactive
+}
+
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+public class DrawGizmoAttribute : Attribute
+{
+  public Type drawnType { get; }
+  public GizmoType gizmoType { get; }
+
+  public DrawGizmoAttribute(Type drawnType)
+  {
+    this.drawnType = drawnType;
+    this.gizmoType = GizmoType.Always;
+  }
+
+  public DrawGizmoAttribute(Type drawnType, GizmoType gizmoType)
+  {
+    this.drawnType = drawnType;
+    this.gizmoType = gizmoType;
+  }
+}
