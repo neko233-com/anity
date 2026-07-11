@@ -257,12 +257,6 @@ public class SpriteAtlasManager
     }
 }
 
-public enum SpriteMeshType
-{
-    FullRect,
-    Tight
-}
-
 public enum SpritePackingMode
 {
     Tight,

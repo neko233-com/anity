@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI;
 
@@ -10,8 +11,8 @@ public class Slider : Selectable
     private float _maxValue = 1f;
     private bool _wholeNumbers;
     private Slider.Direction _direction = Direction.LeftToRight;
-    private RectTransform _fillRect;
-    private RectTransform _handleRect;
+    private RectTransform? _fillRect;
+    private RectTransform? _handleRect;
 
     public enum Direction
     {
@@ -61,13 +62,13 @@ public class Slider : Selectable
         set => _direction = value;
     }
 
-    public RectTransform fillRect
+    public RectTransform? fillRect
     {
         get => _fillRect;
         set => _fillRect = value;
     }
 
-    public RectTransform handleRect
+    public RectTransform? handleRect
     {
         get => _handleRect;
         set => _handleRect = value;
@@ -96,12 +97,12 @@ public class Slider : Selectable
     public class SliderEvent : UnityEngine.Events.UnityEvent<float> { }
 }
 
-public class Toggle : Selectable
+public class Toggle : Selectable, IPointerClickHandler
 {
     private bool _isOn;
     private Toggle.ToggleTransition _toggleTransition = ToggleTransition.Fade;
-    private Graphic _graphic;
-    private ToggleGroup _group;
+    private Graphic? _graphic;
+    private ToggleGroup? _group;
 
     public enum ToggleTransition
     {
@@ -112,10 +113,7 @@ public class Toggle : Selectable
     public bool isOn
     {
         get => _isOn;
-        set
-        {
-            Set(value);
-        }
+        set => Set(value);
     }
 
     public Toggle.ToggleTransition toggleTransition
@@ -124,13 +122,13 @@ public class Toggle : Selectable
         set => _toggleTransition = value;
     }
 
-    public Graphic graphic
+    public Graphic? graphic
     {
         get => _graphic;
         set => _graphic = value;
     }
 
-    public ToggleGroup group
+    public ToggleGroup? group
     {
         get => _group;
         set => _group = value;
@@ -138,11 +136,21 @@ public class Toggle : Selectable
 
     public Toggle.ToggleEvent onValueChanged { get; set; } = new Toggle.ToggleEvent();
 
-    private void Set(bool value)
+    private void Set(bool value, bool sendCallback = true)
     {
         if (_isOn == value) return;
         _isOn = value;
-        onValueChanged?.Invoke(_isOn);
+        if (_group is not null && value)
+            _group.NotifyToggleOn(this);
+        if (sendCallback)
+            onValueChanged?.Invoke(_isOn);
+        PlayEffect();
+    }
+
+    private void PlayEffect()
+    {
+        if (_graphic is null) return;
+        _graphic.CrossFadeAlpha(_isOn ? 1f : 0f, 0.1f, true);
     }
 
     public virtual void SetIsOnWithoutNotify(bool value)
@@ -150,12 +158,18 @@ public class Toggle : Selectable
         _isOn = value;
     }
 
+    public virtual void OnPointerClick(PointerEventData eventData)
+    {
+        if (!IsInteractable() || !IsActive()) return;
+        Set(!_isOn);
+    }
+
     public class ToggleEvent : UnityEngine.Events.UnityEvent<bool> { }
 }
 
 public class ToggleGroup : UIBehaviour
 {
-    private List<Toggle> _toggles = new List<Toggle>();
+    private readonly List<Toggle> _toggles = new();
     private bool _allowSwitchOff;
 
     public bool allowSwitchOff
@@ -186,7 +200,7 @@ public class ToggleGroup : UIBehaviour
         foreach (var t in _toggles)
         {
             if (t != toggle)
-                t.isOn = false;
+                t.SetIsOnWithoutNotify(false);
         }
     }
 
@@ -203,52 +217,10 @@ public class ToggleGroup : UIBehaviour
 
     public void SetAllTogglesOff()
     {
-        bool oldAllowSwitchOff = _allowSwitchOff;
+        var old = _allowSwitchOff;
         _allowSwitchOff = true;
         foreach (var t in _toggles)
-            t.isOn = false;
-        _allowSwitchOff = oldAllowSwitchOff;
+            t.SetIsOnWithoutNotify(false);
+        _allowSwitchOff = old;
     }
-
-    internal void EnsureValidState()
-    {
-    }
-}
-
-public interface IEventSystemHandler { }
-public interface IPointerMoveHandler : IEventSystemHandler { void OnPointerMove(PointerEventData eventData); }
-public interface IPointerOverHandler : IEventSystemHandler { }
-
-public abstract class BaseInputModule : UIBehaviour
-{
-    public virtual bool IsModuleSupported() => true;
-    public virtual bool ShouldActivateModule() => false;
-    public virtual void ActivateModule() { }
-    public virtual void DeactivateModule() { }
-    public virtual void UpdateModule() { }
-    public virtual bool IsPointerOverGameObject(int pointerId) => false;
-    public virtual GameObject FindCommonRoot(GameObject g1, GameObject g2) => null;
-    public virtual void HandlePointerExitAndEnter(PointerEventData currentPointerData, GameObject newEnterTarget) { }
-}
-
-public abstract class PointerInputModule : BaseInputModule
-{
-    public enum MouseButton
-    {
-        Left = 0,
-        Right = 1,
-        Middle = 2,
-    }
-}
-
-public class StandaloneInputModule : PointerInputModule
-{
-    public string horizontalAxis { get; set; } = "Horizontal";
-    public string verticalAxis { get; set; } = "Vertical";
-    public string submitButton { get; set; } = "Submit";
-    public string cancelButton { get; set; } = "Cancel";
-    public string inputActionsAsset { get; set; }
-    public float inputActionsPerSecond { get; set; } = 10f;
-    public float repeatDelay { get; set; } = 0.5f;
-    public float moveRepeatRate { get; set; } = 0.1f;
 }

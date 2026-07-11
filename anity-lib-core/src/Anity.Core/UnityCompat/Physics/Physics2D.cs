@@ -391,18 +391,18 @@ public static class Physics2D
 
   public static bool CapsuleCast(Vector2 origin, Vector2 size, CapsuleDirection2D directionType, float angle, Vector2 direction, float distance, int layerMask = -1)
   {
-    return Physics2DWorld.CapsuleCast(origin, size, directionType, distance, direction, layerMask, out _);
+    return Physics2DWorld.CapsuleCast(origin, size, directionType, angle, direction, distance, layerMask, out _);
   }
 
   public static bool CapsuleCast(Vector2 origin, Vector2 size, CapsuleDirection2D directionType, float angle, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask = -1)
   {
-    return Physics2DWorld.CapsuleCast(origin, size, directionType, distance, direction, layerMask, out hitInfo);
+    return Physics2DWorld.CapsuleCast(origin, size, directionType, angle, direction, distance, layerMask, out hitInfo);
   }
 
   public static int CapsuleCast(Vector2 origin, Vector2 size, CapsuleDirection2D directionType, float angle, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask = -1)
   {
     if (results is null || results.Length == 0) return 0;
-    if (!Physics2DWorld.CapsuleCast(origin, size, directionType, distance, direction, layerMask, out var hit)) return 0;
+    if (!Physics2DWorld.CapsuleCast(origin, size, directionType, angle, direction, distance, layerMask, out var hit)) return 0;
     results[0] = hit;
     return 1;
   }
@@ -444,7 +444,7 @@ public static class Physics2D
 
   public static RaycastHit2D[] CapsuleCastAll(Vector2 origin, Vector2 size, CapsuleDirection2D directionType, float angle, Vector2 direction, float distance, int layerMask = -1)
   {
-    return Physics2DWorld.CapsuleCast(origin, size, directionType, distance, direction, layerMask, out var hit)
+    return Physics2DWorld.CapsuleCast(origin, size, directionType, angle, direction, distance, layerMask, out var hit)
       ? new[] { hit }
       : Array.Empty<RaycastHit2D>();
   }

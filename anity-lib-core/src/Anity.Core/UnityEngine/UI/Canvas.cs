@@ -19,6 +19,7 @@ public class Canvas : Behaviour
   public Camera? worldCamera { get; set; }
   public int sortingOrder { get; set; }
   public int sortOrder { get; set; }
+  public int renderOrder { get; set; }
   public bool overrideSorting { get; set; }
   public int targetDisplay { get; set; }
   public float scaleFactor { get; set; } = 1f;
@@ -35,13 +36,16 @@ public class Canvas : Behaviour
   public static event System.Action<bool>? preWillRenderCanvases;
   public static event System.Action? willRenderCanvases;
 
-  public void ForceUpdateCanvases()
+  static Canvas()
   {
-    preWillRenderCanvases?.Invoke(false);
-    willRenderCanvases?.Invoke();
+    willRenderCanvases += () =>
+    {
+      CanvasUpdateRegistry.instance.PerformUpdate();
+      ClipperRegistry.Cull();
+    };
   }
 
-  public static void ForceUpdateCanvasesStatic()
+  public static void ForceUpdateCanvases()
   {
     preWillRenderCanvases?.Invoke(false);
     willRenderCanvases?.Invoke();

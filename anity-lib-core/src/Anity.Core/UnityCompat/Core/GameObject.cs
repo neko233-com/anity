@@ -89,7 +89,7 @@ public class GameObject : Object
 
   public static GameObject[] FindObjectsOfType(Type componentType)
   {
-    if (componentType is null || !typeof(Component).IsAssignableFrom(componentType))
+    if (componentType is null)
     {
       return Array.Empty<GameObject>();
     }
@@ -99,7 +99,7 @@ public class GameObject : Object
       .ToArray();
   }
 
-  public static T[] FindObjectsOfType<T>() where T : Component
+  public static T[] FindObjectsOfType<T>() where T : class
   {
     var result = new List<T>();
     foreach (var go in _allObjects.Where(go => !go.IsDestroyed))
@@ -153,7 +153,7 @@ public class GameObject : Object
 
   public Component? GetComponent(Type componentType)
   {
-    if (componentType is null || !typeof(Component).IsAssignableFrom(componentType))
+    if (componentType is null)
     {
       return null;
     }
@@ -172,12 +172,12 @@ public class GameObject : Object
     return null;
   }
 
-  public T? GetComponent<T>() where T : Component
+  public T? GetComponent<T>() where T : class
   {
-    return (T?)GetComponent(typeof(T));
+    return GetComponent(typeof(T)) as T;
   }
 
-  public bool TryGetComponent<T>(out T? component) where T : Component
+  public bool TryGetComponent<T>(out T? component) where T : class
   {
     component = GetComponent<T>();
     return component is not null;
@@ -185,7 +185,7 @@ public class GameObject : Object
 
   public Component[] GetComponents(Type componentType)
   {
-    if (componentType is null || !typeof(Component).IsAssignableFrom(componentType))
+    if (componentType is null)
     {
       return Array.Empty<Component>();
     }
@@ -195,13 +195,18 @@ public class GameObject : Object
       .ToArray();
   }
 
-  public T[] GetComponents<T>() where T : Component
+  public T[] GetComponents<T>() where T : class
   {
     return GetComponents(typeof(T)).OfType<T>().ToArray();
   }
 
   public Component[] GetComponentsInChildren(Type componentType, bool includeInactive = true)
   {
+    if (componentType is null)
+    {
+      return Array.Empty<Component>();
+    }
+
     if (!includeInactive && !activeSelf)
     {
       return Array.Empty<Component>();
@@ -224,13 +229,18 @@ public class GameObject : Object
     return components.ToArray();
   }
 
-  public T[] GetComponentsInChildren<T>(bool includeInactive = true) where T : Component
+  public T[] GetComponentsInChildren<T>(bool includeInactive = true) where T : class
   {
     return GetComponentsInChildren(typeof(T), includeInactive).OfType<T>().ToArray();
   }
 
   public Component[] GetComponentsInParent(Type componentType, bool includeInactive = true)
   {
+    if (componentType is null)
+    {
+      return Array.Empty<Component>();
+    }
+
     if (!includeInactive && !activeSelf)
     {
       return Array.Empty<Component>();
@@ -253,7 +263,7 @@ public class GameObject : Object
     return components.ToArray();
   }
 
-  public T[] GetComponentsInParent<T>(bool includeInactive = true) where T : Component
+  public T[] GetComponentsInParent<T>(bool includeInactive = true) where T : class
   {
     return GetComponentsInParent(typeof(T), includeInactive).OfType<T>().ToArray();
   }
@@ -263,7 +273,7 @@ public class GameObject : Object
     return GetComponentsInChildren(componentType, includeInactive).FirstOrDefault();
   }
 
-  public T? GetComponentInChildren<T>(bool includeInactive = true) where T : Component
+  public T? GetComponentInChildren<T>(bool includeInactive = true) where T : class
   {
     return GetComponentsInChildren<T>(includeInactive).FirstOrDefault();
   }
@@ -273,7 +283,7 @@ public class GameObject : Object
     return GetComponentsInParent(componentType, true).FirstOrDefault();
   }
 
-  public T? GetComponentInParent<T>() where T : Component
+  public T? GetComponentInParent<T>() where T : class
   {
     return GetComponentInParent(typeof(T)) as T;
   }

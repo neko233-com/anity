@@ -10,7 +10,7 @@ public readonly struct Quaternion
   public readonly float z;
   public readonly float w;
 
-  private Quaternion(float x, float y, float z, float w)
+  public Quaternion(float x, float y, float z, float w)
   {
     this.x = x; this.y = y; this.z = z; this.w = w;
   }
@@ -73,6 +73,76 @@ public readonly struct Quaternion
       var inv = 1f / mag;
       return new Quaternion(x * inv, y * inv, z * inv, w * inv);
     }
+  }
+
+  public static Quaternion LookRotation(Vector3 forward)
+  {
+    return LookRotation(forward, Vector3.up);
+  }
+
+  public static Quaternion LookRotation(Vector3 forward, Vector3 upwards)
+  {
+    forward = forward.normalized;
+    if (forward.sqrMagnitude < 1e-6f) return identity;
+
+    Vector3 right = Vector3.Cross(upwards, forward).normalized;
+    if (right.sqrMagnitude < 1e-6f)
+    {
+      right = Vector3.Cross(Vector3.right, forward).normalized;
+      if (right.sqrMagnitude < 1e-6f)
+      {
+        right = Vector3.Cross(Vector3.forward, forward).normalized;
+      }
+    }
+    upwards = Vector3.Cross(forward, right).normalized;
+
+    float m00 = right.x;
+    float m01 = right.y;
+    float m02 = right.z;
+    float m10 = upwards.x;
+    float m11 = upwards.y;
+    float m12 = upwards.z;
+    float m20 = forward.x;
+    float m21 = forward.y;
+    float m22 = forward.z;
+
+    float trace = m00 + m11 + m22;
+    float qx, qy, qz, qw;
+
+    if (trace > 0f)
+    {
+      float s = MathF.Sqrt(trace + 1f) * 2f;
+      qw = 0.25f * s;
+      qx = (m21 - m12) / s;
+      qy = (m02 - m20) / s;
+      qz = (m10 - m01) / s;
+    }
+    else if (m00 > m11 && m00 > m22)
+    {
+      float s = MathF.Sqrt(1f + m00 - m11 - m22) * 2f;
+      qw = (m21 - m12) / s;
+      qx = 0.25f * s;
+      qy = (m01 + m10) / s;
+      qz = (m02 + m20) / s;
+    }
+    else if (m11 > m22)
+    {
+      float s = MathF.Sqrt(1f + m11 - m00 - m22) * 2f;
+      qw = (m02 - m20) / s;
+      qx = (m01 + m10) / s;
+      qy = 0.25f * s;
+      qz = (m12 + m21) / s;
+    }
+    else
+    {
+      float s = MathF.Sqrt(1f + m22 - m00 - m11) * 2f;
+      qw = (m10 - m01) / s;
+      qx = (m02 + m20) / s;
+      qy = (m12 + m21) / s;
+      qz = 0.25f * s;
+    }
+
+    return new Quaternion(qx, qy, qz, qw).normalized;
   }
 }
 

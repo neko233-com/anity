@@ -84,6 +84,10 @@ public class Texture2D : Texture
     public TextureFormat format { get; set; }
     public override bool isReadable => true;
 
+    public Texture2D() : this(4, 4, TextureFormat.RGBA32)
+    {
+    }
+
     public Texture2D(int width, int height) : this(width, height, TextureFormat.RGBA32)
     {
     }

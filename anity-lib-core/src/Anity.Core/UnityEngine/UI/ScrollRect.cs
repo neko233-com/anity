@@ -1,8 +1,10 @@
 using System;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI;
 
-public class ScrollRect : UIBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IScrollHandler
+[AddComponentMenu("UI/Scroll Rect", 37)]
+public class ScrollRect : UIBehaviour, IInitializePotentialDragHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IScrollHandler, ICanvasElement, ILayoutElement, ILayoutGroup
 {
     public enum MovementType
     {
@@ -33,26 +35,41 @@ public class ScrollRect : UIBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
     private ScrollbarVisibility _verticalScrollbarVisibility;
     private Vector2 _horizontalScrollbarSpacing;
     private Vector2 _verticalScrollbarSpacing;
-
+    private bool _viewRectIsValid;
+    private Bounds _contentBounds;
+    private Bounds _viewBounds;
     private Vector2 _velocity;
     private Vector2 _normalizedPosition;
-    private Vector2 _prevPosition;
     private bool _dragging;
     private Vector2 _pointerStartLocalCursor;
     private Vector2 _contentStartPosition;
+    private Vector2 _prevPosition;
+    private bool _horizontalScrollbarVisibilityNeedsToBeUpdated;
+    private bool _verticalScrollbarVisibilityNeedsToBeUpdated;
+    private bool _hasRebuiltLayout;
+    private bool _suppressOnScroll;
 
     private ScrollRectEvent _onValueChanged = new();
 
     public RectTransform? content
     {
         get => _content;
-        set => _content = value;
+        set
+        {
+            _content = value;
+            _hasRebuiltLayout = false;
+        }
     }
 
     public RectTransform? viewport
     {
         get => _viewport;
-        set => _viewport = value;
+        set
+        {
+            _viewport = value;
+            _viewRectIsValid = false;
+            m_ViewRect = null;
+        }
     }
 
     public bool horizontal
@@ -100,13 +117,31 @@ public class ScrollRect : UIBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
     public Scrollbar? horizontalScrollbar
     {
         get => _horizontalScrollbar;
-        set => _horizontalScrollbar = value;
+        set
+        {
+            if (_horizontalScrollbar != null)
+                _horizontalScrollbar.onValueChanged.ValueChanged -= OnHorizontalScrollbarValueChanged;
+            _horizontalScrollbar = value;
+            if (_horizontalScrollbar != null && IsActive())
+            {
+                _horizontalScrollbar.onValueChanged.ValueChanged += OnHorizontalScrollbarValueChanged;
+            }
+        }
     }
 
     public Scrollbar? verticalScrollbar
     {
         get => _verticalScrollbar;
-        set => _verticalScrollbar = value;
+        set
+        {
+            if (_verticalScrollbar != null)
+                _verticalScrollbar.onValueChanged.ValueChanged -= OnVerticalScrollbarValueChanged;
+            _verticalScrollbar = value;
+            if (_verticalScrollbar != null && IsActive())
+            {
+                _verticalScrollbar.onValueChanged.ValueChanged += OnVerticalScrollbarValueChanged;
+            }
+        }
     }
 
     public ScrollbarVisibility horizontalScrollbarVisibility
@@ -139,6 +174,21 @@ public class ScrollRect : UIBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
         set => _velocity = value;
     }
 
+    public RectTransform rectTransform => transform as RectTransform;
+    private RectTransform? m_ViewRect;
+    private RectTransform viewRect
+    {
+        get
+        {
+            if (!_viewRectIsValid)
+            {
+                m_ViewRect = _viewport == null ? GetComponent<RectTransform>() : _viewport;
+                _viewRectIsValid = true;
+            }
+            return m_ViewRect;
+        }
+    }
+
     public Vector2 normalizedPosition
     {
         get
@@ -148,30 +198,38 @@ public class ScrollRect : UIBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
         }
         set
         {
-            SetNormalizedPosition(value, Axis.Horizontal);
-            SetNormalizedPosition(value, Axis.Vertical);
+            SetNormalizedPosition(value.x, 0);
+            SetNormalizedPosition(value.y, 1);
         }
     }
 
     public float horizontalNormalizedPosition
     {
-        get => _normalizedPosition.x;
-        set => SetNormalizedPosition(new Vector2(value, _normalizedPosition.y), Axis.Horizontal);
+        get
+        {
+            UpdateBounds();
+            return _normalizedPosition.x;
+        }
+        set => SetNormalizedPosition(value, 0);
     }
 
     public float verticalNormalizedPosition
     {
-        get => _normalizedPosition.y;
-        set => SetNormalizedPosition(new Vector2(_normalizedPosition.x, value), Axis.Vertical);
+        get
+        {
+            UpdateBounds();
+            return _normalizedPosition.y;
+        }
+        set => SetNormalizedPosition(value, 1);
     }
 
-    public float minWidth => 0f;
-    public float preferredWidth => 0f;
-    public float flexibleWidth => -1f;
-    public float minHeight => 0f;
-    public float preferredHeight => 0f;
-    public float flexibleHeight => -1f;
-    public int layoutPriority => 0;
+    public virtual float minWidth => -1f;
+    public virtual float preferredWidth => -1f;
+    public virtual float flexibleWidth => -1f;
+    public virtual float minHeight => -1f;
+    public virtual float preferredHeight => -1f;
+    public virtual float flexibleHeight => -1f;
+    public virtual int layoutPriority => -1;
 
     public ScrollRectEvent onValueChanged
     {
@@ -179,209 +237,379 @@ public class ScrollRect : UIBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
         set => _onValueChanged = value;
     }
 
-    public virtual bool IsActive()
+    protected override void OnEnable()
     {
-        return gameObject is not null && gameObject.activeInHierarchy;
-    }
-
-    public void Rebuild(CanvasUpdate executing)
-    {
-        _ = executing;
-    }
-
-    public void LayoutComplete()
-    {
-    }
-
-    public void GraphicUpdateComplete()
-    {
-    }
-
-    protected virtual void UpdateBounds()
-    {
-    }
-
-    public virtual void SetLayoutHorizontal()
-    {
-    }
-
-    public virtual void SetLayoutVertical()
-    {
-    }
-
-    public virtual void CalculateLayoutInputHorizontal()
-    {
-    }
-
-    public virtual void CalculateLayoutInputVertical()
-    {
-    }
-
-    protected void SetNormalizedPosition(Vector2 value, Axis axis)
-    {
-        if (_content is null) return;
-
-        var contentSize = _content.sizeDelta;
-        var viewportSize = _viewport?.sizeDelta ?? Vector2.zero;
-
-        if (axis == Axis.Horizontal)
+        base.OnEnable();
+        if (_horizontalScrollbar != null)
         {
-            _normalizedPosition.x = Mathf.Clamp01(value.x);
-            var delta = contentSize.x - viewportSize.x;
-            if (delta > 0f)
-            {
-                var pos = _content.anchoredPosition;
-                pos.x = -_normalizedPosition.x * delta;
-                _content.anchoredPosition = pos;
-            }
+            _horizontalScrollbar.onValueChanged.ValueChanged += OnHorizontalScrollbarValueChanged;
         }
-        else
+        if (_verticalScrollbar != null)
         {
-            _normalizedPosition.y = Mathf.Clamp01(value.y);
-            var delta = contentSize.y - viewportSize.y;
-            if (delta > 0f)
-            {
-                var pos = _content.anchoredPosition;
-                pos.y = _normalizedPosition.y * delta;
-                _content.anchoredPosition = pos;
-            }
+            _verticalScrollbar.onValueChanged.ValueChanged += OnVerticalScrollbarValueChanged;
         }
+        CanvasUpdateRegistry.RegisterCanvasElementForLayoutRebuild(this);
+        SetDirty();
+    }
 
+    protected override void OnDisable()
+    {
+        CanvasUpdateRegistry.UnRegisterCanvasElementForRebuild(this);
+        if (_horizontalScrollbar != null)
+        {
+            _horizontalScrollbar.onValueChanged.ValueChanged -= OnHorizontalScrollbarValueChanged;
+        }
+        if (_verticalScrollbar != null)
+        {
+            _verticalScrollbar.onValueChanged.ValueChanged -= OnVerticalScrollbarValueChanged;
+        }
+        _velocity = Vector2.zero;
+        _dragging = false;
+        base.OnDisable();
+    }
+
+    public virtual void Rebuild(CanvasUpdate executing)
+    {
+        if (executing == CanvasUpdate.PostLayout)
+        {
+            UpdateBounds();
+            UpdateScrollbars();
+            _hasRebuiltLayout = true;
+        }
+        if (executing == CanvasUpdate.PreRender)
+        {
+            UpdateScrollbarVisibility();
+        }
+    }
+
+    public virtual void LayoutComplete() { }
+    public virtual void GraphicUpdateComplete() { }
+
+    public virtual void CalculateLayoutInputHorizontal() { }
+    public virtual void CalculateLayoutInputVertical() { }
+    public virtual void SetLayoutHorizontal() { }
+    public virtual void SetLayoutVertical() { }
+
+    private void OnHorizontalScrollbarValueChanged(float value)
+    {
+        if (_suppressOnScroll) return;
+        if (!_horizontal) return;
+        SetNormalizedPosition(value, 0);
+    }
+
+    private void OnVerticalScrollbarValueChanged(float value)
+    {
+        if (_suppressOnScroll) return;
+        if (!_vertical) return;
+        SetNormalizedPosition(value, 1);
+    }
+
+    protected void SetNormalizedPosition(float value, int axis)
+    {
+        if (_content == null) return;
+        UpdateBounds();
+
+        var delta = axis == 0 ? _contentBounds.size.x - _viewBounds.size.x : _contentBounds.size.y - _viewBounds.size.y;
+        var newAnchoredPosition = _content.anchoredPosition;
+        if (delta > 0.01f)
+        {
+            if (axis == 0)
+                newAnchoredPosition.x = -value * delta;
+            else
+                newAnchoredPosition.y = value * delta;
+        }
+        _content.anchoredPosition = newAnchoredPosition;
+        UpdateBounds();
+        UpdatePrevData();
         _onValueChanged?.Invoke(_normalizedPosition);
-        UpdateScrollbars();
+    }
+
+    public void OnInitializePotentialDrag(PointerEventData eventData)
+    {
+        _ = eventData;
+        if (eventData.button != PointerEventData.InputButton.Left) return;
+        _velocity = Vector2.zero;
     }
 
     public void OnBeginDrag(PointerEventData eventData)
     {
+        if (eventData.button != PointerEventData.InputButton.Left) return;
         if (!IsActive()) return;
+
         _dragging = true;
-        _pointerStartLocalCursor = eventData.position;
-        _contentStartPosition = _content?.anchoredPosition ?? Vector2.zero;
+        if (_content == null) return;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(viewRect, eventData.pressPosition, eventData.pressEventCamera, out _pointerStartLocalCursor))
+        {
+            _contentStartPosition = _content.anchoredPosition;
+            UpdateBounds();
+        }
         _velocity = Vector2.zero;
     }
 
     public void OnDrag(PointerEventData eventData)
     {
-        if (!IsActive() || !_dragging || _content is null) return;
+        if (!_dragging || _content == null) return;
+        if (eventData.button != PointerEventData.InputButton.Left) return;
+        if (!IsActive()) return;
 
-        var pointerDelta = eventData.position - _pointerStartLocalCursor;
-        var position = _contentStartPosition + new Vector2(
-            _horizontal ? pointerDelta.x : 0f,
-            _vertical ? pointerDelta.y : 0f) * _scrollSensitivity;
+        Vector2 localCursor;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(viewRect, eventData.position, eventData.pressEventCamera, out localCursor))
+            return;
 
-        position = ApplyMovementType(position);
-        _content.anchoredPosition = position;
-        _velocity = (position - _prevPosition) / Mathf.Max(Time.unscaledDeltaTime, 0.0001f);
-        _prevPosition = position;
-        UpdateNormalizedPosition();
+        var pointerDelta = localCursor - _pointerStartLocalCursor;
+        var position = _contentStartPosition + pointerDelta;
+
+        if (!_horizontal)
+            position.x = _content.anchoredPosition.x;
+        if (!_vertical)
+            position.y = _content.anchoredPosition.y;
+
+        var offset = CalculateOffset(position - _content.anchoredPosition);
+        position += offset;
+
+        if (_movementType == MovementType.Elastic)
+        {
+            if (offset.x != 0f) position.x = position.x - RubberDelta(offset.x, _viewBounds.size.x);
+            if (offset.y != 0f) position.y = position.y - RubberDelta(offset.y, _viewBounds.size.y);
+        }
+
+        SetContentAnchoredPosition(position);
     }
 
     public void OnEndDrag(PointerEventData eventData)
     {
         _ = eventData;
+        if (eventData.button != PointerEventData.InputButton.Left) return;
         _dragging = false;
     }
 
     public void OnScroll(PointerEventData data)
     {
         if (!IsActive()) return;
+        if (_content == null) return;
 
-        var delta = data.scrollDelta * _scrollSensitivity;
-        var pos = normalizedPosition;
-        pos.x += _horizontal ? delta.x : 0f;
-        pos.y += _vertical ? delta.y : 0f;
-        normalizedPosition = pos;
+        var delta = data.scrollDelta;
+        delta.y *= -1f;
+        if (!_horizontal) delta.x = 0f;
+        if (!_vertical) delta.y = 0f;
+
+        var position = _content.anchoredPosition;
+        if (_horizontal) position.x += delta.x * _scrollSensitivity;
+        if (_vertical) position.y += delta.y * _scrollSensitivity;
+        position += CalculateOffset(position - _content.anchoredPosition);
+        SetContentAnchoredPosition(position);
+        UpdateBounds();
     }
 
     protected virtual void LateUpdate()
     {
-        if (_dragging || _content is null) return;
+        if (_content == null) return;
+        EnsureLayoutHasRebuilt();
+        UpdateBounds();
+        var deltaTime = Time.unscaledDeltaTime;
+        var offset = CalculateOffset(Vector2.zero);
 
-        if (_inertia && _velocity.magnitude > 1f)
+        if (!_dragging && (offset != Vector2.zero || _velocity != Vector2.zero))
         {
             var position = _content.anchoredPosition;
-            position += _velocity * Time.unscaledDeltaTime;
-            position = ApplyMovementType(position);
+            for (int axis = 0; axis < 2; axis++)
+            {
+                if (offset[axis] != 0f && _movementType == MovementType.Elastic)
+                {
+                    var speed = _velocity[axis];
+                    position[axis] = Mathf.SmoothDamp(_content.anchoredPosition[axis], _content.anchoredPosition[axis] + offset[axis], ref speed, _elasticity, Mathf.Infinity, deltaTime);
+                    _velocity[axis] = speed;
+                }
+                else if (_inertia)
+                {
+                    _velocity[axis] *= Mathf.Pow(_decelerationRate, deltaTime);
+                    if (Mathf.Abs(_velocity[axis]) < 1f) _velocity[axis] = 0f;
+                    position[axis] += _velocity[axis] * deltaTime;
+                }
+                else
+                {
+                    _velocity[axis] = 0f;
+                }
+            }
+
+            if (_movementType != MovementType.Unrestricted)
+            {
+                var offset2 = CalculateOffset(position - _content.anchoredPosition);
+                position += offset2;
+                for (int axis = 0; axis < 2; axis++)
+                {
+                    if (offset2[axis] != 0f && _movementType == MovementType.Clamped)
+                    {
+                        offset = CalculateOffset(position - _content.anchoredPosition);
+                        position += offset;
+                        _velocity[axis] = 0f;
+                    }
+                }
+            }
+
+            SetContentAnchoredPosition(position);
+        }
+
+        if (_dragging && _inertia)
+        {
+            var newVelocity = (_content.anchoredPosition - _prevPosition) / deltaTime;
+            _velocity = Vector2.Lerp(_velocity, newVelocity, deltaTime * 10f);
+        }
+
+        UpdatePrevData();
+        UpdateScrollbars();
+    }
+
+    private void EnsureLayoutHasRebuilt()
+    {
+        if (!_hasRebuiltLayout && !CanvasUpdateRegistry.instance.IsRebuildingLayout())
+        {
+            Canvas.ForceUpdateCanvases();
+        }
+    }
+
+    private void UpdatePrevData()
+    {
+        if (_content == null)
+            _prevPosition = Vector2.zero;
+        else
+            _prevPosition = _content.anchoredPosition;
+    }
+
+    private void SetContentAnchoredPosition(Vector2 position)
+    {
+        if (_content == null) return;
+        if (position != _content.anchoredPosition)
+        {
             _content.anchoredPosition = position;
-            _velocity *= Mathf.Pow(_decelerationRate, Time.unscaledDeltaTime);
-            UpdateNormalizedPosition();
-        }
-        else if (_movementType == MovementType.Elastic)
-        {
-            var target = _content.anchoredPosition;
-            target = ApplyClampedPosition(target);
-            _content.anchoredPosition = Vector2.Lerp(_content.anchoredPosition, target, Time.unscaledDeltaTime * 10f);
+            UpdateBounds();
             UpdateNormalizedPosition();
         }
     }
 
-    private Vector2 ApplyMovementType(Vector2 position)
+    private Vector2 CalculateOffset(Vector2 delta)
     {
-        if (_movementType == MovementType.Unrestricted) return position;
-        return ApplyClampedPosition(position);
+        var offset = Vector2.zero;
+        if (_movementType == MovementType.Unrestricted) return offset;
+        if (_content == null) return offset;
+
+        var vMin = new Vector2(_contentBounds.min.x, _contentBounds.min.y);
+        var vMax = new Vector2(_contentBounds.max.x, _contentBounds.max.y);
+        var bounds = new Bounds(_viewBounds.center, _viewBounds.size);
+        var max = new Vector2(bounds.max.x, bounds.max.y);
+        var min = new Vector2(bounds.min.x, bounds.min.y);
+
+        if (_horizontal)
+        {
+            if (delta.x > 0f) vMin.x += delta.x;
+            if (delta.x < 0f) vMax.x += delta.x;
+            offset.x = vMin.x > min.x ? min.x - vMin.x : (vMax.x < max.x ? max.x - vMax.x : 0f);
+        }
+        else
+        {
+            offset.x = _content.anchoredPosition.x + offset.x;
+        }
+
+        if (_vertical)
+        {
+            if (delta.y > 0f) vMin.y += delta.y;
+            if (delta.y < 0f) vMax.y += delta.y;
+            offset.y = vMin.y > min.y ? min.y - vMin.y : (vMax.y < max.y ? max.y - vMax.y : 0f);
+        }
+        else
+        {
+            offset.y = _content.anchoredPosition.y + offset.y;
+        }
+
+        return offset;
     }
 
-    private Vector2 ApplyClampedPosition(Vector2 position)
+    private static float RubberDelta(float overStretching, float viewSize)
     {
-        if (_content is null) return position;
-        var contentSize = _content.sizeDelta;
-        var viewportSize = _viewport?.sizeDelta ?? Vector2.zero;
+        return (1f - (1f / ((Mathf.Abs(overStretching) * 0.55f / viewSize) + 1f))) * viewSize * Mathf.Sign(overStretching);
+    }
 
-        if (_horizontal && contentSize.x > viewportSize.x)
+    private void UpdateBounds()
+    {
+        if (_content == null || viewRect == null) return;
+        var vMin = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        var vMax = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+        var cMin = new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+        var cMax = new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+        for (int i = 0; i < viewRect.childCount; i++)
         {
-            var min = -(contentSize.x - viewportSize.x);
-            position.x = Mathf.Clamp(position.x, min, 0f);
+            _ = viewRect.GetChild(i);
         }
-        else
-        {
-            position.x = 0f;
-        }
-
-        if (_vertical && contentSize.y > viewportSize.y)
-        {
-            var max = contentSize.y - viewportSize.y;
-            position.y = Mathf.Clamp(position.y, 0f, max);
-        }
-        else
-        {
-            position.y = 0f;
-        }
-
-        return position;
+        var viewSize = viewRect.rect.size;
+        var contentSize = _content.rect.size;
+        var contentPos = _content.anchoredPosition;
+        _viewBounds = new Bounds(new Vector3(0, 0, 0), new Vector3(viewSize.x, viewSize.y, 0f));
+        _contentBounds = new Bounds(new Vector3(contentPos.x + contentSize.x * _content.pivot.x, contentPos.y + contentSize.y * _content.pivot.y, 0f), new Vector3(contentSize.x, contentSize.y, 0f));
+        UpdateNormalizedPosition();
     }
 
     private void UpdateNormalizedPosition()
     {
-        if (_content is null) return;
-        var contentSize = _content.sizeDelta;
-        var viewportSize = _viewport?.sizeDelta ?? Vector2.zero;
-
-        if (contentSize.x > viewportSize.x)
+        float hDelta = _contentBounds.size.x - _viewBounds.size.x;
+        float vDelta = _contentBounds.size.y - _viewBounds.size.y;
+        if (hDelta > 0.01f)
         {
-            _normalizedPosition.x = Mathf.Clamp01(-_content.anchoredPosition.x / (contentSize.x - viewportSize.x));
+            _normalizedPosition.x = Mathf.Clamp01(-_content.anchoredPosition.x / hDelta);
         }
         else
         {
-            _normalizedPosition.x = 0f;
+            _normalizedPosition.x = (_contentBounds.min.x > _viewBounds.min.x) ? 1f : 0f;
         }
-
-        if (contentSize.y > viewportSize.y)
+        if (vDelta > 0.01f)
         {
-            _normalizedPosition.y = Mathf.Clamp01(_content.anchoredPosition.y / (contentSize.y - viewportSize.y));
+            _normalizedPosition.y = Mathf.Clamp01(_content.anchoredPosition.y / vDelta);
         }
         else
         {
-            _normalizedPosition.y = 0f;
+            _normalizedPosition.y = (_contentBounds.min.y > _viewBounds.min.y) ? 1f : 0f;
         }
-
         _onValueChanged?.Invoke(_normalizedPosition);
-        UpdateScrollbars();
+        _suppressOnScroll = true;
+        _horizontalScrollbar?.SetValueWithoutNotify(_normalizedPosition.x);
+        _verticalScrollbar?.SetValueWithoutNotify(_normalizedPosition.y);
+        _suppressOnScroll = false;
     }
 
     private void UpdateScrollbars()
     {
-        _horizontalScrollbar?.SetValueWithoutNotify(_normalizedPosition.x);
-        _verticalScrollbar?.SetValueWithoutNotify(_normalizedPosition.y);
+        if (_content == null || viewRect == null) return;
+        float hDelta = _contentBounds.size.x - _viewBounds.size.x;
+        float vDelta = _contentBounds.size.y - _viewBounds.size.y;
+        var hSize = hDelta > 0f ? Mathf.Clamp01(_viewBounds.size.x / _contentBounds.size.x) : 1f;
+        var vSize = vDelta > 0f ? Mathf.Clamp01(_viewBounds.size.y / _contentBounds.size.y) : 1f;
+
+        _suppressOnScroll = true;
+        if (_horizontalScrollbar != null)
+        {
+            _horizontalScrollbar.size = hSize;
+            _horizontalScrollbar.SetValueWithoutNotify(_normalizedPosition.x);
+        }
+        if (_verticalScrollbar != null)
+        {
+            _verticalScrollbar.size = vSize;
+            _verticalScrollbar.SetValueWithoutNotify(_normalizedPosition.y);
+        }
+        _suppressOnScroll = false;
+    }
+
+    private void UpdateScrollbarVisibility()
+    {
+        _horizontalScrollbarVisibilityNeedsToBeUpdated = true;
+        _verticalScrollbarVisibilityNeedsToBeUpdated = true;
+        if (_horizontalScrollbar != null && _horizontalScrollbarVisibility != ScrollbarVisibility.Permanent)
+        {
+            _horizontalScrollbar.gameObject.SetActive(true);
+        }
+        if (_verticalScrollbar != null && _verticalScrollbarVisibility != ScrollbarVisibility.Permanent)
+        {
+            _verticalScrollbar.gameObject.SetActive(true);
+        }
     }
 
     public void StopMovement()
@@ -389,11 +617,31 @@ public class ScrollRect : UIBehaviour, IBeginDragHandler, IDragHandler, IEndDrag
         _velocity = Vector2.zero;
     }
 
-    public void OnInitializePotentialDrag(PointerEventData eventData)
+    private void SetDirty()
     {
-        _ = eventData;
-        _velocity = Vector2.zero;
+        if (!IsActive()) return;
+        LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
     }
+
+    protected override void OnRectTransformDimensionsChange()
+    {
+        base.OnRectTransformDimensionsChange();
+        SetDirty();
+    }
+
+    protected override void OnTransformParentChanged()
+    {
+        base.OnTransformParentChanged();
+        if (viewRect != null) _viewRectIsValid = false;
+    }
+
+    public bool IsActive()
+    {
+        return gameObject != null && gameObject.activeInHierarchy && enabled;
+    }
+
+    Transform ICanvasElement.transform => transform;
+    bool ICanvasElement.IsDestroyed() => this == null;
 }
 
 [Serializable]

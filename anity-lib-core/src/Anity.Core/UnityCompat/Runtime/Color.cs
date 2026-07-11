@@ -33,6 +33,9 @@ public struct Color
     return a.Equals(b);
   }
 
+  public static Color operator *(Color c, float f) => new Color(c.r * f, c.g * f, c.b * f, c.a * f);
+  public static Color operator *(float f, Color c) => c * f;
+
   public override bool Equals(object obj)
   {
     if (obj is Color other)

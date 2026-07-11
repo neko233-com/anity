@@ -54,3 +54,20 @@ public class Collider2D : Component
     return new ColliderShape2D(ColliderShapeType2D.Box, offset, Vector2.one, 0.5f);
   }
 }
+
+public class Collision2D
+{
+  public Collider2D collider { get; }
+  public Collider2D otherCollider { get; }
+  public Vector2 normal { get; }
+  public Rigidbody2D? rigidbody => collider.attachedRigidbody;
+  public Rigidbody2D? otherRigidbody => otherCollider.attachedRigidbody;
+  public Transform? transform => collider.transform;
+
+  public Collision2D(Collider2D col, Collider2D other, Vector2 n)
+  {
+    collider = col;
+    otherCollider = other;
+    normal = n;
+  }
+}

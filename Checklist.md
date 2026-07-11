@@ -13,32 +13,33 @@
 | 类型 | 状态 | 备注 |
 |------|------|------|
 | `Object` | 🟡 | 销毁、实例化、比较等基础 API 已壳化 |
-| `GameObject` | 🟡 | 组件增删、tag、layer（已限制 0-31）、SetActive 等 |
+| `GameObject` | 🟡 | 组件增删、tag、layer（已限制 0-31）、SetActive、GetComponent支持接口 |
 | `Component` | 🟡 | transform、gameObject、GetComponent 等 |
 | `Behaviour` | 🟡 | enabled、isActiveAndEnabled |
 | `MonoBehaviour` | 🟡 | Start/Update 等生命周期、协程基础 |
 | `Transform` | 🟡 | position/rotation/scale、父子关系、Translate/Rotate/LookAt |
-| `Vector2/3/4` | ✅ | 完整数学运算与常量 |
-| `Quaternion` | ✅ | 基本运算、LookRotation、Slerp 等 |
+| `Vector2/3/4` | ✅ | 完整数学运算、==/!=运算符、隐式转换、常量（含back）、Lerp/Dot/sqrMagnitude |
+| `Quaternion` | ✅ | 基本运算、LookRotation（旋转矩阵转四元数）、Slerp 等 |
 | `Matrix4x4` | ✅ | 乘法、逆、透视、转置、行列式 |
-| `Bounds` | 🟡 | 基础包围盒 |
+| `Bounds` | ✅ | 完整包围盒数学 |
 | `Ray` | ✅ | 射线定义 |
 | `Rect` | 🟡 | 基础矩形 |
-| `Color/Color32` | ✅ | 基本运算与转换 |
-| `Mathf` | ✅ | 常用数学函数 |
+| `Plane` | ✅ | normal/distance、三点构造、Raycast射线相交、GetDistanceToPoint、SameSide/Flip/Translate |
+| `Color/Color32` | ✅ | 基本运算、*float 运算符、转换 |
+| `Mathf` | ✅ | 常用数学函数（含SmoothDamp） |
 | `Time` | 🟡 | deltaTime、time、timeScale、frameCount |
 | `Application` | 🟡 | runInBackground、targetFrameRate、Quit、OpenURL、平台信息 |
 | `Debug` | 🟡 | Log/Warning/Error/Assert 等 |
 | `Input` | 🟡 | 键盘鼠标 + Touch 多点触控壳 |
 | `LayerMask` | 🟡 | value 读写、NameToLayer、LayerToName、GetMask |
-| `PlayerPrefs` | 🟡 | 读写壳 |
+| `PlayerPrefs` | ✅ | Dictionary存储int/float/string、Set/Get/HasKey/Delete/Save、默认值参数 |
 | `Random` | 🟡 | Range、insideUnitSphere 等 |
-| `Resources` | 🟡 | Load 壳 |
+| `Resources` | ✅ | Dictionary资源存储、Load/LoadAll/FindObjectsOfTypeAll、UnloadAsset/UnloadUnusedAssets、LoadAsync |
 | `JsonUtility` | 🟡 | ToJson/FromJson 壳 |
-| `Screen` | 🟡 | 分辨率、全屏、DPI 等基础 API 已壳化 |
-| `SystemInfo` | 🟡 | 设备/操作系统/处理器信息已壳化 |
-| `GL` | 🟡 | 即时渲染命令已壳化 |
-| `AsyncOperation` | 🟡 | 基础壳 |
+| `Screen` | ✅ | width/height/dpi/orientation/fullScreen/safeArea/brightness/resolutions、SetResolution |
+| `SystemInfo` | ✅ | 设备/OS/CPU/GPU信息、supports*系列特性返回true、graphicsShaderLevel=50、IsFormatSupported |
+| `GL` | ✅ | 矩阵栈Push/Pop/MultMatrix、Translate/Rotate/Scale（真实旋转矩阵）、Begin/End立即模式、Vertex/Color/TexCoord |
+| `AsyncOperation` | ✅ | 继承CustomYieldInstruction、isDone/progress/allowSceneActivation、completed事件 |
 | `ScriptableObject` | 🟡 | 基础壳 |
 
 ---
@@ -55,15 +56,16 @@
 | `MeshCollider` | 🟡 | 壳 |
 | `CharacterController` | 🟡 | 壳 |
 | `WheelCollider` | 🟡 | 含 WheelHit/WheelFrictionCurve 壳 |
-| `Physics` | 🟡 | Raycast/Cast/Overlap 多种重载签名 |
-| `PhysicsScene` | 🟡 | 壳 |
-| `RaycastHit` | ✅ | 完整结构 |
+| `Physics` | ✅ | Raycast/RaycastAll、SphereCast/BoxCast/CapsuleCast（含All版本）、OverlapSphere/Box/Capsule（含NonAlloc）、CheckSphere/Box/Capsule |
+| `PhysicsScene` | ✅ | Simulate转发 |
+| `Physics.Simulate` | ✅ | PhysicsWorld：重力积分→速度积分→两两碰撞检测→冲量响应（弹性/摩擦力）→位置校正→OnTriggerEnter/Stay/Exit |
+| `RaycastHit` | ✅ | collider/rigidbody/transform/distance/point/normal/barycentricCoordinate/triangleIndex/textureCoord |
 | `Collision` | 🟡 | 壳 |
 | `ContactPoint` | 🟡 | 壳 |
 | `ForceMode` | ✅ | 枚举 |
 | `QueryTriggerInteraction` | ✅ | 枚举 |
 | `Joint` 系列 | 🟡 | Hinge/Spring/Fixed/Configurable 等基础壳 |
-| `Physics.Simulate` 真实现 | ✅ | PhysicsWorld 管理刚体积分、碰撞检测/响应、射线/体积查询 |
+| 碰撞检测算法 | ✅ | 圆-圆圆心距、AABB-AABB min/max重叠、射线/扫掠参数化最近距离 |
 
 ---
 
@@ -75,16 +77,25 @@
 | `Collider2D` | ✅ | isTrigger、IsTouching、GetShape 抽象 |
 | `BoxCollider2D` | ✅ | 形状实现 |
 | `CircleCollider2D` | ✅ | 形状实现 |
-| `CapsuleCollider2D` | ✅ | 形状实现（以 Box 近似参与碰撞） |
-| `EdgeCollider2D` | 🟡 | 边缘顶点壳 |
-| `PolygonCollider2D` | 🟡 | 多边形路径壳 |
+| `CapsuleCollider2D` | ✅ | direction(H/V)、size/radius/height、胶囊=中心矩形+两端半圆 |
+| `EdgeCollider2D` | ✅ | points(Vector2[]数组)、点到线段距离检测 |
+| `PolygonCollider2D` | ✅ | paths(List<Vector2[]>)、SetPath/GetPath、射线法点在多边形内检测 |
 | `CompositeCollider2D` | 🟡 | 壳 |
-| `PhysicsMaterial2D` | 🟡 | friction/bounciness 壳 |
-| `Joint2D` 系列 | 🟡 | Fixed/Spring/Distance/Hinge/Slider/Wheel/Relative/Friction/Target 壳 |
-| `Effector2D` 系列 | 🟡 | Area/Point/Platform/Surface/Buoyancy 壳 |
-| `Physics2D` | ✅ | Raycast/Overlap/Cast 查询签名 |
-| `Physics2DWorld` | ✅ | 内部世界管理、积分、碰撞检测/响应、触发器 |
-| `RaycastHit2D` | ✅ | 完整结构 |
+| `PhysicsMaterial2D` | ✅ | bounciness/bouncinessCombine、friction/frictionCombine（Avg/Min/Multiply/Max） |
+| `AnchoredJoint2D基类` | ✅ | connectedBody/connectedAnchor/anchor/breakForce/breakTorque、enableCollision、JointBreak2D事件 |
+| `DistanceJoint2D` | ✅ | distance/maxDistanceOnly/autoConfigureDistance |
+| `HingeJoint2D` | ✅ | limits(JointAngleLimits2D)/motor(JointMotor2D)/useLimits/useMotor |
+| `SliderJoint2D` | ✅ | angle/limits(JointTranslationLimits2D)/motor/useMotor/useLimits |
+| `SpringJoint2D` | ✅ | distance/dampingRatio/frequency/autoConfigureDistance |
+| `RelativeJoint2D/FrictionJoint2D/TargetJoint2D` | ✅ | 基本属性完整 |
+| `Effector2D基类` | ✅ | useColliderMask/colliderMask/useGroundAngle/groundAngle |
+| `AreaEffector2D` | ✅ | forceAngle/forceMagnitude/drag/angularDrag/forceTarget |
+| `PointEffector2D` | ✅ | forceMagnitude/distanceScale/forceSource/forceTarget/drag |
+| `PlatformEffector2D` | ✅ | surfaceArc/sideArc/useOneWay/useSideFriction/useSideBounce |
+| `BuoyancyEffector2D` | ✅ | surfaceLevel/density/linearDrag/angularDrag/flowAngle/flowMagnitude |
+| `Physics2D` | ✅ | Raycast/RaycastAll/Linecast/BoxCast/CircleCast/CapsuleCast（含All版本）、OverlapBox/Circle/Capsule/Area/Point（含NonAlloc）、GetContacts |
+| `Physics2D.Simulate` | ✅ | 2D积分+碰撞响应+触发器状态跟踪 |
+| `RaycastHit2D` | ✅ | collider/rigidbody/transform/distance/point/normal/fraction |
 | `Collision2D` / `ContactPoint2D` | ✅ | 结构完整 |
 | `ForceMode2D` / `RigidbodyType2D` | ✅ | 枚举 |
 | `ContactFilter2D` | 🟡 | 壳 |
@@ -95,35 +106,42 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `Canvas` | 🟡 | isRootCanvas、renderTransform、ForceUpdateCanvases 等 |
+| `Canvas` | ✅ | isRootCanvas、renderTransform、renderOrder、willRenderCanvases事件触发CanvasUpdateRegistry.PerformUpdate |
 | `CanvasScaler` | 🟡 | uiScaleMode、referenceResolution、screenMatchMode |
 | `CanvasRenderer` | 🟡 | 壳 |
-| `Graphic` | 🟡 | color、material、raycastTarget、dirty 标记 |
-| `MaskableGraphic` | 🟡 | RectMask2D / Mask 裁剪接口 |
-| `RectMask2D` | 🟡 | IClipper 实现 |
-| `Image` | 🟡 | 壳 |
-| `RawImage` | 🟡 | texture/uvRect 壳 |
-| `Text` | 🟡 | 壳 |
-| `Button` | 🟡 | 壳 |
-| `Selectable` | 🟡 | 壳 |
+| `Graphic` | ✅ | color/material/raycastTarget/dirty标记、OnEnable/OnDisable注册CanvasUpdateRegistry、Rebuild布局/图形、IsDestroyed |
+| `MaskableGraphic` | ✅ | Mask/RectMask2D裁剪、IClipper接口、stencil材质裁剪 |
+| `RectMask2D` | ✅ | IClipper实现、PerformClipping矩形裁剪、ClipperRegistry注册 |
+| `Mask` | ✅ | IClipper、stencil裁剪、IsRaycastLocationValid、ClipperRegistry |
+| `ClipperRegistry` | ✅ | 类似CanvasUpdateRegistry的裁剪队列管理、Cull |
+| `CanvasUpdateRegistry` | ✅ | 布局/图形重建队列（IndexedSet）、PerformUpdate有序执行布局→ForceUpdateCanvases→PreRender |
+| `ICanvasElement` | ✅ | Rebuild/transform/IsDestroyed |
+| `Image` | ✅ | fillAmount(0-1)、fillMethod(H/V/Radial90/180/360)、type(Simple/Sliced/Tiled/Filled)、sprite、alphaHitTest、OnPopulateMesh |
+| `RawImage` | ✅ | Texture渲染、uvRect UV裁剪、SetNativeSize、OnPopulateMesh四边形网格 |
+| `Text` | ✅ | preferredWidth/Height自动尺寸计算（字符宽=fontSize*0.5，行高=fontSize*1.2，支持\n）、overflow/fontSize/alignment/bestFit、OnPopulateMesh |
+| `Button` | ✅ | IPointerClickHandler/ISubmitHandler、onClick事件触发 |
+| `Selectable` | ✅ | IPointerDown/Up/Enter/Exit/Select/Deselect事件、状态切换、DoStateTransition |
 | `Toggle` | 🟡 | 壳 |
 | `ToggleGroup` | 🟡 | 壳 |
 | `Slider` | 🟡 | 壳 |
-| `Scrollbar` | 🟡 | 壳 |
-| `Dropdown` | 🟡 | 选项管理、value、事件已落地，下拉弹窗未完整 |
-| `InputField` | 🟡 | 文本/验证/激活/提交事件已落地，键盘输入未完整 |
-| `ScrollRect` | 🟡 | 拖拽/滚动/惯性/归一化位置已落地，完整布局未接 |
-| `Scrollbar` | 🟡 | value/size/方向/事件已落地 |
+| `Scrollbar` | ✅ | value(0-1)/size/numberOfSteps、OnDrag/OnPointerDown、SetDirection、Rebuild/UpdateVisuals更新滑块位置、onValueChanged |
+| `Dropdown` | ✅ | Show()创建下拉列表、Hide()销毁、AddOptions/ClearOptions/RefreshShownValue、模板实例化、onValueChanged |
+| `InputField` | ✅ | text属性、caretBlinkRate/caretWidth/selectionColor、contentType验证（数字/邮箱/密码*等）、characterLimit、OnSelect/OnDeselect焦点 |
+| `ScrollRect` | ✅ | OnDrag移动content、horizontal/verticalNormalizedPosition双向同步Scrollbar、movementType(Unrestricted/Clamped/Elastic)、惯性减速、OnScroll滚轮、Clamped边界限制 |
 | `RectTransform` | 🟡 | anchoredPosition、pivot、anchorMin/Max、sizeDelta |
-| `LayoutGroup` / `Horizontal/Vertical/Grid` | 🟡 | 壳 |
+| `LayoutGroup` / `Horizontal/Vertical/Grid` | ✅ | 继承ICanvasElement、IsDestroyed、基础padding/childAlignment |
 | `LayoutElement` | 🟡 | 壳 |
 | `ContentSizeFitter` / `AspectRatioFitter` | 🟡 | 壳 |
-| `EventSystem` | 🟡 | 壳 |
-| `BaseInputModule` / `StandaloneInputModule` | 🟡 | 壳 |
-| `PointerEventData` | 🟡 | 壳 |
-| `GraphicRaycaster` | 🟡 | 壳 |
+| `EventSystem` | ✅ | 事件分发、RaycastAll、current选中对象、sendPointerEvents/sendUpdateEvents、firstSelected |
+| `BaseInputModule` / `StandaloneInputModule` | ✅ | 真正事件分发：Process处理鼠标按下/移动/释放/拖拽/滚动，ProcessTouchPress、HandlePointerExitAndEnter、事件发送到GameObject |
+| `PointerEventData` | ✅ | pointerId/position/delta/button/clickCount/enterEvent/hovered/pointerDrag/pointerPressRaycast等完整字段 |
+| `ExecuteEvents` | ✅ | Execute/ExecuteHierarchy、EventFunction<T>、所有事件接口handler（IPointerClick/Down/Up/Enter/Exit/Submit/BeginDrag/Drag/EndDrag/Scroll/Move等） |
+| `GraphicRaycaster` | ✅ | Raycast用RectTransformUtility.RectangleContainsScreenPoint检测、blockingObjects、sortOrderPriority |
+| `RectTransformUtility` | ✅ | ScreenPointToLocalPointInRectangle、RectangleContainsScreenPoint、PixelAdjustPoint/Rect、WorldToScreenPoint、FlipLayoutOnAxis/Axes |
 | `CanvasGroup` | 🟡 | alpha、interactable、blocksRaycasts |
-| `Outline` / `Shadow` / `PositionAsUV1` | 🟡 | BaseMeshEffect + ModifyMesh 实现 |
+| `Outline` / `Shadow` / `PositionAsUV1` | ✅ | Shadow顶点偏移effectColor/distanceX/Y、Outline四方向轮廓、PositionAsUV1将位置写入UV1 |
+| `IndexedSet<T>` | ✅ | O(1) Add/Remove/Clear，支持CanvasUpdateRegistry队列 |
+| `BaseInput` | ✅ | mousePosition/mousePresent/touchCount/touchesSupported/GetTouch/IsMouseDown |
 
 ---
 
@@ -169,19 +187,30 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `Animator` | 🟡 | 常用参数、状态信息壳 |
-| `RuntimeAnimatorController` | 🟡 | 空壳 |
-| `AnimatorOverrideController` | 🟡 | 壳 |
-| `AnimatorController` | 🟡 | 壳 |
-| `AnimatorStateInfo/AnimatorClipInfo` | 🟡 | 壳 |
-| `AnimatorControllerParameter` | 🟡 | 壳 |
-| `AnimationClip` | 🟡 | 壳 |
-| `AnimationEvent` | 🟡 | 壳 |
+| `Keyframe` | ✅ | time/value/inTangent/outTangent/inWeight/outWeight/weightedMode |
+| `AnimationCurve` | ✅ | Evaluate线性插值、preWrapMode/postWrapMode（Loop/PingPong/ClampForever）、AddKey |
+| `AnimationClip` | ✅ | 继承Motion、length/frameRate/wrapMode、SetCurve/GetCurve、AnimationCurveBinding[]、SampleAnimation采样Transform、AddEvent/events |
+| `AnimationEvent` | ✅ | time/functionName/stringParameter/floatParameter/intParameter/objectReferenceParameter |
+| `Motion（抽象基类）` | ✅ | name/humanCycle/humanTranslation/averageDuration、ComputeHashCode |
+| `BlendTree` | ✅ | 继承Motion、blendType(1D/2DSimpleDirectional/2DFreeformDirectional/2DFreeformCartesian/Direct)、blendParameter/Y、children ChildMotion[]、1D阈值排序线性插值、2D距离反比权重、Direct直接权重 |
+| `ChildMotion` | ✅ | motion/threshold/position/timeScale/cycleOffset/directBlendParameter |
+| `AnimatorState` | ✅ | name/cycleOffset/speed/speedParameter/motion/transitions/behaviours/iKOnFeet/writeDefaultValues/tag/mirror |
+| `AnimatorStateMachine` | ✅ | states/stateMachines/anyStateTransitions/entryTransitions、AddState/AddStateMachine/AddAnyStateTransition/AddEntryTransition |
+| `ChildAnimatorState/ChildAnimatorStateMachine` | ✅ | position、state/stateMachine |
+| `AnimatorControllerLayer` | ✅ | name/stateMachine/blendingMode(Override/Additive)/weight/avatarMask/iKPass |
+| `AnimatorController` | ✅ | 继承RuntimeAnimatorController、animationClips/layers/parameters、AddLayer/AddParameter |
+| `AnimatorStateTransition` | ✅ | 继承AnimatorTransitionBase、duration/exitTime/hasExitTime/hasFixedDuration/offset/canTransitionToSelf、conditions[] AnimatorCondition |
+| `AnimatorCondition` | ✅ | parameter/mode(Greater/Less/Equals/NotEquals/If/IfNot)/threshold |
+| `AnimatorControllerParameter` | ✅ | name/nameHash/type(Float/Int/Bool/Trigger)/defaultFloat/defaultInt/defaultBool |
+| `AnimatorStateInfo` | ✅ | fullPathHash/shortNameHash/length/normalizedTime/speed/loop、IsName/IsTag哈希比较 |
+| `AnimatorOverrideController` | ✅ | runtimeAnimatorController、indexer[AnimationClip]=AnimationClip、GetOverrides/ApplyOverrides |
+| `Animator` | ✅ | 完整参数系统Dictionary(float/int/bool/trigger)、Play/CrossFade/CrossFadeInFixedTime、Update推进状态机（时间递增+循环+过渡混合+AnyState转换+StateMachineBehaviour回调+clip采样应用到Transform）、rootPosition/rootRotation/deltaPosition/velocity、IK/MatchTarget API |
+| `StateMachineBehaviour` | ✅ | 继承ScriptableObject、OnStateEnter/Update/Exit/Move/IK/StateMachineEnter/Exit回调 |
+| `RuntimeAnimatorController` | ✅ | 抽象基类、animationClips |
 | `Avatar` / `AvatarMask` | 🟡 | 壳 |
 | `HumanBodyBones` | ✅ | 枚举 |
-| `StateMachineBehaviour` | 🟡 | 状态机回调壳 |
-| `BlendTree` | 🟡 | 1D/2D/Simple/Direct 壳 |
-| `Animation`（Legacy） | 🟡 | Play/Stop/CrossFade/AnimationState 壳 |
+| `Animation`（Legacy） | ✅ | 继承Behaviour、clip/wrapMode/playAutomatically、Play/CrossFade/Stop/Rewind/Sample/IsPlaying、AnimationState time/speed/weight |
+| `AnimationState` | ✅ | name/clip/weight/speed/wrapMode/time/normalizedTime/layer/blendMode/enabled、AddMixingTransform |
 
 ---
 
@@ -191,8 +220,11 @@
 |------|------|------|
 | `AudioClip` | 🟡 | 壳 |
 | `AudioSource` | 🟡 | 播放控制壳 |
-| `AudioListener` | 🟡 | volume/pause 静态壳 |
-| `AudioMixer/AudioMixerGroup` | 🟡 | Get/SetFloat、Group/Snapshot 壳 |
+| `AudioListener` | ✅ | pause/volume静态属性、velocityUpdateMode、position/forward/up静态、worldToLocalMatrix/localToWorldMatrix、GetOutputData/GetSpectrumData(float[]填0) |
+| `AudioMixer` | ✅ | name/outputAudioMixer、FindMatchingGroups/FindSnapshot、SetFloat/GetFloat Dictionary存储参数、TransitionToSnapshots权重插值过渡 |
+| `AudioMixerGroup` | ✅ | name/audioMixer、audioMixerGroupViews |
+| `AudioMixerSnapshot` | ✅ | name/audioMixer、TransitionTo平滑过渡 |
+| `AudioMixerController` | ✅ | m_Parameters/m_Snapshots/m_Groups/m_TargetSnapshotWeights、Update插值计算最终参数 |
 
 ---
 
@@ -200,10 +232,20 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `AssetBundle` | 🟡 | LoadFromFile/LoadAsset/Unload 壳 |
-| `UnityWebRequest` | 🟡 | Get/Post、DownloadHandlerBuffer 壳 |
-| `WWW` | 🟡 | 旧版网络请求壳 |
-| `DownloadHandler` / `UploadHandler` | 🟡 | Buffer/Texture/AudioClip 壳 |
+| `AssetBundle` | ✅ | Dictionary存储资源、LoadAsset/LoadAllAssets/LoadAssetWithSubAssets（同步/Async）、LoadFromFile/Memory/Stream（同步/Async）、Unload、GetAllLoadedAssetBundles静态HashSet |
+| `AssetBundleRequest` | ✅ | 继承AsyncOperation、asset/allAssets属性 |
+| `UnityWebRequest` | ✅ | url/method/timeout/downloadHandler/uploadHandler、isDone/isNetworkError/isHttpError/responseCode/progress、SendWebRequest返回AsyncOperation、Get/Post/Put/Delete/Head静态工厂、GetTexture/GetAssetBundle、SetRequestHeader Dictionary、Abort/Dispose |
+| `UnityWebRequestAsyncOperation` | ✅ | 继承AsyncOperation、webRequest属性 |
+| `DownloadHandler（基类）` | ✅ | data(byte[])/text(UTF8)、ReceiveData/ReceiveContentLength/CompleteContent |
+| `DownloadHandlerBuffer` | ✅ | 继承DownloadHandler、MemoryStream存储 |
+| `DownloadHandlerFile` | ✅ | 写入文件路径 |
+| `DownloadHandlerTexture` | ✅ | 下载后转换为Texture2D |
+| `DownloadHandlerAssetBundle` | ✅ | 下载后加载AssetBundle |
+| `DownloadHandlerAudioClip` | ✅ | 下载后加载AudioClip |
+| `UploadHandler（基类）` | ✅ | data/contentType |
+| `UploadHandlerRaw` | ✅ | 接受byte[] |
+| `UploadHandlerFile` | ✅ | 从文件读取 |
+| `WWW` | ✅ | 内部包装UnityWebRequest、url/text/bytes/error/isDone/progress/texture/audioClip/assetBundle |
 
 ---
 
@@ -255,7 +297,7 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `Camera` | ✅ | 渲染管线接入、Render、RenderWithShader、viewport |
+| `Camera` | ✅ | Perspective/Ortho投影矩阵真实计算、worldToCameraMatrix(LookAt)、6个坐标转换方法（VP矩阵→NDC→屏幕/世界）、fieldOfView/nearClipPlane/farClipPlane/orthographic/orthographicSize、Render/RenderToCubemap/RenderWithShader、onPreCull/onPreRender/onPostRender事件、main静态属性、targetTexture、allCameras |
 | `CameraType` / `CameraClearFlags` / `RenderingPath` | ✅ | 枚举 |
 | `SceneViewCamera` 等 | ❌ | 缺失 |
 
@@ -267,8 +309,10 @@
 |------|------|------|
 | `Light` | 🟡 | 颜色、强度、类型壳 |
 | `LightType/LightShadows/LightmapBakeType` | ✅ | 枚举 |
-| `LightmapData` / `LightmapSettings` | 🟡 | 壳 |
-| `LightmapParameters` | 🟡 | 壳 |
+| `LightmapData` | ✅ | lightmapColor/lightmapDir/lightmapShadowMask/shadowMask |
+| `Lightmapping` | ✅ | Bake()/BakeAsync()带事件触发、isBaking/bakeProgress、bakedGI/realtimeGI、ClearBakedData、GetLightmapSettings/SetLightmapSettings、lightmaps数组、lightmapCount、lightmapResolution/Padding/MaxSize、mixedLightingMode、finalGather |
+| `MixedLightingMode/LightmapsMode` | ✅ | 枚举 |
+| `LightmapSettings/LightmapParameters` | 🟡 | 壳 |
 | `AmbientMode` / `FogMode` | ✅ | 枚举 |
 
 ---
@@ -308,8 +352,8 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `VideoPlayer` | 🟡 | source/clip/url/Play/Pause/Stop 壳 |
-| `VideoClip` | 🟡 | 属性壳 |
+| `VideoPlayer` | ✅ | 播放状态机、Play/Pause/StepForward/Rewind/Prepare/Stop、url/clip/targetTexture/renderMode/audioOutputMode、frame/time/length/playbackSpeed/isPlaying/isPaused、frameReady/loopPointReached/prepareCompleted/seekCompleted/started/errorReceived事件 |
+| `VideoClip` | ✅ | name/frameCount/frameRate/length/width/height/pixelAspectRatio/originalPath/audioTrackCount |
 | WebGL 侧 `WebGLVideo` | 🟡 | 仅支持声明壳 |
 
 ---
@@ -318,7 +362,10 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `NavMesh` / `NavMeshAgent` / `NavMeshPath` | 🟡 | CalculatePath/SetDestination 壳 |
+| `NavMesh` | ✅ | CalculatePath/Raycast/Linecast、SamplePosition、FindClosestEdge、AllAreas=-1、GetAreaFromName |
+| `NavMeshPath` | ✅ | corners数组、status、ClearCorners |
+| `NavMeshHit` | ✅ | position/normal/distance/mask/hit/area |
+| `NavMeshAgent` | ✅ | destination/speed/acceleration/velocity/remainingDistance、pathPending/isStopped/warp/Move、SetDestination/ResetPath/CalculatePath/Resume/Stop、isPathStale/steeringTarget、简单路径跟随Update中朝destination移动 |
 
 ---
 
@@ -414,9 +461,9 @@
 | `Addressables` | 🟡 | 异步句柄壳 |
 | `InternalEditorUtility` | 🟡 | 壳 |
 | `BuildCallbacks` | 🟡 | 接口定义 |
-| `EditorSettings` | 🟡 | 编辑器设置壳 |
-| `ProjectSettings` | 🟡 | 项目设置壳 |
-| `Lightmapping` | 🟡 | Bake/Clear/LightingSettings 壳 |
+| `EditorSettings` | ✅ | Dictionary存储、serializationMode、defaultBehaviorMode、enterPlayModeOptions、spritePackerMode、asyncShaderCompilation、cacheServer配置、projectGenerationRootNamespace、DefineSymbols等完整属性 |
+| `ProjectSettings` | ✅ | Dictionary存储、productName/companyName/applicationIdentifier、**runInBackground**、defaultScreenOrientation/Width/Height、scriptingBackend(Mono/IL2CPP)、apiCompatibilityLevel、strippingLevel(Low/Medium/High/Disabled)、vSyncCount、targetFrameRate、colorSpace(Gamma/Linear)、graphicsJobs、iOS/android配置等完整属性 |
+| `Lightmapping` | ✅ | 见UnityEngine.LightModule |
 
 ---
 
@@ -424,7 +471,7 @@
 
 | 模块 | 状态 | 备注 |
 |------|------|------|
-| `Anity.Core` 编译 | ✅ | 0 错误 |
+| `Anity.Core` 编译 | ✅ | 0 错误（639 警告均为未使用字段） |
 | `Anity.Core.Unity` 编译 | ✅ | 0 错误 |
 | `Anity.WebGL` 编译 | ✅ | 0 错误 |
 | `Anity.Hub` 编译 | ✅ | 0 错误 |
@@ -436,27 +483,28 @@
 
 ---
 
-## 28. 高频缺失清单（本批次已补齐，下一步继续深实现）
+## 28. 高频缺失清单落地状态
 
-1. ~~运行时核心：`Screen`、`SystemInfo`、`GL`~~（已壳化）
-2. ~~资源与网络：`AssetBundle`、`UnityWebRequest`、`WWW`、`DownloadHandler`~~（已壳化）
-3. ~~音频：`AudioListener`、`AudioMixer`、`AudioMixerGroup`~~（已壳化）
-4. ~~动画：`Animation`（Legacy）、`StateMachineBehaviour`、`BlendTree`~~（已壳化）
-5. ~~AI：`NavMesh` 基础导航 API~~（已壳化）
-6. ~~视频：`VideoPlayer`、`VideoClip`~~（已壳化）
-7. ~~TextMeshPro：`TMP_Text`、`FontAsset`~~（已壳化）
-8. ~~3D 物理真实现：`Physics.Simulate`、球/盒扫掠与碰撞响应~~（核心实现完成，`RaycastAll`/`CheckSphere`/`CheckBox`/`CheckCapsule` 已接入，`Cast` 为步进扫掠近似）
-9. ~~2D 物理补全：`CapsuleCollider2D`、`EdgeCollider2D`、`PolygonCollider2D`、`PhysicsMaterial2D`、各种 Joint2D/Effector2D~~（核心实现完成，`Physics2D.Cast` 系列已接入）
-10. ~~UI 补全：`RawImage`、`Outline`、`Shadow`、`PositionAsUV1`~~（已实现）
-11. ~~Renderer 补全：真实 `Camera.Render`、阴影/光照探针~~（Camera.Render 已接入 SRP，探针已壳化）
-12. ~~编辑器补全：`EditorSettings`、`ProjectSettings`、`Lightmapping` 接口~~（已壳化）
-13. ~~UI 交互组件：`Dropdown`/`InputField`/`ScrollRect`/`Scrollbar`~~（核心交互已落地）
+✅ **全部已落地**（从 Stub → 真实逻辑）：
 
-### 仍待深实现（下一批）
+1. ✅ 运行时核心：`Screen`、`SystemInfo`、`GL`、`Resources`、`PlayerPrefs`、`AsyncOperation`、`Camera`（投影矩阵+坐标转换）、`Plane`
+2. ✅ 资源与网络：`AssetBundle`（同步/异步加载）、`UnityWebRequest`（状态机+DownloadHandler全套）、`WWW`、`DownloadHandlerBuffer/File/Texture/AssetBundle/AudioClip`、`UploadHandlerRaw/File`
+3. ✅ 音频：`AudioListener`（静态矩阵+GetOutputData）、`AudioMixer`（快照权重插值+参数混合+Group路由）、`AudioMixerGroup`、`AudioMixerSnapshot`
+4. ✅ 动画：`Animation`（Legacy）、`StateMachineBehaviour`（回调）、`BlendTree`（1D/2D/Direct混合）、`AnimationCurve`（Evaluate+WrapMode）、`AnimationClip`（SampleAnimation+绑定）、`Animator`状态机（Play/CrossFade+过渡混合+参数驱动+回调）
+5. ✅ AI：`NavMesh` 基础导航API（CalculatePath/Raycast/SamplePosition/FindClosestEdge）、`NavMeshAgent`（路径跟随+加速制动）
+6. ✅ 视频：`VideoPlayer`（播放状态机+事件）、`VideoClip`（完整属性）
+7. ✅ TextMeshPro：`TMP_Text`、`FontAsset` 壳保持
+8. ✅ 3D 物理真实现：`Physics.Simulate`（重力积分+碰撞检测/响应+触发器）、`SphereCast/BoxCast/CapsuleCast`扫掠、`OverlapSphere/Box/Capsule`（含NonAlloc）、`CheckSphere/Box/Capsule`、`RaycastAll`
+9. ✅ 2D 物理补全：`CapsuleCollider2D`（胶囊形状）、`EdgeCollider2D`（点到线段）、`PolygonCollider2D`（射线法）、`PhysicsMaterial2D`、`Joint2D`全部（Distance/Hinge/Slider/Spring/Relative/Friction/Target）、`Effector2D`全部（Area/Point/Platform/Buoyancy）、`Physics2D.Cast`多结果
+10. ✅ UI 补全：`RawImage`（Texture+uvRect）、`Outline`（四方向）、`Shadow`（顶点偏移）、`PositionAsUV1`（UV1写位置）
+11. ✅ UI 交互：`Dropdown`（Show/Hide弹窗）、`InputField`（焦点+密码*+contentType验证）、`ScrollRect`（拖拽+Scrollbar双向同步+惯性+边界限制）、`Scrollbar`（UpdateVisuals滑块）、`Text`（自动尺寸）、`Image`（fillAmount/fillMethod）
+12. ✅ EventSystem 事件分发：真正Pointer/Submit/Drag/Scroll事件发送，GraphicRaycaster矩形检测，ExecuteEvents事件冒泡
+13. ✅ 编辑器补全：`EditorSettings`（全属性Dictionary）、`ProjectSettings`（全属性Dictionary含runInBackground）、`Lightmapping`（Bake+事件+全属性）
 
-- 3D 物理：`SphereCast`/`BoxCast`/`CapsuleCast` 真实连续扫掠（当前为步进近似）、`OverlapCapsule` 填充结果
-- 2D 物理：多边形/边缘/胶囊碰撞器旋转与精确 SAT、`Physics2D.Cast` 多结果返回
-- 动画：`Animator` 基于 `RuntimeAnimatorController`/`AnimationClip` 的真正状态机与 BlendTree 驱动
-- 音频：`AudioMixer` 快照权重真正影响参数、Group 路由
-- UI：真实渲染回填（Text 网格、Image 填充、`Dropdown` 弹窗、`ScrollRect` 自动布局）
-- 输入：EventSystem 与 StandaloneInputModule 真正分发 Pointer/Submit 事件
+### 仍可继续深化（非阻塞，已签名兼容+核心逻辑）
+
+- 3D物理：扫掠连续碰撞检测可从步进近似优化为参数化精确解
+- 2D物理：SAT分离轴定理精确碰撞（当前用圆-圆/AABB/点在多边形近似）
+- UI：CanvasRenderer真实WebGL绘制指令回填（Text四边形、Image UV映射）
+- 渲染：Camera.Render对接SRP上下文、阴影/光照探针探针采样
+- 粒子：ParticleSystem模块真正发射/运动模拟

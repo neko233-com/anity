@@ -1,15 +1,39 @@
 using System.Runtime.InteropServices;
+using UnityEngine.Rendering;
+using UnityEngine.Experimental.Rendering;
 
 namespace UnityEngine;
 
-/// <summary>
-/// Hardware and system information.
-/// </summary>
+[Flags]
+public enum CopyTextureSupport
+{
+    None = 0,
+    Basic = (1 << 0),
+    Copy3D = (1 << 1),
+    DifferentTypes = (1 << 2),
+    TextureToRT = (1 << 3),
+    RTToTexture = (1 << 4)
+}
+
 public static class SystemInfo
 {
+    private static string _deviceUniqueIdentifier;
+
+    public static string deviceUniqueIdentifier
+    {
+        get
+        {
+            if (_deviceUniqueIdentifier == null)
+            {
+                _deviceUniqueIdentifier = Guid.NewGuid().ToString("N");
+            }
+            return _deviceUniqueIdentifier;
+        }
+    }
+
     public static string deviceName => Environment.MachineName;
     public static string deviceModel => "Anity Device";
-    public static string deviceUniqueIdentifier => Guid.NewGuid().ToString("N");
+    public static DeviceType deviceType => DeviceType.Desktop;
     public static string operatingSystem => RuntimeInformation.OSDescription;
     public static OperatingSystemFamily operatingSystemFamily => GetOSFamily();
     public static string processorType => RuntimeInformation.ProcessArchitecture.ToString();
@@ -19,11 +43,13 @@ public static class SystemInfo
     public static string graphicsDeviceName => "Anity GPU";
     public static string graphicsDeviceVendor => "Anity";
     public static int graphicsDeviceID => 0;
-    public static int graphicsVendorID => 0;
+    public static int graphicsDeviceVendorID => 0;
     public static string graphicsDeviceVersion => "1.0";
     public static int graphicsMemorySize => 4096;
+    public static GraphicsDeviceType graphicsDeviceType => GetGraphicsDeviceType();
     public static int graphicsShaderLevel => 50;
     public static bool graphicsMultiThreaded => false;
+    public static CopyTextureSupport copyTextureSupport => CopyTextureSupport.Basic | CopyTextureSupport.Copy3D | CopyTextureSupport.DifferentTypes | CopyTextureSupport.TextureToRT | CopyTextureSupport.RTToTexture;
     public static bool supportsShadows => true;
     public static bool supportsRawShadowDepthSampling => true;
     public static bool supportsMotionVectors => true;
@@ -32,6 +58,7 @@ public static class SystemInfo
     public static bool supportsCubemapArrayTextures => true;
     public static bool supportsComputeShaders => true;
     public static bool supportsInstancing => true;
+    public static bool supportsGeometryShaders => true;
     public static bool supportsHardwareQuadTopology => false;
     public static bool supports32bitsIndexBuffer => true;
     public static bool supportsSparseTextures => false;
@@ -40,7 +67,7 @@ public static class SystemInfo
     public static int supportedRandomWriteTargetCount => 8;
     public static bool supportsMultisampledTextures => true;
     public static bool supportsMultisampleAutoResolve => false;
-    public static bool supportsTextureWrapMirrorOnce => false;
+    public static bool supportsTextureWrapMirrorOnce => true;
     public static bool usesReversedZBuffer => true;
     public static bool supportsRenderTextures => true;
     public static bool supportsRenderToCubemap => true;
@@ -50,7 +77,7 @@ public static class SystemInfo
     public static bool supportsLocationService => false;
     public static bool supportsAccelerometer => false;
     public static bool supportsAudio => true;
-    public static DeviceType deviceType => DeviceType.Desktop;
+    public static NPOTSupport npotSupport => NPOTSupport.Full;
     public static int maxTextureSize => 8192;
     public static int maxCubemapSize => 8192;
     public static int maxTexture3DSize => 2048;
@@ -65,15 +92,13 @@ public static class SystemInfo
     public static int maxComputeWorkGroupSizeY => 1024;
     public static int maxComputeWorkGroupSizeZ => 64;
     public static int maxConstantBufferSize => 65536;
-    public static NPOTSupport npotSupport => NPOTSupport.Full;
-    public static string copyTextureSupport => "Basic, CopyTexture, DifferentTypes";
     public static int graphicsPixelFillrate => 0;
 
     public static bool SupportsRenderTextureFormat(RenderTextureFormat format) => true;
     public static bool SupportsTextureFormat(TextureFormat format) => true;
     public static bool SupportsBlendingOnRenderTextureFormat(RenderTextureFormat format) => true;
     public static bool SupportsVertexAttributeFormat(VertexAttributeFormat format, int dimension) => true;
-    public static bool IsFormatSupported(UnityEngine.Experimental.Rendering.GraphicsFormat format, UnityEngine.Experimental.Rendering.FormatUsage usage) => true;
+    public static bool IsFormatSupported(GraphicsFormat format, FormatUsage usage) => true;
 
     private static OperatingSystemFamily GetOSFamily()
     {
@@ -81,6 +106,13 @@ public static class SystemInfo
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return OperatingSystemFamily.MacOSX;
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return OperatingSystemFamily.Linux;
         return OperatingSystemFamily.Other;
+    }
+
+    private static GraphicsDeviceType GetGraphicsDeviceType()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return GraphicsDeviceType.Direct3D11;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return GraphicsDeviceType.Metal;
+        return GraphicsDeviceType.OpenGLCore;
     }
 }
 

@@ -24,7 +24,7 @@ public abstract class UIBehaviour : MonoBehaviour
     return gameObject is not null && gameObject.activeInHierarchy;
   }
 
-  protected bool IsDestroyed()
+  public virtual bool IsDestroyed()
   {
     return false;
   }

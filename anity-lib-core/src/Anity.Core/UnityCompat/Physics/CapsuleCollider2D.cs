@@ -10,7 +10,7 @@ public class CapsuleCollider2D : Collider2D
 
     internal override ColliderShape2D GetShape()
     {
-        return new ColliderShape2D(ColliderShapeType2D.Capsule, offset, size, 0f);
+        return new ColliderShape2D(ColliderShapeType2D.Capsule, offset, size, 0f, null, direction);
     }
 }
 

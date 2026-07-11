@@ -3,821 +3,1108 @@ using System.Collections.Generic;
 
 namespace UnityEngine;
 
+internal enum ColliderShapeType
+{
+    Sphere,
+    Box,
+    Capsule
+}
+
+internal struct ColliderShape
+{
+    public ColliderShapeType Type;
+    public Vector3 Center;
+    public Vector3 Size;
+    public float Radius;
+    public float Height;
+    public int Direction;
+
+    public ColliderShape(ColliderShapeType type, Vector3 center, Vector3 size, float radius, float height, int direction)
+    {
+        Type = type;
+        Center = center;
+        Size = size;
+        Radius = radius;
+        Height = height;
+        Direction = direction;
+    }
+}
+
+internal readonly struct CollisionPair : IEquatable<CollisionPair>
+{
+    public readonly Collider A;
+    public readonly Collider B;
+
+    public CollisionPair(Collider a, Collider b)
+    {
+        A = a.GetInstanceID() < b.GetInstanceID() ? a : b;
+        B = a.GetInstanceID() < b.GetInstanceID() ? b : a;
+    }
+
+    public bool Equals(CollisionPair other) => A == other.A && B == other.B;
+    public override bool Equals(object obj) => obj is CollisionPair other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(A?.GetInstanceID() ?? 0, B?.GetInstanceID() ?? 0);
+    public static bool operator ==(CollisionPair left, CollisionPair right) => left.Equals(right);
+    public static bool operator !=(CollisionPair left, CollisionPair right) => !left.Equals(right);
+}
+
 internal static class PhysicsWorld
 {
     private static readonly List<Collider> _colliders = new();
     private static readonly List<Rigidbody> _rigidbodies = new();
+    private static readonly HashSet<CollisionPair> _collisionStates = new();
+    private static readonly HashSet<CollisionPair> _triggerStates = new();
+    private static readonly Dictionary<(Collider, Collider), bool> _ignoreCollisionPairs = new();
+    private static bool[,] _layerMatrix = new bool[32, 32];
+    private static Vector3 _gravity = new(0f, -9.81f, 0f);
+    private static bool _autoSimulation = true;
+    private static float _bounceThreshold = 2f;
+    private static float _sleepThreshold = 0.005f;
+    private static float _defaultContactOffset = 0.01f;
+    private static int _defaultSolverIterations = 6;
 
-    public static void Register(Collider collider)
+    public static Vector3 gravity { get => _gravity; set => _gravity = value; }
+    public static bool autoSimulation { get => _autoSimulation; set => _autoSimulation = value; }
+    public static float bounceThreshold { get => _bounceThreshold; set => _bounceThreshold = value; }
+    public static float sleepThreshold { get => _sleepThreshold; set => _sleepThreshold = value; }
+    public static float defaultContactOffset { get => _defaultContactOffset; set => _defaultContactOffset = value; }
+    public static int defaultSolverIterations { get => _defaultSolverIterations; set => _defaultSolverIterations = value; }
+
+    static PhysicsWorld()
     {
-        if (collider is null || _colliders.Contains(collider)) return;
-        _colliders.Add(collider);
+        for (int i = 0; i < 32; i++)
+            for (int j = 0; j < 32; j++)
+                _layerMatrix[i, j] = true;
     }
 
-    public static void Unregister(Collider collider)
+    public static void Register(Collider c) => RegisterCollider(c);
+
+    public static void RegisterCollider(Collider c)
     {
-        if (collider is null) return;
-        _ = _colliders.Remove(collider);
+        if (!_colliders.Contains(c)) _colliders.Add(c);
     }
 
-    public static void Register(Rigidbody rigidbody)
+    public static void UnregisterCollider(Collider c)
     {
-        if (rigidbody is null || _rigidbodies.Contains(rigidbody)) return;
-        _rigidbodies.Add(rigidbody);
+        _colliders.Remove(c);
     }
 
-    public static void Unregister(Rigidbody rigidbody)
+    public static void Register(Rigidbody rb) => RegisterRigidbody(rb);
+
+    public static void RegisterRigidbody(Rigidbody rb)
     {
-        if (rigidbody is null) return;
-        _ = _rigidbodies.Remove(rigidbody);
+        if (!_rigidbodies.Contains(rb)) _rigidbodies.Add(rb);
     }
 
-    public static IReadOnlyList<Collider> GetColliders() => _colliders;
-    public static IReadOnlyList<Rigidbody> GetRigidbodies() => _rigidbodies;
-
-    public static void Simulate(float deltaTime)
+    public static void UnregisterRigidbody(Rigidbody rb)
     {
-        CleanupDestroyed();
-        IntegrateRigidbodies(deltaTime);
-        DetectAndResolveCollisions(deltaTime);
+        _rigidbodies.Remove(rb);
     }
 
-    private static void CleanupDestroyed()
+    public static bool GetIgnoreLayerCollision(int layer1, int layer2)
     {
-        for (var i = _colliders.Count - 1; i >= 0; i--)
+        layer1 = Math.Clamp(layer1, 0, 31);
+        layer2 = Math.Clamp(layer2, 0, 31);
+        return !_layerMatrix[layer1, layer2];
+    }
+
+    public static void SetIgnoreLayerCollision(int layer1, int layer2, bool ignore)
+    {
+        layer1 = Math.Clamp(layer1, 0, 31);
+        layer2 = Math.Clamp(layer2, 0, 31);
+        _layerMatrix[layer1, layer2] = !ignore;
+        _layerMatrix[layer2, layer1] = !ignore;
+    }
+
+    public static bool GetIgnoreCollision(Collider a, Collider b)
+    {
+        if (a == null || b == null) return false;
+        return _ignoreCollisionPairs.TryGetValue((a, b), out var ignore) && ignore;
+    }
+
+    public static void SetIgnoreCollision(Collider a, Collider b, bool ignore)
+    {
+        if (a == null || b == null) return;
+        _ignoreCollisionPairs[(a, b)] = ignore;
+        _ignoreCollisionPairs[(b, a)] = ignore;
+    }
+
+    private static Vector3 TransformPoint(Vector3 localPos, Transform t)
+    {
+        if (t == null) return localPos;
+        return t.position + t.rotation * localPos;
+    }
+
+    private static ColliderShape GetWorldShape(Collider c)
+    {
+        var t = c.transform;
+        var scale = t != null ? t.lossyScale : Vector3.one;
+        return c switch
         {
-            var c = _colliders[i];
-            if (c is null || c.IsDestroyed || c.gameObject is null || !c.gameObject.activeInHierarchy)
-            {
-                _colliders.RemoveAt(i);
-            }
-        }
-
-        for (var i = _rigidbodies.Count - 1; i >= 0; i--)
-        {
-            var rb = _rigidbodies[i];
-            if (rb is null || rb.IsDestroyed || rb.gameObject is null || !rb.gameObject.activeInHierarchy)
-            {
-                _rigidbodies.RemoveAt(i);
-            }
-        }
-    }
-
-    private static void IntegrateRigidbodies(float deltaTime)
-    {
-        foreach (var rb in _rigidbodies)
-        {
-            if (rb is null || rb.IsDestroyed || rb.isKinematic) continue;
-
-            if (rb.useGravity)
-            {
-                rb.velocity += Physics.gravity * deltaTime;
-            }
-
-            if (rb.drag > 0f)
-            {
-                rb.velocity *= Math.Max(0f, 1f - rb.drag * deltaTime);
-            }
-
-            if (rb.angularDrag > 0f)
-            {
-                rb.angularVelocity *= Math.Max(0f, 1f - rb.angularDrag * deltaTime);
-            }
-
-            var transform = rb.transform;
-            if (transform is null) continue;
-
-            transform.localPosition += rb.velocity * deltaTime;
-
-            if (!rb.freezeRotation && rb.angularVelocity.magnitude > 1e-6f)
-            {
-                var deltaAngle = rb.angularVelocity * deltaTime;
-                transform.localRotation *= Quaternion.Euler(deltaAngle.x, deltaAngle.y, deltaAngle.z);
-            }
-        }
-    }
-
-    private static void DetectAndResolveCollisions(float deltaTime)
-    {
-        _ = deltaTime;
-
-        var count = _colliders.Count;
-        for (var i = 0; i < count; i++)
-        {
-            var a = _colliders[i];
-            if (a is null || a.IsDestroyed || !a.enabled) continue;
-
-            for (var j = i + 1; j < count; j++)
-            {
-                var b = _colliders[j];
-                if (b is null || b.IsDestroyed || !b.enabled) continue;
-
-                if (!Physics.IsLayerCollisionEnabled(a.gameObject?.layer ?? 0, b.gameObject?.layer ?? 0))
-                {
-                    continue;
-                }
-
-                if (a.isTrigger || b.isTrigger)
-                {
-                    if (Intersect(a, b, out _, out _))
-                    {
-                        DispatchTrigger(a, b);
-                    }
-                    continue;
-                }
-
-                if (Intersect(a, b, out var normal, out var penetration))
-                {
-                    ResolveCollision(a, b, normal, penetration);
-                    DispatchCollision(a, b, normal);
-                }
-            }
-        }
+            SphereCollider sc => new ColliderShape(ColliderShapeType.Sphere,
+                TransformPoint(sc.center, t),
+                Vector3.one,
+                sc.radius * MathF.Max(MathF.Abs(scale.x), MathF.Max(MathF.Abs(scale.y), MathF.Abs(scale.z))),
+                0f, 0),
+            BoxCollider bc => new ColliderShape(ColliderShapeType.Box,
+                TransformPoint(bc.center, t),
+                new Vector3(bc.size.x * MathF.Abs(scale.x), bc.size.y * MathF.Abs(scale.y), bc.size.z * MathF.Abs(scale.z)),
+                0f, 0f, 0),
+            CapsuleCollider cc =>
+                new ColliderShape(ColliderShapeType.Capsule, TransformPoint(cc.center, t), Vector3.one,
+                    cc.radius * MathF.Max(MathF.Abs(scale.x), MathF.Abs(scale.z)),
+                    cc.height * MathF.Abs(cc.direction == 0 ? scale.x : cc.direction == 1 ? scale.y : scale.z),
+                    cc.direction),
+            _ => new ColliderShape(ColliderShapeType.Box, c.bounds.center, c.bounds.size, 0f, 0f, 0)
+        };
     }
 
     public static bool Raycast(Ray ray, out RaycastHit hitInfo, float maxDistance, int layerMask)
     {
-        var hits = RaycastAll(ray, maxDistance, layerMask);
-        if (hits.Count == 0)
+        return Raycast(ray.origin, ray.direction, out hitInfo, maxDistance, layerMask, QueryTriggerInteraction.UseGlobal);
+    }
+
+    public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction)
+    {
+        hitInfo = default;
+        direction = direction.normalized;
+        float closestDist = maxDistance;
+        Collider closestCollider = null;
+        Vector3 closestPoint = default;
+        Vector3 closestNormal = Vector3.up;
+
+        for (int i = 0; i < _colliders.Count; i++)
         {
-            hitInfo = RaycastHit.empty;
-            return false;
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (queryTriggerInteraction == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+
+            var shape = GetWorldShape(c);
+            if (RaycastShape(origin, direction, shape, closestDist, out float dist, out Vector3 pt, out Vector3 n))
+            {
+                if (dist < closestDist)
+                {
+                    closestDist = dist;
+                    closestCollider = c;
+                    closestPoint = pt;
+                    closestNormal = n;
+                }
+            }
         }
 
-        hitInfo = hits[0];
+        if (closestCollider == null) return false;
+        hitInfo = new RaycastHit
+        {
+            collider = closestCollider,
+            distance = closestDist,
+            point = closestPoint,
+            normal = closestNormal,
+            rigidbody = closestCollider.attachedRigidbody,
+            transform = closestCollider.transform
+        };
         return true;
     }
 
-    public static List<RaycastHit> RaycastAll(Ray ray, float maxDistance, int layerMask)
+    public static RaycastHit[] RaycastAll(Ray ray, float maxDistance, int layerMask)
+    {
+        return RaycastAll(ray.origin, ray.direction, maxDistance, layerMask, QueryTriggerInteraction.UseGlobal);
+    }
+
+    public static RaycastHit[] RaycastAll(Vector3 origin, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction)
     {
         var hits = new List<RaycastHit>();
-        var direction = ray.direction.normalized;
-        if (direction.magnitude < 1e-6f) return hits;
-
-        foreach (var collider in _colliders)
+        direction = direction.normalized;
+        for (int i = 0; i < _colliders.Count; i++)
         {
-            if (collider is null || collider.IsDestroyed || !collider.enabled) continue;
-            if (!Physics.LayerMatches(collider.gameObject?.layer ?? 0, layerMask)) continue;
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (queryTriggerInteraction == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
 
-            if (RaycastCollider(ray.origin, direction, collider, out var t, out var normal) && t < maxDistance && t >= 0f)
+            var shape = GetWorldShape(c);
+            if (RaycastShape(origin, direction, shape, maxDistance, out float dist, out Vector3 pt, out Vector3 n))
             {
-                var point = ray.origin + direction * t;
                 hits.Add(new RaycastHit
                 {
-                    collider = collider,
-                    rigidbody = collider.attachedRigidbody,
-                    transform = collider.transform,
-                    point = point,
-                    normal = normal,
-                    distance = t,
-                    barycentricCoordinate = new Vector3(1f - t, t, 0f)
+                    collider = c,
+                    distance = dist,
+                    point = pt,
+                    normal = n,
+                    rigidbody = c.attachedRigidbody,
+                    transform = c.transform
                 });
             }
         }
-
-        hits.Sort((a, b) => a.distance.CompareTo(b.distance));
-        return hits;
+        return hits.ToArray();
     }
 
-    private static bool RaycastCollider(Vector3 origin, Vector3 direction, Collider collider, out float distance, out Vector3 normal)
+    private static bool RaycastShape(Vector3 origin, Vector3 dir, ColliderShape shape, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
     {
-        distance = float.PositiveInfinity;
-        normal = -direction;
+        dist = maxDist;
+        point = default;
+        normal = Vector3.up;
 
-        switch (collider)
-        {
-            case SphereCollider sphere:
-                return RaycastSphere(origin, direction, GetWorldPosition(collider, sphere.center), sphere.radius, out distance, out normal);
-            case BoxCollider box:
-                return RaycastBox(origin, direction, GetWorldPosition(collider, box.center), box.size, collider.transform?.rotation ?? Quaternion.identity, out distance, out normal);
-            case CapsuleCollider capsule:
-                GetCapsulePoints(collider, capsule, out var p0, out var p1, out var radius);
-                return RaycastCapsule(origin, direction, p0, p1, radius, out distance, out normal);
-        }
-
+        if (shape.Type == ColliderShapeType.Sphere)
+            return RaycastSphere(origin, dir, shape.Center, shape.Radius, maxDist, out dist, out point, out normal);
+        if (shape.Type == ColliderShapeType.Box)
+            return RaycastBox(origin, dir, shape.Center, shape.Size * 0.5f, maxDist, out dist, out point, out normal);
+        if (shape.Type == ColliderShapeType.Capsule)
+            return RaycastCapsule(origin, dir, shape, maxDist, out dist, out point, out normal);
         return false;
     }
 
-    private static void GetCapsulePoints(Collider collider, CapsuleCollider capsule, out Vector3 point0, out Vector3 point1, out float radius)
+    private static bool RaycastSphere(Vector3 origin, Vector3 dir, Vector3 center, float radius, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
     {
-        var center = GetWorldPosition(collider, capsule.center);
-        var rotation = collider.transform?.rotation ?? Quaternion.identity;
-        var axis = capsule.direction switch
-        {
-            0 => rotation * Vector3.right,
-            1 => rotation * Vector3.up,
-            _ => rotation * Vector3.forward
-        };
-        var halfHeight = MathF.Max(0f, capsule.height * 0.5f - capsule.radius);
-        point0 = center - axis * halfHeight;
-        point1 = center + axis * halfHeight;
-        radius = capsule.radius;
-    }
-
-    private static bool RaycastCapsule(Vector3 origin, Vector3 direction, Vector3 point0, Vector3 point1, float radius, out float distance, out Vector3 normal)
-    {
-        distance = float.PositiveInfinity;
-        normal = -direction;
-
-        var axis = point1 - point0;
-        var length = axis.magnitude;
-        if (length < 1e-6f)
-        {
-            return RaycastSphere(origin, direction, point0, radius, out distance, out normal);
-        }
-
-        axis = axis.normalized;
-        var steps = Math.Max(1, (int)(length / radius));
-        var step = length / steps;
-        var hit = false;
-        for (var i = 0; i <= steps; i++)
-        {
-            var p = point0 + axis * (i * step);
-            if (RaycastSphere(origin, direction, p, radius, out var t, out var n) && t < distance)
-            {
-                distance = t;
-                normal = n;
-                hit = true;
-            }
-        }
-
-        return hit;
-    }
-
-    private static bool RaycastSphere(Vector3 origin, Vector3 direction, Vector3 center, float radius, out float distance, out Vector3 normal)
-    {
-        distance = float.PositiveInfinity;
-        normal = -direction;
-
-        var oc = origin - center;
-        var a = Vector3.Dot(direction, direction);
-        var b = 2f * Vector3.Dot(oc, direction);
-        var c = Vector3.Dot(oc, oc) - radius * radius;
-        var discriminant = b * b - 4f * a * c;
-
-        if (discriminant < 0f) return false;
-
-        var sqrt = MathF.Sqrt(discriminant);
-        var t = (-b - sqrt) / (2f * a);
-        if (t < 0f) t = (-b + sqrt) / (2f * a);
-        if (t < 0f) return false;
-
-        distance = t;
-        normal = (origin + direction * t - center).normalized;
+        dist = maxDist;
+        point = default;
+        normal = Vector3.up;
+        Vector3 m = origin - center;
+        float b = Vector3.Dot(m, dir);
+        float c = Vector3.Dot(m, m) - radius * radius;
+        if (c > 0f && b > 0f) return false;
+        float discr = b * b - c;
+        if (discr < 0f) return false;
+        float t = -b - MathF.Sqrt(discr);
+        if (t < 0f) t = 0f;
+        if (t > maxDist) return false;
+        dist = t;
+        point = origin + dir * t;
+        normal = (point - center).normalized;
         return true;
     }
 
-    private static bool RaycastBox(Vector3 origin, Vector3 direction, Vector3 center, Vector3 size, Quaternion rotation, out float distance, out Vector3 normal)
+    private static bool RaycastBox(Vector3 origin, Vector3 dir, Vector3 center, Vector3 halfExtents, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
     {
-        distance = float.PositiveInfinity;
-        normal = -direction;
+        dist = maxDist;
+        point = default;
+        normal = Vector3.up;
+        Vector3 min = center - halfExtents;
+        Vector3 max = center + halfExtents;
+        float tmin = 0f, tmax = maxDist;
+        Vector3 hitNormal = Vector3.zero;
 
-        var invRotation = Quaternion.Inverse(rotation);
-        var localOrigin = invRotation * (origin - center);
-        var localDir = invRotation * direction;
-
-        var half = size * 0.5f;
-        var tMin = float.NegativeInfinity;
-        var tMax = float.PositiveInfinity;
-        var axis = 0;
-        var sign = 0;
-
-        for (var i = 0; i < 3; i++)
+        for (int i = 0; i < 3; i++)
         {
-            var o = i == 0 ? localOrigin.x : i == 1 ? localOrigin.y : localOrigin.z;
-            var d = i == 0 ? localDir.x : i == 1 ? localDir.y : localDir.z;
-            var min = i == 0 ? -half.x : i == 1 ? -half.y : -half.z;
-            var max = i == 0 ? half.x : i == 1 ? half.y : half.z;
-
-            if (MathF.Abs(d) < 1e-6f)
+            float o = origin[i];
+            float d = dir[i];
+            float mn = min[i];
+            float mx = max[i];
+            if (MathF.Abs(d) < 1e-8f)
             {
-                if (o < min || o > max) return false;
+                if (o < mn || o > mx) return false;
             }
             else
             {
-                var invD = 1f / d;
-                var t1 = (min - o) * invD;
-                var t2 = (max - o) * invD;
-                var s = 1;
-                if (t1 > t2)
-                {
-                    (t1, t2) = (t2, t1);
-                    s = -1;
-                }
-
-                if (t1 > tMin)
-                {
-                    tMin = t1;
-                    axis = i;
-                    sign = s;
-                }
-
-                tMax = MathF.Min(tMax, t2);
-                if (tMin > tMax) return false;
+                float inv = 1f / d;
+                float t1 = (mn - o) * inv;
+                float t2 = (mx - o) * inv;
+                Vector3 n = Vector3.zero;
+                if (t1 > t2) { (t1, t2) = (t2, t1); }
+                if (d > 0) n[i] = t1 > tmin ? -1f : n[i];
+                else n[i] = t1 > tmin ? 1f : n[i];
+                if (t1 > tmin) { tmin = t1; hitNormal = n; }
+                tmax = MathF.Min(tmax, t2);
+                if (tmin > tmax) return false;
             }
         }
 
-        if (tMin < 0f) return false;
-        distance = tMin;
-
-        var localNormal = Vector3.zero;
-        localNormal[axis] = sign;
-        normal = rotation * localNormal;
+        if (tmin > maxDist) return false;
+        dist = tmin;
+        point = origin + dir * tmin;
+        normal = hitNormal.magnitude > 1e-6f ? hitNormal.normalized : -dir;
         return true;
     }
 
-    public static bool Intersect(Collider a, Collider b, out Vector3 normal, out float penetration)
+    private static bool RaycastCapsule(Vector3 origin, Vector3 dir, ColliderShape shape, float maxDist, out float dist, out Vector3 point, out Vector3 normal)
     {
+        dist = maxDist;
+        point = default;
         normal = Vector3.up;
-        penetration = 0f;
+        Vector3 axis = shape.Direction == 0 ? Vector3.right : shape.Direction == 1 ? Vector3.up : Vector3.forward;
+        float halfH = shape.Height * 0.5f - shape.Radius;
+        Vector3 p0 = shape.Center - axis * halfH;
+        Vector3 p1 = shape.Center + axis * halfH;
+        float bestT = maxDist;
+        Vector3 bestPt = default, bestN = Vector3.up;
 
-        return (a, b) switch
+        if (RaycastSphere(origin, dir, p0, shape.Radius, maxDist, out float t0, out Vector3 pt0, out Vector3 n0) && t0 < bestT)
+        { bestT = t0; bestPt = pt0; bestN = n0; }
+        if (RaycastSphere(origin, dir, p1, shape.Radius, maxDist, out float t1, out Vector3 pt1, out Vector3 n1) && t1 < bestT)
+        { bestT = t1; bestPt = pt1; bestN = n1; }
+
+        Vector3 cyl = p1 - p0;
+        float cylLen = cyl.magnitude;
+        if (cylLen > 1e-6f)
         {
-            (SphereCollider sa, SphereCollider sb) => IntersectSphereSphere(GetWorldPosition(a, sa.center), sa.radius, GetWorldPosition(b, sb.center), sb.radius, out normal, out penetration),
-            (BoxCollider ba, BoxCollider bb) => IntersectBoxBox(GetWorldPosition(a, ba.center), ba.size, a.transform?.rotation ?? Quaternion.identity, GetWorldPosition(b, bb.center), bb.size, b.transform?.rotation ?? Quaternion.identity, out normal, out penetration),
-            (SphereCollider sa, BoxCollider bb) => IntersectSphereBox(GetWorldPosition(a, sa.center), sa.radius, GetWorldPosition(b, bb.center), bb.size, b.transform?.rotation ?? Quaternion.identity, out normal, out penetration) && InvertNormal(ref normal),
-            (BoxCollider ba, SphereCollider sb) => IntersectSphereBox(GetWorldPosition(b, sb.center), sb.radius, GetWorldPosition(a, ba.center), ba.size, a.transform?.rotation ?? Quaternion.identity, out normal, out penetration),
-            (CapsuleCollider ca, CapsuleCollider cb) => IntersectCapsuleCapsule(a, ca, b, cb, out normal, out penetration),
-            (CapsuleCollider ca, SphereCollider sb) => IntersectCapsuleSphere(a, ca, GetWorldPosition(b, sb.center), sb.radius, out normal, out penetration),
-            (SphereCollider sa, CapsuleCollider cb) => IntersectCapsuleSphere(b, cb, GetWorldPosition(a, sa.center), sa.radius, out normal, out penetration) && InvertNormal(ref normal),
-            (CapsuleCollider ca, BoxCollider bb) => IntersectCapsuleBox(a, ca, GetWorldPosition(b, bb.center), bb.size, b.transform?.rotation ?? Quaternion.identity, out normal, out penetration),
-            (BoxCollider ba, CapsuleCollider cb) => IntersectCapsuleBox(b, cb, GetWorldPosition(a, ba.center), ba.size, a.transform?.rotation ?? Quaternion.identity, out normal, out penetration) && InvertNormal(ref normal),
-            _ => false
-        };
-    }
-
-    private static bool InvertNormal(ref Vector3 normal)
-    {
-        normal = -normal;
-        return true;
-    }
-
-    private static bool IntersectSphereSphere(Vector3 a, float radiusA, Vector3 b, float radiusB, out Vector3 normal, out float penetration)
-    {
-        normal = Vector3.up;
-        penetration = 0f;
-
-        var delta = b - a;
-        var distance = delta.magnitude;
-        var sumRadius = radiusA + radiusB;
-        if (distance >= sumRadius || distance < 1e-6f) return false;
-
-        penetration = sumRadius - distance;
-        normal = delta.normalized;
-        return true;
-    }
-
-    private static bool IntersectBoxBox(Vector3 centerA, Vector3 sizeA, Quaternion rotA, Vector3 centerB, Vector3 sizeB, Quaternion rotB, out Vector3 normal, out float penetration)
-    {
-        normal = Vector3.up;
-        penetration = 0f;
-
-        var delta = centerB - centerA;
-        var axes = new List<Vector3>
-        {
-            rotA * Vector3.right,
-            rotA * Vector3.up,
-            rotA * Vector3.forward,
-            rotB * Vector3.right,
-            rotB * Vector3.up,
-            rotB * Vector3.forward
-        };
-
-        for (var i = 0; i < axes.Count; i++)
-        {
-            for (var j = i + 1; j < axes.Count; j++)
+            Vector3 cylDir = cyl / cylLen;
+            Vector3 rel = origin - p0;
+            float a = Vector3.Dot(dir, dir) - Vector3.Dot(dir, cylDir) * Vector3.Dot(dir, cylDir);
+            float b = 2f * (Vector3.Dot(dir, rel) - Vector3.Dot(dir, cylDir) * Vector3.Dot(rel, cylDir));
+            float c = Vector3.Dot(rel, rel) - Vector3.Dot(rel, cylDir) * Vector3.Dot(rel, cylDir) - shape.Radius * shape.Radius;
+            if (MathF.Abs(a) > 1e-6f)
             {
-                var cross = Vector3.Cross(axes[i], axes[j]);
-                if (cross.magnitude > 1e-6f)
+                float disc = b * b - 4f * a * c;
+                if (disc >= 0f)
                 {
-                    axes.Add(cross.normalized);
+                    float sqrtD = MathF.Sqrt(disc);
+                    float t = (-b - sqrtD) / (2f * a);
+                    if (t >= 0f && t < bestT)
+                    {
+                        Vector3 hp = origin + dir * t;
+                        float proj = Vector3.Dot(hp - p0, cylDir);
+                        if (proj >= 0f && proj <= cylLen)
+                        {
+                            Vector3 cp = p0 + cylDir * proj;
+                            bestT = t;
+                            bestPt = hp;
+                            bestN = (hp - cp).normalized;
+                        }
+                    }
                 }
             }
         }
 
-        var minPenetration = float.PositiveInfinity;
-        var minAxis = Vector3.up;
+        if (bestT >= maxDist) return false;
+        dist = bestT;
+        point = bestPt;
+        normal = bestN;
+        return true;
+    }
 
-        foreach (var axis in axes)
+    public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction qti)
+    {
+        hitInfo = default;
+        direction = direction.normalized;
+        float closest = maxDistance;
+        Collider bestC = null;
+        Vector3 bestPt = default, bestN = Vector3.up;
+
+        for (int i = 0; i < _colliders.Count; i++)
         {
-            if (!TestAxis(axis, centerA, sizeA, rotA, centerB, sizeB, rotB, out var pen)) continue;
-            if (pen < minPenetration)
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            var shape = GetWorldShape(c);
+            if (SphereCastShape(origin, radius, direction, shape, maxDistance, out float t, out Vector3 pt, out Vector3 n))
             {
-                minPenetration = pen;
-                minAxis = axis;
+                if (t < closest) { closest = t; bestC = c; bestPt = pt; bestN = n; }
             }
         }
-
-        if (minPenetration == float.PositiveInfinity) return false;
-
-        penetration = minPenetration;
-        normal = Vector3.Dot(delta, minAxis) > 0f ? minAxis : -minAxis;
+        if (bestC == null) return false;
+        hitInfo = new RaycastHit { collider = bestC, distance = closest, point = bestPt, normal = bestN, rigidbody = bestC.attachedRigidbody, transform = bestC.transform };
         return true;
     }
 
-    private static bool TestAxis(Vector3 axis, Vector3 centerA, Vector3 sizeA, Quaternion rotA, Vector3 centerB, Vector3 sizeB, Quaternion rotB, out float penetration)
+    private static bool SphereCastShape(Vector3 origin, float radius, Vector3 dir, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
     {
-        penetration = 0f;
-        axis = axis.normalized;
-        if (axis.magnitude < 1e-6f) return false;
-
-        var halfA = sizeA * 0.5f;
-        var halfB = sizeB * 0.5f;
-
-        var ra = ProjectBox(centerA, halfA, rotA, axis);
-        var rb = ProjectBox(centerB, halfB, rotB, axis);
-        var centerDist = MathF.Abs(Vector3.Dot(centerB - centerA, axis));
-        var sum = ra + rb;
-
-        if (centerDist >= sum) return false;
-
-        penetration = sum - centerDist;
-        return true;
-    }
-
-    private static float ProjectBox(Vector3 center, Vector3 halfSize, Quaternion rotation, Vector3 axis)
-    {
-        var right = rotation * Vector3.right;
-        var up = rotation * Vector3.up;
-        var forward = rotation * Vector3.forward;
-        return MathF.Abs(Vector3.Dot(right * halfSize.x, axis)) +
-               MathF.Abs(Vector3.Dot(up * halfSize.y, axis)) +
-               MathF.Abs(Vector3.Dot(forward * halfSize.z, axis));
-    }
-
-    private static bool IntersectSphereBox(Vector3 sphereCenter, float radius, Vector3 boxCenter, Vector3 boxSize, Quaternion boxRotation, out Vector3 normal, out float penetration)
-    {
-        normal = Vector3.up;
-        penetration = 0f;
-
-        var invRotation = Quaternion.Inverse(boxRotation);
-        var localSphere = invRotation * (sphereCenter - boxCenter);
-        var half = boxSize * 0.5f;
-
-        var closest = new Vector3(
-            Math.Clamp(localSphere.x, -half.x, half.x),
-            Math.Clamp(localSphere.y, -half.y, half.y),
-            Math.Clamp(localSphere.z, -half.z, half.z));
-
-        var delta = localSphere - closest;
-        var distance = delta.magnitude;
-        if (distance >= radius) return false;
-
-        if (distance < 1e-6f)
+        t = maxDist; pt = default; n = Vector3.up;
+        if (shape.Type == ColliderShapeType.Sphere)
         {
-            normal = (sphereCenter - boxCenter).normalized;
-            if (normal.magnitude < 1e-6f) normal = Vector3.up;
-            penetration = radius;
-            return true;
-        }
-
-        penetration = radius - distance;
-        normal = boxRotation * delta.normalized;
-        return true;
-    }
-
-    private static bool IntersectCapsuleCapsule(Collider a, CapsuleCollider ca, Collider b, CapsuleCollider cb, out Vector3 normal, out float penetration)
-    {
-        normal = Vector3.up;
-        penetration = 0f;
-        GetCapsulePoints(a, ca, out var a0, out var a1, out var ra);
-        GetCapsulePoints(b, cb, out var b0, out var b1, out var rb);
-
-        var (pa, pb) = ClosestPointOnSegments(a0, a1, b0, b1);
-        var delta = pb - pa;
-        var distance = delta.magnitude;
-        var sumRadius = ra + rb;
-        if (distance >= sumRadius || distance < 1e-6f) return false;
-
-        penetration = sumRadius - distance;
-        normal = delta.normalized;
-        return true;
-    }
-
-    private static bool IntersectCapsuleSphere(Collider a, CapsuleCollider capsule, Vector3 sphereCenter, float sphereRadius, out Vector3 normal, out float penetration)
-    {
-        normal = Vector3.up;
-        penetration = 0f;
-        GetCapsulePoints(a, capsule, out var p0, out var p1, out var radius);
-        var closest = ClosestPointOnSegment(sphereCenter, p0, p1);
-        var delta = sphereCenter - closest;
-        var distance = delta.magnitude;
-        var sumRadius = radius + sphereRadius;
-        if (distance >= sumRadius || distance < 1e-6f) return false;
-
-        penetration = sumRadius - distance;
-        normal = delta.normalized;
-        return true;
-    }
-
-    private static bool IntersectCapsuleBox(Collider a, CapsuleCollider capsule, Vector3 boxCenter, Vector3 boxSize, Quaternion boxRotation, out Vector3 normal, out float penetration)
-    {
-        GetCapsulePoints(a, capsule, out var p0, out var p1, out var radius);
-        return IntersectCapsuleBox(p0, p1, radius, boxCenter, boxSize, boxRotation, out normal, out penetration);
-    }
-
-    private static bool IntersectCapsuleBox(Vector3 point0, Vector3 point1, float radius, Vector3 boxCenter, Vector3 boxSize, Quaternion boxRotation, out Vector3 normal, out float penetration)
-    {
-        normal = Vector3.up;
-        penetration = 0f;
-        var axis = point1 - point0;
-        var length = axis.magnitude;
-        var steps = Math.Max(1, (int)(length / Math.Max(radius, 0.001f)));
-        var step = length / steps;
-        var dir = length > 1e-6f ? axis.normalized : Vector3.up;
-
-        for (var i = 0; i <= steps; i++)
-        {
-            var p = point0 + dir * (i * step);
-            if (IntersectSphereBox(p, radius, boxCenter, boxSize, boxRotation, out var n, out var pen))
+            float sumR = radius + shape.Radius;
+            if (RaycastSphere(origin, dir, shape.Center, sumR, maxDist, out float td, out Vector3 p, out Vector3 nm))
             {
-                if (pen > penetration)
-                {
-                    penetration = pen;
-                    normal = n;
-                }
+                t = td; pt = p - nm * radius; n = nm;
+                return true;
             }
         }
-
-        return penetration > 0f;
+        if (shape.Type == ColliderShapeType.Box)
+        {
+            Vector3 he = shape.Size * 0.5f + new Vector3(radius, radius, radius);
+            if (RaycastBox(origin, dir, shape.Center, he, maxDist, out float td, out Vector3 p, out Vector3 nm))
+            {
+                t = td; pt = p - nm * radius; n = nm;
+                return true;
+            }
+        }
+        if (shape.Type == ColliderShapeType.Capsule)
+        {
+            float sumR = radius + shape.Radius;
+            var expanded = new ColliderShape(ColliderShapeType.Capsule, shape.Center, shape.Size, sumR, shape.Height, shape.Direction);
+            if (RaycastCapsule(origin, dir, expanded, maxDist, out float td, out Vector3 p, out Vector3 nm))
+            {
+                t = td; pt = p - nm * radius; n = nm;
+                return true;
+            }
+        }
+        return false;
     }
 
-    private static Vector3 ClosestPointOnSegment(Vector3 point, Vector3 a, Vector3 b)
+    public static bool BoxCast(Vector3 center, Vector3 halfExtents, Vector3 direction, out RaycastHit hitInfo, float maxDistance, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
     {
-        var ab = b - a;
-        var t = Vector3.Dot(point - a, ab) / Vector3.Dot(ab, ab);
+        hitInfo = default;
+        direction = direction.normalized;
+        float closest = maxDistance;
+        Collider bestC = null;
+        Vector3 bestPt = default, bestN = Vector3.up;
+        float inflate = MathF.Max(halfExtents.x, MathF.Max(halfExtents.y, halfExtents.z));
+
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            var shape = GetWorldShape(c);
+            if (BoxCastShape(center, halfExtents, direction, shape, maxDistance, inflate, out float t, out Vector3 pt, out Vector3 n))
+            {
+                if (t < closest) { closest = t; bestC = c; bestPt = pt; bestN = n; }
+            }
+        }
+        if (bestC == null) return false;
+        hitInfo = new RaycastHit { collider = bestC, distance = closest, point = bestPt, normal = bestN, rigidbody = bestC.attachedRigidbody, transform = bestC.transform };
+        return true;
+    }
+
+    private static bool BoxCastShape(Vector3 center, Vector3 he, Vector3 dir, ColliderShape shape, float maxDist, float inflate, out float t, out Vector3 pt, out Vector3 n)
+    {
+        t = maxDist; pt = default; n = Vector3.up;
+        if (shape.Type == ColliderShapeType.Sphere)
+        {
+            Vector3 expandedHe = he + new Vector3(shape.Radius, shape.Radius, shape.Radius);
+            if (RaycastBox(center, dir, shape.Center, expandedHe, maxDist, out float td, out Vector3 p, out Vector3 nm))
+            {
+                t = td; pt = p - nm * inflate; n = nm;
+                return true;
+            }
+        }
+        if (shape.Type == ColliderShapeType.Box)
+        {
+            Vector3 she = shape.Size * 0.5f;
+            Vector3 expandedHe = new Vector3(he.x + she.x, he.y + she.y, he.z + she.z);
+            if (RaycastBox(center, dir, shape.Center, expandedHe, maxDist, out float td, out Vector3 p, out Vector3 nm))
+            {
+                t = td; pt = p - nm * inflate; n = nm;
+                return true;
+            }
+        }
+        if (shape.Type == ColliderShapeType.Capsule)
+        {
+            Vector3 expandedHe = he + new Vector3(shape.Radius, shape.Radius, shape.Radius);
+            if (RaycastBox(center, dir, shape.Center, expandedHe, maxDist, out float td, out Vector3 p, out Vector3 nm))
+            {
+                t = td; pt = p - nm * inflate; n = nm;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction qti)
+    {
+        hitInfo = default;
+        direction = direction.normalized;
+        float closest = maxDistance;
+        Collider bestC = null;
+        Vector3 bestPt = default, bestN = Vector3.up;
+        Vector3 capCenter = (point1 + point2) * 0.5f;
+        float capHeight = Vector3.Distance(point1, point2);
+        int capDir = 1;
+        Vector3 axis = (point2 - point1).normalized;
+        if (MathF.Abs(Vector3.Dot(axis, Vector3.right)) > 0.9f) capDir = 0;
+        else if (MathF.Abs(Vector3.Dot(axis, Vector3.forward)) > 0.9f) capDir = 2;
+
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            var shape = GetWorldShape(c);
+            if (CapsuleCastShape(capCenter, capHeight, radius, capDir, direction, shape, maxDistance, out float t, out Vector3 pt, out Vector3 n))
+            {
+                if (t < closest) { closest = t; bestC = c; bestPt = pt; bestN = n; }
+            }
+        }
+        if (bestC == null) return false;
+        hitInfo = new RaycastHit { collider = bestC, distance = closest, point = bestPt, normal = bestN, rigidbody = bestC.attachedRigidbody, transform = bestC.transform };
+        return true;
+    }
+
+    private static bool CapsuleCastShape(Vector3 center, float height, float radius, int dir, Vector3 direction, ColliderShape shape, float maxDist, out float t, out Vector3 pt, out Vector3 n)
+    {
+        t = maxDist; pt = default; n = Vector3.up;
+        float inflate = radius;
+        Vector3 axis = dir == 0 ? Vector3.right : dir == 1 ? Vector3.up : Vector3.forward;
+        float halfH = height * 0.5f - radius;
+        Vector3 p0 = center - axis * halfH;
+        Vector3 p1 = center + axis * halfH;
+        bool hit = false;
+        float bestT = maxDist;
+        Vector3 bestPt = default, bestN = Vector3.up;
+
+        if (shape.Type == ColliderShapeType.Sphere)
+        {
+            float sumR = radius + shape.Radius;
+            if (RaycastSphere(p0, direction, shape.Center, sumR, bestT, out float t0, out Vector3 p0p, out Vector3 n0) && t0 < bestT)
+            { bestT = t0; bestPt = p0p - n0 * inflate; bestN = n0; hit = true; }
+            if (RaycastSphere(p1, direction, shape.Center, sumR, bestT, out float t1, out Vector3 p1p, out Vector3 n1) && t1 < bestT)
+            { bestT = t1; bestPt = p1p - n1 * inflate; bestN = n1; hit = true; }
+        }
+        if (shape.Type == ColliderShapeType.Box)
+        {
+            Vector3 expandedHe = shape.Size * 0.5f + new Vector3(radius, radius, radius);
+            if (RaycastBox(center, direction, shape.Center, expandedHe, bestT, out float tb, out Vector3 pb, out Vector3 nb) && tb < bestT)
+            { bestT = tb; bestPt = pb - nb * inflate; bestN = nb; hit = true; }
+        }
+        if (shape.Type == ColliderShapeType.Capsule)
+        {
+            float sumR = radius + shape.Radius;
+            var expanded = new ColliderShape(ColliderShapeType.Capsule, shape.Center, shape.Size, sumR, shape.Height, shape.Direction);
+            if (RaycastCapsule(center, direction, expanded, bestT, out float tc, out Vector3 pc, out Vector3 nc) && tc < bestT)
+            { bestT = tc; bestPt = pc - nc * inflate; bestN = nc; hit = true; }
+        }
+
+        if (!hit) return false;
+        t = bestT; pt = bestPt; n = bestN;
+        return true;
+    }
+
+    public static Collider[] OverlapSphere(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti)
+    {
+        var list = new List<Collider>();
+        OverlapSphereInternal(center, radius, layerMask, qti, list);
+        return list.ToArray();
+    }
+
+    public static int OverlapSphereNonAlloc(Vector3 center, float radius, Collider[] results, int layerMask, QueryTriggerInteraction qti)
+    {
+        var list = new List<Collider>();
+        OverlapSphereInternal(center, radius, layerMask, qti, list);
+        int count = Math.Min(list.Count, results?.Length ?? 0);
+        for (int i = 0; i < count; i++) results[i] = list[i];
+        return count;
+    }
+
+    public static bool CheckSphere(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti)
+    {
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            var shape = GetWorldShape(c);
+            if (OverlapShapePoint(center, radius, shape)) return true;
+        }
+        return false;
+    }
+
+    public static Collider[] OverlapBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
+    {
+        var list = new List<Collider>();
+        OverlapBoxInternal(center, halfExtents, layerMask, qti, list);
+        return list.ToArray();
+    }
+
+    public static int OverlapBoxNonAlloc(Vector3 center, Vector3 halfExtents, Collider[] results, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
+    {
+        var list = new List<Collider>();
+        OverlapBoxInternal(center, halfExtents, layerMask, qti, list);
+        int count = Math.Min(list.Count, results?.Length ?? 0);
+        for (int i = 0; i < count; i++) results[i] = list[i];
+        return count;
+    }
+
+    public static bool CheckBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, int layerMask, QueryTriggerInteraction qti)
+    {
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            var shape = GetWorldShape(c);
+            if (OverlapBoxShape(center, halfExtents, shape)) return true;
+        }
+        return false;
+    }
+
+    public static Collider[] OverlapCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti)
+    {
+        var list = new List<Collider>();
+        OverlapCapsuleInternal(point0, point1, radius, layerMask, qti, list);
+        return list.ToArray();
+    }
+
+    public static int OverlapCapsuleNonAlloc(Vector3 point0, Vector3 point1, float radius, Collider[] results, int layerMask, QueryTriggerInteraction qti)
+    {
+        var list = new List<Collider>();
+        OverlapCapsuleInternal(point0, point1, radius, layerMask, qti, list);
+        int count = Math.Min(list.Count, results?.Length ?? 0);
+        for (int i = 0; i < count; i++) results[i] = list[i];
+        return count;
+    }
+
+    public static bool CheckCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti)
+    {
+        Vector3 center = (point0 + point1) * 0.5f;
+        float height = Vector3.Distance(point0, point1);
+        int dir = 1;
+        Vector3 axis = (point1 - point0).normalized;
+        if (MathF.Abs(Vector3.Dot(axis, Vector3.right)) > 0.9f) dir = 0;
+        else if (MathF.Abs(Vector3.Dot(axis, Vector3.forward)) > 0.9f) dir = 2;
+        var capShape = new ColliderShape(ColliderShapeType.Capsule, center, Vector3.one, radius, height + radius * 2f, dir);
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            if (Intersect(capShape, GetWorldShape(c), out _, out _)) return true;
+        }
+        return false;
+    }
+
+    private static void OverlapSphereInternal(Vector3 center, float radius, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
+    {
+        var sphereShape = new ColliderShape(ColliderShapeType.Sphere, center, Vector3.one, radius, 0f, 0);
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            if (Intersect(sphereShape, GetWorldShape(c), out _, out _)) results.Add(c);
+        }
+    }
+
+    private static bool OverlapShapePoint(Vector3 center, float radius, ColliderShape shape)
+    {
+        if (shape.Type == ColliderShapeType.Sphere)
+            return Vector3.Distance(center, shape.Center) <= radius + shape.Radius;
+        if (shape.Type == ColliderShapeType.Box)
+        {
+            Vector3 d = Vector3.Abs(center - shape.Center);
+            Vector3 h = shape.Size * 0.5f + new Vector3(radius, radius, radius);
+            return d.x <= h.x && d.y <= h.y && d.z <= h.z;
+        }
+        if (shape.Type == ColliderShapeType.Capsule)
+        {
+            Vector3 axis = shape.Direction == 0 ? Vector3.right : shape.Direction == 1 ? Vector3.up : Vector3.forward;
+            float halfH = shape.Height * 0.5f - shape.Radius;
+            Vector3 p0 = shape.Center - axis * halfH;
+            Vector3 p1 = shape.Center + axis * halfH;
+            Vector3 closest = ClosestPointOnSegment(center, p0, p1);
+            return Vector3.Distance(center, closest) <= radius + shape.Radius;
+        }
+        return false;
+    }
+
+    private static void OverlapBoxInternal(Vector3 center, Vector3 halfExtents, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
+    {
+        var boxShape = new ColliderShape(ColliderShapeType.Box, center, halfExtents * 2f, 0f, 0f, 0);
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            if (Intersect(boxShape, GetWorldShape(c), out _, out _)) results.Add(c);
+        }
+    }
+
+    private static bool OverlapBoxShape(Vector3 center, Vector3 halfExtents, ColliderShape shape)
+    {
+        var boxShape = new ColliderShape(ColliderShapeType.Box, center, halfExtents * 2f, 0f, 0f, 0);
+        return Intersect(boxShape, shape, out _, out _);
+    }
+
+    private static void OverlapCapsuleInternal(Vector3 point0, Vector3 point1, float radius, int layerMask, QueryTriggerInteraction qti, List<Collider> results)
+    {
+        Vector3 center = (point0 + point1) * 0.5f;
+        float height = Vector3.Distance(point0, point1);
+        int dir = 1;
+        Vector3 axis = (point1 - point0).normalized;
+        if (MathF.Abs(Vector3.Dot(axis, Vector3.right)) > 0.9f) dir = 0;
+        else if (MathF.Abs(Vector3.Dot(axis, Vector3.forward)) > 0.9f) dir = 2;
+        var capShape = new ColliderShape(ColliderShapeType.Capsule, center, Vector3.one, radius, height + radius * 2f, dir);
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            var c = _colliders[i];
+            if (c == null) continue;
+            if (qti == QueryTriggerInteraction.Ignore && c.isTrigger) continue;
+            int layer = c.gameObject?.layer ?? 0;
+            if (layerMask != -1 && (layerMask & (1 << layer)) == 0) continue;
+            if (Intersect(capShape, GetWorldShape(c), out _, out _)) results.Add(c);
+        }
+    }
+
+    private static Vector3 ClosestPointOnSegment(Vector3 p, Vector3 a, Vector3 b)
+    {
+        Vector3 ab = b - a;
+        float denom = Vector3.Dot(ab, ab);
+        if (denom < 1e-8f) return a;
+        float t = Vector3.Dot(p - a, ab) / denom;
         t = Math.Clamp(t, 0f, 1f);
         return a + ab * t;
     }
 
-    private static (Vector3, Vector3) ClosestPointOnSegments(Vector3 a0, Vector3 a1, Vector3 b0, Vector3 b1)
+    private static bool Intersect(ColliderShape a, ColliderShape b, out Vector3 normal, out float penetration)
     {
-        // Use midpoint approximations for segment-segment closest points.
-        var bestA = a0;
-        var bestB = b0;
-        var bestDist = (bestB - bestA).magnitude;
-        var steps = 8;
-        for (var i = 0; i <= steps; i++)
+        normal = Vector3.up;
+        penetration = 0f;
+        if (a.Type == ColliderShapeType.Sphere && b.Type == ColliderShapeType.Sphere)
+            return IntersectSphereSphere(a.Center, a.Radius, b.Center, b.Radius, out normal, out penetration);
+        if (a.Type == ColliderShapeType.Sphere && b.Type == ColliderShapeType.Box)
+            return IntersectSphereBox(a.Center, a.Radius, b.Center, b.Size * 0.5f, out normal, out penetration);
+        if (a.Type == ColliderShapeType.Box && b.Type == ColliderShapeType.Sphere)
         {
-            var ta = i / (float)steps;
-            var pa = Vector3.Lerp(a0, a1, ta);
-            for (var j = 0; j <= steps; j++)
+            if (IntersectSphereBox(b.Center, b.Radius, a.Center, a.Size * 0.5f, out normal, out penetration)) { normal = -normal; return true; }
+            return false;
+        }
+        if (a.Type == ColliderShapeType.Box && b.Type == ColliderShapeType.Box)
+            return IntersectBoxBox(a.Center, a.Size * 0.5f, b.Center, b.Size * 0.5f, out normal, out penetration);
+        if (a.Type == ColliderShapeType.Capsule && b.Type == ColliderShapeType.Sphere)
+            return IntersectCapsuleSphere(a, b.Center, b.Radius, out normal, out penetration);
+        if (a.Type == ColliderShapeType.Sphere && b.Type == ColliderShapeType.Capsule)
+        {
+            if (IntersectCapsuleSphere(b, a.Center, a.Radius, out normal, out penetration)) { normal = -normal; return true; }
+            return false;
+        }
+        if (a.Type == ColliderShapeType.Capsule && b.Type == ColliderShapeType.Capsule)
+            return IntersectCapsuleCapsule(a, b, out normal, out penetration);
+        if (a.Type == ColliderShapeType.Capsule && b.Type == ColliderShapeType.Box)
+            return IntersectCapsuleBox(a, b.Center, b.Size * 0.5f, out normal, out penetration);
+        if (a.Type == ColliderShapeType.Box && b.Type == ColliderShapeType.Capsule)
+        {
+            if (IntersectCapsuleBox(b, a.Center, a.Size * 0.5f, out normal, out penetration)) { normal = -normal; return true; }
+            return false;
+        }
+        return false;
+    }
+
+    private static bool IntersectSphereSphere(Vector3 c1, float r1, Vector3 c2, float r2, out Vector3 normal, out float penetration)
+    {
+        normal = Vector3.up;
+        penetration = 0f;
+        Vector3 d = c2 - c1;
+        float dist = d.magnitude;
+        float sumR = r1 + r2;
+        if (dist >= sumR || dist < 1e-6f) return false;
+        penetration = sumR - dist;
+        normal = dist > 1e-6f ? d / dist : Vector3.up;
+        return true;
+    }
+
+    private static bool IntersectSphereBox(Vector3 sc, float r, Vector3 bc, Vector3 he, out Vector3 normal, out float penetration)
+    {
+        normal = Vector3.up;
+        penetration = 0f;
+        Vector3 closest = new Vector3(
+            Math.Clamp(sc.x, bc.x - he.x, bc.x + he.x),
+            Math.Clamp(sc.y, bc.y - he.y, bc.y + he.y),
+            Math.Clamp(sc.z, bc.z - he.z, bc.z + he.z));
+        Vector3 delta = sc - closest;
+        float dist = delta.magnitude;
+        if (dist > r) return false;
+        if (dist < 1e-6f)
+        {
+            Vector3 d = sc - bc;
+            Vector3 overlap = he - Vector3.Abs(d);
+            if (overlap.x < overlap.y && overlap.x < overlap.z)
+            { normal = new Vector3(d.x < 0 ? -1 : 1, 0, 0); penetration = overlap.x + r; }
+            else if (overlap.y < overlap.z)
+            { normal = new Vector3(0, d.y < 0 ? -1 : 1, 0); penetration = overlap.y + r; }
+            else
+            { normal = new Vector3(0, 0, d.z < 0 ? -1 : 1); penetration = overlap.z + r; }
+            return true;
+        }
+        penetration = r - dist;
+        normal = delta / dist;
+        return true;
+    }
+
+    private static bool IntersectBoxBox(Vector3 c1, Vector3 he1, Vector3 c2, Vector3 he2, out Vector3 normal, out float penetration)
+    {
+        normal = Vector3.up;
+        penetration = 0f;
+        Vector3 d = c2 - c1;
+        float ox = he1.x + he2.x - MathF.Abs(d.x);
+        float oy = he1.y + he2.y - MathF.Abs(d.y);
+        float oz = he1.z + he2.z - MathF.Abs(d.z);
+        if (ox <= 0f || oy <= 0f || oz <= 0f) return false;
+        if (ox < oy && ox < oz)
+        { normal = new Vector3(d.x < 0 ? -1 : 1, 0, 0); penetration = ox; }
+        else if (oy < oz)
+        { normal = new Vector3(0, d.y < 0 ? -1 : 1, 0); penetration = oy; }
+        else
+        { normal = new Vector3(0, 0, d.z < 0 ? -1 : 1); penetration = oz; }
+        return true;
+    }
+
+    private static Vector3 GetCapsuleAxis(ColliderShape cap) => cap.Direction == 0 ? Vector3.right : cap.Direction == 1 ? Vector3.up : Vector3.forward;
+
+    private static bool IntersectCapsuleSphere(ColliderShape cap, Vector3 sc, float r, out Vector3 normal, out float penetration)
+    {
+        normal = Vector3.up;
+        penetration = 0f;
+        Vector3 axis = GetCapsuleAxis(cap);
+        float halfH = cap.Height * 0.5f - cap.Radius;
+        Vector3 p0 = cap.Center - axis * halfH;
+        Vector3 p1 = cap.Center + axis * halfH;
+        Vector3 closest = ClosestPointOnSegment(sc, p0, p1);
+        Vector3 delta = sc - closest;
+        float dist = delta.magnitude;
+        float sumR = cap.Radius + r;
+        if (dist >= sumR || dist < 1e-6f) return false;
+        penetration = sumR - dist;
+        normal = delta / dist;
+        return true;
+    }
+
+    private static bool IntersectCapsuleCapsule(ColliderShape a, ColliderShape b, out Vector3 normal, out float penetration)
+    {
+        normal = Vector3.up;
+        penetration = 0f;
+        Vector3 axisA = GetCapsuleAxis(a);
+        Vector3 axisB = GetCapsuleAxis(b);
+        float hA = a.Height * 0.5f - a.Radius;
+        float hB = b.Height * 0.5f - b.Radius;
+        Vector3 a0 = a.Center - axisA * hA;
+        Vector3 a1 = a.Center + axisA * hA;
+        Vector3 b0 = b.Center - axisB * hB;
+        Vector3 b1 = b.Center + axisB * hB;
+        Vector3 pa = a0, pb = b0;
+        float bestDistSq = float.MaxValue;
+        for (int i = 0; i <= 8; i++)
+        {
+            for (int j = 0; j <= 8; j++)
             {
-                var tb = j / (float)steps;
-                var pb = Vector3.Lerp(b0, b1, tb);
-                var d = (pb - pa).magnitude;
-                if (d < bestDist)
+                float t1 = i / 8f, t2 = j / 8f;
+                Vector3 p = a0 + (a1 - a0) * t1;
+                Vector3 q = b0 + (b1 - b0) * t2;
+                float d = Vector3.DistanceSquared(p, q);
+                if (d < bestDistSq) { bestDistSq = d; pa = p; pb = q; }
+            }
+        }
+        pa = ClosestPointOnSegment(pb, a0, a1);
+        pb = ClosestPointOnSegment(pa, b0, b1);
+        Vector3 delta = pb - pa;
+        float dist = delta.magnitude;
+        float sumR = a.Radius + b.Radius;
+        if (dist >= sumR || dist < 1e-6f) return false;
+        penetration = sumR - dist;
+        normal = delta / dist;
+        return true;
+    }
+
+    private static bool IntersectCapsuleBox(ColliderShape cap, Vector3 bc, Vector3 he, out Vector3 normal, out float penetration)
+    {
+        normal = Vector3.up;
+        penetration = 0f;
+        Vector3 axis = GetCapsuleAxis(cap);
+        float halfH = cap.Height * 0.5f - cap.Radius;
+        Vector3 p0 = cap.Center - axis * halfH;
+        Vector3 p1 = cap.Center + axis * halfH;
+        int steps = 8;
+        float bestPen = 0f;
+        Vector3 bestN = Vector3.zero;
+        for (int i = 0; i <= steps; i++)
+        {
+            float t = i / (float)steps;
+            Vector3 c = p0 + (p1 - p0) * t;
+            if (IntersectSphereBox(c, cap.Radius, bc, he, out Vector3 n, out float pen))
+            {
+                if (pen > bestPen) { bestPen = pen; bestN = n; }
+            }
+        }
+        if (bestPen <= 0f) return false;
+        normal = bestN;
+        penetration = bestPen;
+        return true;
+    }
+
+    private static float CombineBounciness(float a, float b, PhysicMaterialCombine ca, PhysicMaterialCombine cb)
+    {
+        var mode = ca > cb ? ca : cb;
+        return mode switch
+        {
+            PhysicMaterialCombine.Average => (a + b) * 0.5f,
+            PhysicMaterialCombine.Minimum => MathF.Min(a, b),
+            PhysicMaterialCombine.Maximum => MathF.Max(a, b),
+            PhysicMaterialCombine.Multiply => a * b,
+            _ => (a + b) * 0.5f
+        };
+    }
+
+    private static float CombineFriction(float a, float b, PhysicMaterialCombine ca, PhysicMaterialCombine cb)
+    {
+        var mode = ca > cb ? ca : cb;
+        return mode switch
+        {
+            PhysicMaterialCombine.Average => (a + b) * 0.5f,
+            PhysicMaterialCombine.Minimum => MathF.Min(a, b),
+            PhysicMaterialCombine.Maximum => MathF.Max(a, b),
+            PhysicMaterialCombine.Multiply => a * b,
+            _ => (a + b) * 0.5f
+        };
+    }
+
+    public static void Simulate(float step)
+    {
+        for (int i = 0; i < _rigidbodies.Count; i++)
+        {
+            var rb = _rigidbodies[i];
+            if (rb == null || rb.isKinematic) continue;
+            rb.velocity += _gravity * step;
+            if (rb.transform != null)
+                rb.transform.position += rb.velocity * step;
+        }
+
+        var currentCollisions = new HashSet<CollisionPair>();
+        var currentTriggers = new HashSet<CollisionPair>();
+
+        for (int i = 0; i < _colliders.Count; i++)
+        {
+            for (int j = i + 1; j < _colliders.Count; j++)
+            {
+                var a = _colliders[i];
+                var b = _colliders[j];
+                if (a == null || b == null) continue;
+                if (GetIgnoreCollision(a, b)) continue;
+                int la = a.gameObject?.layer ?? 0;
+                int lb = b.gameObject?.layer ?? 0;
+                if (!_layerMatrix[la, lb]) continue;
+
+                var sa = GetWorldShape(a);
+                var sb = GetWorldShape(b);
+                if (Intersect(sa, sb, out Vector3 normal, out float pen))
                 {
-                    bestDist = d;
-                    bestA = pa;
-                    bestB = pb;
+                    bool aTrigger = a.isTrigger;
+                    bool bTrigger = b.isTrigger;
+                    var pair = new CollisionPair(a, b);
+
+                    if (aTrigger || bTrigger)
+                    {
+                        currentTriggers.Add(pair);
+                        if (!_triggerStates.Contains(pair))
+                        {
+                            _triggerStates.Add(pair);
+                            if (aTrigger) a.SendMessage("OnTriggerEnter", b);
+                            if (bTrigger) b.SendMessage("OnTriggerEnter", a);
+                        }
+                        else
+                        {
+                            if (aTrigger) a.SendMessage("OnTriggerStay", b);
+                            if (bTrigger) b.SendMessage("OnTriggerStay", a);
+                        }
+                    }
+                    else
+                    {
+                        currentCollisions.Add(pair);
+                        ResolveCollision(a, b, normal, pen);
+                        if (!_collisionStates.Contains(pair))
+                        {
+                            _collisionStates.Add(pair);
+                            a.SendMessage("OnCollisionEnter", b);
+                            b.SendMessage("OnCollisionEnter", a);
+                        }
+                        else
+                        {
+                            a.SendMessage("OnCollisionStay", b);
+                            b.SendMessage("OnCollisionStay", a);
+                        }
+                    }
                 }
             }
         }
 
-        return (bestA, bestB);
+        foreach (var pair in _collisionStates)
+        {
+            if (!currentCollisions.Contains(pair))
+            {
+                pair.A?.SendMessage("OnCollisionExit", pair.B);
+                pair.B?.SendMessage("OnCollisionExit", pair.A);
+            }
+        }
+        _collisionStates.IntersectWith(currentCollisions);
+
+        foreach (var pair in _triggerStates)
+        {
+            if (!currentTriggers.Contains(pair))
+            {
+                bool aT = pair.A != null && pair.A.isTrigger;
+                bool bT = pair.B != null && pair.B.isTrigger;
+                if (aT) pair.A.SendMessage("OnTriggerExit", pair.B);
+                if (bT) pair.B.SendMessage("OnTriggerExit", pair.A);
+            }
+        }
+        _triggerStates.IntersectWith(currentTriggers);
     }
 
     private static void ResolveCollision(Collider a, Collider b, Vector3 normal, float penetration)
     {
         var rbA = a.attachedRigidbody;
         var rbB = b.attachedRigidbody;
+        if ((rbA == null || rbA.isKinematic) && (rbB == null || rbB.isKinematic)) return;
 
-        if ((rbA is null || rbA.isKinematic) && (rbB is null || rbB.isKinematic))
+        float invMassA = rbA != null && !rbA.isKinematic ? 1f / rbA.mass : 0f;
+        float invMassB = rbB != null && !rbB.isKinematic ? 1f / rbB.mass : 0f;
+        float totalInvMass = invMassA + invMassB;
+        if (totalInvMass <= 1e-6f) return;
+
+        PhysicMaterial matA = a.sharedMaterialInstance;
+        PhysicMaterial matB = b.sharedMaterialInstance;
+        float bounciness = CombineBounciness(matA?.bounciness ?? 0f, matB?.bounciness ?? 0f,
+            matA?.bounceCombine ?? PhysicMaterialCombine.Average, matB?.bounceCombine ?? PhysicMaterialCombine.Average);
+        float friction = CombineFriction(matA?.dynamicFriction ?? 0.6f, matB?.dynamicFriction ?? 0.6f,
+            matA?.frictionCombine ?? PhysicMaterialCombine.Average, matB?.frictionCombine ?? PhysicMaterialCombine.Average);
+
+        float correctionAmount = MathF.Max(penetration - _defaultContactOffset, 0f) / totalInvMass * 0.8f;
+        Vector3 correction = normal * correctionAmount;
+        if (a.transform != null && invMassA > 0f) a.transform.position -= correction * invMassA;
+        if (b.transform != null && invMassB > 0f) b.transform.position += correction * invMassB;
+
+        Vector3 velA = rbA?.velocity ?? Vector3.zero;
+        Vector3 velB = rbB?.velocity ?? Vector3.zero;
+        Vector3 relVel = velA - velB;
+        float velAlongNormal = Vector3.Dot(relVel, normal);
+        if (velAlongNormal > 0f) return;
+
+        float impulseMag = -(1f + bounciness) * velAlongNormal / totalInvMass;
+        Vector3 impulse = normal * impulseMag;
+        if (rbA != null && invMassA > 0f) rbA.velocity += impulse * invMassA;
+        if (rbB != null && invMassB > 0f) rbB.velocity -= impulse * invMassB;
+
+        Vector3 tangent = relVel - normal * velAlongNormal;
+        float tangentMag = tangent.magnitude;
+        if (tangentMag > 1e-6f)
         {
-            return;
-        }
-
-        var transformA = a.transform;
-        var transformB = b.transform;
-
-        var inverseMassA = rbA is not null && !rbA.isKinematic ? 1f / rbA.mass : 0f;
-        var inverseMassB = rbB is not null && !rbB.isKinematic ? 1f / rbB.mass : 0f;
-        var totalInverseMass = inverseMassA + inverseMassB;
-        if (totalInverseMass <= 1e-6f) return;
-
-        var percent = 0.8f;
-        var slop = 0.01f;
-        var correction = normal * (MathF.Max(penetration - slop, 0f) / totalInverseMass * percent);
-
-        if (transformA is not null && inverseMassA > 0f)
-        {
-            transformA.localPosition -= correction * inverseMassA;
-        }
-
-        if (transformB is not null && inverseMassB > 0f)
-        {
-            transformB.localPosition += correction * inverseMassB;
-        }
-
-        var velocityA = rbA?.velocity ?? Vector3.zero;
-        var velocityB = rbB?.velocity ?? Vector3.zero;
-        var relativeVelocity = velocityA - velocityB;
-        var velocityAlongNormal = Vector3.Dot(relativeVelocity, normal);
-
-        if (velocityAlongNormal > 0f) return;
-
-        var restitution = 0f;
-        var impulseScalar = -(1f + restitution) * velocityAlongNormal / totalInverseMass;
-        var impulse = normal * impulseScalar;
-
-        if (rbA is not null && inverseMassA > 0f)
-        {
-            rbA.velocity += impulse * inverseMassA;
-        }
-
-        if (rbB is not null && inverseMassB > 0f)
-        {
-            rbB.velocity -= impulse * inverseMassB;
+            tangent /= tangentMag;
+            float velAlongTangent = Vector3.Dot(relVel, tangent);
+            float frictionImpulseMag = -velAlongTangent / totalInvMass;
+            float maxFriction = MathF.Abs(impulseMag) * friction;
+            frictionImpulseMag = Math.Clamp(frictionImpulseMag, -maxFriction, maxFriction);
+            Vector3 frictionImpulse = tangent * frictionImpulseMag;
+            if (rbA != null && invMassA > 0f) rbA.velocity += frictionImpulse * invMassA;
+            if (rbB != null && invMassB > 0f) rbB.velocity -= frictionImpulse * invMassB;
         }
     }
 
-    private static void DispatchCollision(Collider a, Collider b, Vector3 normal)
+    public static int GetContacts(Collider collider, Collider[] results)
     {
-        var contact = new Collision(a, b, normal);
-        DispatchMessage(a.gameObject, "OnCollisionEnter", contact);
-        DispatchMessage(b.gameObject, "OnCollisionEnter", contact);
-    }
-
-    private static void DispatchTrigger(Collider a, Collider b)
-    {
-        DispatchMessage(a.gameObject, "OnTriggerEnter", b);
-        DispatchMessage(b.gameObject, "OnTriggerEnter", a);
-    }
-
-    private static void DispatchMessage(GameObject? target, string methodName, object? arg)
-    {
-        if (target is null) return;
-
-        var behaviours = target.GetComponents<MonoBehaviour>();
-        foreach (var behaviour in behaviours)
+        if (collider == null || results == null) return 0;
+        var shape = GetWorldShape(collider);
+        int count = 0;
+        for (int i = 0; i < _colliders.Count && count < results.Length; i++)
         {
-            if (behaviour is null || !behaviour.enabled) continue;
-
-            var method = behaviour.GetType().GetMethod(methodName,
-                System.Reflection.BindingFlags.Instance |
-                System.Reflection.BindingFlags.Public |
-                System.Reflection.BindingFlags.NonPublic,
-                null,
-                new[] { arg?.GetType() ?? typeof(object) },
-                null);
-
-            if (method is not null)
-            {
-                try
-                {
-                    method.Invoke(behaviour, new[] { arg });
-                }
-                catch
-                {
-                    // Ignore reflection errors in compatibility layer.
-                }
-            }
+            var other = _colliders[i];
+            if (other == null || other == collider) continue;
+            if (Intersect(shape, GetWorldShape(other), out _, out _))
+                results[count++] = other;
         }
+        return count;
     }
-
-    private static Vector3 GetWorldPosition(Collider collider, Vector3 localOffset)
-    {
-        var transform = collider.transform;
-        if (transform is null) return localOffset;
-        return transform.TransformPoint(localOffset);
-    }
-
-    public static bool OverlapSphere(Vector3 position, float radius, int layerMask, Collider[]? results)
-    {
-        var found = 0;
-        foreach (var collider in _colliders)
-        {
-            if (collider is null || collider.IsDestroyed || !collider.enabled) continue;
-            if (!Physics.LayerMatches(collider.gameObject?.layer ?? 0, layerMask)) continue;
-
-            if (TryOverlapSphere(position, radius, collider))
-            {
-                if (results is not null && found < results.Length) results[found] = collider;
-                found++;
-            }
-        }
-
-        return found > 0;
-    }
-
-    private static bool TryOverlapSphere(Vector3 position, float radius, Collider collider)
-    {
-        switch (collider)
-        {
-            case SphereCollider sphere:
-                var center = GetWorldPosition(collider, sphere.center);
-                return (center - position).magnitude <= radius + sphere.radius;
-            case BoxCollider box:
-                var boxCenter = GetWorldPosition(collider, box.center);
-                return IntersectSphereBox(position, radius, boxCenter, box.size, collider.transform?.rotation ?? Quaternion.identity, out _, out _);
-            case CapsuleCollider capsule:
-                GetCapsulePoints(collider, capsule, out var p0, out var p1, out var capRadius);
-                var closest = ClosestPointOnSegment(position, p0, p1);
-                return (position - closest).magnitude <= radius + capRadius;
-        }
-
-        return false;
-    }
-
-    public static bool OverlapBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, int layerMask, Collider[]? results)
-    {
-        var found = 0;
-        foreach (var collider in _colliders)
-        {
-            if (collider is null || collider.IsDestroyed || !collider.enabled) continue;
-            if (!Physics.LayerMatches(collider.gameObject?.layer ?? 0, layerMask)) continue;
-
-            if (TryOverlapBox(center, halfExtents, orientation, collider))
-            {
-                if (results is not null && found < results.Length) results[found] = collider;
-                found++;
-            }
-        }
-
-        return found > 0;
-    }
-
-    private static bool TryOverlapBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, Collider collider)
-    {
-        switch (collider)
-        {
-            case BoxCollider box:
-                var otherCenter = GetWorldPosition(collider, box.center);
-                return IntersectBoxBox(center, halfExtents * 2f, orientation, otherCenter, box.size, collider.transform?.rotation ?? Quaternion.identity, out _, out _);
-            case SphereCollider sphere:
-                var sphereCenter = GetWorldPosition(collider, sphere.center);
-                return IntersectSphereBox(sphereCenter, sphere.radius, center, halfExtents * 2f, orientation, out _, out _);
-            case CapsuleCollider capsule:
-                return IntersectCapsuleBox(collider, capsule, center, halfExtents * 2f, orientation, out _, out _);
-        }
-
-        return false;
-    }
-
-    public static bool OverlapCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask, Collider[]? results)
-    {
-        var found = 0;
-        foreach (var collider in _colliders)
-        {
-            if (collider is null || collider.IsDestroyed || !collider.enabled) continue;
-            if (!Physics.LayerMatches(collider.gameObject?.layer ?? 0, layerMask)) continue;
-
-            if (TryOverlapCapsule(point0, point1, radius, collider))
-            {
-                if (results is not null && found < results.Length) results[found] = collider;
-                found++;
-            }
-        }
-
-        return found > 0;
-    }
-
-    private static bool TryOverlapCapsule(Vector3 point0, Vector3 point1, float radius, Collider collider)
-    {
-        switch (collider)
-        {
-            case SphereCollider sphere:
-                var center = GetWorldPosition(collider, sphere.center);
-                var closest = ClosestPointOnSegment(center, point0, point1);
-                return (center - closest).magnitude <= radius + sphere.radius;
-            case BoxCollider box:
-                var boxCenter = GetWorldPosition(collider, box.center);
-                return IntersectCapsuleBox(point0, point1, radius, boxCenter, box.size, collider.transform?.rotation ?? Quaternion.identity, out _, out _);
-            case CapsuleCollider capsule:
-                GetCapsulePoints(collider, capsule, out var c0, out var c1, out var capRadius);
-                var (pa, pb) = ClosestPointOnSegments(point0, point1, c0, c1);
-                return (pb - pa).magnitude <= radius + capRadius;
-        }
-
-        return false;
-    }
-}
-
-public class Collision
-{
-    public Collider collider { get; }
-    public Collider otherCollider { get; }
-    public Vector3 relativeVelocity { get; }
-    public Rigidbody? rigidbody => collider?.attachedRigidbody;
-    public Rigidbody? otherRigidbody => otherCollider?.attachedRigidbody;
-    public Transform? transform => collider?.transform;
-    public GameObject? gameObject => collider?.gameObject;
-    public ContactPoint[] contacts { get; }
-
-    public Collision(Collider a, Collider b, Vector3 normal)
-    {
-        collider = a;
-        otherCollider = b;
-        relativeVelocity = (a.attachedRigidbody?.velocity ?? Vector3.zero) - (b.attachedRigidbody?.velocity ?? Vector3.zero);
-        contacts = new[] { new ContactPoint { point = (a.bounds.center + b.bounds.center) * 0.5f, normal = normal, thisCollider = a, otherCollider = b } };
-    }
-}
-
-public struct ContactPoint
-{
-    public Vector3 point;
-    public Vector3 normal;
-    public Collider? thisCollider;
-    public Collider? otherCollider;
 }

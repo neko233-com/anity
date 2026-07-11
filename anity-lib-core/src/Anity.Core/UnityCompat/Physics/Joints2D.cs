@@ -113,6 +113,7 @@ public struct JointAngleLimits2D
 {
     public float min;
     public float max;
+    public float bounciness;
 }
 
 public struct JointTranslationLimits2D
@@ -140,7 +141,9 @@ public abstract class Effector2D : Behaviour
 {
     public bool useColliderMask { get; set; } = true;
     public int colliderMask { get; set; } = -1;
-    public bool useGlobalAngle { get; set; }
+    public bool useGroundAngle { get; set; }
+    public float groundAngle { get; set; } = 90f;
+    public float groundAngleVariant { get; set; } = 10f;
     public float surfaceArc { get; set; } = 180f;
 }
 
@@ -151,6 +154,7 @@ public sealed class AreaEffector2D : Effector2D
     public float forceVariation { get; set; }
     public float drag { get; set; }
     public float angularDrag { get; set; }
+    public EffectorSelection2D forceTarget { get; set; } = EffectorSelection2D.Rigidbody;
 }
 
 public sealed class PointEffector2D : Effector2D
@@ -160,6 +164,8 @@ public sealed class PointEffector2D : Effector2D
     public float distanceScale { get; set; } = 1f;
     public float drag { get; set; }
     public float angularDrag { get; set; }
+    public EffectorSelection2D forceSource { get; set; } = EffectorSelection2D.Collider;
+    public EffectorSelection2D forceTarget { get; set; } = EffectorSelection2D.Rigidbody;
 }
 
 public sealed class PlatformEffector2D : Effector2D
@@ -208,4 +214,10 @@ public sealed class CompositeCollider2D : Collider2D
     {
         return new ColliderShape2D(ColliderShapeType2D.Polygon, offset, Vector2.one, 0f);
     }
+}
+
+public enum EffectorSelection2D
+{
+    Collider,
+    Rigidbody
 }

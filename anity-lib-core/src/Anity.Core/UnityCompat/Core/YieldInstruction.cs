@@ -2,14 +2,13 @@ using System;
 
 namespace UnityEngine;
 
-/// <summary>
-/// Base class for yield instructions to use with coroutines.
-/// </summary>
 public class YieldInstruction { }
 
-/// <summary>
-/// Suspends the coroutine execution for the given amount of seconds.
-/// </summary>
+public abstract class CustomYieldInstruction : YieldInstruction
+{
+    public abstract bool keepWaiting { get; }
+}
+
 public class WaitForSeconds : YieldInstruction
 {
     public float seconds { get; }
@@ -20,25 +19,13 @@ public class WaitForSeconds : YieldInstruction
     }
 }
 
-/// <summary>
-/// Suspends the coroutine execution until the end of the current frame.
-/// </summary>
 public class WaitForEndOfFrame : YieldInstruction { }
 
-/// <summary>
-/// Suspends the coroutine execution until the next physics update.
-/// </summary>
 public class WaitForFixedUpdate : YieldInstruction { }
 
-/// <summary>
-/// Yield while the specified WWW object is downloading.
-/// </summary>
 public class WaitForWWW : YieldInstruction { }
 
-/// <summary>
-/// Yield while a specified AsyncOperation is being processed.
-/// </summary>
-public class WaitForAsyncOperation : YieldInstruction
+public class WaitForAsyncOperation : CustomYieldInstruction
 {
     public AsyncOperation asyncOperation { get; }
 
@@ -46,11 +33,10 @@ public class WaitForAsyncOperation : YieldInstruction
     {
         this.asyncOperation = asyncOperation ?? throw new ArgumentNullException(nameof(asyncOperation));
     }
+
+    public override bool keepWaiting => !asyncOperation.isDone;
 }
 
-/// <summary>
-/// Allows yielding a coroutine from a coroutine (managed version).
-/// </summary>
 public class ManagedCoroutine : YieldInstruction
 {
     public object? inner { get; }

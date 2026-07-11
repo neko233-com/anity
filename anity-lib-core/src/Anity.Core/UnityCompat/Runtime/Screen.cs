@@ -1,8 +1,5 @@
 namespace UnityEngine;
 
-/// <summary>
-/// Screen resolution and display information.
-/// </summary>
 public static class Screen
 {
     private static int _width = 1920;
@@ -11,24 +8,69 @@ public static class Screen
     private static float _dpi = 96f;
     private static bool _fullScreen;
     private static FullScreenMode _fullScreenMode = FullScreenMode.Windowed;
-    private static int _sleepTimeout;
+    private static int _sleepTimeout = SleepTimeout.NeverSleep;
 
-    public static int width => _width;
-    public static int height => _height;
+    public static int width
+    {
+        get => _width;
+        set => _width = value;
+    }
+
+    public static int height
+    {
+        get => _height;
+        set => _height = value;
+    }
+
     public static Resolution currentResolution => new Resolution(_width, _height, _refreshRate);
-    public static Resolution[] resolutions => new[] { currentResolution };
-    public static float dpi => _dpi;
-    public static bool fullScreen => _fullScreen;
-    public static FullScreenMode fullScreenMode => _fullScreenMode;
+    public static Resolution[] resolutions => new[]
+    {
+        new Resolution(800, 600, 60),
+        new Resolution(1024, 768, 60),
+        new Resolution(1280, 720, 60),
+        new Resolution(1366, 768, 60),
+        new Resolution(1600, 900, 60),
+        new Resolution(1920, 1080, 60),
+        new Resolution(2560, 1440, 60),
+        new Resolution(3840, 2160, 60),
+        currentResolution
+    };
+
+    public static float dpi
+    {
+        get => _dpi;
+        set => _dpi = value;
+    }
+
+    public static bool fullScreen
+    {
+        get => _fullScreen;
+        set
+        {
+            _fullScreen = value;
+            _fullScreenMode = value ? FullScreenMode.FullScreenWindow : FullScreenMode.Windowed;
+        }
+    }
+
+    public static FullScreenMode fullScreenMode
+    {
+        get => _fullScreenMode;
+        set
+        {
+            _fullScreenMode = value;
+            _fullScreen = value != FullScreenMode.Windowed;
+        }
+    }
+
     public static int sleepTimeout
     {
         get => _sleepTimeout;
         set => _sleepTimeout = value;
     }
-    public static int currentResolutionRefreshRate => _refreshRate;
+
     public static Rect safeArea => new Rect(0, 0, _width, _height);
     public static Rect[] cutouts => Array.Empty<Rect>();
-    public static int brightness { get; set; } = 100;
+    public static float brightness { get; set; } = 1f;
     public static bool autorotateToPortrait { get; set; } = true;
     public static bool autorotateToPortraitUpsideDown { get; set; } = true;
     public static bool autorotateToLandscapeLeft { get; set; } = true;
@@ -39,7 +81,7 @@ public static class Screen
     {
         _width = width;
         _height = height;
-        _fullScreen = fullscreen;
+        fullScreen = fullscreen;
     }
 
     public static void SetResolution(int width, int height, bool fullscreen, int preferredRefreshRate)
@@ -52,8 +94,7 @@ public static class Screen
     {
         _width = width;
         _height = height;
-        _fullScreenMode = fullscreenMode;
-        _fullScreen = fullscreenMode != FullScreenMode.Windowed;
+        fullScreenMode = fullscreenMode;
     }
 
     public static void SetResolution(int width, int height, FullScreenMode fullscreenMode, int preferredRefreshRate)
@@ -67,16 +108,20 @@ public struct Resolution
 {
     public int width;
     public int height;
-    public int refreshRateRatio;
+    public int refreshRate;
+    public int refreshRateRatioNumerator;
+    public int refreshRateRatioDenominator;
 
     public Resolution(int width, int height, int refreshRate)
     {
         this.width = width;
         this.height = height;
-        refreshRateRatio = refreshRate;
+        this.refreshRate = refreshRate;
+        refreshRateRatioNumerator = refreshRate;
+        refreshRateRatioDenominator = 1;
     }
 
-    public override string ToString() => $"{width} x {height} @{refreshRateRatio}Hz";
+    public override string ToString() => $"{width} x {height} @{refreshRate}Hz";
 }
 
 public enum FullScreenMode
@@ -95,4 +140,10 @@ public enum ScreenOrientation
     LandscapeRight = 4,
     AutoRotation = 5,
     Landscape = 6
+}
+
+public static class SleepTimeout
+{
+    public const int NeverSleep = -1;
+    public const int SystemSetting = -2;
 }

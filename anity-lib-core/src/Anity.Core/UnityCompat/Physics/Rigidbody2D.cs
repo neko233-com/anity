@@ -92,3 +92,10 @@ public enum ForceMode2D
   Force,
   Impulse
 }
+
+public enum RigidbodyType2D
+{
+  Dynamic,
+  Kinematic,
+  Static
+}

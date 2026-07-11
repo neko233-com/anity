@@ -4,6 +4,7 @@ public class LightmapData
 {
   public Texture2D? lightmapColor { get; set; }
   public Texture2D? lightmapDir { get; set; }
+  public Texture2D? lightmapShadowMask { get; set; }
   public Texture2D? shadowMask { get; set; }
 }
 
@@ -11,7 +12,7 @@ public static class LightmapSettings
 {
   public static LightmapData[] lightmaps { get; set; } = new LightmapData[0];
   public static LightmapsMode lightmapsMode { get; set; } = LightmapsMode.NonDirectional;
-  public static LightmapParameters lightmapParameters { get; set; }
+  public static LightmapParameters lightmapParameters { get; set; } = new LightmapParameters();
   public static Material? skybox { get; set; }
   public static Light[] additiveLights { get; set; } = new Light[0];
   public static Light[] directionalLights { get; set; } = new Light[0];
@@ -49,12 +50,6 @@ public class LightmapParameters
   public float flareStrength { get; set; } = 1f;
   public float flareFadeSpeed { get; set; } = 3f;
   public float hallowScale { get; set; } = 0.5f;
-}
-
-public enum LightmapsMode
-{
-  NonDirectional,
-  CombinedDirectional
 }
 
 public enum AmbientMode

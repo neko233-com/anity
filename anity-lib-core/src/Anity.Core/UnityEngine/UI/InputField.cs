@@ -1,4 +1,5 @@
 using System;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI;
 
@@ -56,6 +57,9 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     private int _selectionAnchorPosition;
     private int _selectionFocusPosition;
     private bool _isFocused;
+    private float _caretBlinkRate = 0.85f;
+    private int _caretWidth = 1;
+    private Color _selectionColor = new Color(0.65882355f, 0.8156863f, 1f, 0.7529412f);
 
     private InputFieldSubmitEvent _onEndEdit = new();
     private InputFieldChangeEvent _onValueChanged = new();
@@ -146,6 +150,24 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     {
         get => _readOnly;
         set => _readOnly = value;
+    }
+
+    public float caretBlinkRate
+    {
+        get => _caretBlinkRate;
+        set => _caretBlinkRate = value;
+    }
+
+    public int caretWidth
+    {
+        get => _caretWidth;
+        set => _caretWidth = value;
+    }
+
+    public Color selectionColor
+    {
+        get => _selectionColor;
+        set => _selectionColor = value;
     }
 
     public bool multiLine => _lineType != LineType.SingleLine;
@@ -340,7 +362,7 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
         ActivateInputField();
     }
 
-    public void OnSubmit(BaseEventData eventData)
+    public new void OnSubmit(BaseEventData eventData)
     {
         _ = eventData;
         if (!IsInteractable()) return;
@@ -348,9 +370,21 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
         _onEndEdit?.Invoke(_text);
     }
 
-    public void OnUpdateSelected(BaseEventData eventData)
+    public new void OnUpdateSelected(BaseEventData eventData)
     {
         _ = eventData;
+    }
+
+    public override void OnSelect(BaseEventData eventData)
+    {
+        base.OnSelect(eventData);
+        ActivateInputField();
+    }
+
+    public override void OnDeselect(BaseEventData eventData)
+    {
+        base.OnDeselect(eventData);
+        DeactivateInputField();
     }
 
     public void SetTextWithoutNotify(string input)

@@ -1,517 +1,371 @@
 using System;
+using System.Collections.Generic;
 
 namespace UnityEngine;
 
+public static class PhysicsSceneExtensions
+{
+    public static bool Simulate(this PhysicsScene scene, float step)
+    {
+        PhysicsWorld.Simulate(step);
+        return true;
+    }
+}
+
 public static class Physics
 {
-  private static Vector3 _gravity = new Vector3(0f, -9.81f, 0f);
-  private static readonly HashSet<(int, int)> _ignoredLayerCollisions = new();
-  private static readonly Collider[] _emptyColliderArray = Array.Empty<Collider>();
-
-  public static Vector3 gravity
-  {
-    get => _gravity;
-    set => _gravity = value;
-  }
-
-  public static bool autoSimulation { get; set; } = true;
-
-  public static bool IgnoreLayerCollision(int layer1, int layer2, bool ignore = true)
-  {
-    var key = layer1 < layer2 ? (layer1, layer2) : (layer2, layer1);
-    if (ignore)
+    public static Vector3 gravity
     {
-      _ = _ignoredLayerCollisions.Add(key);
-    }
-    else
-    {
-      _ = _ignoredLayerCollisions.Remove(key);
+        get => PhysicsWorld.gravity;
+        set => PhysicsWorld.gravity = value;
     }
 
-    return true;
-  }
-
-  // Backward-compatible typo-cased overload used by existing internal callers.
-  public static bool ignoreLayerCollision(int layer1, int layer2, bool ignore = true)
-  {
-    return IgnoreLayerCollision(layer1, layer2, ignore);
-  }
-
-  public static bool GetIgnoreLayerCollision(int layer1, int layer2)
-  {
-    var key = layer1 < layer2 ? (layer1, layer2) : (layer2, layer1);
-    return _ignoredLayerCollisions.Contains(key);
-  }
-
-  public static bool IsLayerCollisionEnabled(int layer1, int layer2)
-  {
-    return !GetIgnoreLayerCollision(layer1, layer2);
-  }
-
-  internal static bool LayerMatches(int layer, int layerMask)
-  {
-    if (layerMask == -1)
+    public static bool autoSimulation
     {
-      return true;
+        get => PhysicsWorld.autoSimulation;
+        set => PhysicsWorld.autoSimulation = value;
     }
 
-    return (layerMask & (1 << layer)) != 0;
-  }
-
-  public static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return PhysicsWorld.Raycast(new Ray(origin, direction), out _, maxDistance, layerMask);
-  }
-
-  public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hitInfo, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return PhysicsWorld.Raycast(new Ray(origin, direction), out hitInfo, maxDistance, layerMask);
-  }
-
-  public static bool Raycast(Ray ray, out RaycastHit hitInfo, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return PhysicsWorld.Raycast(ray, out hitInfo, maxDistance, layerMask);
-  }
-
-  public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth)
-  {
-    _ = minDepth;
-    _ = maxDepth;
-    return Raycast(origin, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static bool Linecast(Vector3 start, Vector3 end, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    return Raycast(start, end - start, Vector3Distance(start, end), layerMask, queryTriggerInteraction);
-  }
-
-  public static bool Linecast(Vector3 start, Vector3 end, out RaycastHit hitInfo, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    var direction = end - start;
-    hitInfo = RaycastHit.empty;
-    return Raycast(start, direction, out hitInfo, Vector3Distance(start, end), layerMask, queryTriggerInteraction);
-  }
-
-  public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    direction = direction.normalized;
-    if (direction.magnitude < 1e-6f) return false;
-
-    var steps = Math.Max(1, (int)(maxDistance / Math.Max(radius, 0.01f)));
-    var stepDistance = maxDistance / steps;
-    for (var i = 0; i <= steps; i++)
+    public static float bounceThreshold
     {
-      var position = origin + direction * (i * stepDistance);
-      if (PhysicsWorld.OverlapSphere(position, radius, layerMask, null))
-      {
+        get => PhysicsWorld.bounceThreshold;
+        set => PhysicsWorld.bounceThreshold = value;
+    }
+
+    public static float sleepThreshold
+    {
+        get => PhysicsWorld.sleepThreshold;
+        set => PhysicsWorld.sleepThreshold = value;
+    }
+
+    public static float defaultContactOffset
+    {
+        get => PhysicsWorld.defaultContactOffset;
+        set => PhysicsWorld.defaultContactOffset = value;
+    }
+
+    public static int defaultSolverIterations
+    {
+        get => PhysicsWorld.defaultSolverIterations;
+        set => PhysicsWorld.defaultSolverIterations = value;
+    }
+
+    public static PhysicsScene defaultPhysicsScene => new PhysicsScene();
+
+    public static void IgnoreLayerCollision(int layer1, int layer2, bool ignore = true)
+    {
+        PhysicsWorld.SetIgnoreLayerCollision(layer1, layer2, ignore);
+    }
+
+    public static bool GetIgnoreLayerCollision(int layer1, int layer2)
+    {
+        return PhysicsWorld.GetIgnoreLayerCollision(layer1, layer2);
+    }
+
+    public static bool IgnoreCollision(Collider collider1, Collider collider2, bool ignore = true)
+    {
+        PhysicsWorld.SetIgnoreCollision(collider1, collider2, ignore);
         return true;
-      }
     }
 
-    return false;
-  }
-
-  public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    hitInfo = RaycastHit.empty;
-    if (!SphereCast(origin, radius, direction, maxDistance, layerMask, queryTriggerInteraction))
+    public static bool Raycast(Vector3 origin, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      return false;
+        return Raycast(origin, direction, out _, maxDistance, layerMask, queryTriggerInteraction);
     }
 
-    return Raycast(origin, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth, out RaycastHit hitInfo)
-  {
-    _ = minDepth;
-    _ = maxDepth;
-    hitInfo = RaycastHit.empty;
-    return SphereCast(origin, radius, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static RaycastHit[] SphereCastAll(Vector3 origin, float radius, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = radius;
-    return SphereCast(origin, radius, direction, out var hitInfo, maxDistance, layerMask, queryTriggerInteraction) ? new[] { hitInfo } : Array.Empty<RaycastHit>();
-  }
-
-  public static int SphereCastNonAlloc(Vector3 origin, float radius, Vector3 direction, RaycastHit[] results, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    if (SphereCast(origin, radius, direction, out var hitInfo, maxDistance, layerMask, queryTriggerInteraction))
+    public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hitInfo, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      return Fill(results, hitInfo);
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        return PhysicsWorld.Raycast(origin, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
     }
 
-    return 0;
-  }
-
-  public static int SphereCastNonAlloc(Vector3 origin, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth, RaycastHit[] results)
-  {
-    _ = minDepth;
-    _ = maxDepth;
-    return SphereCastNonAlloc(origin, radius, direction, results, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static bool CheckSphere(Vector3 position, float radius, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return PhysicsWorld.OverlapSphere(position, radius, layerMask, null);
-  }
-
-  public static bool IgnoreCollision(Collider collider1, Collider collider2, bool ignore = true)
-  {
-    _ = collider1;
-    _ = collider2;
-    _ = ignore;
-    return true;
-  }
-
-  public static int RaycastNonAlloc(Vector3 origin, Vector3 direction, RaycastHit[] results, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    if (results is null)
+    public static bool Raycast(Ray ray, out RaycastHit hitInfo, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      return 0;
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        return PhysicsWorld.Raycast(ray.origin, ray.direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
     }
 
-    if (Raycast(origin, direction, out var hit, maxDistance, layerMask, queryTriggerInteraction))
+    public static bool Raycast(Vector3 origin, Vector3 direction, out RaycastHit hitInfo, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth)
     {
-      results[0] = hit;
-      return 1;
+        return Raycast(origin, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
     }
 
-    return 0;
-  }
-
-  public static int LinecastNonAlloc(Vector3 start, Vector3 end, RaycastHit[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    return Linecast(start, end, out var hitInfo, layerMask, queryTriggerInteraction)
-      ? Fill(results, hitInfo)
-      : 0;
-  }
-
-  public static RaycastHit[] LinecastAll(Vector3 start, Vector3 end, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    if (Linecast(start, end, out var hit, layerMask, queryTriggerInteraction))
+    public static RaycastHit[] RaycastAll(Vector3 origin, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      return new[] { hit };
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        return PhysicsWorld.RaycastAll(origin, direction, maxDistance, layerMask, queryTriggerInteraction);
     }
 
-    return Array.Empty<RaycastHit>();
-  }
-
-  public static RaycastHit[] RaycastAll(Vector3 origin, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return PhysicsWorld.RaycastAll(new Ray(origin, direction), maxDistance, layerMask).ToArray();
-  }
-
-  public static Collider[] OverlapSphere(Vector3 position, float radius, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    var results = new Collider[64];
-    _ = PhysicsWorld.OverlapSphere(position, radius, layerMask, results);
-    return results;
-  }
-
-  public static bool OverlapSphere(Vector3 position, float radius, Collider[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return PhysicsWorld.OverlapSphere(position, radius, layerMask, results);
-  }
-
-  public static Collider[] OverlapBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    var results = new Collider[64];
-    _ = PhysicsWorld.OverlapBox(center, halfExtents, orientation, layerMask, results);
-    return results;
-  }
-
-  public static bool OverlapBox(Vector3 center, Vector3 halfExtents, Quaternion orientation, Collider[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return PhysicsWorld.OverlapBox(center, halfExtents, orientation, layerMask, results);
-  }
-
-  public static Collider[] OverlapCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = point0;
-    _ = point1;
-    _ = radius;
-    _ = layerMask;
-    _ = queryTriggerInteraction;
-    return Array.Empty<Collider>();
-  }
-
-  public static bool OverlapCapsule(Vector3 point0, Vector3 point1, float radius, Collider[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = point0;
-    _ = point1;
-    _ = radius;
-    _ = layerMask;
-    _ = queryTriggerInteraction;
-    return results is not null && results.Length > 0;
-  }
-
-  public static bool CheckBox(Vector3 center, Vector3 halfExtents, Quaternion orientation = default, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return PhysicsWorld.OverlapBox(center, halfExtents, orientation, layerMask, null);
-  }
-
-  public static bool CheckCapsule(Vector3 point1, Vector3 point2, float radius, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    var delta = point2 - point1;
-    var length = delta.magnitude;
-    var steps = Math.Max(1, (int)(length / radius));
-    for (var i = 0; i <= steps; i++)
+    public static int RaycastNonAlloc(Vector3 origin, Vector3 direction, RaycastHit[] results, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      var t = i / (float)steps;
-      var position = Vector3.Lerp(point1, point2, t);
-      if (PhysicsWorld.OverlapSphere(position, radius, layerMask, null))
-      {
-        return true;
-      }
+        if (results == null || results.Length == 0) return 0;
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        var hits = PhysicsWorld.RaycastAll(origin, direction, maxDistance, layerMask, queryTriggerInteraction);
+        int count = Math.Min(hits.Length, results.Length);
+        for (int i = 0; i < count; i++) results[i] = hits[i];
+        return count;
     }
 
-    return false;
-  }
-
-  public static bool BoxCast(Vector3 center, Vector3 halfExtents, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    direction = direction.normalized;
-    if (direction.magnitude < 1e-6f) return false;
-
-    var minExtent = Math.Min(halfExtents.x, Math.Min(halfExtents.y, halfExtents.z));
-    var steps = Math.Max(1, (int)(maxDistance / Math.Max(minExtent * 2f, 0.01f)));
-    var stepDistance = maxDistance / steps;
-    for (var i = 0; i <= steps; i++)
+    public static bool Linecast(Vector3 start, Vector3 end, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      var position = center + direction * (i * stepDistance);
-      if (PhysicsWorld.OverlapBox(position, halfExtents, Quaternion.identity, layerMask, null))
-      {
-        return true;
-      }
+        return Linecast(start, end, out _, layerMask, queryTriggerInteraction);
     }
 
-    return false;
-  }
-
-  public static bool BoxCast(Vector3 center, Vector3 halfExtents, Vector3 direction, out RaycastHit hitInfo, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    hitInfo = RaycastHit.empty;
-    if (!BoxCast(center, halfExtents, direction, maxDistance, layerMask, queryTriggerInteraction))
+    public static bool Linecast(Vector3 start, Vector3 end, out RaycastHit hitInfo, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      return false;
+        Vector3 dir = end - start;
+        float dist = dir.magnitude;
+        if (dist < 1e-6f)
+        {
+            hitInfo = default;
+            return false;
+        }
+        return Raycast(start, dir, out hitInfo, dist, layerMask, queryTriggerInteraction);
     }
 
-    return Raycast(center, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static bool BoxCast(Vector3 center, Vector3 halfExtents, Quaternion orientation, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = orientation;
-    return BoxCast(center, halfExtents, direction, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static bool BoxCast(Vector3 center, Vector3 halfExtents, Quaternion orientation, Vector3 direction, out RaycastHit hitInfo, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = orientation;
-    hitInfo = RaycastHit.empty;
-    return BoxCast(center, halfExtents, direction, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static RaycastHit[] BoxCastAll(Vector3 center, Vector3 halfExtents, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = center;
-    _ = halfExtents;
-    _ = direction;
-    _ = maxDistance;
-    _ = layerMask;
-    _ = queryTriggerInteraction;
-    return Array.Empty<RaycastHit>();
-  }
-
-  public static int BoxCastNonAlloc(Vector3 center, Vector3 halfExtents, Vector3 direction, RaycastHit[] results, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = center;
-    _ = halfExtents;
-    _ = direction;
-    _ = maxDistance;
-    _ = layerMask;
-    _ = queryTriggerInteraction;
-    return 0;
-  }
-
-  public static int BoxCastNonAlloc(Vector3 center, Vector3 halfExtents, Quaternion orientation, Vector3 direction, RaycastHit[] results, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = orientation;
-    return BoxCastNonAlloc(center, halfExtents, direction, results, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    direction = direction.normalized;
-    if (direction.magnitude < 1e-6f) return false;
-
-    var axis = point2 - point1;
-    var length = axis.magnitude;
-    var steps = Math.Max(1, (int)(maxDistance / Math.Max(radius, 0.01f)));
-    var stepDistance = maxDistance / steps;
-    for (var i = 0; i <= steps; i++)
+    public static RaycastHit[] LinecastAll(Vector3 start, Vector3 end, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      var offset = direction * (i * stepDistance);
-      var p0 = point1 + offset;
-      var p1 = point2 + offset;
-      if (PhysicsWorld.OverlapCapsule(p0, p1, radius, layerMask, null))
-      {
-        return true;
-      }
+        Vector3 dir = end - start;
+        float dist = dir.magnitude;
+        if (dist < 1e-6f) return Array.Empty<RaycastHit>();
+        return RaycastAll(start, dir, dist, layerMask, queryTriggerInteraction);
     }
 
-    return false;
-  }
-
-  public static bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    hitInfo = RaycastHit.empty;
-    if (!CapsuleCast(point1, point2, radius, direction, maxDistance, layerMask, queryTriggerInteraction))
+    public static int LinecastNonAlloc(Vector3 start, Vector3 end, RaycastHit[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      return false;
+        Vector3 dir = end - start;
+        float dist = dir.magnitude;
+        if (dist < 1e-6f || results == null || results.Length == 0) return 0;
+        return RaycastNonAlloc(start, dir, results, dist, layerMask, queryTriggerInteraction);
     }
 
-    return Raycast(point1, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth, out RaycastHit hitInfo)
-  {
-    _ = minDepth;
-    _ = maxDepth;
-    return CapsuleCast(point1, point2, radius, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static RaycastHit[] CapsuleCastAll(Vector3 point1, Vector3 point2, float radius, Vector3 direction, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    return CapsuleCast(point1, point2, radius, direction, out var hitInfo, maxDistance, layerMask, queryTriggerInteraction)
-      ? new[] { hitInfo }
-      : Array.Empty<RaycastHit>();
-  }
-
-  public static int CapsuleCastNonAlloc(Vector3 point1, Vector3 point2, float radius, Vector3 direction, RaycastHit[] results, float maxDistance = 1000f, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    if (CapsuleCast(point1, point2, radius, direction, out var hitInfo, maxDistance, layerMask, queryTriggerInteraction))
+    public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      return Fill(results, hitInfo);
+        return SphereCast(origin, radius, direction, out _, maxDistance, layerMask, queryTriggerInteraction);
     }
 
-    return 0;
-  }
-
-  public static int CapsuleCastNonAlloc(Vector3 point1, Vector3 point2, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth, RaycastHit[] results)
-  {
-    _ = minDepth;
-    _ = maxDepth;
-    return CapsuleCastNonAlloc(point1, point2, radius, direction, results, maxDistance, layerMask, queryTriggerInteraction);
-  }
-
-  public static int OverlapSphereNonAlloc(Vector3 position, float radius, Collider[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    if (results is null || results.Length == 0) return 0;
-    var temp = new Collider[results.Length];
-    if (!PhysicsWorld.OverlapSphere(position, radius, layerMask, temp)) return 0;
-    var count = Math.Min(results.Length, temp.Length);
-    Array.Copy(temp, results, count);
-    return count;
-  }
-
-  public static int OverlapBoxNonAlloc(Vector3 center, Vector3 halfExtents, Collider[] results, Quaternion orientation = default, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    if (results is null || results.Length == 0) return 0;
-    var temp = new Collider[results.Length];
-    if (!PhysicsWorld.OverlapBox(center, halfExtents, orientation, layerMask, temp)) return 0;
-    var count = Math.Min(results.Length, temp.Length);
-    Array.Copy(temp, results, count);
-    return count;
-  }
-
-  public static int OverlapCapsuleNonAlloc(Vector3 point0, Vector3 point1, float radius, Collider[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
-  {
-    _ = queryTriggerInteraction;
-    if (results is null || results.Length == 0) return 0;
-    var temp = new Collider[results.Length];
-    if (!PhysicsWorld.OverlapCapsule(point0, point1, radius, layerMask, temp)) return 0;
-    var count = Math.Min(results.Length, temp.Length);
-    Array.Copy(temp, results, count);
-    return count;
-  }
-
-  public static bool ComputePenetration(Vector3 directionA, Vector3 positionA, Quaternion rotationA, Vector3 directionB, Vector3 positionB, Quaternion rotationB, out Vector3 movementDirection, out float movementDistance)
-  {
-    _ = directionA;
-    _ = positionA;
-    _ = rotationA;
-    _ = directionB;
-    _ = positionB;
-    _ = rotationB;
-    movementDirection = Vector3.zero;
-    movementDistance = 0f;
-    return false;
-  }
-
-  public static Vector3 ClosestPoint(Vector3 position, Vector3 closestToPosition, Vector3 size)
-  {
-    _ = position;
-    _ = closestToPosition;
-    _ = size;
-    return closestToPosition;
-  }
-
-  public static void SyncTransforms()
-  {
-  }
-
-  public static void Simulate(float deltaTime)
-  {
-    PhysicsWorld.Simulate(deltaTime);
-  }
-
-  public static void StepSimulation(float deltaTime)
-  {
-    Simulate(deltaTime);
-  }
-
-  public static bool IsSleeping()
-  {
-    return true;
-  }
-
-  private static int Fill(RaycastHit[] results, RaycastHit hitInfo)
-  {
-    if (results.Length == 0)
+    public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
     {
-      return 0;
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        return PhysicsWorld.SphereCast(origin, radius, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
     }
 
-    results[0] = hitInfo;
-    return 1;
-  }
+    public static bool SphereCast(Ray ray, float radius, out RaycastHit hitInfo, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        return PhysicsWorld.SphereCast(ray.origin, radius, ray.direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
+    }
 
-  private static float Vector3Distance(Vector3 a, Vector3 b)
-  {
-    var x = a.x - b.x;
-    var y = a.y - b.y;
-    var z = a.z - b.z;
-    return MathF.Sqrt(x * x + y * y + z * z);
-  }
+    public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth, out RaycastHit hitInfo)
+    {
+        return SphereCast(origin, radius, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static RaycastHit[] SphereCastAll(Vector3 origin, float radius, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        if (PhysicsWorld.SphereCast(origin, radius, direction, out var hit, maxDistance, layerMask, queryTriggerInteraction))
+            return new[] { hit };
+        return Array.Empty<RaycastHit>();
+    }
+
+    public static int SphereCastNonAlloc(Vector3 origin, float radius, Vector3 direction, RaycastHit[] results, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (results == null || results.Length == 0) return 0;
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        if (PhysicsWorld.SphereCast(origin, radius, direction, out var hit, maxDistance, layerMask, queryTriggerInteraction))
+        {
+            results[0] = hit;
+            return 1;
+        }
+        return 0;
+    }
+
+    public static int SphereCastNonAlloc(Vector3 origin, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth, RaycastHit[] results)
+    {
+        return SphereCastNonAlloc(origin, radius, direction, results, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool BoxCast(Vector3 center, Vector3 halfExtents, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return BoxCast(center, halfExtents, direction, out _, Quaternion.identity, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool BoxCast(Vector3 center, Vector3 halfExtents, Vector3 direction, out RaycastHit hitInfo, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return BoxCast(center, halfExtents, direction, out hitInfo, Quaternion.identity, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool BoxCast(Vector3 center, Vector3 halfExtents, Vector3 direction, out RaycastHit hitInfo, Quaternion orientation, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        return PhysicsWorld.BoxCast(center, halfExtents, direction, out hitInfo, maxDistance, orientation, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool BoxCast(Vector3 center, Vector3 halfExtents, Quaternion orientation, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return BoxCast(center, halfExtents, direction, out _, orientation, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool BoxCast(Vector3 center, Vector3 halfExtents, Quaternion orientation, Vector3 direction, out RaycastHit hitInfo, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return BoxCast(center, halfExtents, direction, out hitInfo, orientation, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static RaycastHit[] BoxCastAll(Vector3 center, Vector3 halfExtents, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return BoxCastAll(center, halfExtents, direction, Quaternion.identity, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static RaycastHit[] BoxCastAll(Vector3 center, Vector3 halfExtents, Vector3 direction, Quaternion orientation, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        if (PhysicsWorld.BoxCast(center, halfExtents, direction, out var hit, maxDistance, orientation, layerMask, queryTriggerInteraction))
+            return new[] { hit };
+        return Array.Empty<RaycastHit>();
+    }
+
+    public static int BoxCastNonAlloc(Vector3 center, Vector3 halfExtents, Vector3 direction, RaycastHit[] results, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return BoxCastNonAlloc(center, halfExtents, direction, results, Quaternion.identity, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static int BoxCastNonAlloc(Vector3 center, Vector3 halfExtents, Vector3 direction, RaycastHit[] results, Quaternion orientation, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (results == null || results.Length == 0) return 0;
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        if (PhysicsWorld.BoxCast(center, halfExtents, direction, out var hit, maxDistance, orientation, layerMask, queryTriggerInteraction))
+        {
+            results[0] = hit;
+            return 1;
+        }
+        return 0;
+    }
+
+    public static int BoxCastNonAlloc(Vector3 center, Vector3 halfExtents, Quaternion orientation, Vector3 direction, RaycastHit[] results, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return BoxCastNonAlloc(center, halfExtents, direction, results, orientation, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return CapsuleCast(point1, point2, radius, direction, out _, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, out RaycastHit hitInfo, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        return PhysicsWorld.CapsuleCast(point1, point2, radius, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool CapsuleCast(Vector3 point1, Vector3 point2, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth, out RaycastHit hitInfo)
+    {
+        return CapsuleCast(point1, point2, radius, direction, out hitInfo, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static RaycastHit[] CapsuleCastAll(Vector3 point1, Vector3 point2, float radius, Vector3 direction, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        if (PhysicsWorld.CapsuleCast(point1, point2, radius, direction, out var hit, maxDistance, layerMask, queryTriggerInteraction))
+            return new[] { hit };
+        return Array.Empty<RaycastHit>();
+    }
+
+    public static int CapsuleCastNonAlloc(Vector3 point1, Vector3 point2, float radius, Vector3 direction, RaycastHit[] results, float maxDistance = float.PositiveInfinity, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        if (results == null || results.Length == 0) return 0;
+        if (float.IsPositiveInfinity(maxDistance)) maxDistance = 1e8f;
+        if (PhysicsWorld.CapsuleCast(point1, point2, radius, direction, out var hit, maxDistance, layerMask, queryTriggerInteraction))
+        {
+            results[0] = hit;
+            return 1;
+        }
+        return 0;
+    }
+
+    public static int CapsuleCastNonAlloc(Vector3 point1, Vector3 point2, float radius, Vector3 direction, float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction, float minDepth, float maxDepth, RaycastHit[] results)
+    {
+        return CapsuleCastNonAlloc(point1, point2, radius, direction, results, maxDistance, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool CheckSphere(Vector3 position, float radius, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.CheckSphere(position, radius, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool CheckBox(Vector3 center, Vector3 halfExtents, Quaternion orientation = default, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.CheckBox(center, halfExtents, orientation, layerMask, queryTriggerInteraction);
+    }
+
+    public static bool CheckCapsule(Vector3 start, Vector3 end, float radius, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.CheckCapsule(start, end, radius, layerMask, queryTriggerInteraction);
+    }
+
+    public static Collider[] OverlapSphere(Vector3 position, float radius, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.OverlapSphere(position, radius, layerMask, queryTriggerInteraction);
+    }
+
+    public static int OverlapSphereNonAlloc(Vector3 position, float radius, Collider[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.OverlapSphereNonAlloc(position, radius, results, layerMask, queryTriggerInteraction);
+    }
+
+    public static Collider[] OverlapBox(Vector3 center, Vector3 halfExtents, Quaternion orientation = default, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.OverlapBox(center, halfExtents, orientation, layerMask, queryTriggerInteraction);
+    }
+
+    public static int OverlapBoxNonAlloc(Vector3 center, Vector3 halfExtents, Collider[] results, Quaternion orientation = default, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.OverlapBoxNonAlloc(center, halfExtents, results, orientation, layerMask, queryTriggerInteraction);
+    }
+
+    public static Collider[] OverlapCapsule(Vector3 point0, Vector3 point1, float radius, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.OverlapCapsule(point0, point1, radius, layerMask, queryTriggerInteraction);
+    }
+
+    public static int OverlapCapsuleNonAlloc(Vector3 point0, Vector3 point1, float radius, Collider[] results, int layerMask = -1, QueryTriggerInteraction queryTriggerInteraction = QueryTriggerInteraction.UseGlobal)
+    {
+        return PhysicsWorld.OverlapCapsuleNonAlloc(point0, point1, radius, results, layerMask, queryTriggerInteraction);
+    }
+
+    public static int GetContacts(Collider collider, Collider[] results)
+    {
+        return PhysicsWorld.GetContacts(collider, results);
+    }
+
+    public static void SyncTransforms()
+    {
+    }
+
+    public static void Simulate(float deltaTime)
+    {
+        PhysicsWorld.Simulate(deltaTime);
+    }
+
+    public static void StepSimulation(float deltaTime)
+    {
+        Simulate(deltaTime);
+    }
+
+    public static bool ComputePenetration(Collider colliderA, Vector3 positionA, Quaternion rotationA, Collider colliderB, Vector3 positionB, Quaternion rotationB, out Vector3 direction, out float distance)
+    {
+        direction = Vector3.zero;
+        distance = 0f;
+        return false;
+    }
+
+    public static Vector3 ClosestPoint(Vector3 point, Collider collider, Vector3 position, Quaternion rotation)
+    {
+        if (collider == null) return point;
+        var bounds = collider.bounds;
+        return new Vector3(
+            Math.Clamp(point.x, bounds.min.x, bounds.max.x),
+            Math.Clamp(point.y, bounds.min.y, bounds.max.y),
+            Math.Clamp(point.z, bounds.min.z, bounds.max.z));
+    }
 }

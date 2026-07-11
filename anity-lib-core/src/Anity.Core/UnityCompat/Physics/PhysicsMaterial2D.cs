@@ -1,8 +1,5 @@
 namespace UnityEngine;
 
-/// <summary>
-/// Physics material for 2D colliders.
-/// </summary>
 public class PhysicsMaterial2D : Object
 {
     private float _friction = 0.4f;
@@ -19,4 +16,15 @@ public class PhysicsMaterial2D : Object
         get => _bounciness;
         set => _bounciness = value;
     }
+
+    public PhysicsMaterialCombine2D frictionCombine { get; set; } = PhysicsMaterialCombine2D.Average;
+    public PhysicsMaterialCombine2D bouncinessCombine { get; set; } = PhysicsMaterialCombine2D.Average;
+}
+
+public enum PhysicsMaterialCombine2D
+{
+    Average,
+    Minimum,
+    Multiply,
+    Maximum
 }

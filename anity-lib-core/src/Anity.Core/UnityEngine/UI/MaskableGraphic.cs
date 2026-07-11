@@ -131,7 +131,7 @@ public interface IClippable
   void SetClipSoftness(Vector2 clipSoftness);
 }
 
-public class Mask : MaskableGraphic
+public class Mask : MaskableGraphic, IClipper
 {
   private bool _showMaskGraphic = true;
   private Graphic? _maskGraphic;
@@ -165,31 +165,61 @@ public class Mask : MaskableGraphic
 
   public override bool IsRaycastLocationValid(Vector2 sp, Camera? eventCamera)
   {
-    return true;
+    if (!isActiveAndEnabled) return true;
+    return RectTransformUtility.RectangleContainsScreenPoint(rectTransform, sp, eventCamera);
   }
 
   public override Material GetModifiedMaterial(Material baseMaterial)
   {
     return baseMaterial;
   }
+
+  public virtual void PerformClipping()
+  {
+  }
+
+  protected override void OnEnable()
+  {
+    base.OnEnable();
+    _maskGraphic = GetComponent<Graphic>();
+    ClipperRegistry.Register(this);
+  }
+
+  protected override void OnDisable()
+  {
+    ClipperRegistry.Unregister(this);
+    base.OnDisable();
+  }
 }
 
-public class RectMask2D : MonoBehaviour, IClipper
+public class RectMask2D : UIBehaviour, IClipper
 {
   private readonly List<IClippable> _clippables = new();
   private Vector4 _cornerRadius = Vector4.zero;
+  private readonly RectangularVertexClipper _vertexClipper = new();
 
-  public virtual Rect canvasRect => default;
+  public virtual Rect canvasRect
+  {
+    get
+    {
+      var rt = transform as RectTransform;
+      if (rt == null) return default;
+      var canvas = GetComponentInParent<Canvas>();
+      return _vertexClipper.GetCanvasRect(rt, canvas);
+    }
+  }
+
   public Vector4 softness { get; set; }
   public Vector4 padding { get; set; }
 
   public virtual void PerformClipping()
   {
     var rect = canvasRect;
+    var validRect = gameObject != null && gameObject.activeInHierarchy;
     foreach (var clippable in _clippables)
     {
-      clippable?.Cull(rect, true);
-      clippable?.SetClipRect(rect, true);
+      clippable?.Cull(rect, validRect);
+      clippable?.SetClipRect(rect, validRect);
     }
   }
 
@@ -215,30 +245,71 @@ public class RectMask2D : MonoBehaviour, IClipper
     clippable.SetClipRect(default, false);
   }
 
-  public virtual void OnTransformParentChanged()
-  {
-    PerformClipping();
-  }
-
-  public virtual void OnTransformChildrenChanged()
-  {
-    PerformClipping();
-  }
-
   protected override void OnEnable()
   {
     base.OnEnable();
-    PerformClipping();
+    ClipperRegistry.Register(this);
   }
 
   protected override void OnDisable()
   {
-    base.OnDisable();
+    ClipperRegistry.Unregister(this);
     foreach (var clippable in _clippables)
     {
       clippable?.Cull(default, false);
       clippable?.SetClipRect(default, false);
     }
+    base.OnDisable();
+  }
+
+  protected override void OnTransformParentChanged()
+  {
+    base.OnTransformParentChanged();
+    PerformClipping();
+  }
+
+  protected override void OnTransformChildrenChanged()
+  {
+    base.OnTransformChildrenChanged();
+    PerformClipping();
+  }
+
+  protected override void OnRectTransformDimensionsChange()
+  {
+    base.OnRectTransformDimensionsChange();
+    PerformClipping();
+  }
+}
+
+public class ClipperRegistry
+{
+  private static readonly List<IClipper> _clippers = new();
+  private static ClipperRegistry? _instance;
+  public static ClipperRegistry instance => _instance ??= new ClipperRegistry();
+
+  public static void Register(IClipper c)
+  {
+    if (c == null || _clippers.Contains(c)) return;
+    _clippers.Add(c);
+  }
+
+  public static void Unregister(IClipper c)
+  {
+    if (c == null) return;
+    _clippers.Remove(c);
+  }
+
+  public static void Cull()
+  {
+    foreach (var c in _clippers)
+    {
+      c.PerformClipping();
+    }
+  }
+
+  public void PerformClipping()
+  {
+    Cull();
   }
 }
 

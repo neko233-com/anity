@@ -1,8 +1,9 @@
 using System;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI;
 
-public class Button : Selectable
+public class Button : Selectable, IPointerClickHandler, ISubmitHandler
 {
   private ButtonClickedEvent _onClick = new();
 
@@ -12,39 +13,27 @@ public class Button : Selectable
     set => _onClick = value;
   }
 
-  public override bool IsInteractable()
+  public virtual void OnPointerClick(PointerEventData eventData)
   {
-    return interactable;
+    if (eventData.button != PointerEventData.InputButton.Left) return;
+    Press();
   }
 
-  public void OnPointerClick(PointerEventData? eventData)
+  public virtual void OnSubmit(BaseEventData eventData)
   {
-    if (!IsInteractable())
-    {
-      return;
-    }
-
-    _onClick?.Invoke();
+    Press();
+    if (!IsActive() || !IsInteractable()) return;
+    DoStateTransition(SelectionState.Pressed, false);
   }
 
-  public new void OnSubmit(BaseEventData? eventData)
+  private void Press()
   {
-    if (!IsInteractable())
-    {
-      return;
-    }
-
+    if (!IsActive() || !IsInteractable()) return;
     _onClick?.Invoke();
   }
 }
 
 [Serializable]
-public class ButtonClickedEvent
+public class ButtonClickedEvent : UnityEngine.Events.UnityEvent
 {
-  public event Action? Clicked;
-
-  public void Invoke()
-  {
-    Clicked?.Invoke();
-  }
 }

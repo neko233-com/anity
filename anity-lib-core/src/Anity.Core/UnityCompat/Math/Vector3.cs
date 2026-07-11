@@ -20,6 +20,7 @@ public struct Vector3
   public static Vector3 up => new Vector3(0f, 1f, 0f);
   public static Vector3 right => new Vector3(1f, 0f, 0f);
   public static Vector3 forward => new Vector3(0f, 0f, 1f);
+  public static Vector3 back => new Vector3(0f, 0f, -1f);
 
   public float magnitude => MathF.Sqrt(x * x + y * y + z * z);
   public Vector3 normalized
@@ -32,6 +33,8 @@ public struct Vector3
   }
 
   public static float Distance(Vector3 a, Vector3 b) => (a - b).magnitude;
+  public static float DistanceSquared(Vector3 a, Vector3 b) => (a - b).sqrMagnitude;
+  public static Vector3 Abs(Vector3 v) => new(MathF.Abs(v.x), MathF.Abs(v.y), MathF.Abs(v.z));
   public static float Dot(Vector3 a, Vector3 b) => a.x * b.x + a.y * b.y + a.z * b.z;
   public static Vector3 Cross(Vector3 a, Vector3 b) => new(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
   public static Vector3 operator +(Vector3 a, Vector3 b) => new(a.x + b.x, a.y + b.y, a.z + b.z);
@@ -43,6 +46,8 @@ public struct Vector3
 
   public static bool operator ==(Vector3 a, Vector3 b) => a.x == b.x && a.y == b.y && a.z == b.z;
   public static bool operator !=(Vector3 a, Vector3 b) => !(a == b);
+
+  public static implicit operator Vector2(Vector3 v) => new Vector2(v.x, v.y);
 
   public static Vector3 Lerp(Vector3 a, Vector3 b, float t) => new(
     a.x + (b.x - a.x) * t,

@@ -2,32 +2,61 @@ using System;
 
 namespace UnityEngine;
 
-public class AsyncOperation
+public class AsyncOperation : CustomYieldInstruction
 {
-  public bool isDone { get; internal set; } = true;
-  public float progress { get; internal set; } = 1f;
-  public bool allowSceneActivation { get; set; } = true;
-  public event Action<AsyncOperation>? completed;
+    private bool _isDone;
+    private float _progress;
 
-  public AsyncOperation()
-  {
-  }
-
-  public AsyncOperation(bool done)
-  {
-    isDone = done;
-    progress = done ? 1f : 0f;
-  }
-
-  internal void SetDone()
-  {
-    if (isDone)
+    public bool isDone
     {
-      return;
+        get => _isDone;
+        internal set
+        {
+            if (_isDone != value)
+            {
+                _isDone = value;
+                if (value)
+                {
+                    _progress = 1f;
+                    completed?.Invoke(this);
+                }
+            }
+        }
     }
 
-    isDone = true;
-    progress = 1f;
-    completed?.Invoke(this);
-  }
+    public float progress
+    {
+        get => _progress;
+        internal set => _progress = Mathf.Clamp01(value);
+    }
+
+    public bool allowSceneActivation { get; set; } = true;
+    public string operationName { get; set; } = "AsyncOperation";
+    public int priority { get; set; }
+
+    public event Action<AsyncOperation>? completed;
+
+    public override bool keepWaiting => !_isDone;
+
+    public AsyncOperation()
+    {
+        _isDone = true;
+        _progress = 1f;
+    }
+
+    public AsyncOperation(bool done)
+    {
+        _isDone = done;
+        _progress = done ? 1f : 0f;
+    }
+
+    internal void SetDone()
+    {
+        isDone = true;
+    }
+
+    internal void SetProgress(float p)
+    {
+        _progress = Mathf.Clamp01(p);
+    }
 }

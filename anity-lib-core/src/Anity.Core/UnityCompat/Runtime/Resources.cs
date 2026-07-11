@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace UnityEngine;
 
@@ -9,6 +10,13 @@ public static class Resources
 {
   private static readonly Dictionary<string, object> _resources = new(StringComparer.Ordinal);
   private static readonly List<ResourceRequest> _loadingRequests = new();
+
+  public static void RegisterResource(string path, object asset)
+  {
+    if (string.IsNullOrEmpty(path) || asset == null)
+      return;
+    _resources[path] = asset;
+  }
 
   public static void RegisterAsset(string key, object value)
   {
@@ -96,8 +104,12 @@ public static class Resources
     return _resources.Values.OfType<T>().ToArray();
   }
 
-  public static void UnloadUnusedAssets()
+  public static AsyncOperation UnloadUnusedAssets()
   {
+    var op = new AsyncOperation(false);
+    op.isDone = true;
+    op.progress = 1f;
+    return op;
   }
 
   public static void UnloadAsset(Object? asset)
@@ -124,6 +136,8 @@ public static class Resources
     var asset = Load<T>(path);
     request.asset = asset;
     request.isDone = true;
+    request.progress = 1f;
+    request.operationName = $"LoadAsync({path})";
     return request;
   }
 
@@ -133,11 +147,16 @@ public static class Resources
     var asset = Load(path, type);
     request.asset = asset;
     request.isDone = true;
+    request.progress = 1f;
+    request.operationName = $"LoadAsync({path})";
     return request;
   }
 
-  public static void UnloadUnusedAssetsAsync()
+  public static AsyncOperation UnloadUnusedAssetsAsync()
   {
+    var op = new AsyncOperation(true);
+    op.operationName = "UnloadUnusedAssets";
+    return op;
   }
 
   public static void Clear()
@@ -151,4 +170,9 @@ public static class Resources
 public class ResourceRequest : AsyncOperation
 {
   public Object? asset { get; set; }
+
+  public ResourceRequest()
+  {
+    operationName = "ResourceRequest";
+  }
 }

@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine.UI;
 
-public abstract class Graphic : MonoBehaviour
+public abstract class Graphic : UIBehaviour, ICanvasElement
 {
   private Color _color = Color.white;
   private Material? _material;
@@ -16,6 +17,8 @@ public abstract class Graphic : MonoBehaviour
   private Rect _pixelAdjustedRect;
   private Canvas? _canvas;
   private CanvasRenderer? _canvasRenderer;
+  private int _depth;
+  private static readonly List<Graphic> _graphics = new();
 
   public virtual Color color
   {
@@ -64,6 +67,9 @@ public abstract class Graphic : MonoBehaviour
   public bool verticesDirty => _verticesDirty;
   public bool materialDirty => _materialDirty;
   public Rect pixelAdjustedRect => _pixelAdjustedRect;
+  public int depth => _depth;
+
+  public RectTransform? rectTransform => transform as RectTransform;
 
   public Canvas? canvas
   {
@@ -89,6 +95,7 @@ public abstract class Graphic : MonoBehaviour
     }
   }
 
+  public virtual Texture mainTexture => defaultWhiteTexture;
   public virtual float minWidth => 0f;
   public virtual float preferredWidth => 0f;
   public virtual float flexibleWidth => -1f;
@@ -96,6 +103,19 @@ public abstract class Graphic : MonoBehaviour
   public virtual float preferredHeight => 0f;
   public virtual float flexibleHeight => -1f;
   public virtual int layoutPriority => 0;
+
+  private static Texture2D? s_WhiteTexture;
+  protected static Texture2D defaultWhiteTexture
+  {
+    get
+    {
+      if (s_WhiteTexture == null)
+      {
+        s_WhiteTexture = new Texture2D();
+      }
+      return s_WhiteTexture;
+    }
+  }
 
   public virtual void SetAllDirty()
   {
@@ -106,45 +126,50 @@ public abstract class Graphic : MonoBehaviour
 
   public virtual void SetLayoutDirty()
   {
+    if (!IsActive()) return;
+    LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
   }
 
   public virtual void SetVerticesDirty()
   {
+    if (!IsActive()) return;
     _verticesDirty = true;
+    CanvasUpdateRegistry.RegisterCanvasElementForGraphicRebuild(this);
   }
 
   public virtual void SetMaterialDirty()
   {
+    if (!IsActive()) return;
     _materialDirty = true;
+    CanvasUpdateRegistry.RegisterCanvasElementForGraphicRebuild(this);
   }
 
-  public virtual void Rebuild(CanvasUpdate update)
+  public virtual void Rebuild(CanvasUpdate executing)
   {
-    if (_canvasRenderer is null)
-    {
-      return;
-    }
-
-    switch (update)
+    switch (executing)
     {
       case CanvasUpdate.PreRender:
-        UpdateGeometry();
+        if (_verticesDirty)
+        {
+          UpdateGeometry();
+          _verticesDirty = false;
+        }
+        if (_materialDirty)
+        {
+          UpdateMaterial();
+          _materialDirty = false;
+        }
         break;
       case CanvasUpdate.Layout:
-        UpdateMaterial();
         break;
     }
   }
 
-  protected virtual void UpdateGeometry()
-  {
-    _verticesDirty = false;
-  }
+  public override bool IsDestroyed() => this == null;
 
-  protected virtual void UpdateMaterial()
-  {
-    _materialDirty = false;
-  }
+  protected virtual void UpdateGeometry() { }
+
+  protected virtual void UpdateMaterial() { }
 
   public virtual void CrossFadeColor(Color targetColor, float duration, bool ignoreTimeScale, bool useAlpha)
   {
@@ -176,12 +201,22 @@ public abstract class Graphic : MonoBehaviour
   {
     base.OnEnable();
     CacheCanvas();
+    _graphics.Add(this);
     SetAllDirty();
   }
 
   protected override void OnDisable()
   {
+    CanvasUpdateRegistry.UnRegisterCanvasElementForRebuild(this);
+    _graphics.Remove(this);
     base.OnDisable();
+  }
+
+  protected override void OnDestroy()
+  {
+    CanvasUpdateRegistry.UnRegisterCanvasElementForRebuild(this);
+    _graphics.Remove(this);
+    base.OnDestroy();
   }
 
   protected override void OnTransformParentChanged()
@@ -191,9 +226,21 @@ public abstract class Graphic : MonoBehaviour
     SetAllDirty();
   }
 
+  protected override void OnCanvasHierarchyChanged()
+  {
+    base.OnCanvasHierarchyChanged();
+    CacheCanvas();
+  }
+
   private void CacheCanvas()
   {
     _canvas = GetComponentInParent<Canvas>();
+  }
+
+  internal static void GetAllGraphics(List<Graphic> result)
+  {
+    result.Clear();
+    result.AddRange(_graphics);
   }
 }
 
@@ -217,13 +264,22 @@ public struct UIVertex
   public Vector4 uv1;
   public Vector4 uv2;
   public Vector4 uv3;
+
+  public static UIVertex simpleVert = new()
+  {
+    position = Vector3.zero,
+    normal = new Vector3(0f, 0f, -1f),
+    tangent = new Vector4(1f, 0f, 0f, -1f),
+    color = new Color32(255, 255, 255, 255),
+    uv0 = new Vector4(0f, 0f, 0f, 1f)
+  };
 }
 
 public class CanvasRenderer : MonoBehaviour
 {
   public bool cull { get; set; }
   public bool hasPopInstruction { get; set; }
-  public int materialCount { get; set; }
+  public int materialCount { get; set; } = 1;
   public int popMaterialCount { get; set; }
   public int absoluteDepth { get; set; }
   public bool hasMoved { get; set; }
@@ -294,7 +350,7 @@ public class CanvasRenderer : MonoBehaviour
   }
 }
 
-public class CanvasScaler : MonoBehaviour
+public class CanvasScaler : UIBehaviour
 {
   public ScaleMode uiScaleMode { get; set; } = ScaleMode.ConstantPixelSize;
   public Vector2 referenceResolution { get; set; } = new Vector2(1920, 1080);
@@ -330,16 +386,145 @@ public enum Unit
   Picas
 }
 
-public class GraphicRaycaster : MonoBehaviour
+public class GraphicRaycaster : BaseRaycaster
 {
-  public bool ignoreReversedGraphics { get; set; } = true;
-  public BlockingObjects blockingObjects { get; set; } = BlockingObjects.None;
-  public LayerMask blockingMask { get; set; }
+  [NonSerialized] private Canvas? _canvas;
+  private bool _ignoreReversedGraphics = true;
+  private BlockingObjects _blockingObjects = BlockingObjects.None;
+  private LayerMask _blockingMask = -1;
 
-  public void Raycast(PointerEventData eventData, List<RaycastResult> resultAppendList)
+  public bool ignoreReversedGraphics
   {
-    _ = eventData;
-    _ = resultAppendList;
+    get => _ignoreReversedGraphics;
+    set => _ignoreReversedGraphics = value;
+  }
+
+  public BlockingObjects blockingObjects
+  {
+    get => _blockingObjects;
+    set => _blockingObjects = value;
+  }
+
+  public LayerMask blockingMask
+  {
+    get => _blockingMask;
+    set => _blockingMask = value;
+  }
+
+  public override int sortOrderPriority
+  {
+    get
+    {
+      var c = canvas;
+      if (c is not null && c.renderMode == RenderMode.ScreenSpaceOverlay)
+        return c.sortingOrder;
+      return int.MinValue;
+    }
+  }
+
+  public override int renderOrderPriority
+  {
+    get
+    {
+      var c = canvas;
+      if (c is not null && c.renderMode == RenderMode.ScreenSpaceOverlay)
+        return c.renderOrder;
+      return int.MinValue;
+    }
+  }
+
+  public override Camera eventCamera
+  {
+    get
+    {
+      var c = canvas;
+      if (c is null || c.renderMode == RenderMode.ScreenSpaceOverlay || c.worldCamera is null)
+        return Camera.main;
+      return c.worldCamera;
+    }
+  }
+
+  public Canvas canvas => _canvas ??= GetComponent<Canvas>();
+
+  public override void Raycast(PointerEventData eventData, List<RaycastResult> resultAppendList)
+  {
+    if (canvas is null) return;
+
+    var eventPos = eventData.position;
+    var graphics = new List<Graphic>();
+    GetAllGraphicsUnderPointer(eventData, graphics);
+
+    if (graphics.Count == 0) return;
+
+    var camera = eventCamera;
+    float hitDistance;
+    if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+      hitDistance = 0f;
+    else
+    {
+      var plane = new Plane(transform.forward, transform.position);
+      var ray = camera.ScreenPointToRay(new Vector3(eventPos.x, eventPos.y, 0f));
+      if (!plane.Raycast(ray, out var dist)) return;
+      hitDistance = dist;
+    }
+
+    for (var i = 0; i < graphics.Count; i++)
+    {
+      var g = graphics[i];
+      if (!g.IsRaycastLocationValid(eventPos, camera)) continue;
+      var go = g.gameObject;
+      if (_ignoreReversedGraphics)
+      {
+        var dir = go.transform.forward;
+        var camDir = camera is not null ? camera.transform.forward : Vector3.forward;
+        if (Vector3.Dot(dir, camDir) <= 0f) continue;
+      }
+
+      var result = new RaycastResult
+      {
+        gameObject = go,
+        module = this,
+        distance = hitDistance,
+        screenPosition = eventPos,
+        depth = g.depth,
+        sortingLayer = canvas.sortingLayerID,
+        sortingOrder = canvas.sortingOrder,
+        index = (float)resultAppendList.Count
+      };
+      resultAppendList.Add(result);
+    }
+  }
+
+  private void GetAllGraphicsUnderPointer(PointerEventData eventData, List<Graphic> result)
+  {
+    var found = new List<Graphic>();
+    Graphic.GetAllGraphics(found);
+
+    var camera = eventCamera;
+    var eventPos = eventData.position;
+
+    for (var i = 0; i < found.Count; i++)
+    {
+      var g = found[i];
+      if (g is null || g.depth == -1 || !g.raycastTarget || g.canvasRenderer is null || g.canvasRenderer.cull) continue;
+      if (!g.IsActive()) continue;
+      if (g.canvas != canvas) continue;
+      var go = g.gameObject;
+      if (go is null || !go.activeInHierarchy) continue;
+      var rt = g.rectTransform;
+      if (rt is null) continue;
+      if (!RectTransformUtility.RectangleContainsScreenPoint(rt, eventPos, camera)) continue;
+      if (g is MaskableGraphic mg && !mg.IsRaycastLocationValid(eventPos, camera)) continue;
+      result.Add(g);
+    }
+
+    result.Sort((g1, g2) => g2.depth.CompareTo(g1.depth));
+  }
+
+  protected override void OnEnable()
+  {
+    base.OnEnable();
+    _canvas = GetComponent<Canvas>();
   }
 }
 
@@ -349,19 +534,4 @@ public enum BlockingObjects
   TwoD = 1,
   ThreeD = 2,
   All = 3
-}
-
-public struct RaycastResult
-{
-  public GameObject? gameObject;
-  public float moduleIndex;
-  public float distance;
-  public float index;
-  public float depth;
-  public int sortingLayer;
-  public int sortingOrder;
-  public Vector3 worldPosition;
-  public Vector3 worldNormal;
-  public Vector2 screenPosition;
-  public int displayIndex;
 }

@@ -12,13 +12,23 @@ public static class LayoutRebuilder
 
   public static void MarkLayoutForRebuild(RectTransform rect)
   {
-    _ = rect;
+    if (rect is null) return;
+    CanvasUpdateRegistry.RegisterCanvasElementForLayoutRebuild(new LayoutRebuildProxy(rect));
   }
 
   public static bool IsRebuildingLayout()
   {
-    return false;
+    return CanvasUpdateRegistry.instance.IsRebuildingLayout();
   }
+}
+
+internal class LayoutRebuildProxy : ICanvasElement
+{
+  private readonly RectTransform _rect;
+  public LayoutRebuildProxy(RectTransform rect) => _rect = rect;
+  public Transform transform => _rect;
+  public void Rebuild(CanvasUpdate executing) { }
+  public bool IsDestroyed() => _rect == null;
 }
 
 public class CanvasUpdateRegistry
@@ -26,26 +36,51 @@ public class CanvasUpdateRegistry
   private static CanvasUpdateRegistry? _instance;
   public static CanvasUpdateRegistry instance => _instance ??= new CanvasUpdateRegistry();
 
-  public event Action<Canvas, CanvasUpdate> performRebuild;
+  private readonly IndexedSet<ICanvasElement> _layoutRebuildQueue = new();
+  private readonly IndexedSet<ICanvasElement> _graphicRebuildQueue = new();
+  private bool _performingLayout;
+  private bool _performingUpdate;
 
-  public void RegisterCanvasElementForGraphicRebuild(ICanvasElement element)
+  public bool IsRebuildingLayout() => _performingLayout;
+  public bool IsUpdating() => _performingUpdate;
+
+  public static void RegisterCanvasElementForLayoutRebuild(ICanvasElement element)
   {
-    _ = element;
+    instance._layoutRebuildQueue.Add(element);
   }
 
-  public void RegisterCanvasElementForLayoutRebuild(ICanvasElement element)
+  public static void RegisterCanvasElementForGraphicRebuild(ICanvasElement element)
   {
-    _ = element;
+    instance._graphicRebuildQueue.Add(element);
   }
 
-  public void UnRegisterCanvasElementForRebuild(ICanvasElement element)
+  public static void UnRegisterCanvasElementForRebuild(ICanvasElement element)
   {
-    _ = element;
+    instance._layoutRebuildQueue.Remove(element);
+    instance._graphicRebuildQueue.Remove(element);
   }
 
-  public bool IsRebuildingLayout()
+  internal void PerformUpdate()
   {
-    return false;
+    _performingLayout = true;
+    for (var i = 0; i < _layoutRebuildQueue.Count; i++)
+    {
+      var elem = _layoutRebuildQueue[i];
+      if (elem is null || elem.IsDestroyed()) continue;
+      try { elem.Rebuild(CanvasUpdate.Layout); } catch { }
+    }
+    _layoutRebuildQueue.Clear();
+    _performingLayout = false;
+
+    _performingUpdate = true;
+    for (var i = 0; i < _graphicRebuildQueue.Count; i++)
+    {
+      var elem = _graphicRebuildQueue[i];
+      if (elem is null || elem.IsDestroyed()) continue;
+      try { elem.Rebuild(CanvasUpdate.PreRender); } catch { }
+    }
+    _graphicRebuildQueue.Clear();
+    _performingUpdate = false;
   }
 }
 
@@ -53,6 +88,7 @@ public interface ICanvasElement
 {
   void Rebuild(CanvasUpdate executing);
   Transform transform { get; }
+  bool IsDestroyed();
 }
 
 public class LayoutGroup : UIBehaviour, ILayoutElement, ILayoutGroup, ICanvasElement
@@ -549,4 +585,42 @@ public class HorizontalLayoutGroup2 : LayoutGroup
 
 public class GridLayoutGroup2 : LayoutGroup
 {
+}
+
+internal class IndexedSet<T> where T : class
+{
+    private readonly List<T> _list = new();
+    private readonly Dictionary<T, int> _index = new();
+
+    public int Count => _list.Count;
+    public T this[int i] => _list[i];
+
+    public bool Add(T item)
+    {
+        if (item is null || _index.ContainsKey(item)) return false;
+        _index[item] = _list.Count;
+        _list.Add(item);
+        return true;
+    }
+
+    public bool Remove(T item)
+    {
+        if (item is null || !_index.TryGetValue(item, out var idx)) return false;
+        _index.Remove(item);
+        var lastIdx = _list.Count - 1;
+        if (idx != lastIdx)
+        {
+            var last = _list[lastIdx];
+            _list[idx] = last;
+            _index[last] = idx;
+        }
+        _list.RemoveAt(lastIdx);
+        return true;
+    }
+
+    public void Clear()
+    {
+        _list.Clear();
+        _index.Clear();
+    }
 }

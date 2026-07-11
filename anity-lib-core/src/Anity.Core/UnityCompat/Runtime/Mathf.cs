@@ -57,4 +57,33 @@ public static class Mathf
   }
   public static float GammaToLinearSpace(float value) => Sqrt(value);
   public static float LinearToGammaSpace(float value) => value * value;
+  public const float Infinity = float.PositiveInfinity;
+  public const float NegativeInfinity = float.NegativeInfinity;
+
+  public static float SmoothDamp(float current, float target, ref float currentVelocity, float smoothTime, float maxSpeed)
+  {
+    return SmoothDamp(current, target, ref currentVelocity, smoothTime, maxSpeed, Time.deltaTime);
+  }
+
+  public static float SmoothDamp(float current, float target, ref float currentVelocity, float smoothTime, float maxSpeed, float deltaTime)
+  {
+    smoothTime = Max(0.0001f, smoothTime);
+    float omega = 2f / smoothTime;
+    float x = omega * deltaTime;
+    float exp = 1f / (1f + x + 0.48f * x * x + 0.235f * x * x * x);
+    float change = current - target;
+    float originalTo = target;
+    float maxChange = maxSpeed * smoothTime;
+    change = Clamp(change, -maxChange, maxChange);
+    target = current - change;
+    float temp = (currentVelocity + omega * change) * deltaTime;
+    currentVelocity = (currentVelocity - omega * temp) * exp;
+    float output = target + (change + temp) * exp;
+    if (originalTo - current > 0f == output > originalTo)
+    {
+      output = originalTo;
+      currentVelocity = (output - originalTo) / deltaTime;
+    }
+    return output;
+  }
 }

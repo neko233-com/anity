@@ -56,19 +56,16 @@ public struct Matrix4x4
   public float m32 { get => _m[14]; set => _m[14] = value; }
   public float m33 { get => _m[15]; set => _m[15] = value; }
 
-  public float determinant
-  {
-    get
-    {
-      return 1f;
-    }
-  }
+  public float determinant => CalculateDeterminant(_m);
 
   public Matrix4x4 inverse
   {
     get
     {
-      return identity;
+      float det = determinant;
+      if (MathF.Abs(det) < 1e-10f)
+        return identity;
+      return Adjugate(_m) * (1f / det);
     }
   }
 
@@ -84,28 +81,73 @@ public struct Matrix4x4
     }
   }
 
+  public Vector3 MultiplyPoint(Vector3 p)
+  {
+    var v = this * new Vector4(p.x, p.y, p.z, 1f);
+    float w = v.w;
+    if (MathF.Abs(w) > 1e-10f)
+      return new Vector3(v.x / w, v.y / w, v.z / w);
+    return new Vector3(v.x, v.y, v.z);
+  }
+
+  public Vector3 MultiplyPoint3x4(Vector3 p)
+  {
+    float x = m00 * p.x + m01 * p.y + m02 * p.z + m03;
+    float y = m10 * p.x + m11 * p.y + m12 * p.z + m13;
+    float z = m20 * p.x + m21 * p.y + m22 * p.z + m23;
+    return new Vector3(x, y, z);
+  }
+
+  public Vector3 MultiplyVector(Vector3 v)
+  {
+    float x = m00 * v.x + m01 * v.y + m02 * v.z;
+    float y = m10 * v.x + m11 * v.y + m12 * v.z;
+    float z = m20 * v.x + m21 * v.y + m22 * v.z;
+    return new Vector3(x, y, z);
+  }
+
   public static Matrix4x4 TRS(Vector3 pos, Quaternion q, Vector3 s)
   {
-    _ = q;
+    var rot = RotationMatrix(q);
     var m = identity;
-    m[0, 3] = pos.x;
-    m[1, 3] = pos.y;
-    m[2, 3] = pos.z;
-    m[0, 0] = s.x;
-    m[1, 1] = s.y;
-    m[2, 2] = s.z;
+    m.m00 = rot.m00 * s.x; m.m01 = rot.m01 * s.y; m.m02 = rot.m02 * s.z; m.m03 = pos.x;
+    m.m10 = rot.m10 * s.x; m.m11 = rot.m11 * s.y; m.m12 = rot.m12 * s.z; m.m13 = pos.y;
+    m.m20 = rot.m20 * s.x; m.m21 = rot.m21 * s.y; m.m22 = rot.m22 * s.z; m.m23 = pos.z;
+    return m;
+  }
+
+  private static Matrix4x4 RotationMatrix(Quaternion q)
+  {
+    float x = q.x, y = q.y, z = q.z, w = q.w;
+    float x2 = x + x, y2 = y + y, z2 = z + z;
+    float xx = x * x2, xy = x * y2, xz = x * z2;
+    float yy = y * y2, yz = y * z2, zz = z * z2;
+    float wx = w * x2, wy = w * y2, wz = w * z2;
+
+    var m = identity;
+    m.m00 = 1f - (yy + zz); m.m01 = xy - wz;         m.m02 = xz + wy;
+    m.m10 = xy + wz;         m.m11 = 1f - (xx + zz); m.m12 = yz - wx;
+    m.m20 = xz - wy;         m.m21 = yz + wx;         m.m22 = 1f - (xx + yy);
     return m;
   }
 
   public static Matrix4x4 Ortho(float left, float right, float bottom, float top, float near, float far)
   {
-    _ = left; _ = right; _ = bottom; _ = top; _ = near; _ = far;
-    return identity;
+    var result = new float[16];
+    result[0]  = 2f / (right - left);
+    result[5]  = 2f / (top - bottom);
+    result[10] = -2f / (far - near);
+    result[12] = -(right + left) / (right - left);
+    result[13] = -(top + bottom) / (top - bottom);
+    result[14] = -(far + near) / (far - near);
+    result[15] = 1f;
+    return new Matrix4x4(result);
   }
 
   public static Matrix4x4 Perspective(float fov, float aspect, float zNear, float zFar)
   {
-    float tanHalfFov = (float)Math.Tan(fov * 0.5f);
+    float radFov = fov * (MathF.PI / 180f);
+    float tanHalfFov = MathF.Tan(radFov * 0.5f);
     var result = new float[16];
     result[0]  = 1f / (aspect * tanHalfFov);
     result[5]  = 1f / tanHalfFov;
@@ -115,24 +157,24 @@ public struct Matrix4x4
     return new Matrix4x4(result);
   }
 
-  public static Matrix4x4 LookAt(Vector3 from, Vector3 to, Vector3 up)
+  public static Matrix4x4 LookAt(Vector3 eye, Vector3 target, Vector3 up)
   {
-    Vector3 f = (to - from).normalized;
-    Vector3 s = Vector3.Cross(up, f).normalized;
-    Vector3 u = Vector3.Cross(f, s);
+    Vector3 zAxis = (eye - target).normalized;
+    Vector3 xAxis = Vector3.Cross(up, zAxis).normalized;
+    Vector3 yAxis = Vector3.Cross(zAxis, xAxis);
     var result = new float[16];
-    result[0]  = s.x;
-    result[4]  = s.y;
-    result[8]  = s.z;
-    result[12] = -Vector3.Dot(s, from);
-    result[1]  = u.x;
-    result[5]  = u.y;
-    result[9]  = u.z;
-    result[13] = -Vector3.Dot(u, from);
-    result[2]  = f.x;
-    result[6]  = f.y;
-    result[10] = f.z;
-    result[14] = -Vector3.Dot(f, from);
+    result[0]  = xAxis.x;
+    result[4]  = xAxis.y;
+    result[8]  = xAxis.z;
+    result[12] = -Vector3.Dot(xAxis, eye);
+    result[1]  = yAxis.x;
+    result[5]  = yAxis.y;
+    result[9]  = yAxis.z;
+    result[13] = -Vector3.Dot(yAxis, eye);
+    result[2]  = zAxis.x;
+    result[6]  = zAxis.y;
+    result[10] = zAxis.z;
+    result[14] = -Vector3.Dot(zAxis, eye);
     result[15] = 1f;
     return new Matrix4x4(result);
   }
@@ -146,12 +188,18 @@ public struct Matrix4x4
       {
         float sum = 0f;
         for (int k = 0; k < 4; k++)
-        {
           sum += lhs[i, k] * rhs[k, j];
-        }
         result[i * 4 + j] = sum;
       }
     }
+    return new Matrix4x4(result);
+  }
+
+  public static Matrix4x4 operator *(Matrix4x4 lhs, float s)
+  {
+    var result = new float[16];
+    for (int i = 0; i < 16; i++)
+      result[i] = lhs._m[i] * s;
     return new Matrix4x4(result);
   }
 
@@ -188,14 +236,76 @@ public struct Matrix4x4
   {
     int hash = 17;
     for (int i = 0; i < 16; i++)
-    {
       hash = hash * 31 + _m[i].GetHashCode();
-    }
     return hash;
   }
 
-  public override string ToString()
+  public override string ToString() => $"[{_m[0]:F2}, {_m[5]:F2}, {_m[10]:F2}, {_m[15]:F2}]";
+
+  public Vector4 GetColumn(int index)
   {
-    return $"[{_m[0]}, {_m[5]}, {_m[10]}, {_m[15]}]";
+    return new Vector4(_m[index], _m[index + 4], _m[index + 8], _m[index + 12]);
+  }
+
+  public Vector4 GetRow(int index)
+  {
+    int i = index * 4;
+    return new Vector4(_m[i], _m[i+1], _m[i+2], _m[i+3]);
+  }
+
+  public void SetColumn(int index, Vector4 v)
+  {
+    _m[index] = v.x;
+    _m[index + 4] = v.y;
+    _m[index + 8] = v.z;
+    _m[index + 12] = v.w;
+  }
+
+  public void SetRow(int index, Vector4 v)
+  {
+    int i = index * 4;
+    _m[i] = v.x;
+    _m[i+1] = v.y;
+    _m[i+2] = v.z;
+    _m[i+3] = v.w;
+  }
+
+  private static float CalculateDeterminant(float[] m)
+  {
+    float a0 = m[0]*m[5] - m[1]*m[4];
+    float a1 = m[0]*m[6] - m[2]*m[4];
+    float a2 = m[0]*m[7] - m[3]*m[4];
+    float a3 = m[1]*m[6] - m[2]*m[5];
+    float a4 = m[1]*m[7] - m[3]*m[5];
+    float a5 = m[2]*m[7] - m[3]*m[6];
+    float b0 = m[8]*m[13] - m[9]*m[12];
+    float b1 = m[8]*m[14] - m[10]*m[12];
+    float b2 = m[8]*m[15] - m[11]*m[12];
+    float b3 = m[9]*m[14] - m[10]*m[13];
+    float b4 = m[9]*m[15] - m[11]*m[13];
+    float b5 = m[10]*m[15] - m[11]*m[14];
+    return a0*b5 - a1*b4 + a2*b3 + a3*b2 - a4*b1 + a5*b0;
+  }
+
+  private static Matrix4x4 Adjugate(float[] m)
+  {
+    float[] adj = new float[16];
+    adj[0]  =  (m[5]*(m[10]*m[15]-m[11]*m[14]) - m[6]*(m[9]*m[15]-m[11]*m[13]) + m[7]*(m[9]*m[14]-m[10]*m[13]));
+    adj[1]  = -(m[1]*(m[10]*m[15]-m[11]*m[14]) - m[2]*(m[9]*m[15]-m[11]*m[13]) + m[3]*(m[9]*m[14]-m[10]*m[13]));
+    adj[2]  =  (m[1]*(m[6]*m[15]-m[7]*m[14]) - m[2]*(m[5]*m[15]-m[7]*m[13]) + m[3]*(m[5]*m[14]-m[6]*m[13]));
+    adj[3]  = -(m[1]*(m[6]*m[11]-m[7]*m[10]) - m[2]*(m[5]*m[11]-m[7]*m[9]) + m[3]*(m[5]*m[10]-m[6]*m[9]));
+    adj[4]  = -(m[4]*(m[10]*m[15]-m[11]*m[14]) - m[6]*(m[8]*m[15]-m[11]*m[12]) + m[7]*(m[8]*m[14]-m[10]*m[12]));
+    adj[5]  =  (m[0]*(m[10]*m[15]-m[11]*m[14]) - m[2]*(m[8]*m[15]-m[11]*m[12]) + m[3]*(m[8]*m[14]-m[10]*m[12]));
+    adj[6]  = -(m[0]*(m[6]*m[15]-m[7]*m[14]) - m[2]*(m[4]*m[15]-m[7]*m[12]) + m[3]*(m[4]*m[14]-m[6]*m[12]));
+    adj[7]  =  (m[0]*(m[6]*m[11]-m[7]*m[10]) - m[2]*(m[4]*m[11]-m[7]*m[8]) + m[3]*(m[4]*m[10]-m[6]*m[8]));
+    adj[8]  =  (m[4]*(m[9]*m[15]-m[11]*m[13]) - m[5]*(m[8]*m[15]-m[11]*m[12]) + m[7]*(m[8]*m[13]-m[9]*m[12]));
+    adj[9]  = -(m[0]*(m[9]*m[15]-m[11]*m[13]) - m[1]*(m[8]*m[15]-m[11]*m[12]) + m[3]*(m[8]*m[13]-m[9]*m[12]));
+    adj[10] =  (m[0]*(m[5]*m[15]-m[7]*m[13]) - m[1]*(m[4]*m[15]-m[7]*m[12]) + m[3]*(m[4]*m[13]-m[5]*m[12]));
+    adj[11] = -(m[0]*(m[5]*m[11]-m[7]*m[9]) - m[1]*(m[4]*m[11]-m[7]*m[8]) + m[3]*(m[4]*m[9]-m[5]*m[8]));
+    adj[12] = -(m[4]*(m[9]*m[14]-m[10]*m[13]) - m[5]*(m[8]*m[14]-m[10]*m[12]) + m[6]*(m[8]*m[13]-m[9]*m[12]));
+    adj[13] =  (m[0]*(m[9]*m[14]-m[10]*m[13]) - m[1]*(m[8]*m[14]-m[10]*m[12]) + m[2]*(m[8]*m[13]-m[9]*m[12]));
+    adj[14] = -(m[0]*(m[5]*m[14]-m[6]*m[13]) - m[1]*(m[4]*m[14]-m[6]*m[12]) + m[2]*(m[4]*m[13]-m[5]*m[12]));
+    adj[15] =  (m[0]*(m[5]*m[10]-m[6]*m[9]) - m[1]*(m[4]*m[10]-m[6]*m[8]) + m[2]*(m[4]*m[9]-m[5]*m[8]));
+    return new Matrix4x4(adj);
   }
 }
