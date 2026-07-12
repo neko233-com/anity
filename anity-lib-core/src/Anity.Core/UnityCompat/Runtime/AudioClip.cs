@@ -1,4 +1,5 @@
 using System;
+using UnityEngine.Audio;
 
 namespace UnityEngine;
 
@@ -18,7 +19,11 @@ public class AudioClip : Object
     public bool ambisonic { get; set; }
     public bool preloadAudioData { get; set; } = true;
     public bool loadInBackground { get; set; }
-    public AudioClipLoadType loadType => _loadType;
+    public AudioClipLoadType loadType
+    {
+        get => _loadType;
+        private set => _loadType = value;
+    }
     public bool loadState => _isLoaded;
 
     public bool GetData(float[] data, int offsetSamples)
@@ -50,11 +55,29 @@ public class AudioClip : Object
 
     public static AudioClip Create(string name, int lengthSamples, int channels, int frequency, bool stream)
     {
-        return Create(name, lengthSamples, channels, frequency, stream, null, null);
+        return Create(name, lengthSamples, channels, frequency, stream, false, AudioClipLoadType.DecompressOnLoad, null, null);
+    }
+
+    public static AudioClip Create(string name, int lengthSamples, int channels, int frequency, bool stream, bool threeD)
+    {
+        return Create(name, lengthSamples, channels, frequency, stream, threeD, AudioClipLoadType.DecompressOnLoad, null, null);
+    }
+
+    public static AudioClip Create(string name, int lengthSamples, int channels, int frequency, bool stream, bool threeD, AudioClipLoadType loadType)
+    {
+        return Create(name, lengthSamples, channels, frequency, stream, threeD, loadType, null, null);
     }
 
     public static AudioClip Create(string name, int lengthSamples, int channels, int frequency, bool stream, PCMReaderCallback pcmreadercallback, PCMSetPositionCallback pcmsetpositioncallback)
     {
+        return Create(name, lengthSamples, channels, frequency, stream, false, AudioClipLoadType.DecompressOnLoad, pcmreadercallback, pcmsetpositioncallback);
+    }
+
+    public static AudioClip Create(string name, int lengthSamples, int channels, int frequency, bool stream, bool threeD, AudioClipLoadType loadType, PCMReaderCallback pcmreadercallback, PCMSetPositionCallback pcmsetpositioncallback)
+    {
+        _ = threeD;
+        _ = pcmreadercallback;
+        _ = pcmsetpositioncallback;
         var clip = new AudioClip
         {
             name = name,
@@ -62,7 +85,8 @@ public class AudioClip : Object
             channels = Math.Max(1, channels),
             frequency = Math.Max(1, frequency),
             _sampleData = new float[lengthSamples * channels],
-            _isLoaded = true
+            _isLoaded = true,
+            _loadType = loadType
         };
         return clip;
     }

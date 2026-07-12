@@ -333,6 +333,8 @@ public class TMP_Text : MaskableGraphic, ILayoutElement
         set => _havePropertiesChanged = value;
     }
 
+    public bool isTextOverflowing { get; set; }
+
     public TMP_TextInfo textInfo
     {
         get

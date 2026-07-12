@@ -258,7 +258,21 @@ public struct Hash128
 
     public static Hash128 Parse(string hashString)
     {
-        return new Hash128();
+        if (string.IsNullOrEmpty(hashString)) return default;
+        var clean = hashString.Trim().Replace("-", "");
+        if (clean.Length != 32) return default;
+        try
+        {
+            uint u0 = Convert.ToUInt32(clean.Substring(0, 8), 16);
+            uint u1 = Convert.ToUInt32(clean.Substring(8, 8), 16);
+            uint u2 = Convert.ToUInt32(clean.Substring(16, 8), 16);
+            uint u3 = Convert.ToUInt32(clean.Substring(24, 8), 16);
+            return new Hash128(u0, u1, u2, u3);
+        }
+        catch
+        {
+            return default;
+        }
     }
 
     public override string ToString()

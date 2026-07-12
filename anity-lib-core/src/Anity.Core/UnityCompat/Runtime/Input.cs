@@ -3,6 +3,30 @@ using System.Collections.Generic;
 
 namespace UnityEngine;
 
+public enum DeviceOrientation
+{
+    Unknown,
+    Portrait,
+    PortraitUpsideDown,
+    LandscapeLeft,
+    LandscapeRight,
+    FaceUp,
+    FaceDown
+}
+
+public enum IMECompositionMode
+{
+    Auto,
+    On,
+    Off
+}
+
+public struct AccelerationEvent
+{
+    public Vector3 acceleration;
+    public float deltaTime;
+}
+
 public struct Touch
 {
     public int fingerId;
@@ -87,32 +111,54 @@ public enum LocationServiceStatus
 
 public struct LocationInfo
 {
-    public float latitude => 0;
-    public float longitude => 0;
-    public float altitude => 0;
-    public float horizontalAccuracy => 0;
-    public float verticalAccuracy => 0;
-    public double timestamp => 0;
+    public float latitude;
+    public float longitude;
+    public float altitude;
+    public float horizontalAccuracy;
+    public float verticalAccuracy;
+    public double timestamp;
 }
 
 public class Compass
 {
-    public float magneticHeading => 0;
-    public float trueHeading => 0;
-    public float headingAccuracy => 0;
-    public Vector3 rawVector => Vector3.zero;
+    public float magneticHeading { get; set; }
+    public float trueHeading { get; set; }
+    public float headingAccuracy { get; set; }
+    public Vector3 rawVector { get; set; }
+    public double timestamp { get; set; }
     public bool enabled { get; set; }
+
+    public Compass()
+    {
+        magneticHeading = 0f;
+        trueHeading = 0f;
+        headingAccuracy = -1f;
+        rawVector = Vector3.zero;
+        timestamp = 0;
+        enabled = false;
+    }
 }
 
 public class Gyroscope
 {
-    public Vector3 rotationRate => Vector3.zero;
-    public Vector3 rotationRateUnbiased => Vector3.zero;
-    public Vector3 gravity => Vector3.zero;
-    public Vector3 userAcceleration => Vector3.zero;
-    public Quaternion attitude => Quaternion.identity;
+    public Vector3 rotationRate { get; set; }
+    public Vector3 rotationRateUnbiased { get; set; }
+    public Vector3 gravity { get; set; }
+    public Vector3 userAcceleration { get; set; }
+    public Quaternion attitude { get; set; }
     public bool enabled { get; set; }
-    public float updateInterval => 0.016f;
+    public float updateInterval { get; set; }
+
+    public Gyroscope()
+    {
+        rotationRate = Vector3.zero;
+        rotationRateUnbiased = Vector3.zero;
+        gravity = Vector3.zero;
+        userAcceleration = Vector3.zero;
+        attitude = Quaternion.identity;
+        enabled = false;
+        updateInterval = 0.016f;
+    }
 }
 
 public static class Input
@@ -126,11 +172,16 @@ public static class Input
     private static readonly HashSet<string> _buttonsDown = new();
     private static readonly HashSet<string> _buttonsUp = new();
     private static readonly List<Touch> _touches = new();
+    private static readonly List<AccelerationEvent> _accelerationEvents = new();
     private static bool _anyKey;
     private static bool _anyKeyDown;
     private static readonly LocationService _location = new();
     private static readonly Compass _compass = new();
     private static readonly Gyroscope _gyro = new();
+    private static string _inputString = string.Empty;
+    private static string _compositionString = string.Empty;
+
+    public static event Action<DeviceOrientation>? onDeviceOrientationChange;
 
     public static LocationService location => _location;
     public static Compass compass => _compass;
@@ -144,27 +195,77 @@ public static class Input
     public static bool compensateSensors { get; set; }
     public static bool multiTouchEnabled { get; set; } = true;
     public static Vector3 acceleration { get; set; }
+    private static DeviceOrientation _deviceOrientation = DeviceOrientation.Portrait;
+    public static DeviceOrientation deviceOrientation
+    {
+        get => _deviceOrientation;
+        set
+        {
+            if (_deviceOrientation != value)
+            {
+                _deviceOrientation = value;
+                onDeviceOrientationChange?.Invoke(value);
+            }
+        }
+    }
     public static Touch[] touches => _touches.ToArray();
     public static int touchCount => _touches.Count;
-    public static int imeCompositionMode { get; set; }
-    public static string compositionString { get; private set; } = string.Empty;
-    public static bool imeIsSelected => false;
+    public static IMECompositionMode imeCompositionMode { get; set; } = IMECompositionMode.Auto;
+    public static string compositionString
+    {
+        get => _compositionString;
+        set => _compositionString = value ?? string.Empty;
+    }
+    public static bool imeIsSelected { get; set; }
     public static Vector2 compositionCursorPos { get; set; }
+    public static string inputString
+    {
+        get => _inputString;
+        set => _inputString = value ?? string.Empty;
+    }
     public static bool mousePresent => true;
     public static bool touchSupported => true;
-    public static bool GetTouchSupported() => true;
+    public static bool touchPressureSupported => true;
+    public static bool stylusTouchSupported => false;
+    public static int accelerationEventCount => _accelerationEvents.Count;
 
     static Input()
     {
         ResetAxes();
     }
 
+    public static void ResetInputAxes()
+    {
+        ResetAxes();
+        foreach (var key in _axes.Keys)
+        {
+            _axes[key] = 0f;
+            _axesRaw[key] = 0f;
+        }
+        _buttonsDown.Clear();
+        _buttonsUp.Clear();
+        foreach (var button in _buttonsHeld.Keys)
+        {
+            _buttonsHeld[button] = false;
+        }
+        _keysDown.Clear();
+        _keysUp.Clear();
+        mouseScrollDelta = Vector2.zero;
+        _inputString = string.Empty;
+    }
+
     private static void ResetAxes()
     {
         _axes["Horizontal"] = 0f;
         _axes["Vertical"] = 0f;
+        _axes["Mouse X"] = 0f;
+        _axes["Mouse Y"] = 0f;
+        _axes["Mouse ScrollWheel"] = 0f;
         _axesRaw["Horizontal"] = 0f;
         _axesRaw["Vertical"] = 0f;
+        _axesRaw["Mouse X"] = 0f;
+        _axesRaw["Mouse Y"] = 0f;
+        _axesRaw["Mouse ScrollWheel"] = 0f;
         _buttonsHeld["Fire1"] = false;
         _buttonsHeld["Fire2"] = false;
         _buttonsHeld["Fire3"] = false;
@@ -259,6 +360,13 @@ public static class Input
         }
     }
 
+    public static AccelerationEvent GetAccelerationEvent(int index)
+    {
+        if (index < 0 || index >= _accelerationEvents.Count)
+            return default;
+        return _accelerationEvents[index];
+    }
+
     internal static void UpdatePerFrame()
     {
         _keysDown.Clear();
@@ -267,6 +375,8 @@ public static class Input
         _buttonsUp.Clear();
         _anyKeyDown = false;
         mouseScrollDelta = Vector2.zero;
+        _inputString = string.Empty;
+        _accelerationEvents.Clear();
         for (int i = _touches.Count - 1; i >= 0; i--)
         {
             var t = _touches[i];
@@ -304,6 +414,15 @@ public static class Input
     public static bool GetButtonDown(string buttonName) => _buttonsDown.Contains(buttonName);
     public static bool GetButtonUp(string buttonName) => _buttonsUp.Contains(buttonName);
 
-    public static Touch GetTouch(int index) => _touches[index];
+    public static Touch GetTouch(int index)
+    {
+        if (index < 0 || index >= _touches.Count)
+            return default;
+        return _touches[index];
+    }
+
     public static bool GetKeyUp(KeyCode key, bool useAutoRepeat) => GetKeyUp(key);
+
+    public static bool GetTouchSupported() => true;
+    public static bool IsTouchSupported() => true;
 }

@@ -27,6 +27,7 @@ public class UnityWebRequest : IDisposable
     public int timeout { get; set; } = 60;
     public int redirectLimit { get; set; } = 32;
     public bool useHttpContinue { get; set; } = true;
+    public bool chunkedTransfer { get; set; }
     public CertificateHandler? certificateHandler { get; set; }
     public bool disposeCertificateHandlerOnDispose { get; set; } = true;
     public bool disposeDownloadHandlerOnDispose { get; set; } = true;
@@ -203,17 +204,22 @@ public class UnityWebRequest : IDisposable
 
     public static UnityWebRequest Get(string url) => new(url, "GET", new DownloadHandlerBuffer(), null);
     public static UnityWebRequest Post(string url, string postData) => new(url, "POST", new DownloadHandlerBuffer(), new UploadHandlerRaw(Encoding.UTF8.GetBytes(postData)));
-    public static UnityWebRequest Post(string url, WWWForm formData) => new(url, "POST", new DownloadHandlerBuffer(), formData != null ? new UploadHandlerRaw(formData.data) { contentType = "application/x-www-form-urlencoded" } : null);
+    public static UnityWebRequest Post(string url, WWWForm formData) => new(url, "POST", new DownloadHandlerBuffer(), formData != null ? new UploadHandlerRaw(formData.data) { contentType = formData.headers.TryGetValue("Content-Type", out var ct) ? ct : "application/x-www-form-urlencoded" } : null);
+    public static UnityWebRequest Post(string url, Dictionary<string, string> formFields)
+    {
+        var serialized = SerializeSimpleForm(formFields);
+        return new UnityWebRequest(url, "POST", new DownloadHandlerBuffer(), new UploadHandlerRaw(Encoding.UTF8.GetBytes(serialized)) { contentType = "application/x-www-form-urlencoded" });
+    }
     public static UnityWebRequest Put(string url, byte[] bodyData) => new(url, "PUT", new DownloadHandlerBuffer(), bodyData != null ? new UploadHandlerRaw(bodyData) : null);
     public static UnityWebRequest Put(string url, string bodyData) => new(url, "PUT", new DownloadHandlerBuffer(), new UploadHandlerRaw(Encoding.UTF8.GetBytes(bodyData)));
     public static UnityWebRequest Delete(string url) => new(url, "DELETE", new DownloadHandlerBuffer(), null);
     public static UnityWebRequest Head(string url) => new(url, "HEAD", null, null);
     public static UnityWebRequest GetTexture(string url) => new(url, "GET", new DownloadHandlerTexture(), null);
-    public static UnityWebRequest GetAudioClip(string url, AudioType audioType) => new(url, "GET", new DownloadHandlerAudioClip { audioType = audioType }, null);
-    public static UnityWebRequest GetAssetBundle(string url) => new(url, "GET", new DownloadHandlerAssetBundle(), null);
-    public static UnityWebRequest GetAssetBundle(string url, uint crc) => new(url, "GET", new DownloadHandlerAssetBundle { crc = crc }, null);
-    public static UnityWebRequest GetAssetBundle(string url, uint version, uint crc) => new(url, "GET", new DownloadHandlerAssetBundle { version = version, crc = crc }, null);
-    public static UnityWebRequest GetAssetBundle(string url, Hash128 hash, uint crc) => new(url, "GET", new DownloadHandlerAssetBundle { hash = hash, crc = crc }, null);
+    public static UnityWebRequest GetAudioClip(string url, AudioType audioType) => new(url, "GET", new DownloadHandlerAudioClip(audioType), null);
+    public static UnityWebRequest GetAssetBundle(string url) => new(url, "GET", DownloadHandlerAssetBundle.Create(url), null);
+    public static UnityWebRequest GetAssetBundle(string url, uint crc) => new(url, "GET", DownloadHandlerAssetBundle.Create(url, crc), null);
+    public static UnityWebRequest GetAssetBundle(string url, uint version, uint crc) => new(url, "GET", DownloadHandlerAssetBundle.Create(url, crc), null);
+    public static UnityWebRequest GetAssetBundle(string url, Hash128 hash, uint crc) => new(url, "GET", DownloadHandlerAssetBundle.Create(url, hash, crc), null);
 
     public void Dispose()
     {
@@ -246,6 +252,17 @@ public class UnityWebRequestAsyncOperation : AsyncOperation
     {
         isDone = true;
     }
+
+    public UnityWebRequestAsyncOperation GetAwaiter()
+    {
+        return this;
+    }
+
+    public bool IsCompleted => isDone;
+
+    public void GetResult()
+    {
+    }
 }
 
 public enum SecureProtocol
@@ -256,11 +273,26 @@ public enum SecureProtocol
     Ssl3 = 48,
 }
 
+public delegate bool CertificateHandlerCallback(byte[] certificateData);
+
 public abstract class CertificateHandler : IDisposable
 {
     private bool _disposed;
+    private CertificateHandlerCallback? _callback;
+
+    public void AcceptCertificateCallback(CertificateHandlerCallback callback)
+    {
+        _callback = callback;
+    }
 
     protected abstract bool ValidateCertificate(byte[] certificateData);
+
+    internal bool ValidateCertificateInternal(byte[] certificateData)
+    {
+        if (_callback != null)
+            return _callback(certificateData);
+        return ValidateCertificate(certificateData);
+    }
 
     public void Dispose()
     {
@@ -270,7 +302,6 @@ public abstract class CertificateHandler : IDisposable
 
     protected virtual void Dispose(bool disposing)
     {
-        _ = disposing;
         _disposed = true;
     }
 }
@@ -293,6 +324,21 @@ public abstract class DownloadHandler : IDisposable
 
     protected abstract byte[]? GetData();
 
+    protected virtual byte[] GetDataProtected()
+    {
+        return GetData() ?? Array.Empty<byte>();
+    }
+
+    protected virtual string GetTextProtected()
+    {
+        return text;
+    }
+
+    protected virtual float GetProgressProtected()
+    {
+        return progress;
+    }
+
     internal virtual bool ReceiveData(byte[] data, int dataLength)
     {
         _ = data;
@@ -311,6 +357,11 @@ public abstract class DownloadHandler : IDisposable
         progress = 1f;
     }
 
+    public float GetProgress()
+    {
+        return progress;
+    }
+
     public void Dispose()
     {
         Dispose(true);
@@ -326,6 +377,10 @@ public abstract class DownloadHandler : IDisposable
 public class DownloadHandlerBuffer : DownloadHandler
 {
     private readonly MemoryStream _stream = new();
+
+    public DownloadHandlerBuffer()
+    {
+    }
 
     protected override byte[] GetData()
     {
@@ -352,18 +407,18 @@ public class DownloadHandlerBuffer : DownloadHandler
 public class DownloadHandlerFile : DownloadHandler
 {
     private readonly string _path;
+    private readonly bool _append;
     private FileStream? _fileStream;
     private bool _removeFileOnAbort;
 
-    public DownloadHandlerFile(string path)
+    public DownloadHandlerFile(string path) : this(path, false)
     {
-        _path = path;
     }
 
     public DownloadHandlerFile(string path, bool append)
     {
         _path = path;
-        _ = append;
+        _append = append;
     }
 
     public bool removeFileOnAbort
@@ -408,7 +463,7 @@ public class DownloadHandlerFile : DownloadHandler
             {
                 Directory.CreateDirectory(dir);
             }
-            _fileStream = new FileStream(_path, FileMode.Create, FileAccess.Write);
+            _fileStream = new FileStream(_path, _append ? FileMode.Append : FileMode.Create, FileAccess.Write);
         }
     }
 
@@ -457,7 +512,7 @@ public class DownloadHandlerTexture : DownloadHandler
         texture = new Texture2D(2, 2);
         if (_stream.Length > 0)
         {
-            texture.LoadImage(_stream.ToArray());
+            texture.LoadImage(_stream.ToArray(), markNonReadable);
         }
         _stream.Dispose();
         base.CompleteContent();
@@ -476,11 +531,59 @@ public class DownloadHandlerTexture : DownloadHandler
 public class DownloadHandlerAssetBundle : DownloadHandler
 {
     private readonly MemoryStream _stream = new();
-    public AssetBundle? assetBundle { get; protected set; }
+    private readonly string? _url;
+    private AssetBundle? _assetBundle;
     public uint crc { get; set; }
     public uint version { get; set; }
     public Hash128 hash { get; set; }
     public bool autoLoadAssetBundle { get; set; } = true;
+
+    public AssetBundle? assetBundle => _assetBundle;
+
+    private DownloadHandlerAssetBundle()
+    {
+    }
+
+    public DownloadHandlerAssetBundle(string url, uint crc)
+    {
+        _url = url;
+        this.crc = crc;
+    }
+
+    public DownloadHandlerAssetBundle(string url, uint version, uint crc)
+    {
+        _url = url;
+        this.version = version;
+        this.crc = crc;
+    }
+
+    public DownloadHandlerAssetBundle(string url, Hash128 hash, uint crc)
+    {
+        _url = url;
+        this.hash = hash;
+        this.crc = crc;
+    }
+
+    public DownloadHandlerAssetBundle(AssetBundle bundle)
+    {
+        _assetBundle = bundle;
+        autoLoadAssetBundle = false;
+    }
+
+    public static DownloadHandlerAssetBundle Create(string url)
+    {
+        return new DownloadHandlerAssetBundle(url, 0u);
+    }
+
+    public static DownloadHandlerAssetBundle Create(string url, uint crc)
+    {
+        return new DownloadHandlerAssetBundle(url, crc);
+    }
+
+    public static DownloadHandlerAssetBundle Create(string url, Hash128 hash, uint crc)
+    {
+        return new DownloadHandlerAssetBundle(url, hash, crc);
+    }
 
     protected override byte[] GetData()
     {
@@ -498,7 +601,7 @@ public class DownloadHandlerAssetBundle : DownloadHandler
     {
         if (autoLoadAssetBundle && _stream.Length > 0)
         {
-            assetBundle = AssetBundle.LoadFromMemory(_stream.ToArray(), crc);
+            _assetBundle = AssetBundle.LoadFromMemory(_stream.ToArray(), crc);
         }
         _stream.Dispose();
         base.CompleteContent();
@@ -521,6 +624,22 @@ public class DownloadHandlerAudioClip : DownloadHandler
     public AudioType audioType { get; set; }
     public bool compressed { get; set; }
     public bool streamAudio { get; set; }
+
+    public DownloadHandlerAudioClip()
+    {
+        audioType = AudioType.UNKNOWN;
+    }
+
+    public DownloadHandlerAudioClip(string url, AudioType audioType)
+    {
+        _ = url;
+        this.audioType = audioType;
+    }
+
+    public DownloadHandlerAudioClip(AudioType audioType)
+    {
+        this.audioType = audioType;
+    }
 
     protected override byte[] GetData()
     {
@@ -666,6 +785,7 @@ public class WWWForm
 {
     private readonly List<byte> _data = new();
     private readonly Dictionary<string, string> _headers = new();
+    private bool _hasBinaryData;
 
     public byte[] data => _data.ToArray();
     public Dictionary<string, string> headers => new(_headers);
@@ -707,6 +827,7 @@ public class WWWForm
         _ = fieldName;
         _ = fileName;
         _ = mimeType;
+        _hasBinaryData = true;
         if (contents != null)
         {
             _data.AddRange(contents);
@@ -728,5 +849,27 @@ public enum AudioType
     XM,
     XMA,
     VAG,
+    WAVPACK,
     AUDIOQUEUE
+}
+
+public static class UnityWebRequestCompat
+{
+    [Obsolete("Use UnityWebRequest.Result.ConnectionError instead")]
+    public const UnityWebRequest.Result NetworkError = UnityWebRequest.Result.ConnectionError;
+}
+
+[Obsolete("Use UnityWebRequest.Result instead")]
+public enum NetworkError
+{
+    Ok,
+    WrongConnection,
+    VersionMismatch,
+    NSURIError,
+    CannotConnectToHost,
+    ConnectionLost,
+    ConnectionTimedOut,
+    SSLConnectionError,
+    DataProcessingError,
+    Unknown
 }

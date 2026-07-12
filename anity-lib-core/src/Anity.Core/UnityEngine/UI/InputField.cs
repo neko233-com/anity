@@ -45,7 +45,7 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     }
 
     private string _text = string.Empty;
-    private Graphic? _textComponent;
+    private Text? _textComponent;
     private Graphic? _placeholder;
     private ContentType _contentType = ContentType.Standard;
     private InputType _inputType = InputType.Standard;
@@ -60,8 +60,10 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     private bool _isFocused;
     private float _caretBlinkRate = 0.85f;
     private int _caretWidth = 1;
+    private Color _caretColor = new Color(0.196f, 0.196f, 0.196f, 1f);
     private Color _selectionColor = new Color(0.65882355f, 0.8156863f, 1f, 0.7529412f);
     private bool _shouldHideMobileInput;
+    private TouchScreenKeyboardType _keyboardType = TouchScreenKeyboardType.Default;
 
     private InputFieldSubmitEvent _onEndEdit = new();
     private InputFieldChangeEvent _onValueChanged = new();
@@ -93,16 +95,26 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     public int selectionStringAnchorPosition => _selectionAnchorPosition;
     public int selectionStringFocusPosition => _selectionFocusPosition;
 
-    public Graphic? textComponent
+    public Text? textComponent
     {
         get => _textComponent;
-        set => _textComponent = value;
+        set
+        {
+            _textComponent = value;
+            UpdateLabel();
+        }
     }
 
     public Graphic? placeholder
     {
         get => _placeholder;
         set => _placeholder = value;
+    }
+
+    public Color caretColor
+    {
+        get => _caretColor;
+        set => _caretColor = value;
     }
 
     public ContentType contentType
@@ -176,6 +188,12 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     {
         get => _shouldHideMobileInput;
         set => _shouldHideMobileInput = value;
+    }
+
+    public TouchScreenKeyboardType keyboardType
+    {
+        get => _keyboardType;
+        set => _keyboardType = value;
     }
 
     public bool multiLine => _lineType != LineType.SingleLine;
@@ -411,6 +429,47 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     public void ForceLabelUpdate()
     {
         UpdateLabel();
+    }
+
+    public void MoveTextEnd(bool shift)
+    {
+        int position = _text.Length;
+        if (shift)
+        {
+            _selectionFocusPosition = position;
+        }
+        else
+        {
+            _selectionAnchorPosition = position;
+            _selectionFocusPosition = position;
+        }
+        _caretPosition = position;
+    }
+
+    public void MoveTextStart(bool shift)
+    {
+        int position = 0;
+        if (shift)
+        {
+            _selectionFocusPosition = position;
+        }
+        else
+        {
+            _selectionAnchorPosition = position;
+            _selectionFocusPosition = position;
+        }
+        _caretPosition = position;
+    }
+
+    public string LimitText(string input)
+    {
+        return ClampAndValidate(input ?? string.Empty);
+    }
+
+    public void Append(string input)
+    {
+        if (_readOnly) return;
+        text = _text.Insert(_caretPosition, input);
     }
 
     private void UpdateLabel()

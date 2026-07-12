@@ -19,6 +19,7 @@ public partial class ParticleSystem : Component
     public VelocityOverLifetimeModule velocityOverLifetime { get; private set; }
     public ColorOverLifetimeModule colorOverLifetime { get; private set; }
     public SizeOverLifetimeModule sizeOverLifetime { get; private set; }
+    public RotationOverLifetimeModule rotationOverLifetime { get; private set; }
     public ForceOverLifetimeModule forceOverLifetime { get; private set; }
     public CollisionModule collision { get; private set; }
     public TriggerModule trigger { get; private set; }
@@ -26,11 +27,14 @@ public partial class ParticleSystem : Component
     public TextureSheetAnimationModule textureSheetAnimation { get; private set; }
     public NoiseModule noise { get; private set; }
     public TrailModule trails { get; private set; }
+    public LightsModule lights { get; private set; }
     public ColorBySpeedModule colorBySpeed { get; private set; }
     public SizeBySpeedModule sizeBySpeed { get; private set; }
     public RotationBySpeedModule rotationBySpeed { get; private set; }
     public InheritVelocityModule inheritVelocity { get; private set; }
     public LimitVelocityOverLifetimeModule limitVelocityOverLifetime { get; private set; }
+    public ExternalForcesModule externalForces { get; private set; }
+    public CustomDataModule customData { get; private set; }
 
     public bool isPlaying => _isPlaying;
     public bool isPaused => _isPaused;
@@ -39,7 +43,7 @@ public partial class ParticleSystem : Component
     public int particleCount => _particles.Count;
     public float time => _time;
     public bool useAutoRandomSeed { get; set; } = true;
-    public int randomSeed { get; set; }
+    public uint randomSeed { get; set; }
     public bool playOnAwake { get; set; } = true;
 
     public ParticleSystem()
@@ -50,6 +54,7 @@ public partial class ParticleSystem : Component
         velocityOverLifetime = new VelocityOverLifetimeModule(this);
         colorOverLifetime = new ColorOverLifetimeModule(this);
         sizeOverLifetime = new SizeOverLifetimeModule(this);
+        rotationOverLifetime = new RotationOverLifetimeModule(this);
         forceOverLifetime = new ForceOverLifetimeModule(this);
         collision = new CollisionModule(this);
         trigger = new TriggerModule(this);
@@ -57,15 +62,24 @@ public partial class ParticleSystem : Component
         textureSheetAnimation = new TextureSheetAnimationModule(this);
         noise = new NoiseModule(this);
         trails = new TrailModule(this);
+        lights = new LightsModule(this);
         colorBySpeed = new ColorBySpeedModule(this);
         sizeBySpeed = new SizeBySpeedModule(this);
         rotationBySpeed = new RotationBySpeedModule(this);
         inheritVelocity = new InheritVelocityModule(this);
         limitVelocityOverLifetime = new LimitVelocityOverLifetimeModule(this);
+        externalForces = new ExternalForcesModule(this);
+        customData = new CustomDataModule(this);
     }
 
     public void Play()
     {
+        Play(true);
+    }
+
+    public void Play(bool withChildren)
+    {
+        _ = withChildren;
         _isPlaying = true;
         _isPaused = false;
         _isStopped = false;
@@ -74,6 +88,12 @@ public partial class ParticleSystem : Component
 
     public void Pause()
     {
+        Pause(true);
+    }
+
+    public void Pause(bool withChildren)
+    {
+        _ = withChildren;
         _isPaused = true;
         _isPlaying = false;
     }
@@ -119,13 +139,38 @@ public partial class ParticleSystem : Component
 
     public void Emit(int count)
     {
-        for (int i = 0; i < count; i++)
+        Emit(new EmitParams(), count);
+    }
+
+    public void Emit(Particle[] particles)
+    {
+        if (particles == null) return;
+        foreach (var p in particles)
         {
-            EmitParticle(default);
+            if (_particles.Count < main.maxParticles)
+                _particles.Add(p);
         }
     }
 
-    public void Emit(ParticleSystem.EmitParams emitParams, int count)
+    public void Emit(Vector3 position, Vector3 velocity, float size, float lifetime, Color32 color)
+    {
+        if (_particles.Count >= main.maxParticles) return;
+        _particles.Add(new Particle
+        {
+            position = position,
+            velocity = velocity,
+            startSize = size,
+            startSize3D = Vector3.one * size,
+            startColor = color,
+            startLifetime = lifetime,
+            remainingLifetime = lifetime,
+            randomSeed = (ulong)UnityEngine.Random.Range(0, int.MaxValue),
+            rotation = 0f,
+            rotation3D = Vector3.zero,
+        });
+    }
+
+    public void Emit(EmitParams emitParams, int count)
     {
         for (int i = 0; i < count; i++)
         {
@@ -189,7 +234,8 @@ public partial class ParticleSystem : Component
             {
                 if (_time >= burst.time && _time - deltaTime < burst.time)
                 {
-                    for (int i = 0; i < burst.count && _particles.Count < main.maxParticles; i++)
+                    int count = UnityEngine.Random.Range(burst.minCount, burst.maxCount + 1);
+                    for (int i = 0; i < count && _particles.Count < main.maxParticles; i++)
                     {
                         EmitParticle(default);
                     }
@@ -230,6 +276,12 @@ public partial class ParticleSystem : Component
                     velocityOverLifetime.z.Evaluate(normalizedLifetime)) * deltaTime;
             }
 
+            if (rotationOverLifetime.enabled)
+            {
+                p.angularVelocity = rotationOverLifetime.angularVelocity.Evaluate(normalizedLifetime);
+                p.rotation += p.angularVelocity * deltaTime * Mathf.Rad2Deg;
+            }
+
             p.velocity = velocity;
             p.position += velocity * deltaTime;
             _particles[i] = p;
@@ -252,7 +304,32 @@ public partial class ParticleSystem : Component
 
         if (@params.applyShapeToPosition && shape.enabled)
         {
-            pos += UnityEngine.Random.insideUnitSphere * shape.radius;
+            switch (shape.shapeType)
+            {
+                case ParticleSystemShapeType.Sphere:
+                    pos += UnityEngine.Random.insideUnitSphere * shape.radius;
+                    break;
+                case ParticleSystemShapeType.Hemisphere:
+                    var pt = UnityEngine.Random.insideUnitSphere;
+                    pt.y = Mathf.Abs(pt.y);
+                    pos += pt * shape.radius;
+                    break;
+                case ParticleSystemShapeType.Cone:
+                    pos += UnityEngine.Random.insideUnitSphere * shape.radius;
+                    vel = Vector3.Lerp(vel, Vector3.up * speed, shape.sphericalDirectionAmount);
+                    vel += UnityEngine.Random.insideUnitSphere * shape.randomDirectionAmount;
+                    break;
+                case ParticleSystemShapeType.Box:
+                    pos += new Vector3(
+                        UnityEngine.Random.Range(-shape.radius, shape.radius),
+                        UnityEngine.Random.Range(-shape.length * 0.5f, shape.length * 0.5f),
+                        UnityEngine.Random.Range(-shape.radius, shape.radius));
+                    break;
+                case ParticleSystemShapeType.Circle:
+                    var circlePos = UnityEngine.Random.insideUnitCircle * shape.radius;
+                    pos += new Vector3(circlePos.x, 0, circlePos.y);
+                    break;
+            }
         }
 
         var particle = new Particle
@@ -260,25 +337,33 @@ public partial class ParticleSystem : Component
             position = pos,
             velocity = vel,
             startSize = size,
+            startSize3D = main.startSize3D ? new Vector3(
+                main.startSizeX.Evaluate(random),
+                main.startSizeY.Evaluate(random),
+                main.startSizeZ.Evaluate(random)) : Vector3.one * size,
             startColor = useDefaults ? new Color32((byte)(color.r * 255), (byte)(color.g * 255), (byte)(color.b * 255), (byte)(color.a * 255)) : @params.startColor,
             startLifetime = lifetime,
             remainingLifetime = lifetime,
             rotation = rotation * Mathf.Rad2Deg,
+            rotation3D = main.startRotation3D ? new Vector3(
+                main.startRotationX.Evaluate(random) * Mathf.Rad2Deg,
+                main.startRotationY.Evaluate(random) * Mathf.Rad2Deg,
+                main.startRotationZ.Evaluate(random) * Mathf.Rad2Deg) : new Vector3(0f, 0f, rotation * Mathf.Rad2Deg),
             startRotation = rotation,
             startSpeed = speed,
             lifetime = lifetime,
             scale = Vector3.one * size,
             totalSize3D = Vector3.one * size,
-            startSize3D = Vector3.one * size,
             axisOfRotation = @params.axisOfRotation != Vector3.zero ? @params.axisOfRotation : Vector3.up,
-            seed = @params.randomSeed > 0f ? (uint)@params.randomSeed : (uint)UnityEngine.Random.Range(0, int.MaxValue),
+            randomSeed = @params.randomSeed > 0f ? (ulong)@params.randomSeed : (ulong)UnityEngine.Random.Range(0, int.MaxValue),
+            seed = (int)(@params.randomSeed > 0f ? @params.randomSeed : UnityEngine.Random.Range(0, int.MaxValue)),
             meshIndex = 0,
             angularVelocity = 0f,
             rotationVelocity = 0f,
             radialVelocity = 0f,
             animatedVelocity = Vector3.zero,
-            rotation3D = new Vector3(0f, 0f, rotation),
             angularVelocity3D = Vector3.zero,
+            totalVelocity = vel,
         };
         _particles.Add(particle);
     }

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using UnityEngine;
 
 namespace UnityEngine.Video;
 
@@ -21,7 +23,8 @@ public enum VideoAudioOutputMode
 {
     None = 0,
     AudioSource = 1,
-    Direct = 2
+    Direct = 2,
+    AudioSourceDirect = 2
 }
 
 public enum VideoTimeReference
@@ -29,6 +32,16 @@ public enum VideoTimeReference
     Freerun = 0,
     InternalTime = 1,
     ExternalTime = 2
+}
+
+public enum VideoAspectRatio
+{
+    NoScaling,
+    FitVertically,
+    FitHorizontally,
+    FitInside,
+    FitOutside,
+    Stretch
 }
 
 public enum Video3DLayout
@@ -63,6 +76,8 @@ public sealed class VideoPlayer : Behaviour
     private Material? _targetMaterial;
     private string _targetMaterialProperty = string.Empty;
     private float _targetCameraAspectRatio = 16f / 9f;
+    private VideoAspectRatio _aspectRatio = VideoAspectRatio.FitInside;
+    private VideoTimeReference _timeReference = VideoTimeReference.InternalTime;
     private float _audioVolume = 1f;
     private bool _audioMuted;
     private ushort _controlledAudioTrackCount;
@@ -74,7 +89,8 @@ public sealed class VideoPlayer : Behaviour
     private float _prepareTime;
     private bool _sendFrameReadyEvents;
     private bool _prepareCompletedSent;
-    private AudioSource? _audioSource;
+    private readonly Dictionary<ushort, AudioSource> _targetAudioSources = new();
+    private readonly HashSet<ushort> _enabledAudioTracks = new();
 
     public VideoPlayer()
     {
@@ -104,6 +120,7 @@ public sealed class VideoPlayer : Behaviour
                 _width = value.width;
                 _height = value.height;
                 _source = VideoSource.VideoClip;
+                audioTrackCount = value.audioTrackCount;
             }
         }
     }
@@ -124,6 +141,12 @@ public sealed class VideoPlayer : Behaviour
         set => _playOnAwake = value;
     }
 
+    public bool waitForFirstFrame
+    {
+        get => _waitForFirstFrame;
+        set => _waitForFirstFrame = value;
+    }
+
     public float playbackSpeed
     {
         get => _playbackSpeed;
@@ -138,11 +161,11 @@ public sealed class VideoPlayer : Behaviour
         set => _isLooping = value;
     }
 
-    public bool waitForFirstFrame
-    {
-        get => _waitForFirstFrame;
-        set => _waitForFirstFrame = value;
-    }
+    public bool canPlay => true;
+    public bool canStep => true;
+    public bool canSetTime => true;
+    public bool canSetSkipOnDrop => true;
+    public bool canSetPlaybackSpeed => true;
 
     public bool skipOnDrop
     {
@@ -184,10 +207,16 @@ public sealed class VideoPlayer : Behaviour
     public double duration => _length;
     public double clockTime => _clockTime;
 
-    public AudioSource? audioSource
+    public VideoTimeReference timeReference
     {
-        get => _audioSource;
-        set => _audioSource = value;
+        get => _timeReference;
+        set => _timeReference = value;
+    }
+
+    public VideoAspectRatio aspectRatio
+    {
+        get => _aspectRatio;
+        set => _aspectRatio = value;
     }
 
     public VideoRenderMode renderMode
@@ -258,11 +287,6 @@ public sealed class VideoPlayer : Behaviour
         set => _audioMuted = value;
     }
 
-    public bool canSetTime => true;
-    public bool canSetSkipOnDrop => true;
-    public bool canSetPlaybackSpeed => true;
-    public bool canStep => true;
-
     public event Action<VideoPlayer, string>? errorReceived;
     public event Action<VideoPlayer, long>? frameReady;
     public event Action<VideoPlayer>? loopPointReached;
@@ -311,6 +335,11 @@ public sealed class VideoPlayer : Behaviour
 
     public void StepForward()
     {
+        Step();
+    }
+
+    public void Step()
+    {
         if (_isPrepared)
         {
             _frame++;
@@ -323,6 +352,60 @@ public sealed class VideoPlayer : Behaviour
     {
         _time = 0;
         _frame = 0;
+    }
+
+    public void EnableAudioTrack(ushort trackIndex)
+    {
+        EnableAudioTrack(trackIndex, true);
+    }
+
+    public void EnableAudioTrack(ushort trackIndex, bool enabled)
+    {
+        if (enabled)
+            _enabledAudioTracks.Add(trackIndex);
+        else
+            _enabledAudioTracks.Remove(trackIndex);
+    }
+
+    public void DisableAudioTrack(ushort trackIndex)
+    {
+        _enabledAudioTracks.Remove(trackIndex);
+    }
+
+    public bool IsAudioTrackEnabled(ushort trackIndex)
+    {
+        return _enabledAudioTracks.Contains(trackIndex) && !_audioMuted;
+    }
+
+    public AudioSource GetTargetAudioSource(ushort trackIndex)
+    {
+        _targetAudioSources.TryGetValue(trackIndex, out var source);
+        return source;
+    }
+
+    public void SetTargetAudioSource(ushort trackIndex, AudioSource source)
+    {
+        _targetAudioSources[trackIndex] = source;
+    }
+
+    public ushort GetAudioChannelCount(ushort trackIndex)
+    {
+        if (_clip != null)
+            return _clip.GetAudioChannelCount(trackIndex);
+        return 2;
+    }
+
+    public uint GetAudioSampleRate(ushort trackIndex)
+    {
+        if (_clip != null)
+            return _clip.GetAudioSampleRate(trackIndex);
+        return 44100;
+    }
+
+    public string GetAudioLanguageCode(ushort trackIndex)
+    {
+        _ = trackIndex;
+        return "und";
     }
 
     internal void SendFrameReadyEvents()
@@ -369,60 +452,6 @@ public sealed class VideoPlayer : Behaviour
                 _isStopped = true;
             }
         }
-    }
-
-    public void SetDirectAudioVolume(ushort trackIndex, float volume)
-    {
-        _ = trackIndex;
-        _audioVolume = Math.Clamp(volume, 0f, 1f);
-    }
-
-    public float GetDirectAudioVolume(ushort trackIndex)
-    {
-        _ = trackIndex;
-        return _audioVolume;
-    }
-
-    public void SetDirectAudioMute(ushort trackIndex, bool mute)
-    {
-        _ = trackIndex;
-        _audioMuted = mute;
-    }
-
-    public bool GetDirectAudioMute(ushort trackIndex)
-    {
-        _ = trackIndex;
-        return _audioMuted;
-    }
-
-    public ushort GetAudioChannelCount(ushort trackIndex)
-    {
-        _ = trackIndex;
-        return 2;
-    }
-
-    public uint GetAudioSampleRate(ushort trackIndex)
-    {
-        _ = trackIndex;
-        return 44100;
-    }
-
-    public void EnableAudioTrack(ushort trackIndex, bool enabled)
-    {
-        _ = trackIndex;
-        _ = enabled;
-    }
-
-    public bool IsAudioTrackEnabled(ushort trackIndex)
-    {
-        _ = trackIndex;
-        return !_audioMuted;
-    }
-
-    public string GetAudioLanguageCode(ushort trackIndex)
-    {
-        _ = trackIndex;
-        return "und";
     }
 }
 
@@ -483,4 +512,16 @@ public sealed class VideoClip : Object
     public float pixelAspectRatio => pixelAspectRatioDenominator > 0
         ? (float)pixelAspectRatioNumerator / pixelAspectRatioDenominator
         : 1f;
+
+    public ushort GetAudioChannelCount(ushort trackIndex)
+    {
+        _ = trackIndex;
+        return 2;
+    }
+
+    public uint GetAudioSampleRate(ushort trackIndex)
+    {
+        _ = trackIndex;
+        return 44100;
+    }
 }

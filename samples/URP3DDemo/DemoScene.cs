@@ -192,7 +192,7 @@ namespace Anity.Demos.URP3D
             var em = exp.main;
             em.startLifetime = 2f; em.startSpeed = 8f; em.startSize = 0.25f;
             em.startColor = new Color(1f, 0.5f, 0f); em.maxParticles = 300;
-            var ee = exp.emission; ee.rateOverTime = 0; ee.SetBursts(new[] { new ParticleSystemBurst(0f, 30) });
+            var ee = exp.emission; ee.rateOverTime = 0; ee.SetBursts(new[] { new ParticleSystem.Burst(0f, 30) });
             var es = exp.shape; es.shapeType = ParticleSystemShapeType.Sphere; es.radius = 0.5f;
             exp.Play();
             ParticleSystemCount++;

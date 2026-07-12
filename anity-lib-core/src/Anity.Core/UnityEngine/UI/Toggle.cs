@@ -8,6 +8,13 @@ public class Toggle : Selectable, IPointerClickHandler, ISubmitHandler, ICanvasE
   [SerializeField] private bool m_IsOn;
   private ToggleEvent _onValueChanged = new();
   private ToggleGroup? _group;
+  private ToggleTransition _toggleTransition = ToggleTransition.Fade;
+
+  public ToggleTransition toggleTransition
+  {
+    get => _toggleTransition;
+    set => _toggleTransition = value;
+  }
 
   public ToggleGroup? group
   {
@@ -49,8 +56,13 @@ public class Toggle : Selectable, IPointerClickHandler, ISubmitHandler, ICanvasE
     set => _onValueChanged = value;
   }
 
-  public Graphic targetGraphic;
-  public Graphic graphic;
+  public new Graphic? targetGraphic
+  {
+    get => base.targetGraphic;
+    set => base.targetGraphic = value;
+  }
+
+  public Graphic? graphic { get; set; }
 
   protected override void OnEnable()
   {

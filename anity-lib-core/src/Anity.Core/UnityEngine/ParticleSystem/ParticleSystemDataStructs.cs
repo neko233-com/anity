@@ -8,70 +8,65 @@ public partial class ParticleSystem
     public struct MinMaxCurve
     {
         public ParticleSystemCurveMode mode;
+        public float constant;
         public float constantMin;
         public float constantMax;
+        public AnimationCurve curve;
         public AnimationCurve curveMin;
         public AnimationCurve curveMax;
-        public float constant;
-
-        public static MinMaxCurve Curve(float constant)
-        {
-            return new MinMaxCurve(constant);
-        }
-
-        public static MinMaxCurve Curve(float constant, AnimationCurve curve)
-        {
-            return new MinMaxCurve(constant, curve);
-        }
-
-        public static MinMaxCurve Curve(float min, float max)
-        {
-            return new MinMaxCurve(min, max);
-        }
-
-        public static MinMaxCurve Curve(float min, float max, AnimationCurve curveMin, AnimationCurve curveMax)
-        {
-            return new MinMaxCurve(min, max, curveMin, curveMax);
-        }
+        public float curveMultiplier;
 
         public MinMaxCurve(float constant)
         {
             mode = ParticleSystemCurveMode.Constant;
-            this.constantMin = constant;
-            this.constantMax = constant;
             this.constant = constant;
-            curveMin = null;
-            curveMax = null;
+            constantMin = constant;
+            constantMax = constant;
+            curve = AnimationCurve.Linear(0f, constant, 1f, constant);
+            curveMin = curve;
+            curveMax = curve;
+            curveMultiplier = 1f;
         }
 
         public MinMaxCurve(float constant, AnimationCurve curve)
         {
             mode = ParticleSystemCurveMode.Curve;
-            this.constantMin = constant;
-            this.constantMax = constant;
             this.constant = constant;
+            constantMin = constant;
+            constantMax = constant;
+            this.curve = curve;
             curveMin = curve;
             curveMax = curve;
+            curveMultiplier = 1f;
         }
 
         public MinMaxCurve(float min, float max)
         {
             mode = ParticleSystemCurveMode.TwoConstants;
+            constant = (min + max) * 0.5f;
             constantMin = min;
             constantMax = max;
-            constant = (min + max) * 0.5f;
-            curveMin = null;
-            curveMax = null;
+            curve = AnimationCurve.Linear(0f, constant, 1f, constant);
+            curveMin = curve;
+            curveMax = curve;
+            curveMultiplier = 1f;
         }
 
         public MinMaxCurve(float min, float max, AnimationCurve curveMin, AnimationCurve curveMax)
         {
             mode = ParticleSystemCurveMode.TwoCurves;
+            constant = (min + max) * 0.5f;
             constantMin = min;
             constantMax = max;
-            constant = (min + max) * 0.5f;
+            curve = curveMin;
             this.curveMin = curveMin;
             this.curveMax = curveMax;
+            curveMultiplier = 1f;
+        }
+
+        public float Evaluate(float time)
+        {
+            return Evaluate(time, UnityEngine.Random.value);
         }
 
         public float Evaluate(float time, float randomFactor)
@@ -79,69 +74,52 @@ public partial class ParticleSystem
             switch (mode)
             {
                 case ParticleSystemCurveMode.Constant:
-                    return constantMin;
-                case ParticleSystemCurveMode.Curve:
-                    return curveMin != null ? curveMin.Evaluate(time) : constantMin;
+                    return constant * curveMultiplier;
                 case ParticleSystemCurveMode.TwoConstants:
-                    return Mathf.Lerp(constantMin, constantMax, randomFactor);
+                    return Mathf.Lerp(constantMin, constantMax, randomFactor) * curveMultiplier;
+                case ParticleSystemCurveMode.Curve:
+                    return curve.Evaluate(time) * curveMultiplier;
                 case ParticleSystemCurveMode.TwoCurves:
                     float minVal = curveMin != null ? curveMin.Evaluate(time) : constantMin;
                     float maxVal = curveMax != null ? curveMax.Evaluate(time) : constantMax;
-                    return Mathf.Lerp(minVal, maxVal, randomFactor);
+                    return Mathf.Lerp(minVal, maxVal, randomFactor) * curveMultiplier;
                 default:
-                    return constantMin;
+                    return constant * curveMultiplier;
             }
         }
 
-        public float Evaluate(float time)
-        {
-            return Evaluate(time, 0f);
-        }
+        public static implicit operator MinMaxCurve(float value) => new MinMaxCurve(value);
     }
 
     [Serializable]
     public struct MinMaxGradient
     {
         public ParticleSystemGradientMode mode;
+        public Color color;
         public Color colorMin;
         public Color colorMax;
+        public Gradient gradient;
         public Gradient gradientMin;
         public Gradient gradientMax;
-
-        public static MinMaxGradient Gradient(Gradient gradient)
-        {
-            return new MinMaxGradient(gradient);
-        }
-
-        public static MinMaxGradient Gradient(Color color)
-        {
-            return new MinMaxGradient(color);
-        }
-
-        public static MinMaxGradient Gradient(Color min, Color max)
-        {
-            return new MinMaxGradient(min, max);
-        }
-
-        public static MinMaxGradient Gradient(Gradient min, Gradient max)
-        {
-            return new MinMaxGradient(min, max);
-        }
 
         public MinMaxGradient(Color color)
         {
             mode = ParticleSystemGradientMode.Color;
+            this.color = color;
             colorMin = color;
             colorMax = color;
-            gradientMin = null;
-            gradientMax = null;
+            gradient = new Gradient();
+            gradientMin = gradient;
+            gradientMax = gradient;
         }
 
         public MinMaxGradient(Gradient gradient)
         {
             mode = ParticleSystemGradientMode.Gradient;
+            color = Color.white;
             colorMin = Color.white;
             colorMax = Color.white;
+            this.gradient = gradient;
             gradientMin = gradient;
             gradientMax = gradient;
         }
@@ -149,19 +127,28 @@ public partial class ParticleSystem
         public MinMaxGradient(Color min, Color max)
         {
             mode = ParticleSystemGradientMode.TwoColors;
+            color = Color.Lerp(min, max, 0.5f);
             colorMin = min;
             colorMax = max;
-            gradientMin = null;
-            gradientMax = null;
+            gradient = new Gradient();
+            gradientMin = gradient;
+            gradientMax = gradient;
         }
 
         public MinMaxGradient(Gradient min, Gradient max)
         {
-            mode = ParticleSystemGradientMode.RandomColor;
+            mode = ParticleSystemGradientMode.TwoGradients;
+            color = Color.white;
             colorMin = Color.white;
             colorMax = Color.white;
+            gradient = min;
             gradientMin = min;
             gradientMax = max;
+        }
+
+        public Color Evaluate(float time)
+        {
+            return Evaluate(time, UnityEngine.Random.value);
         }
 
         public Color Evaluate(float time, float randomFactor)
@@ -169,94 +156,137 @@ public partial class ParticleSystem
             switch (mode)
             {
                 case ParticleSystemGradientMode.Color:
-                    return colorMin;
-                case ParticleSystemGradientMode.Gradient:
-                    return gradientMin != null ? gradientMin.Evaluate(time) : colorMin;
+                    return color;
                 case ParticleSystemGradientMode.TwoColors:
                     return Color.Lerp(colorMin, colorMax, randomFactor);
-                case ParticleSystemGradientMode.RandomColor:
+                case ParticleSystemGradientMode.Gradient:
+                    return gradient != null ? gradient.Evaluate(time) : color;
+                case ParticleSystemGradientMode.TwoGradients:
                     Gradient g = randomFactor < 0.5f ? gradientMin : gradientMax;
-                    return g != null ? g.Evaluate(time) : colorMin;
+                    return g != null ? g.Evaluate(time) : color;
                 default:
-                    return colorMin;
+                    return color;
             }
         }
 
-        public Color Evaluate(float time)
-        {
-            return Evaluate(time, 0f);
-        }
+        public static implicit operator MinMaxGradient(Color color) => new MinMaxGradient(color);
     }
 
     [Serializable]
     public struct Particle
     {
-        public float lifetime;
-        public float startLifetime;
-        public float startSize;
-        public float startSpeed;
-        public float startRotation;
         public Vector3 position;
         public Vector3 velocity;
         public Vector3 animatedVelocity;
-        public Vector3 axisOfRotation;
+        public Vector3 totalVelocity;
+        public float startSize;
+        public Vector3 startSize3D;
         public float rotation;
-        public Vector3 scale;
-        public Color32 startColor;
-        public uint seed;
-        public float remainingLifetime;
-        public int meshIndex;
+        public Vector3 rotation3D;
         public float angularVelocity;
         public float rotationVelocity;
-        public float radialVelocity;
-        public Vector3 totalSize3D;
-        public Vector3 startSize3D;
-        public Vector3 rotation3D;
         public Vector3 angularVelocity3D;
+        public Color32 startColor;
+        public float remainingLifetime;
+        public float startLifetime;
+        public ulong randomSeed;
+        public int meshIndex;
+        public int seed;
+        public float lifetime;
+        public float startSpeed;
+        public float startRotation;
+        public Vector3 axisOfRotation;
+        public float radialVelocity;
+        public Vector3 scale;
+        public Vector3 totalSize3D;
+
+        public Color GetCurrentColor(ParticleSystem system)
+        {
+            _ = system;
+            return startColor;
+        }
+
+        public float GetCurrentSize(ParticleSystem system)
+        {
+            _ = system;
+            return startSize;
+        }
+
+        public Vector3 GetCurrentSize3D(ParticleSystem system)
+        {
+            _ = system;
+            return startSize3D != Vector3.zero ? startSize3D : Vector3.one * startSize;
+        }
     }
 
     [Serializable]
     public struct Burst
     {
         public float time;
-        public int count;
         public short minCount;
         public short maxCount;
-        public int cycles;
-        public float interval;
+        public int cycleCount;
+        public float repeatInterval;
         public float probability;
+
+        public Burst(float time, short count)
+        {
+            this.time = time;
+            minCount = count;
+            maxCount = count;
+            cycleCount = 0;
+            repeatInterval = 0.01f;
+            probability = 1f;
+        }
 
         public Burst(float time, int count)
         {
             this.time = time;
-            this.count = count;
-            this.minCount = (short)count;
-            this.maxCount = (short)count;
-            this.cycles = 1;
-            this.interval = 0f;
-            this.probability = 1f;
+            minCount = (short)count;
+            maxCount = (short)count;
+            cycleCount = 0;
+            repeatInterval = 0.01f;
+            probability = 1f;
         }
 
         public Burst(float time, short minCount, short maxCount)
         {
             this.time = time;
-            this.count = 0;
             this.minCount = minCount;
             this.maxCount = maxCount;
-            this.cycles = 1;
-            this.interval = 0f;
-            this.probability = 1f;
+            cycleCount = 0;
+            repeatInterval = 0.01f;
+            probability = 1f;
+        }
+
+        public Burst(float time, int minCount, int maxCount)
+        {
+            this.time = time;
+            this.minCount = (short)minCount;
+            this.maxCount = (short)maxCount;
+            cycleCount = 0;
+            repeatInterval = 0.01f;
+            probability = 1f;
         }
 
         public Burst(float time, int count, int cycles, float interval)
         {
             this.time = time;
-            this.count = count;
-            this.minCount = (short)count;
-            this.maxCount = (short)count;
-            this.cycles = cycles;
-            this.interval = interval;
-            this.probability = 1f;
+            minCount = (short)count;
+            maxCount = (short)count;
+            cycleCount = cycles;
+            repeatInterval = interval;
+            probability = 1f;
+        }
+
+        public Burst(float time, short minCount, short maxCount, int cycles, float interval)
+        {
+            this.time = time;
+            this.minCount = minCount;
+            this.maxCount = maxCount;
+            cycleCount = cycles;
+            repeatInterval = interval;
+            probability = 1f;
         }
     }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine.Audio;
 
 namespace UnityEngine;
 
@@ -7,6 +8,7 @@ namespace UnityEngine;
 public class AudioSource : Behaviour
 {
     private AudioClip? _clip;
+    private AudioMixerGroup? _outputAudioMixerGroup;
     private float _volume = 1.0f;
     private float _pitch = 1.0f;
     private float _panStereo;
@@ -36,6 +38,12 @@ public class AudioSource : Behaviour
     {
         get => _clip;
         set => _clip = value;
+    }
+
+    public AudioMixerGroup? outputAudioMixerGroup
+    {
+        get => _outputAudioMixerGroup;
+        set => _outputAudioMixerGroup = value;
     }
 
     public float volume

@@ -28,6 +28,7 @@ public class Slider : Selectable, IDragHandler, IInitializePotentialDragHandler,
 
     public RectTransform fillRect;
     public RectTransform handleRect;
+    public RectTransform? fillContainer;
 
     public float value
     {
@@ -182,5 +183,15 @@ public class Slider : Selectable, IDragHandler, IInitializePotentialDragHandler,
         _direction = direction;
         if (includeRectLayouts)
             UpdateVisuals();
+    }
+
+    public void SetValueWithoutNotify(float input)
+    {
+        var newValue = Mathf.Clamp(input, _minValue, _maxValue);
+        if (_wholeNumbers)
+            newValue = Mathf.Round(newValue);
+        if (Mathf.Approximately(_value, newValue)) return;
+        _value = newValue;
+        UpdateVisuals();
     }
 }

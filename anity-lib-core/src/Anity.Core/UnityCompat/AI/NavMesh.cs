@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace UnityEngine.AI;
 
@@ -29,6 +30,11 @@ public static class NavMesh
         _areaCosts[2] = 1f;
     }
 
+    public static bool CalculatePath(Vector3 sourcePosition, Vector3 targetPosition, NavMeshPath path)
+    {
+        return CalculatePath(sourcePosition, targetPosition, AllAreas, path);
+    }
+
     public static bool CalculatePath(Vector3 sourcePosition, Vector3 targetPosition, int areaMask, NavMeshPath path)
     {
         if (path == null) return false;
@@ -51,6 +57,11 @@ public static class NavMesh
         return path.status == NavMeshPathStatus.PathComplete;
     }
 
+    public static bool Raycast(Vector3 sourcePosition, Vector3 targetPosition, out NavMeshHit hit)
+    {
+        return Raycast(sourcePosition, targetPosition, out hit, AllAreas);
+    }
+
     public static bool Raycast(Vector3 sourcePosition, Vector3 targetPosition, out NavMeshHit hit, int areaMask)
     {
         hit = new NavMeshHit();
@@ -68,6 +79,11 @@ public static class NavMesh
         return blocked;
     }
 
+    public static bool Linecast(Vector3 sourcePosition, Vector3 targetPosition, out NavMeshHit hit)
+    {
+        return Linecast(sourcePosition, targetPosition, out hit, AllAreas);
+    }
+
     public static bool Linecast(Vector3 sourcePosition, Vector3 targetPosition, out NavMeshHit hit, int areaMask)
     {
         return Raycast(sourcePosition, targetPosition, out hit, areaMask);
@@ -76,6 +92,7 @@ public static class NavMesh
     public static bool SamplePosition(Vector3 sourcePosition, out NavMeshHit hit, float maxDistance, int areaMask)
     {
         hit = new NavMeshHit();
+        _ = maxDistance;
         _ = areaMask;
         hit.position = sourcePosition;
         hit.normal = Vector3.up;
@@ -84,6 +101,11 @@ public static class NavMesh
         hit.hit = true;
         hit.area = 0;
         return true;
+    }
+
+    public static bool FindClosestEdge(Vector3 sourcePosition, out NavMeshHit hit)
+    {
+        return FindClosestEdge(sourcePosition, out hit, AllAreas);
     }
 
     public static bool FindClosestEdge(Vector3 sourcePosition, out NavMeshHit hit, int areaMask)
@@ -104,9 +126,22 @@ public static class NavMesh
         _areaCosts[areaIndex] = Math.Max(0f, cost);
     }
 
+    public static void SetAreaCost(string areaName, float cost)
+    {
+        int areaIndex = GetAreaFromName(areaName);
+        if (areaIndex >= 0)
+            SetAreaCost(areaIndex, cost);
+    }
+
     public static float GetAreaCost(int areaIndex)
     {
         return _areaCosts.TryGetValue(areaIndex, out var cost) ? cost : 1f;
+    }
+
+    public static float GetAreaCost(string areaName)
+    {
+        int areaIndex = GetAreaFromName(areaName);
+        return areaIndex >= 0 ? GetAreaCost(areaIndex) : 1f;
     }
 
     public static int GetAreaFromName(string areaName)
@@ -138,6 +173,21 @@ public static class NavMesh
         return _navMeshData.Remove(navMeshData);
     }
 
+    public static void RemoveAllNavMeshData()
+    {
+        _navMeshData.Clear();
+    }
+
+    public static NavMeshTriangulation CalculateTriangulation()
+    {
+        return new NavMeshTriangulation
+        {
+            vertices = Array.Empty<Vector3>(),
+            indices = Array.Empty<int>(),
+            areas = Array.Empty<int>()
+        };
+    }
+
     public static NavMeshData BuildNavMesh()
     {
         var data = new NavMeshData();
@@ -154,6 +204,8 @@ public class NavMeshAgent : Behaviour
     private float _stoppingDistance;
     private bool _isStopped;
     private bool _updatePosition = true;
+    private bool _updateRotation = true;
+    private bool _updateUpAxis;
     private bool _autoBraking = true;
     private float _baseOffset;
     private float _speed = 3.5f;
@@ -163,6 +215,7 @@ public class NavMeshAgent : Behaviour
     private float _height = 2f;
     private Vector3 _destination;
     private Vector3 _nextPosition;
+    private Quaternion _nextOrientation = Quaternion.identity;
     private int _areaMask = -1;
     private int _agentTypeID;
     private ObstacleAvoidanceType _obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
@@ -189,6 +242,7 @@ public class NavMeshAgent : Behaviour
         _nextPosition = startPos;
         _destination = startPos;
         _steeringTarget = startPos;
+        _currentPath = new NavMeshPath();
     }
 
     public bool isPathComplete => _hasPath && _currentPath != null && _currentPath.status == NavMeshPathStatus.PathComplete;
@@ -233,8 +287,10 @@ public class NavMeshAgent : Behaviour
     public bool pathPending => _pathPending;
     public bool isStopped { get => _isStopped; set => _isStopped = value; }
     public Vector3 nextPosition { get => _nextPosition; set => _nextPosition = value; }
+    public Quaternion nextOrientation { get => _nextOrientation; set => _nextOrientation = value; }
     public bool updatePosition { get => _updatePosition; set => _updatePosition = value; }
-    public bool updateRotation { get; set; } = true;
+    public bool updateRotation { get => _updateRotation; set => _updateRotation = value; }
+    public bool updateUpAxis { get => _updateUpAxis; set => _updateUpAxis = value; }
     public float radius { get => _radius; set => _radius = Math.Max(0.01f, value); }
     public float height { get => _height; set => _height = Math.Max(0.01f, value); }
     public float baseOffset { get => _baseOffset; set => _baseOffset = value; }
@@ -251,6 +307,11 @@ public class NavMeshAgent : Behaviour
     public Vector3 steeringTarget => _steeringTarget;
     public Vector3 desiredVelocity => _desiredVelocity;
     public Object? navMeshOwner { get => _navMeshOwner; set => _navMeshOwner = value; }
+    public NavMeshPath path
+    {
+        get => _currentPath;
+        set => SetPath(value);
+    }
     public OffMeshLinkData currentOffMeshLinkData => _currentOffMeshLinkData;
     public bool isOnOffMeshLink { get; private set; }
 
@@ -476,6 +537,13 @@ public struct NavMeshHit
     public int area;
 }
 
+public struct NavMeshTriangulation
+{
+    public Vector3[] vertices;
+    public int[] indices;
+    public int[] areas;
+}
+
 public struct OffMeshLinkData
 {
     public bool activated;
@@ -512,7 +580,8 @@ public enum OffMeshLinkType
 public enum NavMeshObstacleShape
 {
     Capsule,
-    Box
+    Box,
+    None
 }
 
 public class NavMeshObstacle : Behaviour
@@ -574,6 +643,9 @@ public class OffMeshLink : Behaviour
     private float _costOverride = 1f;
     private bool _autoUpdatePositions = true;
     private bool _biDirectional = true;
+    private bool _occupied;
+    private int _area;
+    private int _navMeshLayer;
 
     public bool activated
     {
@@ -615,5 +687,23 @@ public class OffMeshLink : Behaviour
     {
         get => _biDirectional;
         set => _biDirectional = value;
+    }
+
+    public bool occupied
+    {
+        get => _occupied;
+        set => _occupied = value;
+    }
+
+    public int area
+    {
+        get => _area;
+        set => _area = value;
+    }
+
+    public int navMeshLayer
+    {
+        get => _navMeshLayer;
+        set => _navMeshLayer = value;
     }
 }

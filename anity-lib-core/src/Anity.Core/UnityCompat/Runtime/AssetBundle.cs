@@ -10,6 +10,7 @@ public class AssetBundle : Object
     private readonly Dictionary<string, Object> _assets = new();
     private Hash128 _hash;
     private Object? _mainAsset;
+    private readonly Dictionary<string, string> _scenePaths = new();
 
     public Hash128 hash => _hash;
     public bool isStreamedSceneAssetBundle { get; set; }
@@ -30,6 +31,12 @@ public class AssetBundle : Object
         if (string.IsNullOrEmpty(assetName) || asset == null) return;
         _assets[assetName] = asset;
         asset.name = assetName;
+    }
+
+    internal void RegisterScenePath(string scenePath)
+    {
+        if (string.IsNullOrEmpty(scenePath)) return;
+        _scenePaths[scenePath] = scenePath;
     }
 
     public bool Contains(string name)
@@ -182,7 +189,9 @@ public class AssetBundle : Object
 
     public string[] GetAllScenePaths()
     {
-        return Array.Empty<string>();
+        var paths = new string[_scenePaths.Count];
+        _scenePaths.Keys.CopyTo(paths, 0);
+        return paths;
     }
 
     public void Unload(bool unloadAllLoadedObjects)
@@ -357,9 +366,25 @@ public class AssetBundleCreateRequest : AsyncOperation
 
     public AssetBundle? assetBundle => _assetBundle;
 
+    public AssetBundleCreateRequest() : base(false)
+    {
+    }
+
     internal void SetAssetBundle(AssetBundle? bundle)
     {
         _assetBundle = bundle;
+    }
+
+    public AssetBundleCreateRequest GetAwaiter()
+    {
+        return this;
+    }
+
+    public bool IsCompleted => isDone;
+
+    public AssetBundle? GetResult()
+    {
+        return _assetBundle;
     }
 }
 
@@ -377,6 +402,10 @@ public class AssetBundleRequest : AsyncOperation
 
     public Object[] allAssets => _allAssets;
 
+    public AssetBundleRequest() : base(false)
+    {
+    }
+
     internal void SetAsset(Object? asset)
     {
         _asset = asset;
@@ -386,16 +415,48 @@ public class AssetBundleRequest : AsyncOperation
     {
         _allAssets = assets ?? Array.Empty<Object>();
     }
+
+    public AssetBundleRequest GetAwaiter()
+    {
+        return this;
+    }
+
+    public bool IsCompleted => isDone;
+
+    public Object? GetResult()
+    {
+        return _asset;
+    }
 }
 
 public class AssetBundleUnloadOperation : AsyncOperation
 {
+    public AssetBundleUnloadOperation() : base(false)
+    {
+    }
+
+    internal void SetDone()
+    {
+        isDone = true;
+    }
+
+    public AssetBundleUnloadOperation GetAwaiter()
+    {
+        return this;
+    }
+
+    public bool IsCompleted => isDone;
+
+    public void GetResult()
+    {
+    }
 }
 
 public class AssetBundleManifest : Object
 {
     private readonly Dictionary<string, Hash128> _bundleHashes = new();
     private readonly Dictionary<string, string[]> _bundleDependencies = new();
+    private readonly Dictionary<string, string[]> _bundleVariants = new();
     private readonly List<string> _allBundles = new();
 
     internal void AddBundle(string bundleName, Hash128 hash, string[]? dependencies)
@@ -407,9 +468,39 @@ public class AssetBundleManifest : Object
         _bundleDependencies[bundleName] = dependencies ?? Array.Empty<string>();
     }
 
+    internal void AddBundleWithVariant(string bundleName, string variant, Hash128 hash)
+    {
+        if (string.IsNullOrEmpty(bundleName)) return;
+        if (!_allBundles.Contains(bundleName))
+            _allBundles.Add(bundleName);
+        _bundleHashes[bundleName] = hash;
+        if (_bundleVariants.TryGetValue(bundleName, out var existing))
+        {
+            var list = new List<string>(existing) { variant };
+            _bundleVariants[bundleName] = list.ToArray();
+        }
+        else
+        {
+            _bundleVariants[bundleName] = new[] { variant };
+        }
+    }
+
     public string[] GetAllAssetBundles()
     {
         return _allBundles.ToArray();
+    }
+
+    public string[] GetAllAssetBundlesWithVariant()
+    {
+        var result = new List<string>();
+        foreach (var kvp in _bundleVariants)
+        {
+            foreach (var variant in kvp.Value)
+            {
+                result.Add($"{kvp.Key}.{variant}");
+            }
+        }
+        return result.ToArray();
     }
 
     public string[] GetAllDependencies(string assetBundleName)
@@ -425,9 +516,15 @@ public class AssetBundleManifest : Object
         return _bundleDependencies.TryGetValue(assetBundleName, out var deps) ? (string[])deps.Clone() : Array.Empty<string>();
     }
 
-    public Hash128 GetHash(string assetBundleName)
+    public Hash128 GetAssetBundleHash(string assetBundleName)
     {
         return _bundleHashes.TryGetValue(assetBundleName, out var hash) ? hash : default;
+    }
+
+    [Obsolete("Use GetAssetBundleHash instead")]
+    public Hash128 GetHash(string assetBundleName)
+    {
+        return GetAssetBundleHash(assetBundleName);
     }
 
     private void GetDependenciesRecursive(string bundleName, HashSet<string> result)
