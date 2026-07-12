@@ -199,3 +199,7 @@ modules/**/[Tt]emp/
 .nuke/temp/
 **/BenchmarkDotNet.Artifacts/
 )
+
+# Local MCP tooling
+mcps/
+
