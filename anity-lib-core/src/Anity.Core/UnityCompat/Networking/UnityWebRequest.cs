@@ -91,17 +91,42 @@ public class UnityWebRequest : IDisposable
     private CancellationTokenSource? _cts;
     private UnityWebRequestAsyncOperation? _pendingOp;
 
-    private HttpClient CreateClientForRequest()
+    /// <summary>Shared cookie jar (Unity WebRequest cookie cache). Replaced on ClearCookieCache.</summary>
+    private static CookieContainer s_CookieJar = new CookieContainer();
+    private static readonly object s_CookieLock = new object();
+
+    /// <summary>When true, ServerCertificateCustomValidationCallback accepts all (dev only).</summary>
+    public static bool dangerAcceptAllCertificates { get; set; }
+
+    private HttpClientHandler CreateHandler()
     {
-        // Per-request handler so redirectLimit is honored (Unity property).
         int redirects = redirectLimit < 0 ? 0 : redirectLimit;
+        CookieContainer jar;
+        lock (s_CookieLock) jar = s_CookieJar;
         var handler = new HttpClientHandler
         {
             AllowAutoRedirect = redirects > 0,
             MaxAutomaticRedirections = redirects > 0 ? Math.Min(redirects, 50) : 1,
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+            UseCookies = true,
+            CookieContainer = jar
         };
-        var c = new HttpClient(handler);
+
+        // Certificate validation — wire CertificateHandler when provided
+        handler.ServerCertificateCustomValidationCallback = (message, cert, chain, errors) =>
+        {
+            if (dangerAcceptAllCertificates) return true;
+            if (certificateHandler == null)
+                return errors == System.Net.Security.SslPolicyErrors.None;
+            byte[] raw = cert?.GetRawCertData() ?? Array.Empty<byte>();
+            return certificateHandler.ValidateCertificateInternal(raw);
+        };
+        return handler;
+    }
+
+    private HttpClient CreateClientForRequest()
+    {
+        var c = new HttpClient(CreateHandler());
         c.Timeout = Timeout.InfiniteTimeSpan;
         return c;
     }
@@ -378,11 +403,64 @@ public class UnityWebRequest : IDisposable
     public void ClearCookieCache()
     {
         _requestHeaders.Remove("Cookie");
+        lock (s_CookieLock)
+            s_CookieJar = new CookieContainer();
     }
 
     public void ClearCookieCache(Uri uri)
     {
-        _ = uri;
+        if (uri == null) { ClearCookieCache(); return; }
+        lock (s_CookieLock)
+        {
+            try
+            {
+                var cookies = s_CookieJar.GetCookies(uri);
+                foreach (Cookie c in cookies)
+                    c.Expired = true;
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>Set a cookie into the shared jar (tests / session bootstrap).</summary>
+    public static void SetCookie(string url, string cookieHeader)
+    {
+        if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(cookieHeader)) return;
+        lock (s_CookieLock)
+        {
+            try { s_CookieJar.SetCookies(new Uri(url), cookieHeader); } catch { }
+        }
+    }
+
+    public static string GetCookieHeader(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return string.Empty;
+        lock (s_CookieLock)
+        {
+            try
+            {
+                var cookies = s_CookieJar.GetCookies(new Uri(url));
+                if (cookies.Count == 0) return string.Empty;
+                var sb = new StringBuilder();
+                foreach (Cookie c in cookies)
+                {
+                    if (sb.Length > 0) sb.Append("; ");
+                    sb.Append(c.Name).Append('=').Append(c.Value);
+                }
+                return sb.ToString();
+            }
+            catch { return string.Empty; }
+        }
+    }
+
+    public static int GetCookieCount(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return 0;
+        lock (s_CookieLock)
+        {
+            try { return s_CookieJar.GetCookies(new Uri(url)).Count; }
+            catch { return 0; }
+        }
     }
 
     public static string EscapeURL(string s) => Uri.EscapeDataString(s);
@@ -490,11 +568,12 @@ public abstract class CertificateHandler : IDisposable
 
     protected abstract bool ValidateCertificate(byte[] certificateData);
 
-    internal bool ValidateCertificateInternal(byte[] certificateData)
+    /// <summary>Public entry for policy evaluation (also used by HttpClient TLS callback).</summary>
+    public bool ValidateCertificateInternal(byte[] certificateData)
     {
         if (_callback != null)
             return _callback(certificateData);
-        return ValidateCertificate(certificateData);
+        return ValidateCertificate(certificateData ?? Array.Empty<byte>());
     }
 
     public void Dispose()
@@ -507,6 +586,27 @@ public abstract class CertificateHandler : IDisposable
     {
         _disposed = true;
     }
+}
+
+/// <summary>Accept any server certificate (dev / self-signed).</summary>
+public sealed class AcceptAllCertificatesSignedWithASpecificKeyPublicKey : CertificateHandler
+{
+    protected override bool ValidateCertificate(byte[] certificateData) => true;
+}
+
+/// <summary>Always reject — useful for negative tests.</summary>
+public sealed class RejectAllCertificatesHandler : CertificateHandler
+{
+    protected override bool ValidateCertificate(byte[] certificateData) => false;
+}
+
+/// <summary>Callback-driven certificate policy.</summary>
+public sealed class CallbackCertificateHandler : CertificateHandler
+{
+    private readonly Func<byte[], bool> _validate;
+    public CallbackCertificateHandler(Func<byte[], bool> validate) =>
+        _validate = validate ?? (_ => false);
+    protected override bool ValidateCertificate(byte[] certificateData) => _validate(certificateData ?? Array.Empty<byte>());
 }
 
 public abstract class DownloadHandler : IDisposable

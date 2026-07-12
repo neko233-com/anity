@@ -266,10 +266,11 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `AssetBundle` | ✅ | **全链路**：UnityFS catalog 写盘/读回、BuildAssetBundles(DryRun/AppendHash/Strict/变体/ChunkBasedCompression)、LoadFromFile/Memory/Stream+CRC、LoadAsset/All/SubAssets、Unload/Async、Manifest 依赖；**ALZ4** 压缩往返；测试≥16 |
-| `AssetBundleCompression` | ✅ | ALZ4 magic + Deflate；MaybeCompress/DecompressIfNeeded；Uncompressed 旁路 |
+| `AssetBundle` | ✅ | **全链路**：UnityFS catalog 写盘/读回、BuildAssetBundles(DryRun/AppendHash/Strict/变体/ChunkBasedCompression)、LoadFromFile/Memory/Stream+CRC、LoadAsset/All/SubAssets、Unload/Async、Manifest 依赖；**真 LZ4 block** 压缩往返 |
+| `Lz4Codec` | ✅ | 纯 C# LZ4 block Encode/Decode（非 Deflate 伪装） |
+| `AssetBundleCompression` | ✅ | ALZ4 + codec(LZ4/Deflate)；legacy Deflate 兼容；MaybeCompress/DecompressIfNeeded |
 | `AssetBundleRequest` | ✅ | 继承AsyncOperation、asset/allAssets属性 |
-| `UnityWebRequest` | ✅ | **HttpClient 真请求**；timeout/redirectLimit；file://与本地路径；WaitForCompletion；Abort；Get/Post/Put/Delete/Head/GetTexture/GetAssetBundle；BOM 安全 text；测试≥17 |
+| `UnityWebRequest` | ✅ | **HttpClient**；Cookie 容器；CertificateHandler TLS 回调；timeout/redirectLimit；file://；WaitForCompletion；Abort；测试≥23 |
 | `UnityWebRequestAsyncOperation` | ✅ | 继承AsyncOperation、webRequest属性、SetDone |
 | `DownloadHandler（基类）` | ✅ | data(byte[])/text(UTF8 去 BOM)、ReceiveData/ReceiveContentLength/CompleteContent |
 | `DownloadHandlerBuffer` | ✅ | 继承DownloadHandler、MemoryStream存储 |
@@ -535,7 +536,9 @@
 | `SettingsProvider` | ✅ | path/label/keywords/guiHandler/OnGUI抽象 |
 | `CompilationPipeline` / `AssemblyBuilder` | ✅ | CompilationStarted/CompilationFinished/assemblyCompilationEvents、AssemblyBuilder(assemblyPath/scriptPaths/extraDefines/build/references) |
 | `PackageManager.Client` / `PackageInfo` | ✅ | Add/Remove/Search/List/Embed/Install/ResetToEditorDefaults、PackageInfo(name/displayName/version/dependencies) |
-| `Addressables` | ✅ | Catalog/Register/RegisterBundle/BuildPlayerContent、LoadAsset/LoadAssets/Instantiate/LoadScene、DownloadDependencies/GetDownloadSize、ResourceLocator、AssetReference、AsyncOperationHandle；测试≥17 |
+| `Addressables` | ✅ | Catalog/标签/依赖图、Register/RegisterBundle/BuildPlayerContent、LoadAsset/LoadAssets/ByLabel/Instantiate/LoadScene、MergeMode、DownloadDependencies、ResourceLocator、AssetReference；测试≥22 |
+| `Il2CppToolchain` | ✅ | CMake/config.h/MethodMap/ABI 矩阵、DetectCompiler、TryNativeCompile 软跳过、BuildAndLink |
+| `PlatformGraphics` Metal/Vulkan | ✅ | iOS→Metal、Android→Vulkan、Force/PreferredApis；测试≥11 |
 | `InternalEditorUtility` | ✅ | **完整UnityEditorInternal API**：inBatchMode/isHumanControllable/isApplicationActive/hasProLicense/unityVersion/isProSkin/unityPreferencesFolder/projectPath、tags/layers/sortingLayerNames/sortingLayerUniqueIDs/asmrefGUIDs/assemblyNames、ReloadAssemblies/RequestScriptReload/IsRecompiling、OpenFileAtLineExternal、LoadRequiredAdditionalDataToWindow、LoadWindowLayout、GetAllGlobalTags/GetAllLayers/TagToLayer/LayerToTag、IsNativeModule/GetScriptAssemblies/GetEditorScriptAssemblies/GetRuntimeScriptAssemblies/GetAssemblyPath/GetAssemblies、IsInEditor/IsInPlayer/GetPlatformDefines/GetDefinesForAssembly/GetPredefinedDefines、RepaintAll/SetDirty/IsObjectAManagedReference、GetSerializedObjectProperties/GetActiveSceneName/GetOpenScenes/IsSceneSaved/GetSceneAssetPath、FindAssets/GetAssetPath/GUIDToAssetPath/AssetPathToGUID、CalculateBounds真实Renderer包围盒计算、SetIconForObject/GetIconForObject图标管理、scriptReloaded事件 |
 | `BuildCallbacks` | ✅ | 接口定义 |
 | `EditorSettings` | ✅ | Dictionary存储、serializationMode、defaultBehaviorMode、enterPlayModeOptions、spritePackerMode、asyncShaderCompilation、cacheServer配置、projectGenerationRootNamespace、DefineSymbols等完整属性 |

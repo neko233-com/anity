@@ -120,4 +120,74 @@ public class Il2CppTests
         Assert.Equal(Il2CppCodeGeneration.OptimizeSpeed, Il2CppBuilder.settings.codeGeneration);
         Assert.Equal(Il2CppCompilerConfiguration.Release, Il2CppBuilder.settings.compilerConfiguration);
     }
+
+    [Fact]
+    public void Toolchain_Emit_CreatesCMakeAndConfig()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "il2cpp_tc_" + Guid.NewGuid().ToString("N"));
+        Assert.True(Il2CppBuilder.BuildFromLoadedDomain(dir));
+        Assert.True(File.Exists(Path.Combine(dir, "CMakeLists.txt")));
+        Assert.True(File.Exists(Path.Combine(dir, "il2cpp-config.h")));
+        Assert.True(File.Exists(Path.Combine(dir, "MethodMap.tsv")));
+        Assert.True(File.Exists(Path.Combine(dir, "toolchain.json")));
+        Assert.True(Il2CppToolchain.ValidateOutputLayout(dir));
+    }
+
+    [Fact]
+    public void Toolchain_BuildAndLinkFromDomain()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "il2cpp_bl_" + Guid.NewGuid().ToString("N"));
+        Assert.True(Il2CppToolchain.BuildAndLinkFromDomain(dir, Il2CppToolchain.TargetAbi.WinX64, tryNativeCompile: false));
+        Assert.True(Il2CppToolchain.ListGeneratedCpp(dir).Count > 0);
+    }
+
+    [Fact]
+    public void Toolchain_Abi_AndroidConfig()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "il2cpp_and_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "t.cpp"), "void f(){}\n");
+        File.WriteAllText(Path.Combine(dir, "link.xml"), "<linker/>");
+        File.WriteAllText(Path.Combine(dir, "Il2CppMetadata.map"), "x");
+        Assert.True(Il2CppToolchain.EmitToolchainFiles(dir, Il2CppToolchain.TargetAbi.AndroidArm64));
+        string cfg = File.ReadAllText(Path.Combine(dir, "il2cpp-config.h"));
+        Assert.Contains("IL2CPP_TARGET_ANDROID", cfg);
+    }
+
+    [Fact]
+    public void Toolchain_Abi_IosConfig()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "il2cpp_ios_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "t.cpp"), "void f(){}\n");
+        File.WriteAllText(Path.Combine(dir, "link.xml"), "<linker/>");
+        File.WriteAllText(Path.Combine(dir, "Il2CppMetadata.map"), "x");
+        Assert.True(Il2CppToolchain.EmitToolchainFiles(dir, Il2CppToolchain.TargetAbi.IosArm64));
+        Assert.Contains("IL2CPP_TARGET_IOS", File.ReadAllText(Path.Combine(dir, "il2cpp-config.h")));
+    }
+
+    [Fact]
+    public void Toolchain_DetectCompiler_DoesNotThrow()
+    {
+        _ = Il2CppToolchain.DetectCompiler();
+        // may be empty on CI without cl/clang — property still set
+        Assert.NotNull(Il2CppToolchain.lastDetectedCompiler);
+    }
+
+    [Fact]
+    public void Toolchain_TryNativeCompile_SoftWhenNoCompiler()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "il2cpp_nc_" + Guid.NewGuid().ToString("N"));
+        Assert.True(Il2CppBuilder.BuildFromLoadedDomain(dir));
+        // should not throw; soft-skip if no compiler
+        bool ok = Il2CppToolchain.TryNativeCompile(dir);
+        Assert.True(ok || !string.IsNullOrEmpty(Il2CppToolchain.lastCompileLog));
+        Assert.True(File.Exists(Path.Combine(dir, "compile.log")) || ok);
+    }
+
+    [Fact]
+    public void Toolchain_Validate_MissingDir_False()
+    {
+        Assert.False(Il2CppToolchain.ValidateOutputLayout(Path.Combine(Path.GetTempPath(), "nope_" + Guid.NewGuid().ToString("N"))));
+    }
 }

@@ -208,4 +208,64 @@ public class UnityWebRequestTests : IDisposable
         Assert.True(op.isDone);
         Assert.Equal(UnityWebRequest.Result.Success, req.result);
     }
+
+    [Fact]
+    public void Cookie_SetGetClear()
+    {
+        string url = "http://example.local/";
+        using var clear = UnityWebRequest.Get(url);
+        clear.ClearCookieCache();
+        UnityWebRequest.SetCookie(url, "sid=abc123");
+        Assert.True(UnityWebRequest.GetCookieCount(url) >= 1);
+        Assert.Contains("sid=abc123", UnityWebRequest.GetCookieHeader(url));
+        clear.ClearCookieCache();
+        Assert.Equal(0, UnityWebRequest.GetCookieCount(url));
+    }
+
+    [Fact]
+    public void CertificateHandler_AcceptAll_Validates()
+    {
+        var h = new AcceptAllCertificatesSignedWithASpecificKeyPublicKey();
+        Assert.True(h.ValidateCertificateInternal(new byte[] { 1, 2, 3 }));
+        h.Dispose();
+    }
+
+    [Fact]
+    public void CertificateHandler_RejectAll()
+    {
+        var h = new RejectAllCertificatesHandler();
+        Assert.False(h.ValidateCertificateInternal(new byte[] { 9 }));
+    }
+
+    [Fact]
+    public void CertificateHandler_Callback()
+    {
+        var h = new CallbackCertificateHandler(data => data != null && data.Length == 2);
+        Assert.True(h.ValidateCertificateInternal(new byte[] { 0, 1 }));
+        Assert.False(h.ValidateCertificateInternal(new byte[] { 0 }));
+    }
+
+    [Fact]
+    public void CertificateHandler_AttachedToRequest()
+    {
+        using var req = UnityWebRequest.Get(_file);
+        req.certificateHandler = new AcceptAllCertificatesSignedWithASpecificKeyPublicKey();
+        req.WaitForCompletion();
+        Assert.Equal(UnityWebRequest.Result.Success, req.result);
+    }
+
+    [Fact]
+    public void DangerAcceptAllCertificates_Flag()
+    {
+        bool prev = UnityWebRequest.dangerAcceptAllCertificates;
+        try
+        {
+            UnityWebRequest.dangerAcceptAllCertificates = true;
+            Assert.True(UnityWebRequest.dangerAcceptAllCertificates);
+        }
+        finally
+        {
+            UnityWebRequest.dangerAcceptAllCertificates = prev;
+        }
+    }
 }

@@ -18,6 +18,9 @@ public static class Addressables
     private static readonly Dictionary<string, string> _addressToPath = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, string> _addressToBundle = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, AssetBundle> _loadedBundles = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, HashSet<string>> _addressLabels = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, HashSet<string>> _labelToAddresses = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, HashSet<string>> _dependencies = new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<IResourceLocator> _locators = new();
     private static readonly HashSet<object> _handles = new();
 
@@ -40,12 +43,104 @@ public static class Addressables
         lock (_lock) _addressToBundle[address] = bundlePath;
     }
 
+    /// <summary>Attach label(s) to an address (Unity Addressables label).</summary>
+    public static void AddLabel(string address, string label)
+    {
+        if (string.IsNullOrEmpty(address) || string.IsNullOrEmpty(label)) return;
+        lock (_lock)
+        {
+            if (!_addressLabels.TryGetValue(address, out var set))
+            {
+                set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _addressLabels[address] = set;
+            }
+            set.Add(label);
+            if (!_labelToAddresses.TryGetValue(label, out var addrs))
+            {
+                addrs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _labelToAddresses[label] = addrs;
+            }
+            addrs.Add(address);
+        }
+    }
+
+    public static void AddLabels(string address, IEnumerable<string> labels)
+    {
+        if (labels == null) return;
+        foreach (var l in labels) AddLabel(address, l);
+    }
+
+    public static IReadOnlyCollection<string> GetLabels(string address)
+    {
+        lock (_lock)
+        {
+            if (_addressLabels.TryGetValue(address, out var set))
+                return set.ToList();
+            return Array.Empty<string>();
+        }
+    }
+
+    public static IReadOnlyCollection<string> GetAddressesWithLabel(string label)
+    {
+        lock (_lock)
+        {
+            if (_labelToAddresses.TryGetValue(label, out var set))
+                return set.ToList();
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>address depends on depAddress (must load deps first).</summary>
+    public static void AddDependency(string address, string depAddress)
+    {
+        if (string.IsNullOrEmpty(address) || string.IsNullOrEmpty(depAddress)) return;
+        lock (_lock)
+        {
+            if (!_dependencies.TryGetValue(address, out var set))
+            {
+                set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _dependencies[address] = set;
+            }
+            set.Add(depAddress);
+        }
+    }
+
+    public static IReadOnlyList<string> GetDependencies(string address, bool recursive = false)
+    {
+        lock (_lock)
+        {
+            if (!recursive)
+            {
+                if (_dependencies.TryGetValue(address, out var direct))
+                    return direct.ToList();
+                return Array.Empty<string>();
+            }
+            var result = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void Walk(string a)
+            {
+                if (!_dependencies.TryGetValue(a, out var deps)) return;
+                foreach (var d in deps)
+                {
+                    if (!seen.Add(d)) continue;
+                    result.Add(d);
+                    Walk(d);
+                }
+            }
+            Walk(address);
+            return result;
+        }
+    }
+
     public static void ClearCatalog()
     {
         lock (_lock)
         {
             _addressToPath.Clear();
             _addressToBundle.Clear();
+            _addressLabels.Clear();
+            _labelToAddresses.Clear();
+            _dependencies.Clear();
             _locators.Clear();
             foreach (var ab in _loadedBundles.Values)
             {
@@ -111,11 +206,30 @@ public static class Addressables
     {
         var handle = new AsyncOperationHandle<IList<T>>();
         var list = new List<T>();
-        if (keys != null)
+        if (keys != null && keys.Count > 0)
         {
+            // Expand labels → addresses, then merge by mode
+            var addressSets = new List<HashSet<string>>();
             foreach (var k in keys)
             {
-                var o = LoadSync(k?.ToString() ?? string.Empty) as T;
+                string key = k?.ToString() ?? string.Empty;
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                // if key is a label, expand
+                var byLabel = GetAddressesWithLabel(key);
+                if (byLabel.Count > 0)
+                    foreach (var a in byLabel) set.Add(a);
+                else if (Exists(key))
+                    set.Add(key);
+                addressSets.Add(set);
+            }
+
+            HashSet<string> merged = MergeAddressSets(addressSets, mode);
+            foreach (var addr in merged)
+            {
+                // load deps first
+                foreach (var dep in GetDependencies(addr, recursive: true))
+                    LoadSync(dep);
+                var o = LoadSync(addr) as T;
                 if (o != null)
                 {
                     list.Add(o);
@@ -125,6 +239,32 @@ public static class Addressables
         }
         handle.Complete(list, null);
         return handle;
+    }
+
+    /// <summary>Load all assets tagged with label.</summary>
+    public static AsyncOperationHandle<IList<T>> LoadAssetsByLabelAsync<T>(string label, Action<T>? callback = null)
+        where T : UnityEngine.Object
+    {
+        return LoadAssetsAsync(new List<object> { label }, callback, MergeMode.Union);
+    }
+
+    private static HashSet<string> MergeAddressSets(List<HashSet<string>> sets, MergeMode mode)
+    {
+        if (sets.Count == 0) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (mode == MergeMode.UseFirst || mode == MergeMode.None)
+            return new HashSet<string>(sets[0], StringComparer.OrdinalIgnoreCase);
+        if (mode == MergeMode.Intersection)
+        {
+            var acc = new HashSet<string>(sets[0], StringComparer.OrdinalIgnoreCase);
+            for (int i = 1; i < sets.Count; i++)
+                acc.IntersectWith(sets[i]);
+            return acc;
+        }
+        // Union
+        var u = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in sets)
+            foreach (var a in s) u.Add(a);
+        return u;
     }
 
     public enum MergeMode
@@ -260,13 +400,22 @@ public static class Addressables
             Register(kvp.Key, kvp.Value);
     }
 
-    /// <summary>Unity-style: download remote deps (local bundles = size 0 / success).</summary>
+    /// <summary>Unity-style: download remote deps (local bundles = size 0 / success). Resolves dependency graph.</summary>
     public static AsyncOperationHandle DownloadDependenciesAsync(string address, bool autoReleaseHandle = false)
     {
         _ = autoReleaseHandle;
         var h = new AsyncOperationHandle();
-        // Local catalog only — complete immediately when address is known or as soft success
-        bool ok = Exists(address);
+        if (string.IsNullOrEmpty(address))
+        {
+            h.Complete(false, new Exception("Empty address"));
+            return h;
+        }
+        // Ensure deps loadable
+        var deps = GetDependencies(address, recursive: true);
+        foreach (var d in deps)
+            LoadSync(d);
+        bool ok = Exists(address) || deps.Count > 0;
+        if (ok) LoadSync(address);
         h.Complete(ok, ok ? null : new Exception("Unknown address: " + address));
         return h;
     }

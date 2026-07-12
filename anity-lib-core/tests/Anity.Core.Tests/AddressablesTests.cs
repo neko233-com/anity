@@ -217,4 +217,75 @@ public class AddressablesTests : IDisposable
             new List<object> { "m1", "m2" }, null, Addressables.MergeMode.Union);
         Assert.Equal(2, h.Result.Count);
     }
+
+    [Fact]
+    public void Labels_RegisterAndQuery()
+    {
+        Addressables.Register("ui/btn", "Assets/Addr/Btn.txt");
+        AssetDatabase.CreateAsset(new TextAsset("btn"), "Assets/Addr/Btn.txt");
+        Addressables.AddLabel("ui/btn", "ui");
+        Addressables.AddLabel("ui/btn", "common");
+        Assert.Contains("ui", Addressables.GetLabels("ui/btn"));
+        Assert.Contains("ui/btn", Addressables.GetAddressesWithLabel("ui"));
+    }
+
+    [Fact]
+    public void LoadAssetsByLabel_ReturnsTagged()
+    {
+        AssetDatabase.CreateAsset(new TextAsset("l1"), "Assets/Addr/L1.txt");
+        AssetDatabase.CreateAsset(new TextAsset("l2"), "Assets/Addr/L2.txt");
+        Addressables.Register("a1", "Assets/Addr/L1.txt");
+        Addressables.Register("a2", "Assets/Addr/L2.txt");
+        Addressables.AddLabel("a1", "pack");
+        Addressables.AddLabel("a2", "pack");
+        var h = Addressables.LoadAssetsByLabelAsync<TextAsset>("pack");
+        Assert.Equal(2, h.Result.Count);
+    }
+
+    [Fact]
+    public void MergeMode_Intersection()
+    {
+        AssetDatabase.CreateAsset(new TextAsset("i1"), "Assets/Addr/I1.txt");
+        AssetDatabase.CreateAsset(new TextAsset("i2"), "Assets/Addr/I2.txt");
+        Addressables.Register("i1", "Assets/Addr/I1.txt");
+        Addressables.Register("i2", "Assets/Addr/I2.txt");
+        Addressables.AddLabel("i1", "A");
+        Addressables.AddLabel("i1", "B");
+        Addressables.AddLabel("i2", "A");
+        var h = Addressables.LoadAssetsAsync<TextAsset>(
+            new List<object> { "A", "B" }, null, Addressables.MergeMode.Intersection);
+        Assert.Single(h.Result);
+    }
+
+    [Fact]
+    public void DependencyGraph_Recursive()
+    {
+        Addressables.Register("root", "Assets/Addr/R.txt");
+        Addressables.Register("mid", "Assets/Addr/Mid.txt");
+        Addressables.Register("leaf", "Assets/Addr/Leaf.txt");
+        AssetDatabase.CreateAsset(new TextAsset("r"), "Assets/Addr/R.txt");
+        AssetDatabase.CreateAsset(new TextAsset("m"), "Assets/Addr/Mid.txt");
+        AssetDatabase.CreateAsset(new TextAsset("l"), "Assets/Addr/Leaf.txt");
+        Addressables.AddDependency("root", "mid");
+        Addressables.AddDependency("mid", "leaf");
+        var deps = Addressables.GetDependencies("root", recursive: true);
+        Assert.Contains("mid", deps);
+        Assert.Contains("leaf", deps);
+        var direct = Addressables.GetDependencies("root", recursive: false);
+        Assert.Contains("mid", direct);
+        Assert.DoesNotContain("leaf", direct);
+    }
+
+    [Fact]
+    public void DownloadDependencies_ResolvesGraph()
+    {
+        Addressables.Register("p", "Assets/Addr/P2.txt");
+        Addressables.Register("c", "Assets/Addr/C2.txt");
+        AssetDatabase.CreateAsset(new TextAsset("p"), "Assets/Addr/P2.txt");
+        AssetDatabase.CreateAsset(new TextAsset("c"), "Assets/Addr/C2.txt");
+        Addressables.AddDependency("p", "c");
+        var h = Addressables.DownloadDependenciesAsync("p");
+        Assert.True(h.IsDone);
+        Assert.Null(h.OperationException);
+    }
 }
