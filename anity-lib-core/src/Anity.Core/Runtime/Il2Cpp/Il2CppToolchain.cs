@@ -176,6 +176,134 @@ public static class Il2CppToolchain
                && File.Exists(Path.Combine(dir, "CMakeLists.txt"));
     }
 
+    public static string GetPlayerExecutablePath(string il2cppOutputDir)
+    {
+        bool win = Environment.OSVersion.Platform == PlatformID.Win32NT;
+        return Path.Combine(il2cppOutputDir, win ? "AnityIl2CppPlayer.exe" : "AnityIl2CppPlayer");
+    }
+
+    /// <summary>
+    /// Full native link of player: compile bootstrap + PlayerMain into executable when compiler available.
+    /// Returns true only if native binary was produced.
+    /// </summary>
+    public static bool LinkPlayer(string il2cppOutputDir, TargetAbi abi = TargetAbi.WinX64)
+    {
+        lastCompileLog = string.Empty;
+        if (string.IsNullOrEmpty(il2cppOutputDir) || !Directory.Exists(il2cppOutputDir))
+            return false;
+
+        // Ensure player main exists
+        string playerMain = Path.Combine(il2cppOutputDir, "PlayerMain.cpp");
+        string bootstrap = Path.Combine(il2cppOutputDir, "Il2CppBootstrap.cpp");
+        if (!File.Exists(bootstrap))
+        {
+            File.WriteAllText(bootstrap,
+                "#include \"il2cpp-config.h\"\nvoid anity_il2cpp_bootstrap() {}\n");
+        }
+        if (!File.Exists(playerMain))
+        {
+            File.WriteAllText(playerMain,
+                "#include \"il2cpp-config.h\"\n#include <stdio.h>\nextern void anity_il2cpp_bootstrap();\n" +
+                "int main(){ anity_il2cpp_bootstrap(); printf(\"AnityIl2CppPlayer\\n\"); return 0; }\n");
+        }
+        if (!File.Exists(Path.Combine(il2cppOutputDir, "il2cpp-config.h")))
+            EmitToolchainFiles(il2cppOutputDir, abi);
+
+        string compiler = DetectCompiler();
+        if (string.IsNullOrEmpty(compiler))
+        {
+            lastCompileLog = "No C++ compiler — LinkPlayer skipped";
+            File.WriteAllText(Path.Combine(il2cppOutputDir, "link.log"), lastCompileLog);
+            return false;
+        }
+
+        string outExe = GetPlayerExecutablePath(il2cppOutputDir);
+        string fileName = Path.GetFileName(compiler).ToLowerInvariant();
+        string args;
+        if (fileName.StartsWith("cl"))
+        {
+            // MSVC: need /Fe and may fail without VS env — still attempt
+            args = $"/nologo /EHsc /I\"{il2cppOutputDir}\" /Fe\"{outExe}\" \"{bootstrap}\" \"{playerMain}\"";
+        }
+        else
+        {
+            args = $"-std=c++17 -I\"{il2cppOutputDir}\" -o \"{outExe}\" \"{bootstrap}\" \"{playerMain}\"";
+        }
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = compiler,
+                Arguments = args,
+                WorkingDirectory = il2cppOutputDir,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var p = Process.Start(psi);
+            if (p == null)
+            {
+                lastCompileLog = "failed to start linker/compiler";
+                return false;
+            }
+            string stdout = p.StandardOutput.ReadToEnd();
+            string stderr = p.StandardError.ReadToEnd();
+            p.WaitForExit(120_000);
+            lastCompileLog = $"link compiler={compiler}\nargs={args}\nexit={p.ExitCode}\n{stdout}\n{stderr}";
+            File.WriteAllText(Path.Combine(il2cppOutputDir, "link.log"), lastCompileLog);
+            bool ok = p.ExitCode == 0 && File.Exists(outExe);
+            if (ok)
+                lastCompileLog += "\nplayer=" + outExe;
+            return ok;
+        }
+        catch (Exception ex)
+        {
+            lastCompileLog = "LinkPlayer: " + ex.Message;
+            try { File.WriteAllText(Path.Combine(il2cppOutputDir, "link.log"), lastCompileLog); } catch { }
+            return false;
+        }
+    }
+
+    /// <summary>Compile all .cpp units to objects (batch), returns count of object files produced.</summary>
+    public static int CompileAllUnits(string il2cppOutputDir)
+    {
+        string compiler = DetectCompiler();
+        if (string.IsNullOrEmpty(compiler) || !Directory.Exists(il2cppOutputDir))
+            return 0;
+
+        int count = 0;
+        bool msvc = Path.GetFileName(compiler).ToLowerInvariant().StartsWith("cl");
+        foreach (var cpp in Directory.GetFiles(il2cppOutputDir, "*.cpp"))
+        {
+            string name = Path.GetFileNameWithoutExtension(cpp);
+            string obj = Path.Combine(il2cppOutputDir, name + (msvc ? ".obj" : ".o"));
+            string args = msvc
+                ? $"/nologo /c /I\"{il2cppOutputDir}\" /Fo\"{obj}\" \"{cpp}\""
+                : $"-c -std=c++17 -I\"{il2cppOutputDir}\" -o \"{obj}\" \"{cpp}\"";
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = compiler,
+                    Arguments = args,
+                    WorkingDirectory = il2cppOutputDir,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var p = Process.Start(psi);
+                if (p == null) continue;
+                p.WaitForExit(60_000);
+                if (File.Exists(obj)) count++;
+            }
+            catch { }
+        }
+        return count;
+    }
+
     private static string GenerateConfigHeader(TargetAbi abi)
     {
         var sb = new StringBuilder();
@@ -206,9 +334,16 @@ public static class Il2CppToolchain
         sb.AppendLine("set(CMAKE_CXX_STANDARD 17)");
         sb.AppendLine("add_library(anity_il2cpp STATIC");
         foreach (var f in cppFiles.Take(200))
+        {
+            if (string.Equals(f, "PlayerMain.cpp", StringComparison.OrdinalIgnoreCase)) continue;
             sb.AppendLine($"  {f}");
+        }
         sb.AppendLine(")");
         sb.AppendLine("target_include_directories(anity_il2cpp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})");
+        sb.AppendLine("if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/PlayerMain.cpp\")");
+        sb.AppendLine("  add_executable(AnityIl2CppPlayer PlayerMain.cpp)");
+        sb.AppendLine("  target_link_libraries(AnityIl2CppPlayer PRIVATE anity_il2cpp)");
+        sb.AppendLine("endif()");
         sb.AppendLine($"# abi={abi}");
         return sb.ToString();
     }

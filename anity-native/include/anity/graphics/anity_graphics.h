@@ -52,6 +52,35 @@ ANITY_API int32_t ANITY_CALL AnityGraphics_SupportsHDR(const AnityGraphicsDevice
 ANITY_API AnityGraphicsDeviceType ANITY_CALL AnityGraphics_GetDefaultDeviceType(
     AnityPlatform platform);
 
+/* --- Swapchain (Metal / Vulkan / D3D / headless) --- */
+typedef struct AnitySwapchainDesc {
+  int32_t width;
+  int32_t height;
+  int32_t imageCount; /* preferred buffer count, 0 = default 2 */
+  int32_t vsync;
+  int32_t hdr;
+  void* nativeWindow; /* HWND / ANativeWindow / CAMetalLayer* / nullptr = headless */
+} AnitySwapchainDesc;
+
+typedef struct AnitySwapchain AnitySwapchain;
+
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CreateSwapchain(
+    AnityGraphicsDevice* device,
+    const AnitySwapchainDesc* desc,
+    AnitySwapchain** outSwapchain);
+
+ANITY_API void ANITY_CALL AnityGraphics_DestroySwapchain(AnitySwapchain* swapchain);
+
+ANITY_API AnityResult ANITY_CALL AnityGraphics_AcquireNextImage(
+    AnitySwapchain* swapchain, int32_t* outImageIndex);
+
+ANITY_API AnityResult ANITY_CALL AnityGraphics_PresentSwapchain(AnitySwapchain* swapchain);
+
+ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainImageCount(const AnitySwapchain* swapchain);
+ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainWidth(const AnitySwapchain* swapchain);
+ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainHeight(const AnitySwapchain* swapchain);
+ANITY_API int32_t ANITY_CALL AnityGraphics_IsSwapchainHeadless(const AnitySwapchain* swapchain);
+
 #ifdef __cplusplus
 }
 #endif

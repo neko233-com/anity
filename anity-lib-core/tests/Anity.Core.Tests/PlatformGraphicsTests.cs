@@ -6,6 +6,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>Metal / Vulkan / platform graphics matrix — ≥10 cases.</summary>
+[Collection("ScreenState")]
 public class PlatformGraphicsTests
 {
     public PlatformGraphicsTests()
@@ -46,18 +47,26 @@ public class PlatformGraphicsTests
     [Fact]
     public void ForceMetal_SetsFlags()
     {
-        PlatformGraphics.ForceGraphicsDevice(GraphicsDeviceType.Metal);
-        Assert.True(PlatformGraphics.IsMetal);
-        Assert.False(PlatformGraphics.IsVulkan);
-        Assert.Equal(GraphicsDeviceType.Metal, PlatformGraphics.ActiveDeviceType);
+        try
+        {
+            PlatformGraphics.ForceGraphicsDevice(GraphicsDeviceType.Metal);
+            Assert.True(PlatformGraphics.IsMetal);
+            Assert.False(PlatformGraphics.IsVulkan);
+            Assert.Equal(GraphicsDeviceType.Metal, PlatformGraphics.ActiveDeviceType);
+        }
+        finally { PlatformGraphics.ClearForce(); }
     }
 
     [Fact]
     public void ForceVulkan_SetsFlags()
     {
-        PlatformGraphics.ForceGraphicsDevice(GraphicsDeviceType.Vulkan);
-        Assert.True(PlatformGraphics.IsVulkan);
-        Assert.False(PlatformGraphics.IsMetal);
+        try
+        {
+            PlatformGraphics.ForceGraphicsDevice(GraphicsDeviceType.Vulkan);
+            Assert.True(PlatformGraphics.IsVulkan);
+            Assert.False(PlatformGraphics.IsMetal);
+        }
+        finally { PlatformGraphics.ClearForce(); }
     }
 
     [Fact]

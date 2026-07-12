@@ -1,0 +1,74 @@
+[
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\core\\anity_core.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\core\\anity_core.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/core/anity_core.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/core/anity_core.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\graphics\\anity_graphics.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\graphics\\anity_graphics.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/graphics/anity_graphics.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/graphics/anity_graphics.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\graphics\\anity_hdr.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\graphics\\anity_hdr.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/graphics/anity_hdr.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/graphics/anity_hdr.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\graphics\\backends\\null_backend.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\graphics\\backends\\null_backend.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/graphics/backends/null_backend.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/graphics/backends/null_backend.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\graphics\\backends\\vulkan_backend.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\graphics\\backends\\vulkan_backend.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/graphics/backends/vulkan_backend.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/graphics/backends/vulkan_backend.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\graphics\\backends\\d3d11_backend.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\graphics\\backends\\d3d11_backend.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/graphics/backends/d3d11_backend.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/graphics/backends/d3d11_backend.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\physics\\anity_physics.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\physics\\anity_physics.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/physics/anity_physics.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/physics/anity_physics.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\audio\\anity_audio.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\audio\\anity_audio.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/audio/anity_audio.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/audio/anity_audio.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\media\\anity_media.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\media\\anity_media.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/media/anity_media.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/media/anity_media.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\jobs\\anity_jobs.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\jobs\\anity_jobs.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/jobs/anity_jobs.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/jobs/anity_jobs.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\texture\\anity_texture_compress.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\texture\\anity_texture_compress.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/texture/anity_texture_compress.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/texture/anity_texture_compress.cpp.obj"
+},
+{
+  "directory": "D:/Code/neko233-Projects/anity/anity-native/build-ci",
+  "command": "C:\\Users\\14170\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\c++.exe -DANITY_HAS_D3D11=1 -DANITY_HAS_HDR=1 -DANITY_OS_WINDOWS=1 -Danity_native_EXPORTS -ID:/Code/neko233-Projects/anity/anity-native/include -ID:/Code/neko233-Projects/anity/anity-native/src -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles\\anity_native.dir\\src\\graphics\\backends\\metal_backend_stub.cpp.obj -c D:\\Code\\neko233-Projects\\anity\\anity-native\\src\\graphics\\backends\\metal_backend_stub.cpp",
+  "file": "D:/Code/neko233-Projects/anity/anity-native/src/graphics/backends/metal_backend_stub.cpp",
+  "output": "D:/Code/neko233-Projects/anity/anity-native/build-ci/CMakeFiles/anity_native.dir/src/graphics/backends/metal_backend_stub.cpp.obj"
+}
+]

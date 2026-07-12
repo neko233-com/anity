@@ -143,6 +143,41 @@ public static class AnityNative
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetDefaultDeviceType")]
     public static extern int Graphics_GetDefaultDeviceType(Platform platform);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SwapchainDesc
+    {
+        public int width;
+        public int height;
+        public int imageCount;
+        public int vsync;
+        public int hdr;
+        public IntPtr nativeWindow;
+    }
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CreateSwapchain")]
+    public static extern Result Graphics_CreateSwapchain(IntPtr device, ref SwapchainDesc desc, out IntPtr swapchain);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_DestroySwapchain")]
+    public static extern void Graphics_DestroySwapchain(IntPtr swapchain);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_AcquireNextImage")]
+    public static extern Result Graphics_AcquireNextImage(IntPtr swapchain, out int imageIndex);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_PresentSwapchain")]
+    public static extern Result Graphics_PresentSwapchain(IntPtr swapchain);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetSwapchainImageCount")]
+    public static extern int Graphics_GetSwapchainImageCount(IntPtr swapchain);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetSwapchainWidth")]
+    public static extern int Graphics_GetSwapchainWidth(IntPtr swapchain);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetSwapchainHeight")]
+    public static extern int Graphics_GetSwapchainHeight(IntPtr swapchain);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_IsSwapchainHeadless")]
+    public static extern int Graphics_IsSwapchainHeadless(IntPtr swapchain);
+
     // --- HDR ---
     [StructLayout(LayoutKind.Sequential)]
     public struct HDRDisplayInfo

@@ -1,19 +1,33 @@
 # PLAN
 
+## 2026-07-13j（本次）— AB.Compare 门禁 + IL2CPP Player 链接启动 + Metal/Vulkan Swapchain
+
+### 已完成
+- **AB.Compare 二进制门禁**
+  - `AssetBundleBinaryComparer`：UnityFS magic（空格/NUL）、ALZ4 解压后校验、catalog 解析、Gate
+  - 写盘 magic 对齐官方 `"UnityFS "`；AB.Compare.Tests **22 全绿**
+  - CI：unit 内必跑 AB.Compare + 独立 ab-compare job
+- **IL2CPP 全链接 + Player 启动**
+  - `Il2CppPlayerHost.BuildPlayer/Launch/LaunchManaged`
+  - `Il2CppToolchain.LinkPlayer`（cl/clang 链 AnityIl2CppPlayer）+ CompileAllUnits + CMake exe target
+  - 无编译器时 managed player 仍可 Launch；Il2CppPlayerTests **13**
+- **Metal/Vulkan 原生交换链**
+  - C-API：Create/Destroy/Acquire/Present/Get* Swapchain
+  - Vulkan 真设备 + headless swapchain 状态；Metal Apple 实现 + 非 Apple stub
+  - managed `NativeGraphicsDevice.CreateSwapchain` 双路径；SwapchainTests **13**
+  - native CMake 构建通过（build-ci）
+- **测试**：AB.Compare 22 + Core 增补；CI native-graphics job
+
+### 下一次要做（优先）
+1. Vulkan 真 VkSurface/SwapchainKHR（Win32/Android）
+2. Metal CAMetalLayer 上屏 + EDR
+3. IL2CPP player 产物打包进 CLI `-il2cpp -buildPlayer`
+
 ## 2026-07-13i（本次）— 真 LZ4 + UWR 证书/Cookie + Addressables 标签依赖 + IL2CPP 工具链 + Metal/Vulkan
 
 ### 已完成
-- **真 LZ4 block codec**（`Lz4Codec` 纯 C#）：Encode/Decode；AB 默认 codec=LZ4，Deflate 兼容
-- **UWR Cookie/证书**：共享 CookieContainer；CertificateHandler 接 TLS 回调；Accept/Reject/Callback
-- **Addressables 标签/依赖图**：AddLabel、LoadAssetsByLabel、MergeMode Intersection、递归依赖
-- **Il2CppToolchain**：CMake/config.h/MethodMap/多 ABI、DetectCompiler、TryNativeCompile 软跳过
-- **PlatformGraphics** Metal/Vulkan 矩阵测试
-- **测试**：Core **174 全绿**；已 push `2cf7382`
-
-### 下一次要做（优先）
-1. 官方 Unity AB 二进制对照门禁（AB.Compare）
-2. IL2CPP → 真 cl/clang 全量链接与 player 启动
-3. Metal/Vulkan 原生设备交换链（anity-native）
+- 真 LZ4、UWR Cookie/证书、Addressables 标签依赖、Il2CppToolchain、PlatformGraphics
+- Core **174 全绿**
 
 ## 2026-07-13h（本次）— UnityWebRequest + Addressables + AB ALZ4 + Instantiate 修复
 

@@ -47,6 +47,9 @@ if(APPLE AND ANITY_ENABLE_METAL)
   target_sources(anity_native PRIVATE src/graphics/backends/metal_backend.mm)
   target_compile_definitions(anity_native PRIVATE ANITY_HAS_METAL=1)
   target_link_libraries(anity_native PRIVATE "-framework Metal" "-framework Foundation" "-framework QuartzCore")
+else()
+  # Windows/Linux: Metal symbols as stubs so CreateDevice(Metal) soft-fails cleanly
+  target_sources(anity_native PRIVATE src/graphics/backends/metal_backend_stub.cpp)
 endif()
 
 if(WIN32 AND ANITY_ENABLE_D3D11)

@@ -39,11 +39,8 @@ internal static class AssetBundleFormat
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms, Encoding.UTF8);
 
-        // UnityFS-compatible 8-byte magic (padded)
-        var magic = Encoding.ASCII.GetBytes(MagicUnityFs);
-        bw.Write(magic);
-        if (magic.Length < 8)
-            bw.Write(new byte[8 - magic.Length]);
+        // UnityFS official 8-byte magic: "UnityFS " (space-padded)
+        bw.Write(Encoding.ASCII.GetBytes("UnityFS "));
 
         bw.Write(FormatVersion);
         bw.Write(catalog.crc);
@@ -99,43 +96,73 @@ internal static class AssetBundleFormat
         catalog = new BundleCatalog();
         if (data == null || data.Length < 16) return false;
 
-        using var ms = new MemoryStream(data);
-        using var br = new BinaryReader(ms, Encoding.UTF8);
-
-        var magicBytes = br.ReadBytes(8);
-        var magic = Encoding.ASCII.GetString(magicBytes).TrimEnd('\0');
-        if (!magic.StartsWith(MagicUnityFs, StringComparison.Ordinal) &&
-            !magic.StartsWith(MagicAnity, StringComparison.Ordinal))
-            return false;
-
-        uint version = br.ReadUInt32();
-        if (version != FormatVersion && version > 10) return false; // allow forward-ish
-
-        catalog.crc = br.ReadUInt32();
-        catalog.bundleName = ReadString(br);
-        catalog.hash = new Hash128(br.ReadUInt32(), br.ReadUInt32(), br.ReadUInt32(), br.ReadUInt32());
-
-        int depCount = br.ReadInt32();
-        for (int i = 0; i < depCount; i++)
-            catalog.dependencies.Add(ReadString(br));
-
-        int sceneCount = br.ReadInt32();
-        for (int i = 0; i < sceneCount; i++)
-            catalog.scenes.Add(ReadString(br));
-
-        int assetCount = br.ReadInt32();
-        for (int i = 0; i < assetCount; i++)
+        try
         {
-            var e = new AssetEntry
+            using var ms = new MemoryStream(data);
+            using var br = new BinaryReader(ms, Encoding.UTF8);
+
+            var magicBytes = br.ReadBytes(8);
+            var magic = Encoding.ASCII.GetString(magicBytes).TrimEnd('\0');
+            if (!magic.StartsWith(MagicUnityFs, StringComparison.Ordinal) &&
+                !magic.StartsWith(MagicAnity, StringComparison.Ordinal))
+                return false;
+
+            uint version = br.ReadUInt32();
+            if (version != FormatVersion && version > 10) return false; // allow forward-ish
+
+            catalog.crc = br.ReadUInt32();
+            // Minimal UnityFS fixture (magic + zeros only) — not an Anity catalog
+            if (ms.Position >= ms.Length)
+                return false;
+
+            catalog.bundleName = ReadString(br);
+            if (ms.Position + 16 > ms.Length) return false;
+            catalog.hash = new Hash128(br.ReadUInt32(), br.ReadUInt32(), br.ReadUInt32(), br.ReadUInt32());
+
+            if (ms.Position + 4 > ms.Length) return false;
+            int depCount = br.ReadInt32();
+            if (depCount < 0 || depCount > 100_000) return false;
+            for (int i = 0; i < depCount; i++)
+                catalog.dependencies.Add(ReadString(br));
+
+            if (ms.Position + 4 > ms.Length) return false;
+            int sceneCount = br.ReadInt32();
+            if (sceneCount < 0 || sceneCount > 100_000) return false;
+            for (int i = 0; i < sceneCount; i++)
+                catalog.scenes.Add(ReadString(br));
+
+            if (ms.Position + 4 > ms.Length) return false;
+            int assetCount = br.ReadInt32();
+            if (assetCount < 0 || assetCount > 100_000) return false;
+            for (int i = 0; i < assetCount; i++)
             {
-                name = ReadString(br),
-                typeName = ReadString(br)
-            };
-            int len = br.ReadInt32();
-            e.payload = len > 0 ? br.ReadBytes(len) : Array.Empty<byte>();
-            catalog.assets.Add(e);
+                var e = new AssetEntry
+                {
+                    name = ReadString(br),
+                    typeName = ReadString(br)
+                };
+                int len = br.ReadInt32();
+                if (len < 0 || ms.Position + len > ms.Length) return false;
+                e.payload = len > 0 ? br.ReadBytes(len) : Array.Empty<byte>();
+                catalog.assets.Add(e);
+            }
+            return true;
         }
-        return true;
+        catch (EndOfStreamException)
+        {
+            catalog = new BundleCatalog();
+            return false;
+        }
+        catch (IOException)
+        {
+            catalog = new BundleCatalog();
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            catalog = new BundleCatalog();
+            return false;
+        }
     }
 
     public static AssetBundle Materialize(BundleCatalog catalog)

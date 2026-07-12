@@ -21,6 +21,7 @@ extern "C" AnityResult AnityGraphics_CreateNull(
   dev->supportsHdr = desc->hdrEnabled || type == ANITY_GFX_METAL || type == ANITY_GFX_VULKAN
                      || type == ANITY_GFX_D3D11 || type == ANITY_GFX_D3D12;
   dev->backend = nullptr;
+  dev->swapchain = nullptr;
   *outDevice = dev;
   return ANITY_OK;
 }

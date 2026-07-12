@@ -64,6 +64,7 @@ jobs:
         run: |
           set -e
           dotnet test anity-lib-core/tests/Anity.Core.Tests/Anity.Core.Tests.csproj -c Release --nologo --verbosity minimal
+          dotnet test anity-lib-core/tests/Anity.AB.Compare.Tests/Anity.AB.Compare.Tests.csproj -c Release --nologo --verbosity minimal
           dotnet test anity-agent/tests/Anity.Agent.Tests/Anity.Agent.Tests.csproj -c Release --nologo --verbosity minimal
           dotnet test anity-cli/tests/Anity.Cli.Tests/Anity.Cli.Tests.csproj -c Release --nologo --verbosity minimal
 
@@ -94,6 +95,25 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - name: AB compare tests
+      - name: AB compare binary gate (required)
         run: |
+          set -e
           dotnet test anity-lib-core/tests/Anity.AB.Compare.Tests/Anity.AB.Compare.Tests.csproj -c Release --nologo --verbosity minimal
+          echo "AB.Compare gate passed"
+
+  native-graphics:
+    runs-on: ${{ matrix.os }}
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure & build anity-native
+        shell: bash
+        run: |
+          set -e
+          cmake -S anity-native -B anity-native/build-ci -DCMAKE_BUILD_TYPE=Release
+          cmake --build anity-native/build-ci --config Release
+          echo "native graphics (swapchain Metal/Vulkan stubs) built"

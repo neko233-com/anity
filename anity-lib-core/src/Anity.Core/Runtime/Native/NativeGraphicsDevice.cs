@@ -10,16 +10,23 @@ namespace Anity.Core.Runtime.Native;
 public sealed class NativeGraphicsDevice : IDisposable
 {
     private IntPtr _handle;
+    private IntPtr _swapchain;
     private bool _disposed;
+    private bool _managedSwapchain;
 
     public static NativeGraphicsDevice? Current { get; private set; }
 
     public IntPtr Handle => _handle;
-    public bool IsValid => _handle != IntPtr.Zero;
+    public IntPtr SwapchainHandle => _swapchain;
+    public bool IsValid => _handle != IntPtr.Zero || _managedSwapchain;
+    public bool HasSwapchain => _swapchain != IntPtr.Zero || _managedSwapchain;
     public GraphicsDeviceType DeviceType { get; private set; }
     public bool SupportsHDR { get; private set; }
     public int Width { get; private set; }
     public int Height { get; private set; }
+    public int SwapchainImageCount { get; private set; }
+    public bool SwapchainHeadless { get; private set; } = true;
+    public int PresentCount { get; private set; }
 
     public static NativeGraphicsDevice Create(
         GraphicsDeviceType preferred,
@@ -87,19 +94,90 @@ public sealed class NativeGraphicsDevice : IDisposable
 
     public void Present()
     {
+        if (_swapchain != IntPtr.Zero && AnityNative.Available)
+        {
+            AnityNative.Graphics_PresentSwapchain(_swapchain);
+            PresentCount++;
+            return;
+        }
         if (_handle != IntPtr.Zero && AnityNative.Available)
+        {
             AnityNative.Graphics_Present(_handle);
+            PresentCount++;
+            return;
+        }
+        // managed headless present
+        PresentCount++;
+    }
+
+    /// <summary>Create headless or windowed swapchain (Metal/Vulkan/D3D/null path).</summary>
+    public bool CreateSwapchain(int width = 0, int height = 0, int imageCount = 2, bool vsync = true, bool hdr = false, IntPtr nativeWindow = default)
+    {
+        int w = width > 0 ? width : Width;
+        int h = height > 0 ? height : Height;
+        if (_handle != IntPtr.Zero && AnityNative.Available)
+        {
+            try
+            {
+                var desc = new AnityNative.SwapchainDesc
+                {
+                    width = w,
+                    height = h,
+                    imageCount = imageCount,
+                    vsync = vsync ? 1 : 0,
+                    hdr = hdr ? 1 : 0,
+                    nativeWindow = nativeWindow
+                };
+                if (AnityNative.Graphics_CreateSwapchain(_handle, ref desc, out var sc) == AnityNative.Result.Ok && sc != IntPtr.Zero)
+                {
+                    _swapchain = sc;
+                    SwapchainImageCount = AnityNative.Graphics_GetSwapchainImageCount(sc);
+                    Width = AnityNative.Graphics_GetSwapchainWidth(sc);
+                    Height = AnityNative.Graphics_GetSwapchainHeight(sc);
+                    SwapchainHeadless = AnityNative.Graphics_IsSwapchainHeadless(sc) != 0;
+                    return true;
+                }
+            }
+            catch
+            {
+                AnityNative.MarkUnavailable();
+            }
+        }
+
+        // Managed headless swapchain
+        _managedSwapchain = true;
+        Width = w > 0 ? w : 1280;
+        Height = h > 0 ? h : 720;
+        SwapchainImageCount = imageCount > 0 ? imageCount : 2;
+        SwapchainHeadless = nativeWindow == IntPtr.Zero;
+        return true;
+    }
+
+    public int AcquireNextImage()
+    {
+        if (_swapchain != IntPtr.Zero && AnityNative.Available)
+        {
+            if (AnityNative.Graphics_AcquireNextImage(_swapchain, out int idx) == AnityNative.Result.Ok)
+                return idx;
+        }
+        return PresentCount % Math.Max(1, SwapchainImageCount);
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        if (_swapchain != IntPtr.Zero && AnityNative.Available)
+        {
+            try { AnityNative.Graphics_DestroySwapchain(_swapchain); } catch { }
+            _swapchain = IntPtr.Zero;
+        }
         if (_handle != IntPtr.Zero && AnityNative.Available)
         {
             AnityNative.Graphics_DestroyDevice(_handle);
             _handle = IntPtr.Zero;
         }
+        _managedSwapchain = false;
         if (Current == this) Current = null;
     }
 

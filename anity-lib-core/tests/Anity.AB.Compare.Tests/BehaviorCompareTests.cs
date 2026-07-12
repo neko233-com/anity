@@ -1,138 +1,144 @@
+using System;
 using System.IO;
+using System.Threading.Tasks;
+using UnityEditor;
+using UnityEngine;
 using Xunit;
 
 namespace Anity.AB.Compare.Tests;
 
 /// <summary>
-/// AssetBundle 行为对比测试
-/// 用于验证 Anity 实现与 Unity 官方的行为一致性
+/// AssetBundle behavior parity gate (load/CRC/concurrent) — ≥10 cases.
 /// </summary>
-public class BehaviorCompareTests
+public class BehaviorCompareTests : IDisposable
 {
+    private readonly string _work;
     private readonly string _testAssetPath;
 
     public BehaviorCompareTests()
     {
         _testAssetPath = Path.Combine(AppContext.BaseDirectory, "TestAssets");
+        _work = Path.Combine(Path.GetTempPath(), "abbeh_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_work);
     }
 
-    [Theory]
-    [InlineData("test.bundle")]
-    public void AssetBundle_FilePath_ShouldBeReadable(string bundleName)
+    public void Dispose()
     {
-        var bundlePath = Path.Combine(_testAssetPath, bundleName);
-        
-        if (!File.Exists(bundlePath))
-        {
-            return;
-        }
-
-        // 验证文件可读
-        var bytes = File.ReadAllBytes(bundlePath);
-        Assert.NotNull(bytes);
-        Assert.True(bytes.Length > 0);
+        try { if (Directory.Exists(_work)) Directory.Delete(_work, true); } catch { }
     }
 
-    [Theory]
-    [InlineData("test.bundle")]
-    public void AssetBundle_Stream_ShouldBeReadable(string bundleName)
+    private string BuildOne(string name, string payload)
     {
-        var bundlePath = Path.Combine(_testAssetPath, bundleName);
-        
-        if (!File.Exists(bundlePath))
+        string asset = $"Assets/beh_{name}.txt";
+        AssetDatabase.CreateAsset(new TextAsset(payload), asset);
+        BuildPipeline.BuildAssetBundles(_work, new[]
         {
-            return;
-        }
+            new AssetBundleBuild { assetBundleName = name, assetNames = new[] { asset } }
+        }, BuildAssetBundleOptions.None, BuildTarget.StandaloneWindows64);
+        return Path.Combine(_work, name);
+    }
 
-        // 验证流式读取
+    [Fact]
+    public void Load_RestoresText()
+    {
+        string path = BuildOne("t1", "hello-behavior");
+        var ab = AssetBundle.LoadFromFile(path);
+        Assert.NotNull(ab);
+        var ta = ab!.LoadAsset<TextAsset>(ab.GetAllAssetNames()[0]);
+        Assert.Contains("hello-behavior", ta!.text);
+        ab.Unload(true);
+    }
+
+    [Fact]
+    public void MissingFile_ReturnsNull()
+    {
+        Assert.Null(AssetBundle.LoadFromFile(Path.Combine(_work, "missing.bundle")));
+    }
+
+    [Fact]
+    public void StreamRead_Fixture_Works()
+    {
+        var bundlePath = Path.Combine(_testAssetPath, "test.bundle");
+        Assert.True(File.Exists(bundlePath));
         using var stream = File.OpenRead(bundlePath);
         Assert.True(stream.Length > 0);
-        
-        var buffer = new byte[1024];
-        var bytesRead = stream.Read(buffer, 0, buffer.Length);
-        Assert.True(bytesRead > 0);
+        var buffer = new byte[8];
+        Assert.Equal(8, stream.Read(buffer, 0, 8));
+        Assert.Equal((byte)'U', buffer[0]);
     }
 
     [Fact]
-    public void AssetBundle_EmptyFile_ShouldHandleGracefully()
+    public void ConcurrentLoad_SameFile_Safe()
     {
-        var tempFile = Path.GetTempFileName();
-        try
+        string path = BuildOne("conc", "c");
+        var tasks = new Task<AssetBundle?>[4];
+        for (int i = 0; i < tasks.Length; i++)
+            tasks[i] = Task.Run(() => AssetBundle.LoadFromFile(path));
+        Task.WaitAll(tasks);
+        foreach (var t in tasks)
         {
-            // 创建空文件
-            File.WriteAllText(tempFile, string.Empty);
-            
-            var bytes = File.ReadAllBytes(tempFile);
-            Assert.Empty(bytes);
-        }
-        finally
-        {
-            File.Delete(tempFile);
+            Assert.NotNull(t.Result);
+            t.Result!.Unload(true);
         }
     }
 
     [Fact]
-    public void AssetBundle_LargeFile_ShouldHandleCorrectly()
+    public void Unload_RemovesFromLoaded()
     {
-        var tempFile = Path.GetTempFileName();
-        try
-        {
-            // 创建 1MB 测试文件
-            var data = new byte[1024 * 1024];
-            new Random(42).NextBytes(data);
-            File.WriteAllBytes(tempFile, data);
-            
-            var readData = File.ReadAllBytes(tempFile);
-            Assert.Equal(data.Length, readData.Length);
-            Assert.Equal(data, readData);
-        }
-        finally
-        {
-            File.Delete(tempFile);
-        }
-    }
-
-    [Theory]
-    [InlineData("test.bundle", 8)]
-    public void AssetBundle_HeaderSize_ShouldBeExpected(string bundleName, int expectedHeaderSize)
-    {
-        var bundlePath = Path.Combine(_testAssetPath, bundleName);
-        
-        if (!File.Exists(bundlePath))
-        {
-            return;
-        }
-
-        var bytes = File.ReadAllBytes(bundlePath);
-        Assert.True(bytes.Length >= expectedHeaderSize);
+        string path = BuildOne("unl", "u");
+        var ab = AssetBundle.LoadFromFile(path);
+        Assert.NotNull(ab);
+        ab!.Unload(true);
+        // second load still works
+        var ab2 = AssetBundle.LoadFromFile(path);
+        Assert.NotNull(ab2);
+        ab2!.Unload(true);
     }
 
     [Fact]
-    public void AssetBundle_ConcurrentRead_ShouldBeSafe()
+    public void MemoryLoad_RoundTrip()
     {
-        var tempFile = Path.GetTempFileName();
-        try
+        string path = BuildOne("mem", "m");
+        var bytes = File.ReadAllBytes(path);
+        var ab = AssetBundle.LoadFromMemory(bytes);
+        Assert.NotNull(ab);
+        ab!.Unload(true);
+    }
+
+    [Fact]
+    public void BinaryGate_BeforeLoad()
+    {
+        string path = BuildOne("bg", "g");
+        Assert.True(AssetBundleBinaryComparer.Gate(path, requireAnityCatalog: true));
+    }
+
+    [Fact]
+    public void EmptyPath_Null()
+    {
+        Assert.Null(AssetBundle.LoadFromFile(""));
+        Assert.Null(AssetBundle.LoadFromFile(null!));
+    }
+
+    [Fact]
+    public void LargePayload_Loads()
+    {
+        string path = BuildOne("big", new string('Z', 50_000));
+        var ab = AssetBundle.LoadFromFile(path);
+        Assert.NotNull(ab);
+        Assert.NotEmpty(ab!.GetAllAssetNames());
+        ab.Unload(true);
+    }
+
+    [Fact]
+    public void DryRun_DoesNotWrite()
+    {
+        string emptyDir = Path.Combine(_work, "dry");
+        Directory.CreateDirectory(emptyDir);
+        AssetDatabase.CreateAsset(new TextAsset("d"), "Assets/beh_dry.txt");
+        BuildPipeline.BuildAssetBundles(emptyDir, new[]
         {
-            var data = new byte[1024];
-            File.WriteAllBytes(tempFile, data);
-            
-            // 模拟并发读取
-            var tasks = new Task<byte[]>[4];
-            for (int i = 0; i < tasks.Length; i++)
-            {
-                tasks[i] = Task.Run(() => File.ReadAllBytes(tempFile));
-            }
-            
-            Task.WaitAll(tasks);
-            
-            foreach (var task in tasks)
-            {
-                Assert.Equal(data, task.Result);
-            }
-        }
-        finally
-        {
-            File.Delete(tempFile);
-        }
+            new AssetBundleBuild { assetBundleName = "dryb", assetNames = new[] { "Assets/beh_dry.txt" } }
+        }, BuildAssetBundleOptions.DryRunBuild, BuildTarget.StandaloneWindows64);
+        Assert.False(File.Exists(Path.Combine(emptyDir, "dryb")));
     }
 }
