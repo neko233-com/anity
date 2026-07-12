@@ -1,7 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
+using System.Net.Http;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace UnityEngine.Networking;
 
@@ -84,67 +88,266 @@ public class UnityWebRequest : IDisposable
         this.certificateHandler = certificateHandler;
     }
 
+    private CancellationTokenSource? _cts;
+    private UnityWebRequestAsyncOperation? _pendingOp;
+
+    private HttpClient CreateClientForRequest()
+    {
+        // Per-request handler so redirectLimit is honored (Unity property).
+        int redirects = redirectLimit < 0 ? 0 : redirectLimit;
+        var handler = new HttpClientHandler
+        {
+            AllowAutoRedirect = redirects > 0,
+            MaxAutomaticRedirections = redirects > 0 ? Math.Min(redirects, 50) : 1,
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+        };
+        var c = new HttpClient(handler);
+        c.Timeout = Timeout.InfiniteTimeSpan;
+        return c;
+    }
+
+    /// <summary>Send request (async completion). Use WaitForCompletion() for blocking.</summary>
     public UnityWebRequestAsyncOperation SendWebRequest()
     {
+        if (_pendingOp != null) return _pendingOp;
         var operation = new UnityWebRequestAsyncOperation { webRequest = this };
-        SimulateRequest(operation);
+        _pendingOp = operation;
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+        Task.Run(async () =>
+        {
+            try
+            {
+                await ExecuteRequestAsync(token).ConfigureAwait(false);
+            }
+            finally
+            {
+                operation.SetDone();
+            }
+        }, token);
         return operation;
     }
 
-    private void SimulateRequest(UnityWebRequestAsyncOperation operation)
+    /// <summary>Unity 2021+ blocking wait (also used by tests).</summary>
+    public void WaitForCompletion()
+    {
+        if (isDone) return;
+        if (_pendingOp == null)
+            SendWebRequest();
+        int ms = timeout > 0 ? timeout * 1000 + 5000 : 120_000;
+        int waited = 0;
+        while (!isDone && waited < ms)
+        {
+            Thread.Sleep(10);
+            waited += 10;
+        }
+        if (!isDone)
+        {
+            Abort();
+            error = "Request timed out (WaitForCompletion)";
+            isNetworkError = true;
+            isDone = true;
+            _pendingOp?.SetDone();
+        }
+    }
+
+    private async Task ExecuteRequestAsync(CancellationToken ct)
     {
         try
         {
-            if (uploadHandler != null)
+            if (string.IsNullOrWhiteSpace(url))
             {
+                Fail("Invalid URL", connection: true);
+                return;
+            }
+
+            // file:// or local absolute path
+            if (TryReadLocal(url, out var localBytes, out var localError))
+            {
+                if (localError != null)
+                {
+                    Fail(localError, connection: true);
+                    return;
+                }
+                await DeliverBytes(localBytes ?? Array.Empty<byte>(), 200, "application/octet-stream", ct).ConfigureAwait(false);
+                return;
+            }
+
+            using var client = CreateClientForRequest();
+            using var req = new HttpRequestMessage(new HttpMethod(method ?? "GET"), url);
+            foreach (var h in _requestHeaders)
+            {
+                if (string.Equals(h.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                try { req.Headers.TryAddWithoutValidation(h.Key, h.Value); } catch { }
+            }
+
+            if (uploadHandler != null && uploadHandler.data != null && uploadHandler.data.Length > 0
+                && !string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase))
+            {
+                var content = new ByteArrayContent(uploadHandler.data);
+                if (!string.IsNullOrEmpty(uploadHandler.contentType))
+                    content.Headers.TryAddWithoutValidation("Content-Type", uploadHandler.contentType);
+                req.Content = content;
                 uploadedBytes = (ulong)uploadHandler.data.Length;
                 uploadProgress = 1f;
             }
 
-            byte[]? responseData = null;
-            if (method != "HEAD" && method != "DELETE")
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            if (timeout > 0)
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeout));
+
+            HttpResponseMessage resp;
+            try
             {
-                responseData = Array.Empty<byte>();
-                if (downloadHandler != null)
-                {
-                    downloadHandler.ReceiveContentLength(responseData.LongLength);
-                    if (responseData.Length > 0)
-                    {
-                        downloadHandler.ReceiveData(responseData, responseData.Length);
-                    }
-                    downloadHandler.CompleteContent();
-                    downloadedBytes = (ulong)responseData.Length;
-                    downloadProgress = 1f;
-                }
+                resp = await client.SendAsync(req, HttpCompletionOption.ResponseContentRead, timeoutCts.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                Fail("Request timeout", connection: true);
+                return;
+            }
+            catch (HttpRequestException ex)
+            {
+                Fail(ex.Message, connection: true);
+                return;
             }
 
-            _responseHeaders["Content-Type"] = downloadHandler is DownloadHandlerTexture ? "image/png" : "application/octet-stream";
-            _responseHeaders["Content-Length"] = (downloadedBytes).ToString();
+            using (resp)
+            {
+                responseCode = (long)resp.StatusCode;
+                isHttpError = (int)resp.StatusCode >= 400;
+                _responseHeaders.Clear();
+                foreach (var h in resp.Headers)
+                    _responseHeaders[h.Key] = string.Join(",", h.Value);
+                if (resp.Content?.Headers != null)
+                {
+                    foreach (var h in resp.Content.Headers)
+                        _responseHeaders[h.Key] = string.Join(",", h.Value);
+                }
 
-            responseCode = 200;
-            isDone = true;
-            isNetworkError = false;
-            isHttpError = responseCode >= 400;
-            operation.SetDone();
+                byte[] body = Array.Empty<byte>();
+                if (!string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase) && resp.Content != null)
+                    body = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+
+                string ctype = "application/octet-stream";
+                if (_responseHeaders.TryGetValue("Content-Type", out var ctHeader))
+                    ctype = ctHeader;
+
+                await DeliverBytes(body, responseCode, ctype, ct).ConfigureAwait(false);
+                if (isHttpError)
+                    error = $"HTTP/{responseCode}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Fail(ex.Message, connection: true);
+        }
+    }
+
+    private async Task DeliverBytes(byte[] body, long code, string contentType, CancellationToken ct)
+    {
+        await Task.Yield();
+        if (ct.IsCancellationRequested)
+        {
+            Fail("Request aborted", connection: true);
+            return;
+        }
+
+        responseCode = code;
+        isHttpError = code >= 400;
+        _responseHeaders["Content-Type"] = contentType;
+        _responseHeaders["Content-Length"] = body.Length.ToString();
+
+        if (downloadHandler != null && !string.Equals(method, "HEAD", StringComparison.OrdinalIgnoreCase))
+        {
+            downloadHandler.ReceiveContentLength(body.LongLength);
+            if (body.Length > 0)
+            {
+                const int chunk = 64 * 1024;
+                int offset = 0;
+                while (offset < body.Length)
+                {
+                    int n = Math.Min(chunk, body.Length - offset);
+                    var slice = new byte[n];
+                    Buffer.BlockCopy(body, offset, slice, 0, n);
+                    downloadHandler.ReceiveData(slice, n);
+                    offset += n;
+                    downloadedBytes = (ulong)offset;
+                    downloadProgress = body.Length > 0 ? (float)offset / body.Length : 1f;
+                }
+            }
+            downloadHandler.CompleteContent();
+            downloadedBytes = (ulong)body.Length;
+            downloadProgress = 1f;
+        }
+
+        isDone = true;
+        isNetworkError = false;
+        if (!isHttpError)
+            error = string.Empty;
+    }
+
+    private static bool TryReadLocal(string url, out byte[]? data, out string? error)
+    {
+        data = null;
+        error = null;
+        try
+        {
+            string path = url;
+            if (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                var uri = new Uri(url);
+                path = uri.LocalPath;
+                if (Path.DirectorySeparatorChar == '\\' && path.StartsWith("/"))
+                    path = path.TrimStart('/');
+            }
+            else if (!Path.IsPathRooted(url) && !url.Contains("://"))
+            {
+                // relative local path
+                path = Path.GetFullPath(url);
+            }
+            else if (url.Contains("://"))
+            {
+                return false; // remote
+            }
+
+            if (File.Exists(path))
+            {
+                data = File.ReadAllBytes(path);
+                return true;
+            }
+            // not a local existing file → treat as remote if scheme present
+            if (url.Contains("://")) return false;
+            error = "Local file not found: " + path;
+            return true;
         }
         catch (Exception ex)
         {
             error = ex.Message;
-            isNetworkError = true;
-            isDone = true;
-            responseCode = 0;
-            operation.SetDone();
+            return true;
         }
+    }
+
+    private void Fail(string message, bool connection)
+    {
+        error = message ?? string.Empty;
+        isNetworkError = connection;
+        isHttpError = !connection && responseCode >= 400;
+        isDone = true;
+        downloadProgress = isDone ? downloadProgress : 0f;
     }
 
     public void Abort()
     {
-        if (!isDone)
-        {
-            error = "Request aborted";
-            isNetworkError = true;
-            isDone = true;
-        }
+        if (isDone) return;
+        try { _cts?.Cancel(); } catch { }
+        error = "Request aborted";
+        isNetworkError = true;
+        isDone = true;
+        _pendingOp?.SetDone();
     }
 
     public string GetRequestHeader(string name)
@@ -317,7 +520,12 @@ public abstract class DownloadHandler : IDisposable
         get
         {
             var d = GetData();
-            return d != null ? Encoding.UTF8.GetString(d) : string.Empty;
+            if (d == null || d.Length == 0) return string.Empty;
+            // strip UTF-8 BOM if present (common on Windows text files)
+            int offset = 0;
+            if (d.Length >= 3 && d[0] == 0xEF && d[1] == 0xBB && d[2] == 0xBF)
+                offset = 3;
+            return Encoding.UTF8.GetString(d, offset, d.Length - offset);
         }
     }
     public float progress { get; protected set; }
@@ -531,6 +739,7 @@ public class DownloadHandlerTexture : DownloadHandler
 public class DownloadHandlerAssetBundle : DownloadHandler
 {
     private readonly MemoryStream _stream = new();
+    private byte[]? _cached;
     private readonly string? _url;
     private AssetBundle? _assetBundle;
     public uint crc { get; set; }
@@ -587,7 +796,9 @@ public class DownloadHandlerAssetBundle : DownloadHandler
 
     protected override byte[] GetData()
     {
-        return _stream.ToArray();
+        if (_cached != null) return _cached;
+        try { return _stream.ToArray(); }
+        catch { return Array.Empty<byte>(); }
     }
 
     internal override bool ReceiveData(byte[] data, int dataLength)
@@ -599,11 +810,16 @@ public class DownloadHandlerAssetBundle : DownloadHandler
 
     internal override void CompleteContent()
     {
-        if (autoLoadAssetBundle && _stream.Length > 0)
+        try
         {
-            _assetBundle = AssetBundle.LoadFromMemory(_stream.ToArray(), crc);
+            _cached = _stream.ToArray();
+            if (autoLoadAssetBundle && _cached.Length > 0)
+                _assetBundle = AssetBundle.LoadFromMemory(_cached, crc);
         }
-        _stream.Dispose();
+        catch
+        {
+            _cached = Array.Empty<byte>();
+        }
         base.CompleteContent();
     }
 
@@ -611,7 +827,7 @@ public class DownloadHandlerAssetBundle : DownloadHandler
     {
         if (disposing)
         {
-            _stream.Dispose();
+            try { _stream.Dispose(); } catch { }
         }
         base.Dispose(disposing);
     }

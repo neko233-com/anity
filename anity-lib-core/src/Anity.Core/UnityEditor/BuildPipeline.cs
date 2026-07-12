@@ -432,8 +432,8 @@ public static class BuildPipeline
           catalog.bundleName = variantName;
           var bytesV = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
           catalog.crc = AssetBundleFormat.ComputeCrc(bytesV);
-          // rewrite with final crc
           bytesV = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+          bytesV = AssetBundleCompression.MaybeCompress(bytesV, assetBundleOptions);
           File.WriteAllBytes(Path.Combine(outputPath, variantName), bytesV);
           manifest.AddBundleWithVariant(build.assetBundleName, variant, catalog.hash);
           manifest.AddBundle(variantName, catalog.hash, catalog.dependencies.ToArray());
@@ -444,6 +444,7 @@ public static class BuildPipeline
         var bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
         catalog.crc = AssetBundleFormat.ComputeCrc(bytes);
         bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+        bytes = AssetBundleCompression.MaybeCompress(bytes, assetBundleOptions);
         File.WriteAllBytes(Path.Combine(outputPath, fileName), bytes);
         manifest.AddBundle(build.assetBundleName, catalog.hash, catalog.dependencies.ToArray());
       }

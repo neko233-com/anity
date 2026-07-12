@@ -1,5 +1,31 @@
 # PLAN
 
+## 2026-07-13h（本次）— UnityWebRequest + Addressables + AB ALZ4 + Instantiate 修复
+
+### 已完成
+- **UnityWebRequest 真网络栈**
+  - `HttpClient` 发请求；`timeout`/`redirectLimit` 生效；GZip/Deflate 自动解压
+  - `file://` + 本地绝对/相对路径读取；`WaitForCompletion` 阻塞等待
+  - `Abort` 取消 CTS；DownloadHandler 分块 ReceiveData；UTF-8 BOM 剥离
+  - `DownloadHandlerAssetBundle` 内存加载 AB（缓存 data，避免 stream dispose 丢数据）
+  - 工厂：Get/Post/Put/Delete/Head/GetTexture/GetAudioClip/GetAssetBundle
+- **Addressables 官方风格**
+  - Catalog JSON Write/Load、Register/RegisterBundle、ClearCatalog
+  - LoadAssetAsync/LoadAssetsAsync/InstantiateAsync/LoadSceneAsync
+  - DownloadDependenciesAsync、GetDownloadSizeAsync、BuildPlayerContent
+  - ResourceLocator、AssetReference、AsyncOperationHandle/Status
+- **AssetBundle ChunkBasedCompression（ALZ4）**
+  - Magic `ALZ4` + Deflate 体；`MaybeCompress` 挂 BuildPipeline；`DecompressIfNeeded` 挂 LoadFromMemory
+  - Uncompressed 保持 UnityFS 头
+- **修复** `Object.Instantiate` 泛型/非泛型重载无限递归 → `InstantiateInternal`
+- **测试**：UWR 17 + Addressables 17 + AB 16 = 本批 50；Core 全量 **133 通过**
+- Screen 状态类测试加 `[Collection("ScreenState")]` 防并行 race
+
+### 下一次要做（优先）
+1. 真 LZ4 帧（非 ALZ4+Deflate）与 Unity 官方 AB 二进制对照
+2. UWR 远程 HTTPS 证书/Cookie 深度；Addressables 标签/依赖图
+3. IL2CPP 真工具链；Metal/Vulkan 设备验证
+
 ## 2026-07-13g（本次）— PlayerPrefs/本地存储 + CI 实跑 + push
 
 ### 已完成

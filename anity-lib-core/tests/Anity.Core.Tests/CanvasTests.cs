@@ -5,6 +5,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>Canvas Overlay/Camera/World + CanvasScaler — ≥12 edge cases.</summary>
+[Collection("ScreenState")] // Screen is process-global; serialize against other Screen mutators
 public class CanvasTests
 {
     public CanvasTests()
@@ -56,30 +57,48 @@ public class CanvasTests
     [Fact]
     public void Scaler_Expand_UsesMinScale()
     {
-        Screen.width = 1280;
-        Screen.height = 720;
-        var (_, canvas, scaler, _) = CreateRoot(RenderMode.ScreenSpaceOverlay);
-        scaler.uiScaleMode = UnityEngine.UI.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-        scaler.screenMatchMode = ScreenMatchMode.Expand;
-        float s = scaler.CalculateScaleFactor();
-        float expected = Mathf.Min(1280f / 1920f, 720f / 1080f);
-        Assert.InRange(s, expected - 0.001f, expected + 0.001f);
-        Assert.Equal(s, canvas.scaleFactor, 3);
+        int ow = Screen.width, oh = Screen.height;
+        try
+        {
+            Screen.width = 1280;
+            Screen.height = 720;
+            var (_, canvas, scaler, _) = CreateRoot(RenderMode.ScreenSpaceOverlay);
+            scaler.uiScaleMode = UnityEngine.UI.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920, 1080);
+            scaler.screenMatchMode = ScreenMatchMode.Expand;
+            float s = scaler.CalculateScaleFactor();
+            float expected = Mathf.Min((float)Screen.width / 1920f, (float)Screen.height / 1080f);
+            Assert.InRange(s, expected - 0.001f, expected + 0.001f);
+            Assert.Equal(s, canvas.scaleFactor, 3);
+        }
+        finally
+        {
+            Screen.width = ow;
+            Screen.height = oh;
+        }
     }
 
     [Fact]
     public void Scaler_Shrink_UsesMaxScale()
     {
-        Screen.width = 2560;
-        Screen.height = 1440;
-        var (_, canvas, scaler, _) = CreateRoot(RenderMode.ScreenSpaceOverlay);
-        scaler.uiScaleMode = UnityEngine.UI.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-        scaler.screenMatchMode = ScreenMatchMode.Shrink;
-        float s = scaler.CalculateScaleFactor();
-        float expected = Mathf.Max(2560f / 1920f, 1440f / 1080f);
-        Assert.InRange(s, expected - 0.001f, expected + 0.001f);
+        int ow = Screen.width, oh = Screen.height;
+        try
+        {
+            Screen.width = 2560;
+            Screen.height = 1440;
+            var (_, canvas, scaler, _) = CreateRoot(RenderMode.ScreenSpaceOverlay);
+            scaler.uiScaleMode = UnityEngine.UI.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920, 1080);
+            scaler.screenMatchMode = ScreenMatchMode.Shrink;
+            float s = scaler.CalculateScaleFactor();
+            float expected = Mathf.Max((float)Screen.width / 1920f, (float)Screen.height / 1080f);
+            Assert.InRange(s, expected - 0.001f, expected + 0.001f);
+        }
+        finally
+        {
+            Screen.width = ow;
+            Screen.height = oh;
+        }
     }
 
     [Fact]

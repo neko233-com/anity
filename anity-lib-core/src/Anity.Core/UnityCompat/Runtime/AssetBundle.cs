@@ -277,6 +277,7 @@ public class AssetBundle : Object
     {
         if (binary == null || binary.Length == 0) return null;
 
+        binary = AssetBundleCompression.DecompressIfNeeded(binary);
         if (AssetBundleFormat.TryReadBundle(binary, out var catalog))
         {
             if (crc != 0 && catalog.crc != 0 && catalog.crc != crc)

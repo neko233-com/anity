@@ -151,83 +151,90 @@ public class Object : IDisposable
 
   public static Object Instantiate(Object original)
   {
-    return Instantiate(original, Vector3.zero, Quaternion.identity, null);
+    return InstantiateInternal(original, Vector3.zero, Quaternion.identity, null, true);
   }
 
   public static Object Instantiate(Object original, Vector3 position, Quaternion rotation)
   {
-    return Instantiate(original, position, rotation, null);
+    return InstantiateInternal(original, position, rotation, null, true);
   }
 
   public static Object Instantiate(Object original, Transform? parent)
   {
-    return Instantiate(original, Vector3.zero, Quaternion.identity, parent);
+    return InstantiateInternal(original, Vector3.zero, Quaternion.identity, parent, true);
   }
 
   public static Object Instantiate(Object original, Transform? parent, bool worldPositionStays)
   {
-    return Instantiate(original, Vector3.zero, Quaternion.identity, parent, worldPositionStays);
+    return InstantiateInternal(original, Vector3.zero, Quaternion.identity, parent, worldPositionStays);
   }
 
   public static Object Instantiate(Object original, Transform? parent, InstantiateParameters instantiateParameters)
   {
     _ = instantiateParameters;
-    return Instantiate(original, Vector3.zero, Quaternion.identity, parent);
+    return InstantiateInternal(original, Vector3.zero, Quaternion.identity, parent, true);
+  }
+
+  public static Object Instantiate(Object original, Vector3 position, Quaternion rotation, Transform? parent)
+  {
+    return InstantiateInternal(original, position, rotation, parent, true);
   }
 
   public static T Instantiate<T>(T original) where T : Object
   {
-    return (T)Instantiate((Object)original);
+    return (T)InstantiateInternal(original, Vector3.zero, Quaternion.identity, null, true);
   }
 
   public static T Instantiate<T>(T original, Vector3 position, Quaternion rotation) where T : Object
   {
-    return (T)Instantiate((Object)original, position, rotation);
+    return (T)InstantiateInternal(original, position, rotation, null, true);
   }
 
   public static T Instantiate<T>(T original, Transform? parent) where T : Object
   {
-    return (T)Instantiate((Object)original, parent);
+    return (T)InstantiateInternal(original, Vector3.zero, Quaternion.identity, parent, true);
   }
 
   public static T Instantiate<T>(T original, Transform? parent, bool worldPositionStays) where T : Object
   {
-    return (T)Instantiate((Object)original, parent, worldPositionStays);
+    return (T)InstantiateInternal(original, Vector3.zero, Quaternion.identity, parent, worldPositionStays);
   }
 
   public static T Instantiate<T>(T original, Vector3 position, Quaternion rotation, Transform? parent) where T : Object
   {
-    return (T)Instantiate((Object)original, position, rotation, parent);
+    return (T)InstantiateInternal(original, position, rotation, parent, true);
   }
 
   public static T Instantiate<T>(T original, Transform? parent, InstantiateParameters instantiateParameters) where T : Object
   {
-    return (T)Instantiate((Object)original, parent, instantiateParameters);
+    _ = instantiateParameters;
+    return (T)InstantiateInternal(original, Vector3.zero, Quaternion.identity, parent, true);
   }
 
-  private static Object Instantiate(Object original, Vector3 position, Quaternion rotation, Transform? parent, bool worldPositionStays = true)
+  /// <summary>
+  /// Core clone path. Named distinctly so generic overloads cannot recurse into each other
+  /// (C# prefers Instantiate&lt;T&gt;(T, Vector3, Quaternion, Transform) over a private 5-arg overload).
+  /// </summary>
+  private static Object InstantiateInternal(Object original, Vector3 position, Quaternion rotation, Transform? parent, bool worldPositionStays)
   {
+    if (original == null) throw new ArgumentNullException(nameof(original));
     if (original is GameObject originalGo)
     {
       return CloneGameObject(originalGo, position, rotation, parent, worldPositionStays);
     }
-    else if (original is Component originalComp)
+    if (original is Component originalComp)
     {
       var go = CloneGameObject(originalComp.gameObject!, position, rotation, parent, worldPositionStays);
       return go.GetComponent(originalComp.GetType())!;
     }
-    else
-    {
-      var type = original.GetType();
-      if (type.IsAbstract || type.IsInterface)
-      {
-        return original;
-      }
-      var clone = (Object)Activator.CreateInstance(type)!;
-      clone._name = original._name + "(Clone)";
-      CopyFields(original, clone);
-      return clone;
-    }
+
+    var type = original.GetType();
+    if (type.IsAbstract || type.IsInterface)
+      return original;
+    var clone = (Object)Activator.CreateInstance(type)!;
+    clone._name = original._name + "(Clone)";
+    CopyFields(original, clone);
+    return clone;
   }
 
   private static GameObject CloneGameObject(GameObject original, Vector3 position, Quaternion rotation, Transform? parent, bool worldPositionStays)

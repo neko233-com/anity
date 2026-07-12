@@ -266,15 +266,16 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `AssetBundle` | ✅ | **全链路**：UnityFS catalog 写盘/读回、BuildAssetBundles(DryRun/AppendHash/Strict/变体)、LoadFromFile/Memory/Stream+CRC、LoadAsset/All/SubAssets、Unload/Async、Manifest 依赖；测试≥14 |
+| `AssetBundle` | ✅ | **全链路**：UnityFS catalog 写盘/读回、BuildAssetBundles(DryRun/AppendHash/Strict/变体/ChunkBasedCompression)、LoadFromFile/Memory/Stream+CRC、LoadAsset/All/SubAssets、Unload/Async、Manifest 依赖；**ALZ4** 压缩往返；测试≥16 |
+| `AssetBundleCompression` | ✅ | ALZ4 magic + Deflate；MaybeCompress/DecompressIfNeeded；Uncompressed 旁路 |
 | `AssetBundleRequest` | ✅ | 继承AsyncOperation、asset/allAssets属性 |
-| `UnityWebRequest` | ✅ | url/method/timeout/downloadHandler/uploadHandler、isDone/isNetworkError/isHttpError/responseCode/progress、SendWebRequest返回AsyncOperation、Get/Post/Put/Delete/Head静态工厂、GetTexture/GetAssetBundle、SetRequestHeader Dictionary、Abort/Dispose |
-| `UnityWebRequestAsyncOperation` | ✅ | 继承AsyncOperation、webRequest属性 |
-| `DownloadHandler（基类）` | ✅ | data(byte[])/text(UTF8)、ReceiveData/ReceiveContentLength/CompleteContent |
+| `UnityWebRequest` | ✅ | **HttpClient 真请求**；timeout/redirectLimit；file://与本地路径；WaitForCompletion；Abort；Get/Post/Put/Delete/Head/GetTexture/GetAssetBundle；BOM 安全 text；测试≥17 |
+| `UnityWebRequestAsyncOperation` | ✅ | 继承AsyncOperation、webRequest属性、SetDone |
+| `DownloadHandler（基类）` | ✅ | data(byte[])/text(UTF8 去 BOM)、ReceiveData/ReceiveContentLength/CompleteContent |
 | `DownloadHandlerBuffer` | ✅ | 继承DownloadHandler、MemoryStream存储 |
 | `DownloadHandlerFile` | ✅ | 写入文件路径 |
 | `DownloadHandlerTexture` | ✅ | 下载后转换为Texture2D |
-| `DownloadHandlerAssetBundle` | ✅ | 下载后加载AssetBundle |
+| `DownloadHandlerAssetBundle` | ✅ | 下载后 LoadFromMemory 加载 AssetBundle；data 缓存 |
 | `DownloadHandlerAudioClip` | ✅ | 下载后加载AudioClip |
 | `UploadHandler（基类）` | ✅ | data/contentType |
 | `UploadHandlerRaw` | ✅ | 接受byte[] |
@@ -534,7 +535,7 @@
 | `SettingsProvider` | ✅ | path/label/keywords/guiHandler/OnGUI抽象 |
 | `CompilationPipeline` / `AssemblyBuilder` | ✅ | CompilationStarted/CompilationFinished/assemblyCompilationEvents、AssemblyBuilder(assemblyPath/scriptPaths/extraDefines/build/references) |
 | `PackageManager.Client` / `PackageInfo` | ✅ | Add/Remove/Search/List/Embed/Install/ResetToEditorDefaults、PackageInfo(name/displayName/version/dependencies) |
-| `Addressables` | ✅ | InitializeAsync/LoadAssetAsync/Release、AsyncOperationHandle(IsDone/Status/Result) |
+| `Addressables` | ✅ | Catalog/Register/RegisterBundle/BuildPlayerContent、LoadAsset/LoadAssets/Instantiate/LoadScene、DownloadDependencies/GetDownloadSize、ResourceLocator、AssetReference、AsyncOperationHandle；测试≥17 |
 | `InternalEditorUtility` | ✅ | **完整UnityEditorInternal API**：inBatchMode/isHumanControllable/isApplicationActive/hasProLicense/unityVersion/isProSkin/unityPreferencesFolder/projectPath、tags/layers/sortingLayerNames/sortingLayerUniqueIDs/asmrefGUIDs/assemblyNames、ReloadAssemblies/RequestScriptReload/IsRecompiling、OpenFileAtLineExternal、LoadRequiredAdditionalDataToWindow、LoadWindowLayout、GetAllGlobalTags/GetAllLayers/TagToLayer/LayerToTag、IsNativeModule/GetScriptAssemblies/GetEditorScriptAssemblies/GetRuntimeScriptAssemblies/GetAssemblyPath/GetAssemblies、IsInEditor/IsInPlayer/GetPlatformDefines/GetDefinesForAssembly/GetPredefinedDefines、RepaintAll/SetDirty/IsObjectAManagedReference、GetSerializedObjectProperties/GetActiveSceneName/GetOpenScenes/IsSceneSaved/GetSceneAssetPath、FindAssets/GetAssetPath/GUIDToAssetPath/AssetPathToGUID、CalculateBounds真实Renderer包围盒计算、SetIconForObject/GetIconForObject图标管理、scriptReloaded事件 |
 | `BuildCallbacks` | ✅ | 接口定义 |
 | `EditorSettings` | ✅ | Dictionary存储、serializationMode、defaultBehaviorMode、enterPlayModeOptions、spritePackerMode、asyncShaderCompilation、cacheServer配置、projectGenerationRootNamespace、DefineSymbols等完整属性 |

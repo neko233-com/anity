@@ -216,4 +216,41 @@ public class AssetBundlePipelineTests : IDisposable
         Assert.NotNull(man);
         Assert.Empty(man.GetAllAssetBundles());
     }
+
+    [Fact]
+    public void ChunkBasedCompression_RoundTrip()
+    {
+        AssetDatabase.CreateAsset(new TextAsset("lz4-payload-content"), "Assets/lz4.txt");
+        BuildPipeline.BuildAssetBundles(_dir, new[]
+        {
+            new AssetBundleBuild { assetBundleName = "lz4b", assetNames = new[] { "Assets/lz4.txt" } }
+        }, BuildAssetBundleOptions.ChunkBasedCompression, BuildTarget.StandaloneWindows64);
+
+        string path = Path.Combine(_dir, "lz4b");
+        Assert.True(File.Exists(path));
+        var bytes = File.ReadAllBytes(path);
+        // compressed files start with ALZ4 magic when chunk compression applied
+        Assert.True(bytes.Length > 8);
+        Assert.Equal(AssetBundleCompression.Magic, BitConverter.ToUInt32(bytes, 0));
+        var ab = AssetBundle.LoadFromFile(path);
+        Assert.NotNull(ab);
+        Assert.NotEmpty(ab!.GetAllAssetNames());
+        var ta = ab.LoadAsset<TextAsset>(ab.GetAllAssetNames()[0]);
+        Assert.NotNull(ta);
+        Assert.Contains("lz4-payload", ta!.text);
+        ab.Unload(true);
+    }
+
+    [Fact]
+    public void Uncompressed_DoesNotUseAlz4Magic()
+    {
+        AssetDatabase.CreateAsset(new TextAsset("raw"), "Assets/raw.txt");
+        BuildPipeline.BuildAssetBundles(_dir, new[]
+        {
+            new AssetBundleBuild { assetBundleName = "rawb", assetNames = new[] { "Assets/raw.txt" } }
+        }, BuildAssetBundleOptions.UncompressedAssetBundle, BuildTarget.StandaloneWindows64);
+        var bytes = File.ReadAllBytes(Path.Combine(_dir, "rawb"));
+        // UnityFS header, not ALZ4
+        Assert.Equal((byte)'U', bytes[0]);
+    }
 }

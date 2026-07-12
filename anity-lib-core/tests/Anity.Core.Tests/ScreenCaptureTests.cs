@@ -6,6 +6,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>ScreenCapture — ≥10 cases including edge conditions (Unity 2022 Pro parity).</summary>
+[Collection("ScreenState")]
 public class ScreenCaptureTests
 {
     public ScreenCaptureTests()

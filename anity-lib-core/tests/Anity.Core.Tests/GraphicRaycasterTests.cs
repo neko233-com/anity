@@ -7,6 +7,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>GraphicRaycaster Overlay / Camera / World — ≥10 boundary cases.</summary>
+[Collection("ScreenState")]
 public class GraphicRaycasterTests
 {
     private static (Canvas canvas, GraphicRaycaster ray, Image image) BuildUi(RenderMode mode, Camera? cam = null)
