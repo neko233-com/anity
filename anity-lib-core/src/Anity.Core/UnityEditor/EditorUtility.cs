@@ -19,7 +19,11 @@ public static class EditorUtility
 
   public static void SetDirty(object? target)
   {
-    _ = target;
+    if (target is null) return;
+    foreach (var window in EditorWindow.GetWindows())
+    {
+      window.Repaint();
+    }
   }
 
   public static bool DisplayDialog(string title, string message, string ok)

@@ -50,6 +50,11 @@ public static class Random
     _rng = new System.Random(seed);
   }
 
+  public static void InitSeed(int seed)
+  {
+    InitState(seed);
+  }
+
   public static float Range(float minInclusive, float maxInclusive)
   {
     if (minInclusive > maxInclusive) (minInclusive, maxInclusive) = (maxInclusive, minInclusive);

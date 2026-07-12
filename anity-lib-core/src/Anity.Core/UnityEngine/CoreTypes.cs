@@ -117,6 +117,98 @@ public struct RectInt
     public static RectInt zero => new RectInt(0, 0, 0, 0);
 }
 
+public struct Vector3Int : IEquatable<Vector3Int>
+{
+    public int x;
+    public int y;
+    public int z;
+
+    public Vector3Int(int x, int y, int z)
+    {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+    }
+
+    public static Vector3Int zero => new Vector3Int(0, 0, 0);
+    public static Vector3Int one => new Vector3Int(1, 1, 1);
+    public static Vector3Int up => new Vector3Int(0, 1, 0);
+    public static Vector3Int down => new Vector3Int(0, -1, 0);
+    public static Vector3Int left => new Vector3Int(-1, 0, 0);
+    public static Vector3Int right => new Vector3Int(1, 0, 0);
+    public static Vector3Int forward => new Vector3Int(0, 0, 1);
+    public static Vector3Int back => new Vector3Int(0, 0, -1);
+
+    public float magnitude => (float)Math.Sqrt(x * x + y * y + z * z);
+    public int sqrMagnitude => x * x + y * y + z * z;
+
+    public static Vector3Int operator +(Vector3Int a, Vector3Int b) => new Vector3Int(a.x + b.x, a.y + b.y, a.z + b.z);
+    public static Vector3Int operator -(Vector3Int a, Vector3Int b) => new Vector3Int(a.x - b.x, a.y - b.y, a.z - b.z);
+    public static Vector3Int operator *(Vector3Int a, int d) => new Vector3Int(a.x * d, a.y * d, a.z * d);
+    public static Vector3Int operator *(int d, Vector3Int a) => new Vector3Int(a.x * d, a.y * d, a.z * d);
+    public static Vector3Int operator /(Vector3Int a, int d) => new Vector3Int(a.x / d, a.y / d, a.z / d);
+    public static Vector3Int operator -(Vector3Int a) => new Vector3Int(-a.x, -a.y, -a.z);
+    public static bool operator ==(Vector3Int lhs, Vector3Int rhs) => lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z;
+    public static bool operator !=(Vector3Int lhs, Vector3Int rhs) => !(lhs == rhs);
+
+    public static implicit operator Vector3(Vector3Int v) => new Vector3(v.x, v.y, v.z);
+    public static explicit operator Vector3Int(Vector3 v) => new Vector3Int((int)v.x, (int)v.y, (int)v.z);
+
+    public bool Equals(Vector3Int other) => x == other.x && y == other.y && z == other.z;
+    public override bool Equals(object obj) => obj is Vector3Int other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(x, y, z);
+    public override string ToString() => $"({x}, {y}, {z})";
+}
+
+public struct BoundsInt : IEquatable<BoundsInt>
+{
+    public Vector3Int position;
+    public Vector3Int size;
+
+    public BoundsInt(Vector3Int position, Vector3Int size)
+    {
+        this.position = position;
+        this.size = size;
+    }
+
+    public BoundsInt(int xMin, int yMin, int zMin, int sizeX, int sizeY, int sizeZ)
+    {
+        position = new Vector3Int(xMin, yMin, zMin);
+        size = new Vector3Int(sizeX, sizeY, sizeZ);
+    }
+
+    public Vector3Int center => new Vector3Int(position.x + size.x / 2, position.y + size.y / 2, position.z + size.z / 2);
+    public Vector3Int min => position;
+    public Vector3Int max => new Vector3Int(position.x + size.x, position.y + size.y, position.z + size.z);
+
+    public int xMin { get => position.x; set => position.x = value; }
+    public int yMin { get => position.y; set => position.y = value; }
+    public int zMin { get => position.z; set => position.z = value; }
+    public int xMax { get => position.x + size.x; set => size.x = value - position.x; }
+    public int yMax { get => position.y + size.y; set => size.y = value - position.y; }
+    public int zMax { get => position.z + size.z; set => size.z = value - position.z; }
+
+    public void SetMinMax(Vector3Int minPosition, Vector3Int maxPosition)
+    {
+        position = minPosition;
+        size = maxPosition - minPosition;
+    }
+
+    public bool Contains(Vector3Int point)
+    {
+        return point.x >= position.x && point.x < position.x + size.x &&
+               point.y >= position.y && point.y < position.y + size.y &&
+               point.z >= position.z && point.z < position.z + size.z;
+    }
+
+    public bool Equals(BoundsInt other) => position.Equals(other.position) && size.Equals(other.size);
+    public override bool Equals(object obj) => obj is BoundsInt other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(position, size);
+    public override string ToString() => $"Position={position}, Size={size}";
+
+    public static BoundsInt zero => new BoundsInt(Vector3Int.zero, Vector3Int.zero);
+}
+
 public struct RectOffset
 {
     public int left;

@@ -6,6 +6,7 @@ public class PolygonCollider2D : Collider2D
 {
     private List<Vector2[]> _paths = new();
     private Vector2[] _points = Array.Empty<Vector2>();
+    public bool autoTiling { get; set; }
 
     public int pathCount
     {

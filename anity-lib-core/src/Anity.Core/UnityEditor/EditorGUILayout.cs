@@ -1223,4 +1223,134 @@ public static class EditorGUILayout
     var rect = GetRect(content);
     return EditorGUI.Button(rect, content, style);
   }
+
+  public static void BeginEnabled(bool enabled = true)
+  {
+    EditorGUI.BeginEnabled(enabled);
+  }
+
+  public static void EndEnabled()
+  {
+    EditorGUI.EndEnabled();
+  }
+
+  public static void FlexibleSpace()
+  {
+    EditorGUI.FlexibleSpace();
+  }
+
+  public static void Header(string label)
+  {
+    var rect = GetRect();
+    EditorGUI.Header(label);
+  }
+
+  public static void Header(GUIContent label)
+  {
+    Header(label.text);
+  }
+
+  public static string SearchField(string text, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.SearchField(rect, text);
+  }
+
+  public static string SearchField(GUIContent label, string text, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.SearchField(rect, text);
+  }
+
+  public static AnimationCurve CurveField(string label, AnimationCurve value, Color color, Rect ranges, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.CurveField(rect, label, value, color, ranges);
+  }
+
+  public static AnimationCurve CurveField(GUIContent label, AnimationCurve value, Color color, Rect ranges, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.CurveField(rect, label.text, value, color, ranges);
+  }
+
+  public static AnimationCurve CurveField(AnimationCurve value, Color color, Rect ranges, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.CurveField(rect, string.Empty, value, color, ranges);
+  }
+
+  public static void PropertyField(SerializedProperty property, GUIContent label, bool includeChildren = true)
+  {
+    var rect = GetRect();
+    EditorGUI.PropertyField(rect, property, label, includeChildren);
+  }
+
+  public static bool ToggleGroup(string label, bool toggle)
+  {
+    var rect = GetRect();
+    return EditorGUI.ToggleLeft(rect, new GUIContent(label), toggle);
+  }
+
+  public static bool ToggleGroup(GUIContent label, bool toggle)
+  {
+    var rect = GetRect(label);
+    return EditorGUI.ToggleLeft(rect, label, toggle);
+  }
+
+  public static int EnumMaskField(string label, int mask, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.EnumMaskField(rect, mask, Array.Empty<string>());
+  }
+
+  public static int EnumMaskField(GUIContent label, int mask, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect(label);
+    return EditorGUI.EnumMaskField(rect, label, mask, Array.Empty<string>());
+  }
+
+  public static int EnumMaskField(int mask, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    return EditorGUI.EnumMaskField(rect, mask, Array.Empty<string>());
+  }
+
+  public static void LabelField(string label, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    LabelField(label);
+  }
+
+  public static void SelectableLabel(string text, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    var rect = GetRect();
+    EditorGUI.SelectableLabel(rect, text);
+  }
+
+  public static float FloatSlider(float value, float leftValue, float rightValue, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    return FloatSlider(string.Empty, value, leftValue, rightValue);
+  }
+
+  public static int IntSlider(int value, int leftValue, int rightValue)
+  {
+    return IntSlider(string.Empty, value, leftValue, rightValue);
+  }
+
+  public static Vector2 BeginScrollView(Vector2 scrollPosition, GUIStyle style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    return BeginScrollView(scrollPosition, options);
+  }
 }

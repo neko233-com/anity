@@ -1851,6 +1851,88 @@ public static class EditorGUI
   public static void HelpBox(Rect position, string message, MessageType type) { _ = position; _ = message; _ = type; }
   public static void HelpBox(string message, MessageType type) { _ = message; _ = type; }
 
+  public static void BeginEnabled(bool enabled = true)
+  {
+    BeginDisabledGroup(!enabled);
+  }
+
+  public static void EndEnabled()
+  {
+    EndDisabledGroup();
+  }
+
+  public static void FlexibleSpace()
+  {
+    GUILayout.FlexibleSpace();
+  }
+
+  public static void Header(string label)
+  {
+    _ = label;
+    GUILayout.Space(4f);
+  }
+
+  public static void Header(GUIContent label)
+  {
+    Header(label.text);
+  }
+
+  public static string SearchField(Rect position, string text, GUIStyle? style = null)
+  {
+    _ = position;
+    _ = style;
+    return text;
+  }
+
+  public static string SearchField(string text, params GUILayoutOption[]? options)
+  {
+    _ = options;
+    return text;
+  }
+
+  public static string SearchField(Rect position, GUIContent? label, string text, GUIStyle? style = null)
+  {
+    _ = label;
+    return SearchField(position, text, style);
+  }
+
+  public static AnimationCurve CurveField(Rect position, AnimationCurve value, Color color, Rect ranges)
+  {
+    _ = color;
+    _ = ranges;
+    return CurveField(position, value);
+  }
+
+  public static AnimationCurve CurveField(Rect position, string label, AnimationCurve value, Color color, Rect ranges)
+  {
+    _ = color;
+    _ = ranges;
+    return CurveField(position, label, value);
+  }
+
+  public static AnimationCurve CurveField(Rect position, GUIContent label, AnimationCurve value, Color color, Rect ranges)
+  {
+    _ = color;
+    _ = ranges;
+    return CurveField(position, label, value);
+  }
+
+  public static AnimationCurve CurveField(string label, AnimationCurve value, Color color, Rect ranges)
+  {
+    _ = color;
+    _ = ranges;
+    return CurveField(label, value);
+  }
+
+  public static void Separator(Rect position)
+  {
+    _ = position;
+  }
+
+  public static void Separator()
+  {
+  }
+
   public static int GetControlID(int hint, FocusType focusType) { _ = focusType; return hint; }
   public static int GetControlID(FocusType focusType, Rect rect) { _ = focusType; _ = rect; return _nextControlId++; }
   public static int GetControlID(GUIContent content, FocusType focusType) { _ = content; _ = focusType; return _nextControlId++; }
@@ -1889,7 +1971,6 @@ public static class EditorGUI
 }
 
 public enum FocusType { Keyboard, Mouse, Native }
-public enum ScaleMode { StretchToFill, ScaleAndCrop, ScaleToFit }
 
 public static class ColorUtility
 {

@@ -53,6 +53,36 @@ public static class Physics
         set => s_world.defaultSolverIterations = value;
     }
 
+    public static int defaultSolverVelocityIterations
+    {
+        get => s_world.defaultSolverVelocityIterations;
+        set => s_world.defaultSolverVelocityIterations = value;
+    }
+
+    public static float defaultMaxDepenetrationVelocity
+    {
+        get => s_world.defaultMaxDepenetrationVelocity;
+        set => s_world.defaultMaxDepenetrationVelocity = value;
+    }
+
+    public static bool queriesHitTriggers
+    {
+        get => s_world.queriesHitTriggers;
+        set => s_world.queriesHitTriggers = value;
+    }
+
+    public static bool queriesHitBackfaces
+    {
+        get => s_world.queriesHitBackfaces;
+        set => s_world.queriesHitBackfaces = value;
+    }
+
+    public static SimulationMode simulationMode
+    {
+        get => s_world.simulationMode;
+        set => s_world.simulationMode = value;
+    }
+
     public static PhysicsScene defaultPhysicsScene => new PhysicsScene();
 
     public static void IgnoreLayerCollision(int layer1, int layer2, bool ignore = true)

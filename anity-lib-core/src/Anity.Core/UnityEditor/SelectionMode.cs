@@ -1,10 +1,16 @@
+using System;
+
 namespace UnityEditor;
 
+[Flags]
 public enum SelectionMode
 {
-  Unfiltered,
-  TopLevel,
-  Deep,
-  DeepAssets
+  Unfiltered = 0,
+  TopLevel = 1,
+  Deep = 2,
+  ExcludePrefab = 4,
+  Editable = 8,
+  Assets = 16,
+  DeepAssets = 32,
+  Everything = ~0
 }
-

@@ -59,6 +59,20 @@ public static class Physics2D
     set => s_world2D.queriesHitTriggers = value;
   }
 
+  public static int velocityIterations
+  {
+    get => s_world2D.velocityIterations;
+    set => s_world2D.velocityIterations = value;
+  }
+
+  public static int positionIterations
+  {
+    get => s_world2D.positionIterations;
+    set => s_world2D.positionIterations = value;
+  }
+
+  public static SimulationMode2D simulationMode { get; set; } = SimulationMode2D.FixedUpdate;
+
   public static bool Raycast(Vector2 origin, Vector2 direction, float distance = 1000f, int layerMask = -1)
   {
     return s_world2D.Raycast(origin, direction, out _, distance, layerMask);
@@ -154,6 +168,14 @@ public static class Physics2D
     return s_world2D.OverlapCircle(point, radius, layerMask, out _);
   }
 
+  public static Collider2D OverlapCircle(Vector2 point, float radius, int layerMask, float minDepth, float maxDepth = float.PositiveInfinity)
+  {
+    _ = minDepth;
+    _ = maxDepth;
+    s_world2D.OverlapCircle(point, radius, layerMask, out var results);
+    return results is { Length: > 0 } ? results[0] : null;
+  }
+
   public static Collider2D[] OverlapCircleAll(Vector2 point, float radius, int layerMask = -1)
   {
     s_world2D.OverlapCircle(point, radius, layerMask, out var results);
@@ -180,6 +202,14 @@ public static class Physics2D
     return s_world2D.OverlapPoint(point, layerMask, out _);
   }
 
+  public static Collider2D OverlapPoint(Vector2 point, int layerMask, float minDepth, float maxDepth = float.PositiveInfinity)
+  {
+    _ = minDepth;
+    _ = maxDepth;
+    s_world2D.OverlapPoint(point, layerMask, out var results);
+    return results is { Length: > 0 } ? results[0] : null;
+  }
+
   public static Collider2D[] OverlapPointAll(Vector2 point, int layerMask = -1)
   {
     s_world2D.OverlapPoint(point, layerMask, out var results);
@@ -201,6 +231,14 @@ public static class Physics2D
     return FillCollider(results, found);
   }
 
+  public static Collider2D OverlapBox(Vector2 point, Vector2 size, float angle, int layerMask = -1, float minDepth = -float.PositiveInfinity, float maxDepth = float.PositiveInfinity)
+  {
+    _ = minDepth;
+    _ = maxDepth;
+    s_world2D.OverlapBox(point, size, angle, layerMask, out var results);
+    return results is { Length: > 0 } ? results[0] : null;
+  }
+
   public static Collider2D[] OverlapBoxAll(Vector2 point, Vector2 size, float angle, int layerMask = -1)
   {
     s_world2D.OverlapBox(point, size, angle, layerMask, out var results);
@@ -220,6 +258,14 @@ public static class Physics2D
     }
 
     return FillCollider(results, found);
+  }
+
+  public static Collider2D OverlapCapsule(Vector2 point, Vector2 size, CapsuleDirection2D direction, float angle, int layerMask = -1, float minDepth = -float.PositiveInfinity, float maxDepth = float.PositiveInfinity)
+  {
+    _ = minDepth;
+    _ = maxDepth;
+    s_world2D.OverlapCapsule(point, size, direction, layerMask, out var results);
+    return results is { Length: > 0 } ? results[0] : null;
   }
 
   public static Collider2D[] OverlapCapsuleAll(Vector2 point, Vector2 size, CapsuleDirection2D direction, float angle, int layerMask = -1)
@@ -247,29 +293,78 @@ public static class Physics2D
     return FillCollider(results, found);
   }
 
-  public static bool CircleCast(Vector2 origin, float radius, Vector2 direction, float distance, int layerMask = -1)
+  public static Collider2D OverlapArea(Vector2 pointA, Vector2 pointB, int layerMask = -1, float minDepth = -float.PositiveInfinity, float maxDepth = float.PositiveInfinity)
   {
+    _ = minDepth;
+    _ = maxDepth;
+    s_world2D.OverlapArea(pointA, pointB, layerMask, out var results);
+    return results is { Length: > 0 } ? results[0] : null;
+  }
+
+  public static Collider2D[] OverlapAreaAll(Vector2 pointA, Vector2 pointB, int layerMask = -1)
+  {
+    s_world2D.OverlapArea(pointA, pointB, layerMask, out var results);
+    return results ?? Array.Empty<Collider2D>();
+  }
+
+  public static int OverlapAreaNonAlloc(Vector2 pointA, Vector2 pointB, Collider2D[] results, int layerMask = -1)
+  {
+    if (results is null || results.Length == 0) return 0;
+    if (!s_world2D.OverlapArea(pointA, pointB, layerMask, out var found)) return 0;
+    return FillCollider(results, found);
+  }
+
+  public static bool CircleCast(Vector2 origin, float radius, Vector2 direction, float distance = float.PositiveInfinity, int layerMask = -1)
+  {
+    if (float.IsPositiveInfinity(distance)) distance = 1e8f;
     return s_world2D.CircleCast(origin, radius, direction, distance, layerMask, out _);
   }
 
-  public static bool CircleCast(Vector2 origin, float radius, Vector2 direction, out RaycastHit2D hitInfo, float distance, int layerMask = -1)
+  public static bool CircleCast(Vector2 origin, float radius, Vector2 direction, out RaycastHit2D hitInfo, float distance = float.PositiveInfinity, int layerMask = -1)
   {
+    if (float.IsPositiveInfinity(distance)) distance = 1e8f;
     return s_world2D.CircleCast(origin, radius, direction, distance, layerMask, out hitInfo);
   }
 
-  public static RaycastHit2D[] CircleCastAll(Vector2 origin, float radius, Vector2 direction, float distance, int layerMask = -1)
+  public static bool CircleCast(Vector2 origin, float radius, Vector2 direction, float distance, ContactFilter2D contactFilter, out RaycastHit2D hitInfo)
   {
+    _ = contactFilter;
+    return CircleCast(origin, radius, direction, out hitInfo, distance);
+  }
+
+  public static int CircleCast(Vector2 origin, float radius, Vector2 direction, RaycastHit2D[] results, float distance, ContactFilter2D contactFilter)
+  {
+    _ = contactFilter;
+    return CircleCastNonAlloc(origin, radius, direction, results, distance);
+  }
+
+  public static RaycastHit2D[] CircleCastAll(Vector2 origin, float radius, Vector2 direction, float distance = float.PositiveInfinity, int layerMask = -1)
+  {
+    if (float.IsPositiveInfinity(distance)) distance = 1e8f;
     return s_world2D.CircleCast(origin, radius, direction, distance, layerMask, out var hit)
       ? new[] { hit }
       : Array.Empty<RaycastHit2D>();
   }
 
-  public static int CircleCastNonAlloc(Vector2 origin, float radius, Vector2 direction, RaycastHit2D[] results, float distance, int layerMask = -1)
+  public static RaycastHit2D[] CircleCastAll(Vector2 origin, float radius, Vector2 direction, float distance, ContactFilter2D contactFilter)
+  {
+    _ = contactFilter;
+    return CircleCastAll(origin, radius, direction, distance);
+  }
+
+  public static int CircleCastNonAlloc(Vector2 origin, float radius, Vector2 direction, RaycastHit2D[] results, float distance = float.PositiveInfinity, int layerMask = -1)
   {
     if (results is null || results.Length == 0) return 0;
+    if (float.IsPositiveInfinity(distance)) distance = 1e8f;
     if (!s_world2D.CircleCast(origin, radius, direction, distance, layerMask, out var hit)) return 0;
     results[0] = hit;
     return 1;
+  }
+
+  public static int CircleCastNonAlloc(Vector2 origin, float radius, Vector2 direction, RaycastHit2D[] results, float distance, ContactFilter2D contactFilter)
+  {
+    _ = contactFilter;
+    return CircleCastNonAlloc(origin, radius, direction, results, distance);
   }
 
   public static bool CheckCollisionLayers(int layer1, int layer2)

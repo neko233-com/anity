@@ -123,4 +123,13 @@ public static class EditorStyles
   public static GUIStyle boldLabelOnDark { get; } = new() { name = "boldLabelOnDark" };
   public static GUIStyle titleLabel { get; } = new() { name = "titleLabel", fontSize = 18 };
   public static GUIStyle header { get; } = new() { name = "header", fontStyle = FontStyle.Bold, fontSize = 14 };
+  public static GUIStyle blackMiniLabel { get; } = new() { name = "blackMiniLabel", fontSize = 10 };
+  public static GUIStyle inspectorFullWidthMargins { get; } = new() { name = "inspectorFullWidthMargins" };
+  public static GUIStyle focused { get; } = new() { name = "focused" };
+  public static GUIStyle tab { get; } = new() { name = "tab" };
+  public static GUIStyle toggleGroup { get; } = new() { name = "toggleGroup", fontStyle = FontStyle.Bold };
+  public static GUIStyle searchField { get; } = new() { name = "searchField" };
+  public static GUIStyle searchFieldCancelButton { get; } = new() { name = "searchFieldCancelButton" };
+  public static GUIStyle helpBoxIcon { get; } = new() { name = "helpBoxIcon" };
+  public static GUIStyle layerMaskField { get; } = new() { name = "layerMaskField" };
 }

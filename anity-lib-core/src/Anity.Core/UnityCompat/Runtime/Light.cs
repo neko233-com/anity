@@ -17,7 +17,7 @@ public class Light : Behaviour
   public Texture? cookie { get; set; }
   public LightShadows shadows { get; set; } = LightShadows.None;
   public float shadowStrength { get; set; } = 1f;
-  public UnityEngine.Rendering.ShadowResolution shadowResolution { get; set; } = ShadowResolution.Medium;
+  public ShadowResolution shadowResolution { get; set; } = ShadowResolution.Medium;
   public float shadowBias { get; set; } = 0.05f;
   public float shadowNormalBias { get; set; } = 0.4f;
   public float shadowNearPlane { get; set; } = 0.2f;

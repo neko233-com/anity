@@ -1,11 +1,72 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 
 namespace UnityEngine;
+
+public enum PlayerPrefsKeyType
+{
+  String,
+  Int,
+  Float
+}
 
 public static class PlayerPrefs
 {
   private static readonly Dictionary<string, object> _data = new(StringComparer.OrdinalIgnoreCase);
+  private static readonly string _savePath;
+  private static readonly JsonSerializerOptions _jsonOptions = new()
+  {
+    WriteIndented = true,
+    IncludeFields = true
+  };
+
+  static PlayerPrefs()
+  {
+    try
+    {
+      _savePath = Path.Combine(Application.persistentDataPath, "PlayerPrefs.json");
+      Load();
+    }
+    catch
+    {
+      _savePath = "PlayerPrefs.json";
+    }
+  }
+
+  private static void Load()
+  {
+    try
+    {
+      if (File.Exists(_savePath))
+      {
+        string json = File.ReadAllText(_savePath);
+        var loaded = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json, _jsonOptions);
+        if (loaded != null)
+        {
+          foreach (var kvp in loaded)
+          {
+            _data[kvp.Key] = DeserializeElement(kvp.Value);
+          }
+        }
+      }
+    }
+    catch { }
+  }
+
+  private static object DeserializeElement(JsonElement element)
+  {
+    return element.ValueKind switch
+    {
+      JsonValueKind.String => element.GetString() ?? string.Empty,
+      JsonValueKind.Number when element.TryGetInt32(out int intVal) => intVal,
+      JsonValueKind.Number => element.GetSingle(),
+      JsonValueKind.True => 1,
+      JsonValueKind.False => 0,
+      _ => string.Empty
+    };
+  }
 
   public static void SetInt(string key, int value)
   {
@@ -54,6 +115,16 @@ public static class PlayerPrefs
     return defaultValue;
   }
 
+  public static void SetBool(string key, bool value)
+  {
+    SetInt(key, value ? 1 : 0);
+  }
+
+  public static bool GetBool(string key, bool defaultValue = false)
+  {
+    return GetInt(key, defaultValue ? 1 : 0) != 0;
+  }
+
   public static bool HasKey(string key)
   {
     return _data.ContainsKey(key);
@@ -71,6 +142,17 @@ public static class PlayerPrefs
 
   public static void Save()
   {
+    try
+    {
+      string? dir = Path.GetDirectoryName(_savePath);
+      if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+      {
+        Directory.CreateDirectory(dir);
+      }
+      string json = JsonSerializer.Serialize(_data, _jsonOptions);
+      File.WriteAllText(_savePath, json);
+    }
+    catch { }
   }
 }
 
@@ -78,4 +160,5 @@ public sealed class PlayerPrefsException : Exception
 {
   public PlayerPrefsException() {}
   public PlayerPrefsException(string message) : base(message) {}
+  public PlayerPrefsException(string message, Exception innerException) : base(message, innerException) {}
 }

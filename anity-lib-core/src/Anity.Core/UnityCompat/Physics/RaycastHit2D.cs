@@ -10,4 +10,5 @@ public struct RaycastHit2D
   public Transform? transform;
   public float fraction;
   public Vector3 point3D;
+  public int pointCount => collider != null ? 1 : 0;
 }

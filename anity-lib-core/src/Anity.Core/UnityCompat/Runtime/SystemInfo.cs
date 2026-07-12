@@ -83,6 +83,11 @@ public static class SystemInfo
     public static bool supportsRenderToCubemap => true;
     public static bool supportsImageEffects => true;
     public static bool supportsVerticalSync => true;
+    public static bool supportsCubemapTextures => true;
+    public static bool supportsTexture3D => supports3DTextures;
+    public static bool supportsTexture2DArray => supports2DArrayTextures;
+    public static bool supportsMultisampleTextures => supportsMultisampledTextures;
+    public static bool supportsTextureStreaming => true;
     public static bool supportsParallelCubemapMips => false;
     public static bool graphicsUVStartsAtTop => true;
     public static int constantBufferOffsetAlignment => 256;

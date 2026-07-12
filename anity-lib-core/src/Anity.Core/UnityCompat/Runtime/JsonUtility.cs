@@ -24,11 +24,13 @@ public static class JsonUtility
   public static T? FromJson<T>(string json)
   {
     if (string.IsNullOrWhiteSpace(json)) return default;
-    if (typeof(T).IsValueType || typeof(T) == typeof(string))
-    {
-      return JsonSerializer.Deserialize<T>(json, _defaultOptions);
-    }
-    return (T?)JsonSerializer.Deserialize(json, typeof(T), _defaultOptions);
+    return (T?)FromJson(json, typeof(T));
+  }
+
+  public static object? FromJson(string json, Type type)
+  {
+    if (string.IsNullOrWhiteSpace(json) || type is null) return null;
+    return JsonSerializer.Deserialize(json, type, _defaultOptions);
   }
 
   public static void FromJsonOverwrite(string json, object objectToOverwrite)

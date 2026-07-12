@@ -9,6 +9,9 @@ public class Collider2D : Component
   public Rigidbody2D? attachedRigidbody { get; set; }
   public PhysicsMaterial2D? sharedMaterial { get; set; }
   public Vector2 offset { get; set; }
+  public float density { get; set; } = 1f;
+  public bool usedByEffector { get; set; }
+  public bool usedByComposite { get; set; }
   private List<ContactPoint2D> _contactPoints = new();
 
   public Bounds bounds
@@ -207,6 +210,61 @@ public class Collider2D : Component
     _contactPoints.Add(cp);
   }
 
+  public bool OverlapPoint(Vector2 point)
+  {
+    return Physics2D.OverlapPoint(point) && IsTouchingPoint(point);
+  }
+
+  private bool IsTouchingPoint(Vector2 point)
+  {
+    var shape = GetShape();
+    Vector2 worldPos = transform != null ? (Vector2)transform.TransformPoint(new Vector3(shape.offset.x, shape.offset.y, 0f)) : shape.offset;
+    switch (shape.type)
+    {
+      case ColliderShapeType2D.Box:
+        Vector2 half = shape.size * 0.5f;
+        return point.x >= worldPos.x - half.x && point.x <= worldPos.x + half.x &&
+               point.y >= worldPos.y - half.y && point.y <= worldPos.y + half.y;
+      case ColliderShapeType2D.Circle:
+        return (point - worldPos).sqrMagnitude <= shape.radius * shape.radius;
+      case ColliderShapeType2D.Capsule:
+        Physics2D.s_world2D.GetCapsuleTransform(shape, worldPos, out var capCenter, out var capAxis, out var capRadius, out var capHalfHeight);
+        Vector2 p0 = capCenter - capAxis * capHalfHeight;
+        Vector2 p1 = capCenter + capAxis * capHalfHeight;
+        Vector2 closestSeg = Physics2D.s_world2D.ClosestPointOnSegment(point, p0, p1);
+        return (point - closestSeg).sqrMagnitude <= capRadius * capRadius;
+      case ColliderShapeType2D.Polygon:
+        Vector2[] polyPoints = Physics2D.s_world2D.TransformPoints(shape.points, worldPos);
+        return Physics2D.s_world2D.PointInPolygon(point, polyPoints);
+      case ColliderShapeType2D.Edge:
+        return false;
+      default:
+        return false;
+    }
+  }
+
+  public int Cast(Vector2 direction, RaycastHit2D[] results, float distance = float.PositiveInfinity)
+  {
+    if (results == null || results.Length == 0) return 0;
+    if (float.IsPositiveInfinity(distance)) distance = 1e8f;
+    var hits = Physics2D.s_world2D.RaycastAll((Vector2)(transform?.position ?? Vector3.zero), direction, distance, -1);
+    int count = 0;
+    foreach (var hit in hits)
+    {
+      if (hit.collider != this && count < results.Length)
+      {
+        results[count] = hit;
+        count++;
+      }
+    }
+    return count;
+  }
+
+  public int Raycast(Vector2 direction, RaycastHit2D[] results, float distance = float.PositiveInfinity)
+  {
+    return Cast(direction, results, distance);
+  }
+
   internal virtual ColliderShape2D GetShape()
   {
     return new ColliderShape2D(ColliderShapeType2D.Box, offset, Vector2.one, 0.5f);
@@ -223,6 +281,8 @@ public class Collision2D
   public Transform? transform => collider.transform;
   public ContactPoint2D[] contacts { get; }
   public Vector2 relativeVelocity { get; }
+  public Vector2 impulse { get; set; }
+  public bool enabled { get; set; } = true;
 
   public Collision2D(Collider2D col, Collider2D other, Vector2 n, Vector2 relVel = default)
   {
@@ -241,6 +301,8 @@ public struct ContactPoint2D
   public Vector2 normal;
   public Vector2 point;
   public float separation;
+  public float normalImpulse;
+  public float tangentImpulse;
   public Rigidbody2D? rigidbody => collider?.attachedRigidbody;
   public Rigidbody2D? otherRigidbody => otherCollider?.attachedRigidbody;
 
@@ -251,5 +313,7 @@ public struct ContactPoint2D
     normal = n;
     point = pt;
     separation = sep;
+    normalImpulse = 0f;
+    tangentImpulse = 0f;
   }
 }

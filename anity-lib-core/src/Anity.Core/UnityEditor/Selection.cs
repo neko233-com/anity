@@ -14,9 +14,17 @@ public static class Selection
   public static int objectCount => _objects.Count;
   public static Object? activeObject { get; set; }
   public static Object? activeContext { get; set; }
-  public static Object? activeGameObject => activeObject;
-  public static Transform? activeTransform => activeObject as Transform;
+  public static GameObject? activeGameObject
+  {
+    get => activeObject as GameObject;
+    set => activeObject = value;
+  }
+  public static Transform? activeTransform => (activeObject as GameObject)?.transform ?? activeObject as Transform;
   public static int activeInstanceID { get; set; }
+  public static SelectionMode mode { get; set; } = SelectionMode.Unfiltered;
+  public static GameObject[] gameObjects => _objects.OfType<GameObject>().Concat(_objects.OfType<Component>().Select(c => c.gameObject)).Distinct().ToArray();
+  public static Transform[] transforms => _objects.OfType<Transform>().Concat(_objects.OfType<GameObject>().Select(go => go.transform)).Distinct().ToArray();
+  public static Object? objectSelector { get; set; }
 
   public static void SetActiveObjectWithContext(Object? obj, Object? context = null)
   {
@@ -98,5 +106,16 @@ public static class Selection
       activeObject = null;
     }
     selectionChanged?.Invoke();
+  }
+
+  public static void SetSelection(Object[] objects, SelectionMode mode)
+  {
+    Selection.mode = mode;
+    SetSelection(objects);
+  }
+
+  public static bool Contains(Object obj)
+  {
+    return obj is not null && _objects.Contains(obj);
   }
 }

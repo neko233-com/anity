@@ -93,4 +93,45 @@ public static class Mathf
     t = t * t * (3f - 2f * t);
     return to * t + from * (1f - t);
   }
+
+  public static bool IsPowerOfTwo(int value)
+  {
+    return value > 0 && (value & (value - 1)) == 0;
+  }
+
+  public static int NextPowerOfTwo(int value)
+  {
+    if (value <= 0) return 1;
+    value--;
+    value |= value >> 1;
+    value |= value >> 2;
+    value |= value >> 4;
+    value |= value >> 8;
+    value |= value >> 16;
+    return value + 1;
+  }
+
+  public static int ClosestPowerOfTwo(int value)
+  {
+    int next = NextPowerOfTwo(value);
+    int prev = next >> 1;
+    if (prev <= 0) return next;
+    return (value - prev) < (next - value) ? prev : next;
+  }
+
+  public static float SmoothDampAngle(float current, float target, ref float currentVelocity, float smoothTime, float maxSpeed)
+  {
+    return SmoothDampAngle(current, target, ref currentVelocity, smoothTime, maxSpeed, Time.deltaTime);
+  }
+
+  public static float SmoothDampAngle(float current, float target, ref float currentVelocity, float smoothTime)
+  {
+    return SmoothDampAngle(current, target, ref currentVelocity, smoothTime, float.PositiveInfinity, Time.deltaTime);
+  }
+
+  public static float SmoothDampAngle(float current, float target, ref float currentVelocity, float smoothTime, float maxSpeed, float deltaTime)
+  {
+    target = current + DeltaAngle(current, target);
+    return SmoothDamp(current, target, ref currentVelocity, smoothTime, maxSpeed, deltaTime);
+  }
 }

@@ -118,6 +118,7 @@ public class HingeJoint : Joint
 {
     private bool _useLimits;
     private JointLimits _limits;
+    private bool _extendedLimits;
     private bool _useMotor;
     private JointMotor _motor;
     private bool _useSpring;
@@ -135,6 +136,12 @@ public class HingeJoint : Joint
     {
         get => _limits;
         set => _limits = value;
+    }
+
+    public bool extendedLimits
+    {
+        get => _extendedLimits;
+        set => _extendedLimits = value;
     }
 
     public bool useMotor

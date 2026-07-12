@@ -39,6 +39,8 @@ public sealed class DistanceJoint2D : Joint2D
     public bool autoConfigureDistance { get; set; } = true;
     public bool maxDistanceOnly { get; set; }
     public float distance { get; set; }
+    public float dampingRatio { get; set; } = 0f;
+    public float frequency { get; set; } = 0f;
 }
 
 public sealed class HingeJoint2D : Joint2D
@@ -102,6 +104,7 @@ public sealed class TargetJoint2D : Joint2D
     public float maxForce { get; set; } = float.PositiveInfinity;
     public float dampingRatio { get; set; } = 1f;
     public float frequency { get; set; } = 5f;
+    public float frequencyRatio { get => frequency; set => frequency = value; }
 }
 
 public struct JointMotor2D
@@ -158,13 +161,21 @@ public sealed class AreaEffector2D : Effector2D
     public EffectorSelection2D forceTarget { get; set; } = EffectorSelection2D.Rigidbody;
 }
 
+public enum EffectorForceMode2D
+{
+    Constant,
+    InverseLinear,
+    InverseSquared
+}
+
 public sealed class PointEffector2D : Effector2D
 {
     public float forceMagnitude { get; set; }
     public float forceVariation { get; set; }
     public float distanceScale { get; set; } = 1f;
     public float drag { get; set; }
-    public float angularDrag { get; set; }
+    public float angularDrag { get; set; } = 0.2f;
+    public EffectorForceMode2D forceMode { get; set; } = EffectorForceMode2D.Constant;
     public EffectorSelection2D forceSource { get; set; } = EffectorSelection2D.Collider;
     public EffectorSelection2D forceTarget { get; set; } = EffectorSelection2D.Rigidbody;
 }
@@ -177,6 +188,7 @@ public sealed class PlatformEffector2D : Effector2D
     public bool useSideBounce { get; set; }
     public float sideArc { get; set; } = 1f;
     public float rotationalOffset { get; set; }
+    public float sideOffset { get; set; }
 }
 
 public sealed class SurfaceEffector2D : Effector2D
@@ -184,6 +196,10 @@ public sealed class SurfaceEffector2D : Effector2D
     public float speed { get; set; } = 1f;
     public float speedVariation { get; set; }
     public float forceScale { get; set; } = 0.1f;
+    public EffectorSelection2D forceTarget { get; set; } = EffectorSelection2D.Rigidbody;
+    public float damping { get; set; }
+    public bool useContactForce { get; set; }
+    public bool useBounce { get; set; }
 }
 
 public sealed class BuoyancyEffector2D : Effector2D
@@ -195,6 +211,7 @@ public sealed class BuoyancyEffector2D : Effector2D
     public float flowAngle { get; set; }
     public float flowMagnitude { get; set; }
     public float flowVariation { get; set; }
+    public LayerMask layerMask { get; set; } = -1;
 }
 
 public sealed class CompositeCollider2D : Collider2D

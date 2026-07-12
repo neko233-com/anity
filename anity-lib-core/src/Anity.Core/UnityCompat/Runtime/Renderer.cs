@@ -433,6 +433,14 @@ public class MeshFilter : Component
 
 public class MeshRenderer : Renderer { }
 
+public enum SkinQuality
+{
+    Auto = 0,
+    Bone1 = 1,
+    Bone2 = 2,
+    Bone4 = 4
+}
+
 public class SkinnedMeshRenderer : Renderer
 {
     private Mesh? _sharedMesh;
@@ -441,6 +449,7 @@ public class SkinnedMeshRenderer : Renderer
     private Bounds _localBounds;
     private bool _updateWhenOffscreen;
     private int _quality = 2;
+    private SkinQuality _skinWeight = SkinQuality.Auto;
     private bool _skinnedMotionVectors = true;
     private Vector3[] _vertices = Array.Empty<Vector3>();
     private Vector2[] _uvs = Array.Empty<Vector2>();
@@ -481,6 +490,12 @@ public class SkinnedMeshRenderer : Renderer
     {
         get => _quality;
         set => _quality = value;
+    }
+
+    public SkinQuality skinWeight
+    {
+        get => _skinWeight;
+        set => _skinWeight = value;
     }
 
     public bool skinnedMotionVectors
@@ -590,48 +605,107 @@ public enum SpriteMaskInteraction
     VisibleOutsideMask
 }
 
+public enum LineAlignment
+{
+    View,
+    TransformZ
+}
+
+public enum LineTextureMode
+{
+    Stretch,
+    Tile,
+    DistributePerSegment,
+    RepeatPerSegment
+}
+
 public partial class TrailRenderer : Renderer
 {
     public float time { get; set; } = 5f;
     public float minVertexDistance { get; set; } = 0.1f;
     public bool autodestruct { get; set; }
+    public bool emitting { get; set; } = true;
     public AnimationCurve widthCurve { get; set; } = AnimationCurve.Linear(0f, 1f, 1f, 1f);
     public float widthMultiplier { get; set; } = 1f;
+    public float startWidth { get; set; } = 1f;
+    public float endWidth { get; set; } = 1f;
     public Gradient colorGradient { get; set; } = new Gradient();
+    public Color startColor { get; set; } = Color.white;
+    public Color endColor { get; set; } = Color.white;
     public int numCapVertices { get; set; }
     public int numCornerVertices { get; set; }
-    public void Clear() { time = 0f; widthMultiplier = 1f; }
-    public void AddPosition(Vector3 position) { _ = position; }
+    private readonly List<Vector3> _positions = new();
+    public int numPositions => _positions.Count;
+
+    public void Clear() { _positions.Clear(); }
+    public void AddPosition(Vector3 position) { _positions.Add(position); }
     public void Embed(Vector3 point) { AddPosition(point); }
-    public Vector3 GetPosition(int index) => Vector3.zero;
+    public Vector3 GetPosition(int index) => index >= 0 && index < _positions.Count ? _positions[index] : Vector3.zero;
     public float GetPosition(int index, out Vector3 position) { position = GetPosition(index); return 0f; }
-    public int GetPositions(Vector3[] positions) => 0;
-    public void SetPosition(int index, Vector3 position) { _ = index; _ = position; }
-    public void SetPositions(Vector3[] positions, int count) { _ = positions; _ = count; }
+    public int GetPositions(Vector3[] positions)
+    {
+        int n = Mathf.Min(positions?.Length ?? 0, _positions.Count);
+        for (int i = 0; i < n; i++) positions[i] = _positions[i];
+        return n;
+    }
+    public void SetPosition(int index, Vector3 position)
+    {
+        while (_positions.Count <= index) _positions.Add(Vector3.zero);
+        _positions[index] = position;
+    }
+    public void SetPositions(Vector3[] positions, int count)
+    {
+        _positions.Clear();
+        if (positions != null)
+        {
+            int n = Mathf.Min(count, positions.Length);
+            for (int i = 0; i < n; i++) _positions.Add(positions[i]);
+        }
+    }
+    public void SetPositions(Vector3[] positions) => SetPositions(positions, positions?.Length ?? 0);
     public void BakeMesh(Mesh mesh, bool useTransform = false) { mesh?.Clear(); }
 }
 
 public class LineRenderer : Renderer
 {
-    public int positionCount { get; set; }
+    public int positionCount
+    {
+        get => _points.Count;
+        set
+        {
+            while (_points.Count < value) _points.Add(Vector3.zero);
+            while (_points.Count > value) _points.RemoveAt(_points.Count - 1);
+        }
+    }
     public bool useWorldSpace { get; set; } = true;
+    public bool loop { get; set; }
     public AnimationCurve widthCurve { get; set; } = AnimationCurve.Linear(0f, 1f, 1f, 1f);
     public float widthMultiplier { get; set; } = 1f;
-    public bool loop { get; set; }
+    public float startWidth { get; set; } = 1f;
+    public float endWidth { get; set; } = 1f;
+    public Gradient colorGradient { get; set; } = new Gradient();
+    public Color startColor { get; set; } = Color.white;
+    public Color endColor { get; set; } = Color.white;
     public int numCapVertices { get; set; }
     public int numCornerVertices { get; set; }
+    public LineAlignment alignment { get; set; } = LineAlignment.View;
+    public LineTextureMode textureMode { get; set; } = LineTextureMode.Stretch;
     private readonly List<Vector3> _points = new();
 
     public void SetPosition(int index, Vector3 position)
     {
         while (_points.Count <= index) _points.Add(Vector3.zero);
         _points[index] = position;
-        positionCount = _points.Count;
     }
     public void SetPositions(Vector3[] positions)
     {
         _points.Clear();
-        if (positions != null) { _points.AddRange(positions); positionCount = positions.Length; }
+        if (positions != null) _points.AddRange(positions);
+    }
+    public void SetPositions(List<Vector3> positions)
+    {
+        _points.Clear();
+        if (positions != null) _points.AddRange(positions);
     }
     public Vector3 GetPosition(int index) => index >= 0 && index < _points.Count ? _points[index] : Vector3.zero;
     public int GetPositions(Vector3[] positions)
@@ -640,8 +714,15 @@ public class LineRenderer : Renderer
         for (int i = 0; i < n; i++) positions[i] = _points[i];
         return n;
     }
-    public void AddPosition(Vector3 position) { _points.Add(position); positionCount = _points.Count; }
-    public void AddPositions(Vector3[] positions) { if (positions != null) { _points.AddRange(positions); positionCount = _points.Count; } }
+    public int GetPositions(List<Vector3> positions)
+    {
+        positions?.Clear();
+        positions?.AddRange(_points);
+        return _points.Count;
+    }
+    public void AddPosition(Vector3 position) { _points.Add(position); }
+    public void AddPositions(Vector3[] positions) { if (positions != null) _points.AddRange(positions); }
+    public void Simplify(float tolerance = 0.01f) { _ = tolerance; }
     public void BakeMesh(Mesh mesh, bool useTransform = false) { mesh?.Clear(); }
 }
 

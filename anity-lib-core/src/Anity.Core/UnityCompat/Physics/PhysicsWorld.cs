@@ -10,6 +10,20 @@ public enum ColliderShapeType
     Capsule
 }
 
+public enum SimulationMode
+{
+    FixedUpdate,
+    Update,
+    Script
+}
+
+public enum SimulationMode2D
+{
+    FixedUpdate,
+    Update,
+    Script
+}
+
 public struct ColliderShape
 {
     public ColliderShapeType Type;
@@ -64,6 +78,11 @@ internal class PhysicsWorld
     internal float _sleepThreshold = 0.005f;
     internal float _defaultContactOffset = 0.01f;
     internal int _defaultSolverIterations = 6;
+    internal int _defaultSolverVelocityIterations = 1;
+    internal float _defaultMaxDepenetrationVelocity = float.PositiveInfinity;
+    internal bool _queriesHitTriggers = true;
+    internal bool _queriesHitBackfaces;
+    internal SimulationMode _simulationMode = SimulationMode.FixedUpdate;
 
     public Vector3 gravity { get => _gravity; set => _gravity = value; }
     public bool autoSimulation { get => _autoSimulation; set => _autoSimulation = value; }
@@ -71,6 +90,11 @@ internal class PhysicsWorld
     public float sleepThreshold { get => _sleepThreshold; set => _sleepThreshold = value; }
     public float defaultContactOffset { get => _defaultContactOffset; set => _defaultContactOffset = value; }
     public int defaultSolverIterations { get => _defaultSolverIterations; set => _defaultSolverIterations = value; }
+    public int defaultSolverVelocityIterations { get => _defaultSolverVelocityIterations; set => _defaultSolverVelocityIterations = value; }
+    public float defaultMaxDepenetrationVelocity { get => _defaultMaxDepenetrationVelocity; set => _defaultMaxDepenetrationVelocity = value; }
+    public bool queriesHitTriggers { get => _queriesHitTriggers; set => _queriesHitTriggers = value; }
+    public bool queriesHitBackfaces { get => _queriesHitBackfaces; set => _queriesHitBackfaces = value; }
+    public SimulationMode simulationMode { get => _simulationMode; set => _simulationMode = value; }
 
     public PhysicsWorld()
     {
