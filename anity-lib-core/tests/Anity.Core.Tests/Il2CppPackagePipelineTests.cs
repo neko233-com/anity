@@ -136,4 +136,67 @@ public class Il2CppPackagePipelineTests : IDisposable
         Assert.Contains("IsIl2Cpp=", r.log);
         Assert.Contains("True", r.log); // player mode active
     }
+
+    [Fact]
+    public void Package_WhenCompilerPresent_NativeLinkProducesExe()
+    {
+        string compiler = Il2CppToolchain.DetectCompiler();
+        if (string.IsNullOrEmpty(compiler))
+        {
+            // Host has no C++ compiler — criterion allows managed fallback; record that honestly
+            Assert.True(true);
+            return;
+        }
+
+        // clang must not be treated as MSVC cl
+        Assert.False(
+            compiler.IndexOf("clang", StringComparison.OrdinalIgnoreCase) >= 0
+            && Il2CppToolchain.IsMsvcCl(compiler),
+            "clang must not be classified as MSVC cl");
+
+        var r = Il2CppPackagePipeline.Package(_dir, tryNativeLink: true, launch: true);
+        Assert.True(r.success, r.error + "\n" + Il2CppToolchain.lastCompileLog);
+
+        string exe = Il2CppToolchain.GetPlayerExecutablePath(_dir);
+        // With a working compiler on PATH, native link must succeed (not silent managed-only)
+        Assert.True(r.nativeLinked || File.Exists(exe),
+            "nativeLinked expected when compiler present: " + compiler + "\nlog=" + Il2CppToolchain.lastCompileLog);
+        Assert.True(File.Exists(exe), "player exe missing: " + exe + "\n" + Il2CppToolchain.lastCompileLog);
+        Assert.True(r.nativeLinked, "PackageResult.nativeLinked must be true when exe exists");
+        Assert.True(r.launchOk);
+        Assert.Equal(0, r.exitCode);
+    }
+
+    [Fact]
+    public void LinkPlayer_UsesGnuFlags_ForClangPath()
+    {
+        // Unit-level: IsMsvcCl is the gate for flag selection
+        Assert.False(Il2CppToolchain.IsMsvcCl("clang++"));
+        Assert.False(Il2CppToolchain.IsMsvcCl("clang"));
+        Assert.True(Il2CppToolchain.IsMsvcCl("cl"));
+
+        string compiler = Il2CppToolchain.DetectCompiler();
+        if (string.IsNullOrEmpty(compiler)) return;
+
+        // Actually link bootstrap+main into this test dir
+        File.WriteAllText(Path.Combine(_dir, "il2cpp-config.h"), "#pragma once\n");
+        File.WriteAllText(Path.Combine(_dir, "Il2CppBootstrap.cpp"),
+            "#include \"il2cpp-config.h\"\nvoid anity_il2cpp_bootstrap() {}\n");
+        File.WriteAllText(Path.Combine(_dir, "PlayerMain.cpp"),
+            "#include \"il2cpp-config.h\"\n#include <stdio.h>\nextern void anity_il2cpp_bootstrap();\n" +
+            "int main(){ anity_il2cpp_bootstrap(); printf(\"ok\\n\"); return 0; }\n");
+
+        bool linked = Il2CppToolchain.LinkPlayer(_dir);
+        Assert.True(linked, "LinkPlayer failed with " + compiler + "\n" + Il2CppToolchain.lastCompileLog);
+        if (!Il2CppToolchain.IsMsvcCl(compiler))
+        {
+            Assert.DoesNotContain("/nologo", Il2CppToolchain.lastCompileLog);
+            Assert.Contains("-std=c++17", Il2CppToolchain.lastCompileLog);
+        }
+        else
+        {
+            Assert.Contains("/nologo", Il2CppToolchain.lastCompileLog);
+        }
+        Assert.True(File.Exists(Il2CppToolchain.GetPlayerExecutablePath(_dir)));
+    }
 }

@@ -72,10 +72,11 @@ public static class Il2CppToolchain
         return true;
     }
 
-    /// <summary>Detect host C/C++ compiler (cl, clang, gcc). Returns path or empty.</summary>
+    /// <summary>Detect host C/C++ compiler (prefer GNU/Clang, then MSVC cl). Returns path or empty.</summary>
     public static string DetectCompiler()
     {
-        foreach (var name in new[] { "cl", "clang++", "clang", "g++", "gcc" })
+        // Prefer clang++/g++ before cl — "cl" basename must not confuse with clang
+        foreach (var name in new[] { "clang++", "g++", "clang", "gcc", "cl" })
         {
             var path = FindOnPath(name);
             if (!string.IsNullOrEmpty(path))
@@ -86,6 +87,16 @@ public static class Il2CppToolchain
         }
         lastDetectedCompiler = string.Empty;
         return string.Empty;
+    }
+
+    /// <summary>
+    /// True only for MSVC driver <c>cl.exe</c>. Must NOT match clang/clang++ (starts with "cl").
+    /// </summary>
+    public static bool IsMsvcCl(string compilerPath)
+    {
+        if (string.IsNullOrEmpty(compilerPath)) return false;
+        string name = Path.GetFileNameWithoutExtension(compilerPath).ToLowerInvariant();
+        return name == "cl";
     }
 
     /// <summary>
@@ -116,15 +127,14 @@ public static class Il2CppToolchain
 
         string objOut = Path.Combine(il2cppOutputDir, "smoke.o");
         string args;
-        string fileName = Path.GetFileName(compiler).ToLowerInvariant();
-        if (fileName.StartsWith("cl"))
+        if (IsMsvcCl(compiler))
         {
             objOut = Path.Combine(il2cppOutputDir, "smoke.obj");
             args = $"/nologo /c /I\"{il2cppOutputDir}\" /Fo\"{objOut}\" \"{unit}\"";
         }
         else
         {
-            args = $"-c -I\"{il2cppOutputDir}\" -o \"{objOut}\" \"{unit}\"";
+            args = $"-c -std=c++17 -I\"{il2cppOutputDir}\" -o \"{objOut}\" \"{unit}\"";
         }
 
         try
@@ -218,15 +228,15 @@ public static class Il2CppToolchain
         }
 
         string outExe = GetPlayerExecutablePath(il2cppOutputDir);
-        string fileName = Path.GetFileName(compiler).ToLowerInvariant();
         string args;
-        if (fileName.StartsWith("cl"))
+        if (IsMsvcCl(compiler))
         {
-            // MSVC: need /Fe and may fail without VS env — still attempt
+            // MSVC cl.exe only
             args = $"/nologo /EHsc /I\"{il2cppOutputDir}\" /Fe\"{outExe}\" \"{bootstrap}\" \"{playerMain}\"";
         }
         else
         {
+            // clang++ / g++ / gcc
             args = $"-std=c++17 -I\"{il2cppOutputDir}\" -o \"{outExe}\" \"{bootstrap}\" \"{playerMain}\"";
         }
 
@@ -274,7 +284,7 @@ public static class Il2CppToolchain
             return 0;
 
         int count = 0;
-        bool msvc = Path.GetFileName(compiler).ToLowerInvariant().StartsWith("cl");
+        bool msvc = IsMsvcCl(compiler);
         foreach (var cpp in Directory.GetFiles(il2cppOutputDir, "*.cpp"))
         {
             string name = Path.GetFileNameWithoutExtension(cpp);

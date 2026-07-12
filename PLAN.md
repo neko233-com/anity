@@ -11,7 +11,14 @@
 ### 下一次要做（优先）
 1. Vulkan 真 VkSurface/SwapchainKHR
 2. Metal CAMetalLayer 上屏
-3. Checklist 剩余 🟡 模块按迁移阻塞优先级补齐
+3. 继续扩展未覆盖的 Unity 编辑器/运行时深度行为（非 Checklist 假 ✅）
+
+## 2026-07-13l — skeptic fixes: PerlinNoise + MSVC/clang detect + native link assert
+
+### 已完成
+- **Mathf.PerlinNoise**：Improved Perlin → Unity [0,1]；Checklist 去掉 “stub”
+- **Il2CppToolchain.IsMsvcCl**：仅 `cl` 为 MSVC；clang/g++ 用 GNU 标志；Detect 优先 clang++/g++
+- **测试**：nativeLinked 在编译器存在时必须 true；IsMsvcCl 不匹配 clang
 # PLAN
 
 ## 2026-07-13j（本次）— AB.Compare 门禁 + IL2CPP Player 链接启动 + Metal/Vulkan Swapchain
