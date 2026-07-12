@@ -8,6 +8,7 @@ namespace UnityEngine;
 
 public class GameObject : Object
 {
+  private static readonly object _sceneLock = new();
   private static readonly Dictionary<string, List<GameObject>> _sceneObjects = new(StringComparer.Ordinal);
   private static readonly List<GameObject> _allObjects = new();
   private readonly List<Component> _components = new();
@@ -438,22 +439,21 @@ public class GameObject : Object
 
   private static void AddToScene(GameObject go)
   {
-    _allObjects.Add(go);
-    if (!_sceneObjects.TryGetValue(go.name, out var byName))
+    lock (_sceneLock)
     {
-      byName = new List<GameObject>();
-      _sceneObjects[go.name] = byName;
-    }
+      _allObjects.Add(go);
+      if (!_sceneObjects.TryGetValue(go.name, out var byName))
+      {
+        byName = new List<GameObject>();
+        _sceneObjects[go.name] = byName;
+      }
 
-    if (!byName.Contains(go))
-    {
-      byName.Add(go);
+      if (!byName.Contains(go))
+        byName.Add(go);
     }
 
     if (go._scene != null && go.transform != null && go.transform.parent is null)
-    {
       SceneManager.RegisterRootGameObject(go, go._scene);
-    }
   }
 
   internal static GameObject[] GetSceneRootGameObjects()
@@ -465,25 +465,21 @@ public class GameObject : Object
   internal static void UnregisterFromScene(GameObject? go)
   {
     if (go is null)
-    {
       return;
-    }
 
-    _ = _allObjects.Remove(go);
-
-    if (go._scene != null)
+    lock (_sceneLock)
     {
-      SceneManager.UnregisterRootGameObject(go, go._scene);
-    }
-
-    if (_sceneObjects.TryGetValue(go.name, out var byName))
-    {
-      byName.Remove(go);
-      if (byName.Count == 0)
+      _ = _allObjects.Remove(go);
+      if (_sceneObjects.TryGetValue(go.name, out var byName))
       {
-        _ = _sceneObjects.Remove(go.name);
+        byName.Remove(go);
+        if (byName.Count == 0)
+          _ = _sceneObjects.Remove(go.name);
       }
     }
+
+    if (go._scene != null)
+      SceneManager.UnregisterRootGameObject(go, go._scene);
   }
 
   private static void CollectChildrenRecursive(Transform root, Action<Transform> onChild)

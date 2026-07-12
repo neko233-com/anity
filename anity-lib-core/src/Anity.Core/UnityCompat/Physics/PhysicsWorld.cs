@@ -958,7 +958,12 @@ internal class PhysicsWorld
 
         foreach (var rb in _rigidbodies)
         {
-            if (rb != null) rb.Integrate(step);
+            if (rb == null) continue;
+            // Continuous / ContinuousDynamic / ContinuousSpeculative: parameterized TOI CCD
+            if (rb.collisionDetectionMode != CollisionDetectionMode.Discrete)
+                ContinuousCollision.IntegrateWithCCD(rb, step, this);
+            else
+                rb.Integrate(step);
         }
 
         foreach (var wheel in _wheels)

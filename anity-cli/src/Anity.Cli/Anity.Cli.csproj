@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>anity</AssemblyName>
+    <RootNamespace>Anity.Cli</RootNamespace>
+    <Description>Anity CLI — Unity-compatible command line (anity.exe)</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../anity-lib-core/src/Anity.Core/Anity.Core.csproj" />
+    <ProjectReference Include="../../../anity-agent/src/Anity.Agent/Anity.Agent.csproj" />
+  </ItemGroup>
+</Project>

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using UnityEngine;
 
 namespace Anity.Core.Runtime.Il2Cpp;
 
@@ -105,18 +106,23 @@ public static class Il2CppRuntime
 
   public static IntPtr GetMethodPointer(MethodInfo method)
   {
-    return IntPtr.Zero;
+    return Il2CppApi.GetMethodPointer(method);
   }
 
   public static IntPtr ResolveInternalCall(string name)
   {
-    return IntPtr.Zero;
+    return Il2CppApi.ResolveInternalCall(name);
   }
 
   public static IntPtr ResolvePInvoke(string libraryName, string entryPoint)
   {
-    return IntPtr.Zero;
+    return Il2CppApi.ResolvePInvoke(libraryName, entryPoint);
   }
+
+  public static bool IsIos =>
+    Application.platform == RuntimePlatform.IPhonePlayer;
+  public static bool IsAndroid =>
+    Application.platform == RuntimePlatform.Android;
 
   public static IEnumerable<string> GetRequiredGenericTypes()
   {
@@ -127,6 +133,36 @@ public static class Il2CppRuntime
   {
     if (type == null) return;
     _registeredGenericTypes.Add(type);
+  }
+
+  public static void RegisterGenericType(Type type) => RegisterGenericTypeForAOT(type);
+
+  public static void RegisterGenericMethod(string key)
+  {
+    if (!string.IsNullOrEmpty(key))
+      _registeredGenericMethods.Add(key);
+  }
+
+  public static void ForcePlatform(Platform platform)
+  {
+    _currentPlatform = platform;
+    _initialized = true;
+  }
+
+  public static int RegisteredGenericTypeCount => _registeredGenericTypes.Count;
+  public static int RegisteredGenericMethodCount => _registeredGenericMethods.Count;
+
+  public static void ClearAotRegistry()
+  {
+    _registeredGenericTypes.Clear();
+    _registeredGenericMethods.Clear();
+  }
+
+  /// <summary>Simulate IL2CPP player process (tests / CLI -batchmode -il2cpp).</summary>
+  public static void EnterIl2CppPlayerMode()
+  {
+    ForcePlatform(Platform.IL2CPP);
+    Initialize();
   }
 
   public static void EnsureGenericMethod<T>(Func<T> method)

@@ -5,7 +5,6 @@ using System.Text.Json;
 using System.Reflection;
 using System.Threading.Tasks;
 using Anity.Editor.Host.Models;
-using Anity.Editor.Host.Services.Windows;
 using UnityEditor;
 using UnityEngine;
 
@@ -43,10 +42,15 @@ public sealed class EditorHost
     EditorApplication.isPlaying = false;
     _tick = 0;
 
+    // Unity 2022 default layout: Scene + Game + Hierarchy + Project + Console + Inspector
     OpenWindowInternal(sessionId, "Scene View");
+    OpenWindowInternal(sessionId, "Game View");
     OpenWindowInternal(sessionId, "Hierarchy");
     OpenWindowInternal(sessionId, "Project");
+    OpenWindowInternal(sessionId, "Inspector");
     OpenWindowInternal(sessionId, "Console");
+    // Ensure Quick Search providers are ready (Ctrl+K)
+    UnityEditor.Search.SearchService.EnsureProviders();
 
     return Task.FromResult(ToSession(state));
   }
@@ -195,10 +199,13 @@ public sealed class EditorHost
     _menuItems["File/New Project"] = () => OpenWindow("Project");
     _menuItems["File/Open Scene"] = () => OpenWindow("Scene View");
     _menuItems["Window/Scene View"] = () => OpenWindow("Scene View");
+    _menuItems["Window/Game View"] = () => OpenWindow("Game View");
     _menuItems["Window/Hierarchy"] = () => OpenWindow("Hierarchy");
     _menuItems["Window/Project"] = () => OpenWindow("Project");
     _menuItems["Window/Console"] = () => OpenWindow("Console");
     _menuItems["Window/Inspector"] = () => OpenWindow("Inspector");
+    _menuItems["Window/Search"] = () => OpenWindow("Search");
+    _menuItems["Edit/Search All..."] = () => OpenWindow("Search");
 
     _menuItems["Window/Play"] = () =>
     {
@@ -318,29 +325,21 @@ public sealed class EditorHost
 
   private void RegisterWindowFactories()
   {
-    RegisterWindowFactory("Scene View", () => EditorWindow.RegisterWindowFactory(typeof(SceneViewWindow), () => new SceneViewWindow()));
-    RegisterWindowFactory("Hierarchy", () => EditorWindow.RegisterWindowFactory(typeof(Services.Windows.HierarchyWindow), () => new Services.Windows.HierarchyWindow()));
-    RegisterWindowFactory("Project", () => EditorWindow.RegisterWindowFactory(typeof(Services.Windows.ProjectWindow), () => new Services.Windows.ProjectWindow()));
-    RegisterWindowFactory("Console", () => EditorWindow.RegisterWindowFactory(typeof(Services.Windows.ConsoleWindow), () => new Services.Windows.ConsoleWindow()));
-    RegisterWindowFactory("Inspector", () => EditorWindow.RegisterWindowFactory(typeof(Services.Windows.InspectorWindow), () => new Services.Windows.InspectorWindow()));
+    // Register full UnityEditor windows from Anity.Core (not host stubs)
+    RegisterWindowFactory("Scene View", typeof(SceneView), () => SceneView.ShowWindow());
+    RegisterWindowFactory("Game View", typeof(GameView), () => GameView.ShowWindow());
+    RegisterWindowFactory("Hierarchy", typeof(HierarchyWindow), () => HierarchyWindow.ShowWindow());
+    RegisterWindowFactory("Project", typeof(ProjectWindow), () => ProjectWindow.ShowWindow());
+    RegisterWindowFactory("Inspector", typeof(InspectorWindow), () => InspectorWindow.ShowWindow());
+    RegisterWindowFactory("Console", typeof(ConsoleWindow), () => ConsoleWindow.ShowWindow());
+    RegisterWindowFactory("Search", typeof(UnityEditor.Search.SearchWindow),
+      () => UnityEditor.Search.SearchWindow.Show(null));
   }
 
-  private void RegisterWindowFactory(string alias, Action register)
+  private void RegisterWindowFactory(string alias, Type windowType, Func<EditorWindow> factory)
   {
-    register();
-    _windowFactories[alias] = () =>
-    {
-      var type = alias switch
-      {
-        "Scene View" => typeof(SceneViewWindow),
-        "Hierarchy" => typeof(Services.Windows.HierarchyWindow),
-        "Project" => typeof(Services.Windows.ProjectWindow),
-        "Console" => typeof(Services.Windows.ConsoleWindow),
-        "Inspector" => typeof(Services.Windows.InspectorWindow),
-        _ => typeof(SceneViewWindow)
-      };
-      return EditorWindow.GetWindow(type, true);
-    };
+    EditorWindow.RegisterWindowFactory(windowType, factory);
+    _windowFactories[alias] = factory;
   }
 
   private void OnEditorUpdate()

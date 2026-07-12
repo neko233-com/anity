@@ -413,61 +413,7 @@ public enum TextureWrapMode
     MirrorOnce = 3
 }
 
-public enum FilterMode
-{
-    Point = 0,
-    Bilinear = 1,
-    Trilinear = 2
-}
-
-public enum TextureFormat
-{
-    Alpha8 = 1,
-    ARGB4444 = 2,
-    RGB24 = 3,
-    RGBA32 = 4,
-    ARGB32 = 5,
-    RGB565 = 7,
-    R16 = 9,
-    DXT1 = 10,
-    DXT5 = 12,
-    RGBA4444 = 13,
-    BGRA32 = 14,
-    RHalf = 15,
-    RGHalf = 16,
-    RGBAHalf = 17,
-    RFloat = 18,
-    RGFloat = 19,
-    RGBAFloat = 20,
-    YUY2 = 21,
-    RGB9e5Float = 22,
-    BC6H = 24,
-    BC7 = 25,
-    BC4 = 26,
-    BC5 = 27,
-    DXT1Crunched = 28,
-    DXT5Crunched = 29,
-    PVRTC_RGB2 = 30,
-    PVRTC_RGBA2 = 31,
-    PVRTC_RGB4 = 32,
-    PVRTC_RGBA4 = 33,
-    ETC_RGB4 = 34,
-    ATC_RGB4 = 35,
-    ETC2_RGB = 45,
-    ETC2_RGBA8 = 46,
-    ASTC_4x4 = 48,
-    ASTC_5x5 = 49,
-    ASTC_6x6 = 50,
-    ASTC_8x8 = 51,
-    ASTC_10x10 = 52,
-    ASTC_12x12 = 53,
-    RG16 = 62,
-    R8 = 63,
-    RG32 = 67,
-    RGBA64 = 68,
-    R8G8B8A8_SRGB = 69,
-    ASTC_HDR_4x4 = 72
-}
+// FilterMode / TextureFormat live in UnityEngine (Texture2D.cs) — do not duplicate here.
 
 [Flags]
 public enum RenderTextureMemoryless

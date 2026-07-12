@@ -338,24 +338,141 @@ public static class BuildPipeline
 
   public static AssetBundleManifest BuildAssetBundles(string outputPath, AssetBundleBuild[]? builds, BuildAssetBundleOptions assetBundleOptions, BuildTarget target)
   {
-    _ = assetBundleOptions;
     _ = target;
-    var manifest = new AssetBundleManifest();
-    if (!string.IsNullOrWhiteSpace(outputPath))
+    var manifest = new AssetBundleManifest { name = "AssetBundleManifest" };
+    if (string.IsNullOrWhiteSpace(outputPath))
+      return manifest;
+
+    if ((assetBundleOptions & BuildAssetBundleOptions.DryRunBuild) != 0)
     {
-      Directory.CreateDirectory(outputPath);
-    }
-    if (builds != null)
-    {
-      foreach (var build in builds)
+      if (builds != null)
       {
-        if (!string.IsNullOrEmpty(build.assetBundleName))
+        foreach (var build in builds)
         {
-          manifest.AddBundle(build.assetBundleName, default, build.assetNames ?? Array.Empty<string>());
+          if (!string.IsNullOrEmpty(build.assetBundleName))
+            manifest.AddBundle(build.assetBundleName, default, Array.Empty<string>());
         }
       }
+      return manifest;
     }
+
+    Directory.CreateDirectory(outputPath);
+    builds ??= Array.Empty<AssetBundleBuild>();
+
+    // Pass 1: collect names for dependency graph (path prefix → bundle)
+    var pathToBundle = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var build in builds)
+    {
+      if (string.IsNullOrEmpty(build.assetBundleName) || build.assetNames == null) continue;
+      foreach (var assetPath in build.assetNames)
+      {
+        if (!string.IsNullOrEmpty(assetPath))
+          pathToBundle[assetPath] = build.assetBundleName;
+      }
+    }
+
+    foreach (var build in builds)
+    {
+      if (string.IsNullOrEmpty(build.assetBundleName)) continue;
+
+      var catalog = new AssetBundleFormat.BundleCatalog
+      {
+        bundleName = build.assetBundleName
+      };
+
+      var names = build.assetNames ?? Array.Empty<string>();
+      var depSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+      foreach (var assetPath in names)
+      {
+        if (string.IsNullOrEmpty(assetPath)) continue;
+
+        // Scene assets
+        if (assetPath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
+        {
+          catalog.scenes.Add(assetPath);
+          continue;
+        }
+
+        Object? asset = AssetDatabase.LoadAssetAtPath<Object>(assetPath);
+        if (asset == null)
+        {
+          // Create placeholder text asset so pack still succeeds (StrictMode fails)
+          if ((assetBundleOptions & BuildAssetBundleOptions.StrictMode) != 0)
+            throw new InvalidOperationException($"Missing asset for bundle: {assetPath}");
+          asset = new TextAsset($"missing:{assetPath}");
+          asset.name = Path.GetFileNameWithoutExtension(assetPath);
+        }
+
+        catalog.assets.Add(AssetBundleFormat.SerializeAsset(assetPath, asset));
+
+        // Direct dependencies via BuildPipeline.GetDirectDependencies if available
+        foreach (var depPath in GetDirectDependencies(assetPath))
+        {
+          if (pathToBundle.TryGetValue(depPath, out var depBundle) &&
+              !string.Equals(depBundle, build.assetBundleName, StringComparison.OrdinalIgnoreCase))
+            depSet.Add(depBundle);
+        }
+      }
+
+      catalog.dependencies.AddRange(depSet);
+      catalog.hash = AssetBundleFormat.ComputeContentHash(names);
+      catalog.crc = (uint)(catalog.hash.u32_0 ^ catalog.hash.u32_1);
+
+      string fileName = build.assetBundleName;
+      if ((assetBundleOptions & BuildAssetBundleOptions.AppendHashToAssetBundleName) != 0)
+        fileName = $"{build.assetBundleName}_{catalog.hash}";
+
+      if (build.assetBundleVariant != null && build.assetBundleVariant.Length > 0)
+      {
+        foreach (var variant in build.assetBundleVariant)
+        {
+          if (string.IsNullOrEmpty(variant)) continue;
+          string variantName = $"{build.assetBundleName}.{variant}";
+          catalog.bundleName = variantName;
+          var bytesV = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+          catalog.crc = AssetBundleFormat.ComputeCrc(bytesV);
+          // rewrite with final crc
+          bytesV = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+          File.WriteAllBytes(Path.Combine(outputPath, variantName), bytesV);
+          manifest.AddBundleWithVariant(build.assetBundleName, variant, catalog.hash);
+          manifest.AddBundle(variantName, catalog.hash, catalog.dependencies.ToArray());
+        }
+      }
+      else
+      {
+        var bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+        catalog.crc = AssetBundleFormat.ComputeCrc(bytes);
+        bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+        File.WriteAllBytes(Path.Combine(outputPath, fileName), bytes);
+        manifest.AddBundle(build.assetBundleName, catalog.hash, catalog.dependencies.ToArray());
+      }
+    }
+
+    // Write manifest bundle itself (Unity writes a manifest asset bundle)
+    var manifestCatalog = new AssetBundleFormat.BundleCatalog
+    {
+      bundleName = Path.GetFileName(outputPath.TrimEnd('/', '\\')),
+      hash = AssetBundleFormat.ComputeContentHash(manifest.GetAllAssetBundles()),
+      assets =
+      {
+        AssetBundleFormat.SerializeAsset("AssetBundleManifest", manifest)
+      }
+    };
+    var manBytes = AssetBundleFormat.WriteBundle(manifestCatalog, assetBundleOptions);
+    string manName = Path.GetFileName(outputPath.TrimEnd('/', '\\'));
+    if (string.IsNullOrEmpty(manName)) manName = "AssetBundles";
+    File.WriteAllBytes(Path.Combine(outputPath, manName), manBytes);
+    File.WriteAllText(Path.Combine(outputPath, manName + ".manifest"),
+      "# Anity AssetBundleManifest\n" + string.Join("\n", manifest.GetAllAssetBundles()));
+
     return manifest;
+  }
+
+  /// <summary>Build all asset bundles from AssetDatabase labels (empty builds → no-op directory create).</summary>
+  public static AssetBundleManifest BuildAssetBundles(string outputPath, BuildAssetBundleOptions assetBundleOptions, BuildTarget targetPlatform)
+  {
+    return BuildAssetBundles(outputPath, Array.Empty<AssetBundleBuild>(), assetBundleOptions, targetPlatform);
   }
 
   public static BuildPlayerWindow BuildPlayerWindow => new BuildPlayerWindow();
@@ -396,11 +513,8 @@ public static class BuildPipeline
   public static string BuildAssetBundles(string outputPath, BuildAssetBundleOptions options)
   {
     if (string.IsNullOrWhiteSpace(outputPath))
-    {
       return string.Empty;
-    }
-
-    Directory.CreateDirectory(outputPath);
+    BuildAssetBundles(outputPath, Array.Empty<AssetBundleBuild>(), options, EditorUserBuildSettings.activeBuildTarget);
     return outputPath;
   }
 

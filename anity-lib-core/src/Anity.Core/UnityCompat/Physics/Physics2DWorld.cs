@@ -825,6 +825,26 @@ internal class Physics2DWorld
   {
     normal = Vector2.up;
     penetration = float.PositiveInfinity;
+
+    // Prefer anity-native C++ SAT
+    if (polyA != null && polyB != null && polyA.Length >= 3 && polyB.Length >= 3)
+    {
+      var flatA = new float[polyA.Length * 2];
+      var flatB = new float[polyB.Length * 2];
+      for (int i = 0; i < polyA.Length; i++) { flatA[i * 2] = polyA[i].x; flatA[i * 2 + 1] = polyA[i].y; }
+      for (int i = 0; i < polyB.Length; i++) { flatB[i * 2] = polyB[i].x; flatB[i * 2 + 1] = polyB[i].y; }
+      if (Anity.Core.Runtime.Native.AnityNative.TryPolygonSAT(flatA, flatB, out float nx, out float ny, out float pen))
+      {
+        normal = new Vector2(nx, ny);
+        penetration = pen;
+        return true;
+      }
+      // TryPolygonSAT returns false both for no-overlap and when native unavailable.
+      // If native is available and returned false, shapes do not overlap.
+      if (Anity.Core.Runtime.Native.AnityNative.Available)
+        return false;
+    }
+
     var axes = new List<Vector2>();
     AddEdges(polyA, axes);
     AddEdges(polyB, axes);

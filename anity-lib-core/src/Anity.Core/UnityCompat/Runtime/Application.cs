@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -50,7 +51,12 @@ public static class Application
   public static bool isEditor => false;
   public static bool isFocused { get; set; } = true;
   public static bool isPaused { get => _isPaused; internal set => _isPaused = value; }
-  public static bool isBatchMode => false;
+  private static bool _isBatchMode;
+  public static bool isBatchMode
+  {
+    get => _isBatchMode;
+    set => _isBatchMode = value;
+  }
   public static bool isMobilePlatform => platform is RuntimePlatform.Android or RuntimePlatform.IPhonePlayer;
   public static bool isConsolePlatform => platform is RuntimePlatform.PS4 or RuntimePlatform.PS5 or RuntimePlatform.XboxOne or RuntimePlatform.Switch;
   public static bool isWebGL => platform == RuntimePlatform.WebGLPlayer;
@@ -139,6 +145,18 @@ public static class Application
       System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
     }
     catch { }
+  }
+
+  private static readonly Dictionary<LogType, StackTraceLogType> _stackTraceTypes = new();
+
+  public static void SetStackTraceLogType(LogType logType, StackTraceLogType stackTraceType)
+  {
+    _stackTraceTypes[logType] = stackTraceType;
+  }
+
+  public static StackTraceLogType GetStackTraceLogType(LogType logType)
+  {
+    return _stackTraceTypes.TryGetValue(logType, out var t) ? t : StackTraceLogType.ScriptOnly;
   }
 
   public static void SetLogCallback(LogCallback? handler)

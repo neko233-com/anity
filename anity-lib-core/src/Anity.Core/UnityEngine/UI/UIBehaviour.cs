@@ -1,17 +1,20 @@
 namespace UnityEngine.UI;
 
+/// <summary>
+/// Base for uGUI components — lifecycle methods must override MonoBehaviour so Awake/OnEnable fire.
+/// </summary>
 public abstract class UIBehaviour : MonoBehaviour
 {
   public RectTransform rectTransform => transform as RectTransform;
 
-  protected virtual void Awake() {}
-  protected virtual void OnEnable() {}
-  protected virtual void OnDisable() {}
-  protected virtual void OnDestroy() {}
-  protected virtual void Start() {}
-  protected virtual void Update() {}
-  protected virtual void LateUpdate() {}
-  protected virtual void FixedUpdate() {}
+  protected override void Awake() {}
+  protected override void OnEnable() {}
+  protected override void OnDisable() {}
+  protected override void OnDestroy() {}
+  protected override void Start() {}
+  protected override void Update() {}
+  protected override void LateUpdate() {}
+  protected override void FixedUpdate() {}
   protected virtual void OnRectTransformDimensionsChange() {}
   protected virtual void OnCanvasGroupChanged() {}
   protected virtual void OnCanvasHierarchyChanged() {}

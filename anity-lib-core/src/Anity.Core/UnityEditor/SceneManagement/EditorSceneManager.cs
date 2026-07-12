@@ -92,6 +92,18 @@ public static class EditorSceneManager
     return SceneManager.GetActiveScene();
   }
 
+  /// <summary>Create an isolated preview scene for Prefab Mode / preview rendering.</summary>
+  public static Scene NewPreviewScene()
+  {
+    return SceneManager.CreateScene("PrefabMode_Preview");
+  }
+
+  public static bool ClosePreviewScene(Scene scene)
+  {
+    if (!scene.IsValid()) return false;
+    return CloseScene(scene, true);
+  }
+
   private static LoadSceneMode ToRuntimeMode(OpenSceneMode mode)
   {
     return mode == OpenSceneMode.Additive ? LoadSceneMode.Additive : LoadSceneMode.Single;

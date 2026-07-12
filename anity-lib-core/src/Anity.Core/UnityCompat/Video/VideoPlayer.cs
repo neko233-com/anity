@@ -524,4 +524,40 @@ public sealed class VideoClip : Object
         _ = trackIndex;
         return 44100;
     }
+
+    public MediaContainerFormat containerFormat { get; set; } = MediaContainerFormat.Unknown;
+    public MediaCodec videoCodec { get; set; } = MediaCodec.Unknown;
+    public MediaCodec audioCodec { get; set; } = MediaCodec.Unknown;
+    public bool isMp4 => containerFormat == MediaContainerFormat.Mp4 || containerFormat == MediaContainerFormat.M4A;
+    public bool isWebM => containerFormat == MediaContainerFormat.WebM;
+
+    /// <summary>Create a VideoClip from file path (.mp4, .webm, .mov, .avi, .m4v).</summary>
+    public static VideoClip? CreateFromFile(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        if (!MediaFormatUtility.IsSupportedVideoExtension(path) && !System.IO.File.Exists(path))
+            return null;
+
+        var info = MediaFormatUtility.DetectFromPath(path);
+        if (!info.isVideo && System.IO.File.Exists(path))
+        {
+            try
+            {
+                var header = new byte[Math.Min(32, (int)new System.IO.FileInfo(path).Length)];
+                using var fs = System.IO.File.OpenRead(path);
+                _ = fs.Read(header, 0, header.Length);
+                info = MediaFormatUtility.DetectFromBytes(header, path);
+            }
+            catch { /* ignore */ }
+        }
+
+        if (!info.isVideo && !MediaFormatUtility.IsSupportedVideoExtension(path))
+            return null;
+
+        var clip = MediaFormatUtility.CreateVideoClipFromPath(path);
+        clip.containerFormat = info.container;
+        clip.videoCodec = info.primaryCodec;
+        clip.audioCodec = info.audioCodec;
+        return clip;
+    }
 }

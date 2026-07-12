@@ -472,9 +472,16 @@ namespace UnityEngine.Rendering
       return m_Components.TryGetValue(type, out component);
     }
 
-    internal void Add(Type type, VolumeComponent comp)
+    public void Add(Type type, VolumeComponent comp)
     {
-      m_Components[type] = comp;
+      if (type != null && comp != null)
+        m_Components[type] = comp;
+    }
+
+    public void Add(VolumeComponent comp)
+    {
+      if (comp != null)
+        m_Components[comp.GetType()] = comp;
     }
 
     internal void Clear()

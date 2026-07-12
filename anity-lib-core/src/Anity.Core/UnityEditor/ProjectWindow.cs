@@ -411,20 +411,57 @@ namespace UnityEditor
 
     private void OpenAsset(ProjectAsset asset)
     {
-      if (asset.Type == typeof(SceneAsset))
+      if (asset == null || string.IsNullOrEmpty(asset.Path)) return;
+
+      var ext = Path.GetExtension(asset.Path).ToLowerInvariant();
+
+      // Prefab Mode — double-click .prefab enters PrefabStage (Isolation)
+      if (ext == ".prefab")
+      {
+        var stage = PrefabStage.OpenPrefab(asset.Path, PrefabStageMode.InIsolation);
+        if (stage != null)
+        {
+          SceneView.ShowWindow();
+          HierarchyWindow.ShowWindow();
+          return;
+        }
+      }
+
+      if (asset.Type == typeof(SceneAsset) || ext == ".unity")
       {
         if (EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
         {
           EditorSceneManager.OpenScene(asset.Path);
         }
+        return;
       }
-      else
+
+      // Media: select AudioClip / VideoClip so Inspector can preview
+      if (MediaFormatUtility.IsSupportedAudioExtension(ext) ||
+          MediaFormatUtility.IsSupportedVideoExtension(ext))
       {
-        var obj = AssetDatabase.LoadAssetAtPath(asset.Path) as UnityEngine.Object;
-        if (obj != null)
+        var mediaObj = AssetDatabase.LoadAssetAtPath(asset.Path) as UnityEngine.Object;
+        if (mediaObj == null && MediaFormatUtility.IsSupportedAudioExtension(ext))
         {
-          Selection.SetActiveObject(obj);
+          mediaObj = AudioClip.CreateFromFile(asset.Path);
+          if (mediaObj != null)
+            AssetDatabase.CreateAsset(mediaObj, asset.Path);
         }
+        if (mediaObj == null && MediaFormatUtility.IsSupportedVideoExtension(ext))
+        {
+          mediaObj = MediaFormatUtility.CreateVideoClipFromPath(asset.Path);
+          if (mediaObj != null)
+            AssetDatabase.CreateAsset(mediaObj, asset.Path);
+        }
+        if (mediaObj != null)
+          Selection.SetActiveObject(mediaObj);
+        return;
+      }
+
+      var obj = AssetDatabase.LoadAssetAtPath(asset.Path) as UnityEngine.Object;
+      if (obj != null)
+      {
+        Selection.SetActiveObject(obj);
       }
     }
 
@@ -546,11 +583,26 @@ namespace UnityEditor
         case ".anim": return typeof(AnimationClip);
         case ".wav":
         case ".mp3":
-        case ".ogg": return typeof(AudioClip);
+        case ".ogg":
+        case ".oga":
+        case ".aac":
+        case ".m4a":
+        case ".flac": return typeof(AudioClip);
+        case ".mp4":
+        case ".m4v":
+        case ".webm":
+        case ".mov":
+        case ".avi": return typeof(UnityEngine.Video.VideoClip);
         case ".fbx":
         case ".obj": return typeof(Mesh);
         case ".prefab": return typeof(GameObject);
         case ".asset": return typeof(ScriptableObject);
+        // Compressed texture import types (ASTC / ETC / DXT / BC)
+        case ".astc":
+        case ".ktx":
+        case ".ktx2":
+        case ".dds":
+        case ".pvr": return typeof(Texture2D);
         default: return typeof(UnityEngine.Object);
       }
     }

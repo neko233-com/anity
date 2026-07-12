@@ -129,6 +129,21 @@ StreamingAssets/yoo/
 Bundles/
 AssetBundles/
 [Bb]undle[Oo]utput/
+Library/Il2CppBuildCache/
+Il2CppOutputProject/
+anity-native/build/
+anity-native/cmake-build-*/
+**/anity_native.dll
+**/libanity_native.*
+!anity-native/include/
+
+# ----- Anity CLI / agent local outputs -----
+player.log
+*.manifest
+!**/packages/**/*.manifest
+TestResults.xml
+agent_capture*.png
+sc_*.png
 
 # ----- Android / Gradle (export & local) -----
 .gradle/

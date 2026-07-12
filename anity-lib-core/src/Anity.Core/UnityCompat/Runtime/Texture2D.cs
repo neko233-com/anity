@@ -53,12 +53,19 @@ public enum TextureFormat
     ASTC_8x8 = 55,
     ASTC_10x10 = 56,
     ASTC_12x12 = 57,
+    // HDR ASTC (Unity 2022+)
+    ASTC_HDR_4x4 = 66,
+    ASTC_HDR_5x5 = 67,
+    ASTC_HDR_6x6 = 68,
+    ASTC_HDR_8x8 = 69,
+    ASTC_HDR_10x10 = 70,
+    ASTC_HDR_12x12 = 71,
     RG16 = 62,
     R8 = 63,
-    RG32 = 67,
-    RGB48 = 68,
-    RGBA64 = 69,
-    R8G8B8A8_SRGB = 70,
+    RG32 = 72,
+    RGB48 = 73,
+    RGBA64 = 74,
+    R8G8B8A8_SRGB = 75,
 }
 
 public enum FilterMode

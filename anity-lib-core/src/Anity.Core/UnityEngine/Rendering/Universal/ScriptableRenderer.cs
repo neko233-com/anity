@@ -75,11 +75,26 @@ namespace UnityEngine.Rendering.Universal
     {
       ConfigureCameraTarget(BuiltinRenderTextureType.CameraTarget, BuiltinRenderTextureType.CameraTarget);
 
+      // Ensure default URP post-process feature for HDR / Volume stack (Unity 2022 Pro parity)
+      EnsureDefaultPostProcessFeature();
+
       foreach (var feature in rendererFeatures)
       {
         if (feature != null && feature.isActive)
           feature.AddRenderPasses(this, ref renderingData);
       }
+    }
+
+    private void EnsureDefaultPostProcessFeature()
+    {
+      for (int i = 0; i < rendererFeatures.Count; i++)
+      {
+        if (rendererFeatures[i] is PostProcessRendererFeature)
+          return;
+      }
+      var f = new PostProcessRendererFeature();
+      f.Create();
+      rendererFeatures.Add(f);
     }
 
     public virtual void Execute(ScriptableRenderContext context, ref RenderingData renderingData)

@@ -1,5 +1,140 @@
 # PLAN
 
+## 2026-07-13f（本次）— AssetBundle 全链路 + GraphicRaycaster + 测试 80 + push
+
+### 已完成
+- **AssetBundle 打包全链路**
+  - `AssetBundleFormat`：UnityFS magic + catalog（assets/scenes/deps/hash/crc）
+  - `BuildPipeline.BuildAssetBundles`：写盘、manifest 文件、DryRun、AppendHash、StrictMode、变体
+  - `LoadFromFile/Memory/Stream` 解析 catalog 并 `RegisterAsset` 还原 TextAsset/Texture2D/Material/GameObject
+  - CRC 校验、Unload/Async、GetAllLoaded
+- **GraphicRaycaster** Overlay→eventCamera=null；Camera/World 用 worldCamera；排序与 blocking
+- **GameObject 场景表加锁**（Job 并行下并发安全）
+- **测试**：Core.Tests **80 全通过**（AB≥14、Raycaster≥12 等）
+- **.gitignore**：native build、Il2Cpp cache、截图/测试产物
+
+### 下一次要做（优先）
+1. AssetBundle LZ4 真压缩与 Unity 官方 AB 二进制对照
+2. Addressables 构建对接
+3. 继续其余模块 10+ 边界测试矩阵
+
+## 2026-07-13e（本次）— Canvas 全适配 + JobSystem/IL2CPP 深度
+
+### 已完成
+- **Canvas 三模式完整**
+  - Screen Space **Overlay**：pixelRect/renderingDisplaySize、sorting、根 RT sizeDelta = display/scaleFactor
+  - Screen Space **Camera**：worldCamera、planeDistance 放置、主相机回退
+  - **World Space**：作者变换保留；Scaler 作用 localScale
+  - rootCanvas / isRootCanvas 嵌套、AdditionalCanvasShaderChannels、GetSortedCanvases、ScreenPointToLocalPoint
+- **CanvasScaler 全模式**
+  - ConstantPixelSize / ScaleWithScreenSize（MatchWidthOrHeight log 混合、Expand、Shrink）/ ConstantPhysicalSize
+  - ApplyScaleFactorToCanvas 对齐 Unity：Overlay/Camera 改 sizeDelta，World 改 localScale
+  - **修复 UIBehaviour 生命周期**：`override Awake/OnEnable` 否则 AddComponent 不触发 Scaler
+- **Job System 深度**
+  - 真 ThreadPool + Parallel.For 批处理、JobHandle 依赖 Complete、CombineDependencies、JobsUtility.WorkerCount
+  - IJob / IJobParallelFor / Batch / Transform 扩展 Schedule/Run/ByRef
+  - 接 anity-native Jobs_Initialize
+- **IL2CPP 深度**
+  - Il2CppApi：icall/pinvoke/method pointer 注册与解析、InvokeMethod、GC、Il2CppException
+  - Il2CppStripping preserve / EffectiveLevel；Builder 集成 InitializeRuntime
+- **测试**：Canvas ≥15、Job ≥13、累计 Core.Tests **54 全通过**
+
+### 下一次要做（优先）
+1. GraphicRaycaster 与 Overlay/Camera/World 事件相机射线全路径测试
+2. Job Burst 编译路径 / Safety system 断言
+3. IL2CPP 真工具链驱动（il2cpp 转换 → 平台 C++ 编译链接）
+
+## 2026-07-13d（本次）— CLI / Agent 官方库 / 截图 / IL2CPP / 深度测试
+
+### 已完成
+- **AGENTS.md**：CLI、Anity.Agent 独立扩展、截图、IL2CPP 绝对支持、**每功能≥10 测试用例** 强制写入规范
+- **anity.exe CLI**（`anity-cli/`）：Unity 兼容 `-batchmode/-quit/-projectPath/-executeMethod/-buildTarget/-build*Player/-runTests/-logFile/-nographics` + Anity `-il2cpp/-screenshot/-agent*`
+- **Anity.Agent 官方扩展**（`anity-agent/`，类 UGUI 独立包）：Session/Memory/ToolRegistry/内置 screenshot·echo·systeminfo 工具；**禁止塞进 Core**
+- **ScreenCapture**：CaptureScreenshot / AsTexture / IntoRenderTexture + superSize 钳制 + 真 PNG 编码（`ImageConversion.EncodeToPNG`）
+- **IL2CPP 深化**：`Il2CppBuilder`（代码生成设置、link.xml、.cpp stub、元数据 map、AOT 泛型注册）、`Il2CppRuntime.EnterIl2CppPlayerMode`
+- **深度测试**
+  - `Anity.Core.Tests`：ScreenCapture 12 + Il2Cpp 14 = **26 通过**
+  - `Anity.Agent.Tests`：**13 通过**
+  - `Anity.Cli.Tests`：**13 通过**
+- **`_scripts/run-tests.ps1`**；`build-all` 纳入 agent/cli
+
+### 下一次要做（优先）
+1. 为物理/HDR/媒体/纹理压缩等其余模块各补满 ≥10 用例
+2. CLI `-executeMethod` 与 Editor 编译脚本完整对接；`-runTests` 接 xUnit
+3. IL2CPP → 真 C++ 工具链（il2cpp.exe 风格驱动 + 平台链接）
+
+## 2026-07-13c（本次）— 查漏补缺：真 D3D11 + URP HDR 后处理 + native 热路径
+
+### 已完成
+- **D3D11 真设备**：`D3D11CreateDevice`（Hardware + WARP 回退）、可选 swapchain/RTV、BeginFrame/Present、HDR10 格式 `R10G10B10A2`
+- **Vulkan 设备骨架**：有 SDK 时 `vkCreateInstance` + physical + logical device（无 SDK 时 NOT_SUPPORTED）
+- **设备创建分发**：`AnityGraphics_CreateDevice` → D3D11 / Vulkan / Null
+- **C# 热路径接 native**
+  - 3D CCD `SphereSphereTOI` → `AnityPhysics3D_*`
+  - 2D SAT `PolygonIntersectPolygon` → `AnityPhysics2D_PolygonSAT`
+  - `AudioClip.CreateFromFile` → `AnityAudio_DecodeFile`
+  - `TextureCompressionUtility.Compress` → `AnityTexture_CompressRGBA8`
+- **URP HDR 后处理**：`PostProcessPass` / `PostProcessRendererFeature` 自动注入；Bloom/Tonemap/ColorAdjustments Volume 参数 → Shader globals + `PostProcessRuntime`
+- **`NativeGraphicsDevice`** 托管包装；**`Display`** 多显示器；**`ColorSpacePipeline`** Linear/HDR 配置
+- **GameView** HDR/Linear 联动 post grade
+- **build-native.ps1** 自动拷贝 `anity_native.dll` 到 managed 输出目录
+- **编译**：Anity.Core 0 错误；native 产出 `anity_native.dll`
+
+### 下一次要做（优先）
+1. Metal 真设备 + iOS EDR；Vulkan swapchain + Android 集成
+2. FFmpeg / 平台 MediaCodec 真 mp3/H.264 解码
+3. 阴影级联/光照探针采样进 native + 对比测试矩阵
+
+## 2026-07-13b（本次）— 完全对标 + C++ 原生 + HDR + _scripts
+
+### 已完成
+- **AGENTS.md 规范升级（强制）**
+  - 完全对标 Unity 2022.3 Pro：API + 行为效果 + 编辑器一模一样
+  - Unity 用 C++ 的部分必须用 C++（`anity-native/`）
+  - 必须支持 URP 下 **HDR**（非 HDRP 产品管线）
+  - 查漏补缺默认执行；`_scripts/` 为环境/构建脚本唯一权威目录
+- **anity-native C++ 引擎核心（可编译）**
+  - 模块：core / graphics（Null+Vulkan/D3D11/Metal 后端壳）/ HDR / physics(CCD+SAT) / audio / media / jobs / texture compress
+  - C-ABI + P/Invoke：`Anity.Core.Runtime.Native.AnityNative`
+  - `_scripts/build-native.ps1` 已产出 `anity_native.dll`
+- **HDR 全链路 API**
+  - `HDROutputSettings` / `ColorGamut` / `HDRDisplayBitDepth` / `HDRUtilities`
+  - native `AnityHDR_*`：ACES/Neutral 色调映射、Bloom 阈值、Linear↔sRGB、显示查询
+  - URP：`supportsHDR`、`DefaultHDR` RT、`QualitySettings.activeColorSpace=Linear` 默认
+  - `Mathf.LinearToGammaSpace` / `GammaToLinearSpace` 对齐 sRGB 曲线
+- **`_scripts/` 环境脚本**
+  - install-env / verify-env / build-native / build-all / gap-audit
+  - install-vulkan-sdk / install-android-sdk（Windows）
+  - 对应 .sh（Unix）
+- **gap-audit**：C# 332 文件、Checklist ✅=346 ❌=0、关键类型齐
+
+### 下一次要做（优先）
+1. Vulkan/D3D11/Metal **真设备**交换链与 HDR 显示输出（当前为后端壳 + 类型矩阵 + HDR CPU 路径）
+2. 接入 FFmpeg/平台编解码：真 mp3/H.264 解码进 native
+3. 逐模块把 C# 热路径（物理步进、网格、粒子）下沉到 `anity-native` 并加对比测试
+
+## 2026-07-13（本次）
+
+### 已完成
+- **媒体格式**：`MediaFormatUtility` 支持 mp3/wav/ogg/aac/m4a/flac + mp4/webm/mov/avi；`AudioClip.CreateFromFile`；`VideoClip`/`WebGLVideo`；Project 浏览器识别媒体扩展
+- **平台图形**：iOS → Metal（`PlatformGraphics.ConfigureIOSMetal`）；Android → Vulkan 主路径 + GLES 回退；`PlayerSettings.GetGraphicsAPIs` 默认矩阵对齐
+- **纹理压缩 ASTC/ETC/DXT(BC)**：`TextureCompressionUtility` 平台默认格式/块大小/软压缩/`ToGraphicsFormat`；去重 `TextureFormat` 枚举冲突；补 `ASTC_HDR_*`
+- **物理深化（已有+修编译）**：3D CCD 参数化 TOI（`ContinuousCollision`）；2D SAT（`PolygonIntersectPolygon`）；`CompositeCollider2D` 凸包合并
+- **编辑器对接**：
+  - Host 默认布局：Scene / Game / Hierarchy / Project / Inspector / Console
+  - Host 改为打开 `Anity.Core` 真实窗口（不再用占位 stub）
+  - **Ctrl+K** Quick Search（`SearchService`/`SearchWindow`，资产/Hierarchy/菜单/窗口/设置）
+  - **Prefab Mode**：`PrefabStage` Isolation/Context；Project 双击 `.prefab` 进入；菜单 `Assets/Open Prefab Mode`
+  - **GameView**：Display/Aspect/Scale/VSync/Stats + `Camera.Render`→SRP + LightProbes
+  - **SceneViewCamera**：Scene 相机 + Render/探针采样
+- **编译修复**：TextureFormat 双枚举歧义、GraphicsFormat 映射、SearchService 事件/类型、CCD 可访问性
+- **编译状态**：`Anity.Core`、`Anity.Editor.Host` 0 错误
+
+### 下一次要做（优先）
+1. 原生编解码深化：mp3/mp4 真实解码后端（FFmpeg/平台 API/WebAudio），当前为软解码/时长估计
+2. iOS Metal / Android Vulkan 原生设备后端（当前为 API 矩阵 + 构建产物管线，非 GPU 真驱动）
+3. GameView RT 像素回读与 Scene/Game 联动 Play Mode 帧循环
+
 ## 2026-07-10（本次）
 
 ### 已完成

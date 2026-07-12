@@ -34,6 +34,7 @@ public static class EditorStyles
   public static GUIStyle toolbarSearchField { get; } = new() { name = "toolbarSearchField" };
   public static GUIStyle toolbarSearchFieldCancelButton { get; } = new() { name = "toolbarSearchFieldCancelButton" };
   public static GUIStyle toolbarSearchFieldCancelButtonEmpty { get; } = new() { name = "toolbarSearchFieldCancelButtonEmpty" };
+  public static GUIStyle selectionRect { get; } = new() { name = "selectionRect" };
   public static GUIStyle toolbarTextField { get; } = new() { name = "toolbarTextField" };
 
   public static GUIStyle foldout { get; } = new() { name = "foldout", fontSize = 11 };

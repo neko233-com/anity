@@ -55,8 +55,18 @@ public static class Mathf
     if (Abs(target - current) <= maxDelta) return target;
     return current + MathF.Sign(target - current) * maxDelta;
   }
-  public static float GammaToLinearSpace(float value) => Sqrt(value);
-  public static float LinearToGammaSpace(float value) => value * value;
+  /// <summary>Unity sRGB transfer (exact curve, not gamma 2.0 approx).</summary>
+  public static float GammaToLinearSpace(float value)
+  {
+    if (value <= 0.04045f) return value / 12.92f;
+    return Pow((value + 0.055f) / 1.055f, 2.4f);
+  }
+
+  public static float LinearToGammaSpace(float value)
+  {
+    if (value <= 0.0031308f) return 12.92f * value;
+    return 1.055f * Pow(value, 1f / 2.4f) - 0.055f;
+  }
   public const float Infinity = float.PositiveInfinity;
   public const float NegativeInfinity = float.NegativeInfinity;
 

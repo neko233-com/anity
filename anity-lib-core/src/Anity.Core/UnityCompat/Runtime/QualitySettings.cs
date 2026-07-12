@@ -166,7 +166,8 @@ public static class QualitySettings
   public static int streamingMipmapsMaxLevelReduction { get; set; } = 2;
   public static int streamingMipmapsMaxFileIORequests { get; set; } = 1024;
 
-  public static ColorSpace activeColorSpace { get; set; } = ColorSpace.Gamma;
+  /// <summary>Unity 2022 URP default project color space is Linear for HDR pipelines.</summary>
+  public static ColorSpace activeColorSpace { get; set; } = ColorSpace.Linear;
   public static ColorSpace desiredColorSpace { get; set; } = ColorSpace.Gamma;
   public static bool hdr { get; set; }
 

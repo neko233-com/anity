@@ -264,7 +264,7 @@
 
 | 类型 | 状态 | 备注 |
 |------|------|------|
-| `AssetBundle` | ✅ | Dictionary存储资源、LoadAsset/LoadAllAssets/LoadAssetWithSubAssets（同步/Async）、LoadFromFile/Memory/Stream（同步/Async）、Unload、GetAllLoadedAssetBundles静态HashSet |
+| `AssetBundle` | ✅ | **全链路**：UnityFS catalog 写盘/读回、BuildAssetBundles(DryRun/AppendHash/Strict/变体)、LoadFromFile/Memory/Stream+CRC、LoadAsset/All/SubAssets、Unload/Async、Manifest 依赖；测试≥14 |
 | `AssetBundleRequest` | ✅ | 继承AsyncOperation、asset/allAssets属性 |
 | `UnityWebRequest` | ✅ | url/method/timeout/downloadHandler/uploadHandler、isDone/isNetworkError/isHttpError/responseCode/progress、SendWebRequest返回AsyncOperation、Get/Post/Put/Delete/Head静态工厂、GetTexture/GetAssetBundle、SetRequestHeader Dictionary、Abort/Dispose |
 | `UnityWebRequestAsyncOperation` | ✅ | 继承AsyncOperation、webRequest属性 |
@@ -333,7 +333,7 @@
 |------|------|------|
 | `Camera` | ✅ | Perspective/Ortho投影矩阵真实计算、worldToCameraMatrix(LookAt)、6个坐标转换方法（VP矩阵→NDC→屏幕/世界）、fieldOfView/nearClipPlane/farClipPlane/orthographic/orthographicSize、Render/RenderToCubemap/RenderWithShader、onPreCull/onPreRender/onPostRender事件、main静态属性、targetTexture、allCameras |
 | `CameraType` / `CameraClearFlags` / `RenderingPath` | ✅ | 枚举 |
-| `SceneViewCamera` 等 | ❌ | 缺失 |
+| `SceneViewCamera` 等 | ✅ | SceneView 专用相机：SyncFromSceneView/Render/RenderToTexture、Camera.Render→SRP、LightProbes 采样、Gizmos/Grid pass、坐标转换 |
 
 ---
 
@@ -388,7 +388,8 @@
 |------|------|------|
 | `VideoPlayer` | ✅ | canPlay/canStep/canSetTime/aspectRatio/timeReference、Step/GetTargetAudioSource/SetTargetAudioSource/EnableAudioTrack/DisableAudioTrack/controlledAudioTrackCount、播放状态机、Play/Pause/Rewind/Prepare/Stop、url/clip/targetTexture/renderMode/audioOutputMode、frame/time/length/playbackSpeed/isPlaying/isPaused、prepareCompleted/loopPointReached/frameReady/errorReceived/started/seekCompleted/started事件 |
 | `VideoClip` | ✅ | name/frameCount/frameRate/length/width/height/pixelAspectRatio/originalPath/audioTrackCount、GetAudioChannelCount/GetAudioSampleRate |
-| WebGL 侧 `WebGLVideo` | ✅ | **完整WebGL视频API**：url/playing/paused/isPlaying/isPaused/isPrepared、time/duration/length/volume/loop/playbackSpeed、prepareCompleted/started/loopPointReached/errorReceived事件、Prepare()/Play()/Pause()/UnPause()/Stop()播放控制、UpdateTime时间推进与循环处理、WebGLApplication单例视频管理器（PlayVideo/PauseVideo/StopVideo/PauseCurrentVideo/StopCurrentVideo/GetVideo/GetCurrentVideo/UpdateVideos） |
+| `MediaFormatUtility` | ✅ | mp3/wav/ogg/aac/m4a/flac 音频 + mp4/webm/mov/avi 视频；DetectFromPath/Bytes、TryDecodeWav/PCM soft decode |
+| WebGL 侧 `WebGLVideo` | ✅ | **完整WebGL视频API**：url/playing/paused/isPlaying/isPaused/isPrepared、time/duration/length/volume/loop/playbackSpeed、prepareCompleted/started/loopPointReached/errorReceived事件、Prepare()/Play()/Pause()/UnPause()/Stop()播放控制、UpdateTime时间推进与循环处理、WebGLApplication单例视频管理器（PlayVideo/PauseVideo/StopVideo/PauseCurrentVideo/StopCurrentVideo/GetVideo/GetCurrentVideo/UpdateVideos）、SupportedFormats mp4/webm/ogg |
 
 ---
 
@@ -489,6 +490,29 @@
 | `AssetDatabase` | ✅ | Dictionary&lt;string,Object&gt;、LoadAssetAtPath&lt;T&gt;/AssetPathToGUID/GUIDToAssetPath/Contains/Refresh/CreateAsset/DeleteAsset/MoveAsset/CopyAsset/GetAllAssetPaths/FindAssets |
 | `AssetImporter` / `AssetPostprocessor` | ✅ | AssetImporter(assetPath/importSettingsMissing/SaveAndReimport)、TextureImporter(textureType/filterMode/compressionQuality)、ModelImporter(animationType/importMaterials)、AssetPostprocessor虚方法(OnPreprocess/Postprocess Texture/Model/Audio) |
 | `PrefabUtility` | ✅ | InstantiatePrefab/IsPrefabAsset/IsPartOfPrefabInstance/IsAnyPrefabInstanceRoot/GetCorrespondingObjectFromSource/ApplyPrefabInstance/RevertPrefabInstance |
+| `PrefabStage` / Prefab Mode | ✅ | Isolation/Context、OpenPrefab/Close/Save/MarkDirty、stage 栈、PrefabStageUtility.EnterPrefabMode；Project 双击 .prefab 进入 |
+| `SearchService` / Ctrl+K | ✅ | Quick Search：资产/Hierarchy/菜单/设置/窗口 Provider、FuzzyScore、SearchWindow、MenuItem Edit/Search All... _%k |
+| `GameView` | ✅ | Display/Aspect/Scale/VSync/Maximize/Mute/Stats、Camera.Render→SRP、LightProbes、RenderTexture 目标 |
+| `TextureCompressionUtility` | ✅ | DXT/BC/ETC/ETC2/ASTC/PVRTC 族、平台默认格式(Metal=ASTC,Vulkan=ASTC/ETC2,Desktop=DXT)、块大小/软压缩/IsFormatSupportedOnAPI |
+| `PlatformGraphics` | ✅ | iOS Metal / Android Vulkan 主路径、GetPreferredApis、ConfigureIOSMetal/ConfigureAndroidVulkan |
+| `HDROutputSettings` / HDR | ✅ | available/active/paperWhiteNits/automaticHDRTonemapping/displayColorGamut/bitDepth、native AnityHDR 路径、HDRUtilities 色调映射 |
+| `ColorGamut` / `HDRDisplayBitDepth` | ✅ | sRGB/Rec709/Rec2020/DisplayP3/HDR10/DolbyHDR/HDR10Plus；8/10/16 bit |
+| `anity-native` C++ | ✅ | core/graphics/HDR/physics/audio/media/jobs/texture；CMake 构建；P/Invoke `AnityNative` |
+| `_scripts/` 环境 | ✅ | install-env/verify-env/build-native/build-all/gap-audit/install-vulkan/android |
+| D3D11 native device | ✅ | D3D11CreateDevice+WARP、swapchain/RTV、Present、HDR R10G10B10A2 |
+| Vulkan native device | ✅ | Instance/Physical/Logical device（需 Vulkan SDK） |
+| URP PostProcessPass | ✅ | Bloom/Tonemap/ColorAdjustments Volume→globals、自动 Feature 注入 |
+| Native 热路径 | ✅ | CCD TOI / 2D SAT / Audio decode / Texture compress 走 anity-native |
+| `Display` | ✅ | multi-display、Activate、RelativeMouseAt、HDR 探测扩展 |
+| `ColorSpacePipeline` | ✅ | Linear/Gamma 转换、ConfigureURPLinearHDR |
+| `ScreenCapture` | ✅ | CaptureScreenshot/AsTexture/IntoRenderTexture、superSize、StereoMode、真 PNG；测试≥12 |
+| `Il2CppBuilder` / IL2CPP 管线 | ✅ | CodeGeneration/CompilerConfig/stripping、.cpp stub、link.xml、AOT 注册；测试≥14 |
+| `anity.exe` CLI | ✅ | Unity 兼容 batchmode/quit/projectPath/executeMethod/build*/runTests + il2cpp/screenshot/agent；测试≥13 |
+| `Anity.Agent` 官方扩展 | ✅ | 独立包 Session/Memory/Tools（类 UGUI）；测试≥13 |
+| `Canvas` Overlay/Camera/World | ✅ | pixelRect、planeDistance、worldCamera、rootCanvas、排序、根布局 sizeDelta；测试≥15 |
+| `CanvasScaler` 三模式 | ✅ | ConstantPixel/ScaleWithScreen(Match/Expand/Shrink)/Physical；UIBehaviour override 修复 |
+| `Job System` 深度 | ✅ | ThreadPool 并行、依赖 Complete、Combine、JobsUtility；测试≥13 |
+| `Il2CppApi` 深度 | ✅ | icall/pinvoke/method pointer、Invoke、Strip preserve、Builder 集成 |
 | `Undo` | ✅ | RecordObject/RecordObjects/DestroyObjectImmediate、Stack&lt;UndoCommand&gt;记录、PerformUndo/PerformRedo、undoRedoPerformed事件 |
 | `MenuItem` / `MenuCommand` / `ContextMenu` / `ContextMenuItem` / `AddComponentMenu` | ✅ | Attribute类、menuName/validate/priority/context |
 | `GenericMenu` | ✅ | AddItem/AddDisabledItem/AddSeparator/ShowAsContext/DropDown、内部MenuItemData列表 |

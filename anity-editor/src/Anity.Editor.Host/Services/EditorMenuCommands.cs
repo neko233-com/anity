@@ -1,36 +1,46 @@
 using UnityEditor;
+using UnityEditor.Search;
+using UnityEditor.SceneManagement;
 
 namespace Anity.Editor.Host.Services;
 
+/// <summary>
+/// Host menu commands — route to full Unity 2022-style editor windows.
+/// </summary>
 internal static class EditorMenuCommands
 {
-  [MenuItem("Window/Scene View")]
-  public static void OpenSceneView()
-  {
-    EditorWindow.GetWindow<Windows.SceneViewWindow>(true, "Scene View");
-  }
+  [MenuItem("Window/General/Scene %#1")]
+  public static void OpenSceneView() => SceneView.ShowWindow();
 
-  [MenuItem("Window/Hierarchy")]
-  public static void OpenHierarchy()
-  {
-    EditorWindow.GetWindow<Windows.HierarchyWindow>(true, "Hierarchy");
-  }
+  [MenuItem("Window/General/Game %#2")]
+  public static void OpenGameView() => GameView.ShowWindow();
 
-  [MenuItem("Window/Project")]
-  public static void OpenProjectBrowser()
-  {
-    EditorWindow.GetWindow<Windows.ProjectWindow>(true, "Project");
-  }
+  [MenuItem("Window/General/Hierarchy %#4")]
+  public static void OpenHierarchy() => HierarchyWindow.ShowWindow();
 
-  [MenuItem("Window/Console")]
-  public static void OpenConsole()
-  {
-    EditorWindow.GetWindow<Windows.ConsoleWindow>(true, "Console");
-  }
+  [MenuItem("Window/General/Project %#5")]
+  public static void OpenProjectBrowser() => ProjectWindow.ShowWindow();
 
-  [MenuItem("Window/Inspector")]
-  public static void OpenInspector()
+  [MenuItem("Window/General/Inspector %#3")]
+  public static void OpenInspector() => InspectorWindow.ShowWindow();
+
+  [MenuItem("Window/General/Console %#c")]
+  public static void OpenConsole() => ConsoleWindow.ShowWindow();
+
+  [MenuItem("Edit/Search All... _%k")] // Ctrl+K
+  public static void OpenQuickSearch() => SearchService.OpenQuickSearch();
+
+  [MenuItem("Assets/Open Prefab Mode %#p")]
+  public static void OpenPrefabMode()
   {
-    EditorWindow.GetWindow<Windows.InspectorWindow>(true, "Inspector");
+    var go = Selection.activeGameObject;
+    if (go != null && PrefabStageUtility.EnterPrefabMode(go))
+      return;
+
+    var obj = Selection.activeObject;
+    if (obj == null) return;
+    string path = AssetDatabase.GetAssetPath(obj);
+    if (!string.IsNullOrEmpty(path) && path.EndsWith(".prefab", System.StringComparison.OrdinalIgnoreCase))
+      PrefabStage.OpenPrefab(path);
   }
 }

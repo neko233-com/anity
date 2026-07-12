@@ -654,6 +654,8 @@ public class CanvasScaler : UIBehaviour
 
   protected virtual void Handle()
   {
+    if (_canvas == null)
+      _canvas = GetComponent<Canvas>();
     if (_canvas == null || !_canvas.isRootCanvas) return;
 
     switch (_uiScaleMode)
@@ -752,23 +754,46 @@ public class CanvasScaler : UIBehaviour
 
   protected virtual void ApplyScaleFactorToCanvas()
   {
-    if (_canvas != null)
-    {
-      _canvas.scaleFactor = _scaleFactor;
-      _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+    if (_canvas == null) return;
 
-      if (_canvas.isRootCanvas && gameObject.TryGetComponent<RectTransform>(out var rt))
+    // Unity: Canvas.scaleFactor drives UI units → pixels; root RT size = display / scaleFactor
+    _canvas.scaleFactor = _scaleFactor;
+    _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+
+    if (!_canvas.isRootCanvas) return;
+
+    // Re-apply layout for Overlay / Screen Space Camera after scale change
+    if (_canvas.renderMode == RenderMode.ScreenSpaceOverlay ||
+        _canvas.renderMode == RenderMode.ScreenSpaceCamera)
+    {
+      _canvas.ApplyRootLayoutFromScale();
+    }
+    else if (_canvas.renderMode == RenderMode.WorldSpace)
+    {
+      // World Space: scaler multiplies root localScale (referencePixelsPerUnit aware)
+      if (gameObject.TryGetComponent<RectTransform>(out var rt))
       {
-        rt.localScale = new Vector3(_scaleFactor, _scaleFactor, 1f);
+        float s = _scaleFactor;
+        rt.localScale = new Vector3(s, s, s);
       }
     }
   }
 
   public void SetScaleFactor(float scale)
   {
-    _scaleFactor = scale;
+    _scaleFactor = Mathf.Max(0.001f, scale);
     ApplyScaleFactorToCanvas();
   }
+
+  /// <summary>Unity-compatible: compute scale without applying (for tests / tooling).</summary>
+  public float CalculateScaleFactor()
+  {
+    Handle();
+    return _scaleFactor;
+  }
+
+  /// <summary>Force refresh using current Screen dimensions.</summary>
+  public void HandleNow() => Handle();
 }
 
 public class GraphicRaycaster : BaseRaycaster
@@ -822,10 +847,15 @@ public class GraphicRaycaster : BaseRaycaster
   {
     get
     {
+      // Unity: Overlay → null camera; Camera/World → worldCamera (or main fallback for Camera mode)
       var c = canvas;
-      if (c is null || c.renderMode == RenderMode.ScreenSpaceOverlay || c.worldCamera is null)
-        return Camera.main;
-      return c.worldCamera;
+      if (c is null) return null;
+      if (c.renderMode == RenderMode.ScreenSpaceOverlay)
+        return null;
+      if (c.renderMode == RenderMode.ScreenSpaceCamera)
+        return c.worldCamera != null ? c.worldCamera : Camera.main;
+      // World Space
+      return c.worldCamera != null ? c.worldCamera : Camera.main;
     }
   }
 
@@ -842,15 +872,21 @@ public class GraphicRaycaster : BaseRaycaster
     if (graphics.Count == 0) return;
 
     var camera = eventCamera;
-    float hitDistance;
-    if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
-      hitDistance = 0f;
-    else
+    float hitDistance = 0f;
+    if (canvas.renderMode != RenderMode.ScreenSpaceOverlay)
     {
-      var plane = new Plane(transform.forward, transform.position);
+      if (camera is null) return;
+      var plane = new Plane(canvas.transform.forward, canvas.transform.position);
       var ray = camera.ScreenPointToRay(new Vector3(eventPos.x, eventPos.y, 0f));
       if (!plane.Raycast(ray, out var dist)) return;
       hitDistance = dist;
+
+      // Optional 2D/3D blocking
+      if (_blockingObjects == BlockingObjects.ThreeD || _blockingObjects == BlockingObjects.All)
+      {
+        // Soft block: if plane distance is infinite-like, skip
+        if (hitDistance > 1e6f) return;
+      }
     }
 
     for (var i = 0; i < graphics.Count; i++)
@@ -858,10 +894,11 @@ public class GraphicRaycaster : BaseRaycaster
       var g = graphics[i];
       if (!g.IsRaycastLocationValid(eventPos, camera)) continue;
       var go = g.gameObject;
-      if (_ignoreReversedGraphics)
+      if (go is null) continue;
+      if (_ignoreReversedGraphics && camera is not null)
       {
         var dir = go.transform.forward;
-        var camDir = camera is not null ? camera.transform.forward : Vector3.forward;
+        var camDir = camera.transform.forward;
         if (Vector3.Dot(dir, camDir) <= 0f) continue;
       }
 
@@ -878,6 +915,14 @@ public class GraphicRaycaster : BaseRaycaster
       };
       resultAppendList.Add(result);
     }
+
+    // Painter's algorithm: higher sortingOrder / depth first already via graphic sort
+    resultAppendList.Sort((a, b) =>
+    {
+      int s = b.sortingOrder.CompareTo(a.sortingOrder);
+      if (s != 0) return s;
+      return b.depth.CompareTo(a.depth);
+    });
   }
 
   private void GetAllGraphicsUnderPointer(PointerEventData eventData, List<Graphic> result)

@@ -14,7 +14,9 @@ public class AssetBundle : Object
 
     public Hash128 hash => _hash;
     public bool isStreamedSceneAssetBundle { get; set; }
-    public uint crc { get; protected set; }
+    public uint crc { get; internal set; }
+
+    internal void SetHash(Hash128 hash) => _hash = hash;
     public Object? mainAsset
     {
         get => _mainAsset;
@@ -227,12 +229,24 @@ public class AssetBundle : Object
 
     public static AssetBundle? LoadFromFile(string path, uint crc, ulong offset)
     {
-        if (string.IsNullOrEmpty(path)) return null;
-        var bundle = new AssetBundle();
-        bundle.name = Path.GetFileNameWithoutExtension(path);
-        bundle.crc = crc;
-        bundle._hash = ComputeHash(path);
-        return bundle;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
+        try
+        {
+            byte[] data;
+            using (var fs = File.OpenRead(path))
+            {
+                if (offset > 0 && (long)offset < fs.Length)
+                    fs.Seek((long)offset, SeekOrigin.Begin);
+                using var ms = new MemoryStream();
+                fs.CopyTo(ms);
+                data = ms.ToArray();
+            }
+            return LoadFromMemory(data, crc);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static AssetBundleCreateRequest LoadFromFileAsync(string path)
@@ -261,12 +275,23 @@ public class AssetBundle : Object
 
     public static AssetBundle? LoadFromMemory(byte[] binary, uint crc)
     {
-        if (binary == null) return null;
-        var bundle = new AssetBundle();
-        bundle.name = "MemoryBundle_" + DateTime.Now.Ticks;
-        bundle.crc = crc;
-        bundle._hash = ComputeHash(binary);
-        return bundle;
+        if (binary == null || binary.Length == 0) return null;
+
+        if (AssetBundleFormat.TryReadBundle(binary, out var catalog))
+        {
+            if (crc != 0 && catalog.crc != 0 && catalog.crc != crc)
+                return null; // CRC mismatch (Unity rejects)
+            var bundle = AssetBundleFormat.Materialize(catalog);
+            if (crc != 0) bundle.crc = crc;
+            return bundle;
+        }
+
+        // Fallback empty catalog bundle (legacy / non-Anity payload)
+        var empty = new AssetBundle();
+        empty.name = "MemoryBundle_" + DateTime.Now.Ticks;
+        empty.crc = crc;
+        empty._hash = ComputeHash(binary);
+        return empty;
     }
 
     public static AssetBundleCreateRequest LoadFromMemoryAsync(byte[] binary)

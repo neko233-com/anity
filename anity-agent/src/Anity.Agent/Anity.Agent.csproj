@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>Anity.Agent</PackageId>
+    <Authors>Anity Team</Authors>
+    <Description>Official Anity Agent extension (independent, UGUI-style package). Not part of engine Core.</Description>
+    <Version>0.1.0</Version>
+    <RootNamespace>Anity.Agent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../anity-lib-core/src/Anity.Core/Anity.Core.csproj" />
+  </ItemGroup>
+</Project>
