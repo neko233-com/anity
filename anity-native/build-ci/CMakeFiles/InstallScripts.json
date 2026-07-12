@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"D:/Code/neko233-Projects/anity/anity-native/build-ci/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

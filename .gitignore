@@ -132,6 +132,7 @@ AssetBundles/
 Library/Il2CppBuildCache/
 Il2CppOutputProject/
 anity-native/build/
+anity-native/build-*/
 anity-native/cmake-build-*/
 **/anity_native.dll
 **/libanity_native.*
