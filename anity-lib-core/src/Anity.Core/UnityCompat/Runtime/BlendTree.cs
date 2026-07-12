@@ -10,6 +10,11 @@ public abstract class Motion : Object
     public bool humanCycle { get; set; }
     public bool humanTranslation { get; set; }
 
+    public virtual float duration
+    {
+        get { return averageDuration; }
+    }
+
     public virtual float averageDuration
     {
         get
@@ -66,6 +71,16 @@ public class BlendTree : Motion
     {
         get => _children;
         set => _children = value ?? Array.Empty<ChildMotion>();
+    }
+
+    public BlendTreeChild[] childrenSerializable
+    {
+        get => _children.Select(c => new BlendTreeChild { motion = c.motion, threshold = c.threshold, position = c.position, mirror = c.mirror, timeScale = c.timeScale }).ToArray();
+        set
+        {
+            if (value == null) { _children = Array.Empty<ChildMotion>(); return; }
+            _children = value.Select(c => new ChildMotion { motion = c.motion, threshold = c.threshold, position = c.position, mirror = c.mirror, timeScale = c.timeScale, cycleOffset = 0f, directBlendParameter = string.Empty }).ToArray();
+        }
     }
 
     public void AddChild(Motion motion)
@@ -267,6 +282,15 @@ public struct ChildMotion
     public float cycleOffset;
     public string directBlendParameter;
     public bool mirror;
+}
+
+public struct BlendTreeChild
+{
+    public Motion? motion;
+    public float threshold;
+    public Vector2 position;
+    public bool mirror;
+    public float timeScale;
 }
 
 public enum BlendTreeType

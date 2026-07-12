@@ -201,12 +201,57 @@ public struct BoundsInt : IEquatable<BoundsInt>
                point.z >= position.z && point.z < position.z + size.z;
     }
 
+    public PositionEnumerator allPositionsWithin => new PositionEnumerator(this);
+
     public bool Equals(BoundsInt other) => position.Equals(other.position) && size.Equals(other.size);
     public override bool Equals(object obj) => obj is BoundsInt other && Equals(other);
     public override int GetHashCode() => HashCode.Combine(position, size);
     public override string ToString() => $"Position={position}, Size={size}";
 
     public static BoundsInt zero => new BoundsInt(Vector3Int.zero, Vector3Int.zero);
+
+    public struct PositionEnumerator
+    {
+        private readonly BoundsInt _bounds;
+        private int _x, _y, _z;
+        private bool _started;
+
+        internal PositionEnumerator(BoundsInt bounds)
+        {
+            _bounds = bounds;
+            _x = _bounds.xMin;
+            _y = _bounds.yMin;
+            _z = _bounds.zMin;
+            _started = false;
+        }
+
+        public PositionEnumerator GetEnumerator() => this;
+
+        public Vector3Int Current => new Vector3Int(_x, _y, _z);
+
+        public bool MoveNext()
+        {
+            if (!_started)
+            {
+                _started = true;
+                return true;
+            }
+            _x++;
+            if (_x >= _bounds.xMax)
+            {
+                _x = _bounds.xMin;
+                _y++;
+                if (_y >= _bounds.yMax)
+                {
+                    _y = _bounds.yMin;
+                    _z++;
+                    if (_z >= _bounds.zMax)
+                        return false;
+                }
+            }
+            return true;
+        }
+    }
 }
 
 public struct RectOffset
@@ -302,7 +347,17 @@ public enum VerticalWrapMode
 
 public class AssetImporter : Object
 {
-    public string assetPath { get; protected set; } = string.Empty;
+    public string assetPath { get; set; } = string.Empty;
+    public bool importSettingsMissing { get; set; }
+    public string editorUserSettingsData { get; set; } = string.Empty;
+
+    public void SaveAndReimport()
+    {
+    }
+
+    public void SaveSettings()
+    {
+    }
 }
 
 public class ComputeBuffer : IDisposable

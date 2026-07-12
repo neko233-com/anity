@@ -1,7 +1,45 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
+using Unity.Jobs;
 
 namespace UnityEngine.Rendering;
+
+public struct GlobalKeyword
+{
+    public int index;
+    public string name;
+}
+
+public struct AttachmentDescriptor
+{
+    public RenderTargetIdentifier loadStoreTarget;
+    public RenderBufferLoadAction loadAction;
+    public RenderBufferStoreAction storeAction;
+    public Color clearColor;
+    public float clearDepth;
+    public uint clearStencil;
+
+    public AttachmentDescriptor(RenderBufferLoadAction loadAction, RenderBufferStoreAction storeAction)
+    {
+        this.loadAction = loadAction;
+        this.storeAction = storeAction;
+        loadStoreTarget = default;
+        clearColor = Color.clear;
+        clearDepth = 1.0f;
+        clearStencil = 0;
+    }
+}
+
+public class ReflectionProbe : Behaviour
+{
+    public Bounds bounds;
+    public Texture texture;
+    public float blendDistance;
+    public int importance;
+    public bool boxProjection;
+    public bool hdr;
+}
 
 internal enum DrawCommandType
 {
@@ -497,6 +535,14 @@ public struct ScriptableRenderContext
         Graphics.ExecuteCommandBuffer(commandBuffer);
     }
 
+    public void ExecuteCommandBufferAsync(CommandBuffer commandBuffer, ComputeQueueType queueType)
+    {
+        if (commandBuffer == null) return;
+        _commandBuffers ??= new List<CommandBuffer>();
+        _commandBuffers.Add(commandBuffer);
+        Graphics.ExecuteCommandBufferAsync(commandBuffer, queueType);
+    }
+
     public void DrawRenderers(CullingResults cullingResults, ref DrawingSettings drawingSettings, ref FilteringSettings filteringSettings)
     {
         _cullingResults = cullingResults;
@@ -508,12 +554,27 @@ public struct ScriptableRenderContext
         });
     }
 
+    public void DrawRenderers(CullingResults cullingResults, ref DrawingSettings drawingSettings, ref FilteringSettings filteringSettings, ref RenderStateBlock stateBlock)
+    {
+        DrawRenderers(cullingResults, ref drawingSettings, ref filteringSettings);
+    }
+
     public void DrawSkybox(Camera camera)
     {
         _drawCommands ??= new List<DrawCommand>();
     }
 
+    public void DrawShadows(ref ShadowDrawingSettings settings)
+    {
+        _drawCommands ??= new List<DrawCommand>();
+    }
+
     public void DrawGizmos(Camera camera, GizmoSubset gizmoSubset)
+    {
+        _drawCommands ??= new List<DrawCommand>();
+    }
+
+    public void DrawWireOverlay(Camera camera)
     {
         _drawCommands ??= new List<DrawCommand>();
     }
@@ -531,6 +592,41 @@ public struct ScriptableRenderContext
         ExecuteCommandBuffer(cmd);
         CommandBufferPool.Release(cmd);
     }
+
+    public void SetRenderTarget(RenderTargetIdentifier color, RenderBufferLoadAction colorLoad, RenderBufferStoreAction colorStore, RenderTargetIdentifier depth, RenderBufferLoadAction depthLoad, RenderBufferStoreAction depthStore)
+    {
+        Graphics.SetRenderTarget(color, depth);
+    }
+
+    public void BeginRenderPass(int width, int height, int samples, NativeArray<AttachmentDescriptor> attachments, int depthAttachmentIndex)
+    {
+        _drawCommands ??= new List<DrawCommand>();
+    }
+
+    public void EndRenderPass()
+    {
+    }
+
+    public void EnableKeyword(ref GlobalKeyword keyword)
+    {
+    }
+
+    public void DisableKeyword(ref GlobalKeyword keyword)
+    {
+    }
+
+    public void SetGlobalFloat(int nameID, float value) => Shader.SetGlobalFloat(nameID, value);
+    public void SetGlobalFloat(string name, float value) => Shader.SetGlobalFloat(name, value);
+    public void SetGlobalInt(int nameID, int value) => Shader.SetGlobalInt(nameID, value);
+    public void SetGlobalInt(string name, int value) => Shader.SetGlobalInt(name, value);
+    public void SetGlobalVector(int nameID, Vector4 value) => Shader.SetGlobalVector(nameID, value);
+    public void SetGlobalVector(string name, Vector4 value) => Shader.SetGlobalVector(name, value);
+    public void SetGlobalColor(int nameID, Color value) => Shader.SetGlobalColor(nameID, value);
+    public void SetGlobalColor(string name, Color value) => Shader.SetGlobalColor(name, value);
+    public void SetGlobalMatrix(int nameID, Matrix4x4 value) => Shader.SetGlobalMatrix(nameID, value);
+    public void SetGlobalMatrix(string name, Matrix4x4 value) => Shader.SetGlobalMatrix(name, value);
+    public void SetGlobalTexture(int nameID, RenderTargetIdentifier value) { }
+    public void SetGlobalTexture(string name, RenderTargetIdentifier value) { }
 
     public void Cull(ref ScriptableCullingParameters parameters, out CullingResults results)
     {
@@ -570,6 +666,12 @@ public struct RenderingLayerMask
     public static string LayerToName(int layer) => "Default";
 }
 
+public struct VisibleRendererList
+{
+    public int length;
+    public IntPtr nativePointer;
+}
+
 public struct CullingResults
 {
     internal VisibleLight[] _visibleLights;
@@ -578,28 +680,83 @@ public struct CullingResults
     internal int _visibleLightCount;
     internal int _visibleInstanceCount;
 
+    public VisibleLight[] lights => _visibleLights ?? Array.Empty<VisibleLight>();
+    public VisibleReflectionProbe[] reflectionProbes => _visibleReflectionProbes ?? Array.Empty<VisibleReflectionProbe>();
+    public VisibleRendererList visibleRenderers;
+    public bool velocityNeedsRasterization;
     public int lightAndReflectionProbeCount => _lightAndReflectionProbeCount;
     public int visibleLightCount => _visibleLightCount;
     public int visibleInstanceCount => _visibleInstanceCount;
     public VisibleLight[] visibleLights => _visibleLights ?? Array.Empty<VisibleLight>();
     public VisibleReflectionProbe[] visibleReflectionProbes => _visibleReflectionProbes ?? Array.Empty<VisibleReflectionProbe>();
+    public NativeArray<VisibleLight> visibleLightsNativeArray => new NativeArray<VisibleLight>(_visibleLights ?? Array.Empty<VisibleLight>(), Allocator.Invalid);
+
+    public int[] GetLightIndexMap()
+    {
+        if (_visibleLights == null) return Array.Empty<int>();
+        var map = new int[_visibleLights.Length];
+        for (int i = 0; i < map.Length; i++) map[i] = i;
+        return map;
+    }
+
+    public bool GetShadowCasterBounds(int lightIndex, out Bounds outBounds)
+    {
+        outBounds = default;
+        return false;
+    }
+
+    public bool ComputeDirectionalShadowMatricesAndCullingPrimitives(int lightIndex, int splitCount, int splitIndex, Vector3 splitRatio, int shadowResolution, float shadowNearPlaneOffset, out Matrix4x4 viewMatrix, out Matrix4x4 projMatrix, out ShadowSplitData splitData)
+    {
+        viewMatrix = Matrix4x4.identity;
+        projMatrix = Matrix4x4.identity;
+        splitData = default;
+        return false;
+    }
+
+    public bool GetPointShadowMatricesAndCullingPrimitives(int lightIndex, CubemapFace cubemapFace, float fovBias, out Matrix4x4 viewMatrix, out Matrix4x4 projMatrix, out ShadowSplitData splitData)
+    {
+        viewMatrix = Matrix4x4.identity;
+        projMatrix = Matrix4x4.identity;
+        splitData = default;
+        return false;
+    }
+
+    public bool GetSpotShadowMatricesAndCullingPrimitives(int lightIndex, out Matrix4x4 viewMatrix, out Matrix4x4 projMatrix, out ShadowSplitData splitData)
+    {
+        viewMatrix = Matrix4x4.identity;
+        projMatrix = Matrix4x4.identity;
+        splitData = default;
+        return false;
+    }
+
+    public bool GetReflectionProbeBounds(out Bounds outBounds)
+    {
+        outBounds = default;
+        return false;
+    }
 }
 
 public struct DrawingSettings
 {
     private ShaderTagId[] m_ShaderTagIds;
-    public SortingCriteria sortingCriteria { get; set; }
-    public PerObjectData renderingLayerMask { get; set; }
+    public SortingSettings sortingSettings { get; }
+    public PerObjectData perObjectData { get; set; }
     public bool enableDynamicBatching { get; set; }
     public bool enableInstancing { get; set; }
+    public int mainLightIndex { get; set; }
+    public Material overrideMaterial { get; set; }
+    public int overrideMaterialPassIndex { get; set; }
     public int shaderPassCount => m_ShaderTagIds?.Length ?? 0;
 
-    public DrawingSettings(ShaderTagId shaderTagId, SortingCriteria sortingCriteria)
+    public DrawingSettings(ShaderTagId shaderTagId, SortingSettings sortingSettings)
     {
-        this.sortingCriteria = sortingCriteria;
-        renderingLayerMask = PerObjectData.None;
+        this.sortingSettings = sortingSettings;
+        perObjectData = PerObjectData.None;
         enableDynamicBatching = false;
         enableInstancing = false;
+        mainLightIndex = -1;
+        overrideMaterial = null;
+        overrideMaterialPassIndex = 0;
         m_ShaderTagIds = new[] { shaderTagId };
     }
 
@@ -623,53 +780,146 @@ public struct DrawingSettings
 public struct FilteringSettings
 {
     public RenderQueueRange renderQueueRange { get; set; }
-    public int layerMask { get; set; }
+    public uint layerMask { get; set; }
+    public uint renderingLayerMask { get; set; }
     public SortingLayerRange sortingLayerRange { get; set; }
+    public bool excludeMotionVectorObjects { get; set; }
 
-    public FilteringSettings(RenderQueueRange range)
+    public FilteringSettings(RenderQueueRange? range = null)
     {
-        renderQueueRange = range;
-        layerMask = -1;
+        renderQueueRange = range ?? RenderQueueRange.all;
+        layerMask = uint.MaxValue;
+        renderingLayerMask = uint.MaxValue;
         sortingLayerRange = SortingLayerRange.all;
+        excludeMotionVectorObjects = false;
     }
 
-    public FilteringSettings(RenderQueueRange range, int layerMask)
+    public FilteringSettings(RenderQueueRange range, uint layerMask)
     {
         renderQueueRange = range;
         this.layerMask = layerMask;
+        renderingLayerMask = uint.MaxValue;
         sortingLayerRange = SortingLayerRange.all;
+        excludeMotionVectorObjects = false;
     }
+
+    public FilteringSettings(RenderQueueRange range, uint layerMask, uint renderingLayerMask)
+    {
+        renderQueueRange = range;
+        this.layerMask = layerMask;
+        this.renderingLayerMask = renderingLayerMask;
+        sortingLayerRange = SortingLayerRange.all;
+        excludeMotionVectorObjects = false;
+    }
+}
+
+public struct SortingSettings
+{
+    private Camera _camera;
+
+    public SortingCriteria criteria { get; set; }
+    public Vector3 customAxis { get; set; }
+    public DistanceMetric distanceMetric { get; set; }
+
+    public SortingSettings(Camera camera)
+    {
+        _camera = camera;
+        criteria = SortingCriteria.CommonOpaque;
+        customAxis = Vector3.forward;
+        distanceMetric = camera != null && camera.orthographic ? DistanceMetric.Orthographic : DistanceMetric.Default;
+    }
+
+    public SortingSettings(SortingCriteria criteria)
+    {
+        _camera = null;
+        this.criteria = criteria;
+        customAxis = Vector3.forward;
+        distanceMetric = DistanceMetric.Default;
+    }
+
+    public static implicit operator SortingSettings(SortingCriteria criteria) => new SortingSettings(criteria);
 }
 
 public struct SortingLayerRange
 {
-    public short lowerBound { get; set; }
-    public short upperBound { get; set; }
-    public static SortingLayerRange all => new() { lowerBound = short.MinValue, upperBound = short.MaxValue };
+    public int min { get; set; }
+    public int max { get; set; }
+
+    public static readonly SortingLayerRange all = new SortingLayerRange { min = short.MinValue, max = short.MaxValue };
+
+    public SortingLayerRange(int min, int max)
+    {
+        this.min = min;
+        this.max = max;
+    }
 }
 
 public struct RenderQueueRange
 {
-    public int lowerBound { get; set; }
-    public int upperBound { get; set; }
+    public int min { get; set; }
+    public int max { get; set; }
 
-    public static RenderQueueRange all => new() { lowerBound = 0, upperBound = 5000 };
-    public static RenderQueueRange opaque => new() { lowerBound = 0, upperBound = 2500 };
-    public static RenderQueueRange transparent => new() { lowerBound = 2501, upperBound = 5000 };
+    public static readonly RenderQueueRange all = new RenderQueueRange(0, 5000);
+    public static readonly RenderQueueRange opaque = new RenderQueueRange(0, 2500);
+    public static readonly RenderQueueRange transparent = new RenderQueueRange(2501, 5000);
+
+    public RenderQueueRange(int min, int max)
+    {
+        this.min = min;
+        this.max = max;
+    }
 }
 
-public struct ShaderTagId
+public struct ShaderTagId : IEquatable<ShaderTagId>
 {
     public string name;
     private int _id;
 
+    public int id => _id;
+
     public ShaderTagId(string name)
     {
         this.name = name;
-        _id = name?.GetHashCode() ?? 0;
+        _id = Shader.PropertyToID(name ?? string.Empty);
+    }
+
+    public bool Equals(ShaderTagId other)
+    {
+        return _id == other._id;
+    }
+
+    public override bool Equals(object obj)
+    {
+        return obj is ShaderTagId other && Equals(other);
+    }
+
+    public override int GetHashCode()
+    {
+        return _id;
+    }
+
+    public static bool operator ==(ShaderTagId left, ShaderTagId right)
+    {
+        return left.Equals(right);
+    }
+
+    public static bool operator !=(ShaderTagId left, ShaderTagId right)
+    {
+        return !left.Equals(right);
     }
 
     public static implicit operator ShaderTagId(string name) => new(name);
+
+    public static readonly ShaderTagId SRPDefaultUnlit = new("SRPDefaultUnlit");
+    public static readonly ShaderTagId UniversalForward = new("UniversalForward");
+    public static readonly ShaderTagId UniversalGBuffer = new("UniversalGBuffer");
+    public static readonly ShaderTagId UniversalForwardOnly = new("UniversalForwardOnly");
+    public static readonly ShaderTagId ShadowCaster = new("ShadowCaster");
+    public static readonly ShaderTagId DepthNormals = new("DepthNormals");
+    public static readonly ShaderTagId DepthOnly = new("DepthOnly");
+    public static readonly ShaderTagId Meta = new("Meta");
+    public static readonly ShaderTagId LightweightForward = new("LightweightForward");
+    public static readonly ShaderTagId _RenderOpaqueForwardOnly = new("_RenderOpaqueForwardOnly");
 }
 
 public static class RenderPipelineManager

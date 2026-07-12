@@ -2,8 +2,31 @@ using System;
 
 namespace UnityEngine;
 
+public enum FrustumPlanes
+{
+    Left = 0,
+    Right = 1,
+    Bottom = 2,
+    Top = 3,
+    Near = 4,
+    Far = 5
+}
+
 public static class GeometryUtility
 {
+    public static Bounds CalculateBounds(Collider[] colliders)
+    {
+        if (colliders == null || colliders.Length == 0)
+            return new Bounds(Vector3.zero, Vector3.zero);
+
+        Bounds bounds = colliders[0].bounds;
+        for (int i = 1; i < colliders.Length; i++)
+        {
+            bounds.Encapsulate(colliders[i].bounds);
+        }
+        return bounds;
+    }
+
     public static Plane[] CalculateFrustumPlanes(Camera camera)
     {
         return CalculateFrustumPlanes(camera.projectionMatrix * camera.worldToCameraMatrix);

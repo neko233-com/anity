@@ -99,6 +99,27 @@ public class MonoBehaviour : Behaviour
       coroutine.WaitingForSeconds = false;
     }
 
+    if (coroutine.WaitRealtimeTimeLeft > 0f)
+    {
+      coroutine.WaitRealtimeTimeLeft -= Time.unscaledDeltaTime;
+      if (coroutine.WaitRealtimeTimeLeft > 0f) return true;
+      coroutine.WaitingForSecondsRealtime = false;
+    }
+
+    if (coroutine.WaitingForCustomYield != null)
+    {
+      if (coroutine.WaitingForCustomYield.keepWaiting)
+        return true;
+      coroutine.WaitingForCustomYield = null;
+    }
+
+    if (coroutine.WaitingForCoroutine != null)
+    {
+      if (!coroutine.WaitingForCoroutine.Finished)
+        return true;
+      coroutine.WaitingForCoroutine = null;
+    }
+
     if (coroutine.WaitingForFixedUpdate)
     {
       return true;
@@ -135,6 +156,13 @@ public class MonoBehaviour : Behaviour
     {
       coroutine.WaitingForSeconds = true;
       coroutine.WaitTimeLeft = wait.seconds;
+      return true;
+    }
+
+    if (current is WaitForSecondsRealtime waitRealtime)
+    {
+      coroutine.WaitingForSecondsRealtime = true;
+      coroutine.WaitRealtimeTimeLeft = waitRealtime.waitTime;
       return true;
     }
 
@@ -401,7 +429,7 @@ public class WaitForFixedUpdate : YieldInstruction
 {
 }
 
-public class WaitUntil : YieldInstruction
+public class WaitUntil : CustomYieldInstruction
 {
   private readonly Func<bool> _predicate;
 
@@ -410,10 +438,10 @@ public class WaitUntil : YieldInstruction
     _predicate = predicate;
   }
 
-  public bool KeepWaiting => !_predicate();
+  public override bool keepWaiting => !_predicate();
 }
 
-public class WaitWhile : YieldInstruction
+public class WaitWhile : CustomYieldInstruction
 {
   private readonly Func<bool> _predicate;
 
@@ -422,5 +450,5 @@ public class WaitWhile : YieldInstruction
     _predicate = predicate;
   }
 
-  public bool KeepWaiting => _predicate();
+  public override bool keepWaiting => _predicate();
 }

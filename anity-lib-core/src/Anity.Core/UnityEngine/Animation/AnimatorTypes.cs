@@ -141,12 +141,17 @@ public abstract class AnimatorTransitionBase : Object
     public float exitTime { get; set; } = 0.75f;
     public float duration { get; set; } = 0.25f;
     public bool hasFixedDuration { get; set; } = true;
+    public bool fixedDuration { get => hasFixedDuration; set => hasFixedDuration = value; }
     public float offset { get; set; }
     public TransitionInterruptionSource interruptionSource { get; set; }
     public bool orderedInterruption { get; set; } = true;
 }
 
 public class AnimatorStateTransition : AnimatorTransitionBase
+{
+}
+
+public class AnimatorTransition : AnimatorTransitionBase
 {
 }
 
@@ -271,6 +276,7 @@ public class AnimatorStateMachine : Object
     public List<ChildAnimatorStateMachine> stateMachines { get; set; } = new();
     public List<AnimatorStateTransition> anyStateTransitions { get; set; } = new();
     public List<AnimatorStateTransition> entryTransitions { get; set; } = new();
+    public List<AnimatorTransition> stateMachineTransitions { get; set; } = new();
     public AnimatorState defaultState { get; set; }
 
     public AnimatorState AddState(string name)
@@ -284,6 +290,23 @@ public class AnimatorStateMachine : Object
         states.Add(new ChildAnimatorState { position = position, state = state });
         if (defaultState == null) defaultState = state;
         return state;
+    }
+
+    public void RemoveState(AnimatorState state)
+    {
+        if (state == null) return;
+        for (int i = states.Count - 1; i >= 0; i--)
+        {
+            if (states[i].state == state)
+            {
+                states.RemoveAt(i);
+                break;
+            }
+        }
+        if (defaultState == state)
+        {
+            defaultState = states.Count > 0 ? states[0].state : null;
+        }
     }
 
     public AnimatorStateMachine AddStateMachine(string name)
@@ -321,6 +344,13 @@ public class AnimatorStateMachine : Object
     {
         var transition = new AnimatorStateTransition { destinationState = destinationState };
         entryTransitions.Add(transition);
+        return transition;
+    }
+
+    public AnimatorTransition AddStateMachineTransition(AnimatorStateMachine destinationStateMachine)
+    {
+        var transition = new AnimatorTransition { destinationStateMachine = destinationStateMachine };
+        stateMachineTransitions.Add(transition);
         return transition;
     }
 

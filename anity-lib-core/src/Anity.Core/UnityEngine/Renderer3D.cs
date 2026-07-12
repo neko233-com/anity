@@ -93,7 +93,7 @@ public sealed class LODGroup : Component
 
     public void Reset()
     {
-        var allRenderers = gameObject != null ? gameObject.GetComponentsInChildren<Renderer>() : Array.Empty<Renderer>();
+        var allRenderers = gameObject != null ? gameObject.GetComponentsInChildren<Renderer>(true) : Array.Empty<Renderer>();
         _lods = new LOD[] { new LOD(1f, allRenderers) };
         _localReferencePoint = Vector3.zero;
         _size = 1f;
@@ -178,11 +178,19 @@ public sealed class LightProbeGroup : Component
 {
     private List<Vector3> _probePositions = new List<Vector3>();
 
-    public Vector3[] probePositions
+    public Vector3[] positions
     {
         get => _probePositions.ToArray();
         set => _probePositions = value != null ? new List<Vector3>(value) : new List<Vector3>();
     }
+
+    public Vector3[] probePositions
+    {
+        get => positions;
+        set => positions = value;
+    }
+
+    public int probesCount => _probePositions.Count;
 
     public void AddProbe(Vector3 position)
     {
@@ -200,38 +208,233 @@ public sealed class LightProbeGroup : Component
     public int GetProbeCount() => _probePositions.Count;
 }
 
-public sealed class LightProbes
+public sealed class LightProbes : Object
 {
     private List<Vector3> _positions = new List<Vector3>();
     private List<SphericalHarmonicsL2> _coefficients = new List<SphericalHarmonicsL2>();
-    public Vector3[] positions { get => _positions.ToArray(); set => _positions = value != null ? new List<Vector3>(value) : new List<Vector3>(); }
-    public SphericalHarmonicsL2[] bakedProbes { get => _coefficients.ToArray(); set => _coefficients = value != null ? new List<SphericalHarmonicsL2>(value) : new List<SphericalHarmonicsL2>(); }
+
+    public Vector3[] positions
+    {
+        get => _positions.ToArray();
+        set => _positions = value != null ? new List<Vector3>(value) : new List<Vector3>();
+    }
+
+    public SphericalHarmonicsL2[] bakedProbes
+    {
+        get => _coefficients.ToArray();
+        set => _coefficients = value != null ? new List<SphericalHarmonicsL2>(value) : new List<SphericalHarmonicsL2>();
+    }
+
     public int count => _positions.Count;
+
+    public void CalculateAmbientProbe(out SphericalHarmonicsL2 probe)
+    {
+        probe = new SphericalHarmonicsL2();
+        probe.AddAmbientLight(RenderSettings.ambientSkyColor * RenderSettings.ambientIntensity);
+    }
+
+    public static void GetInterpolatedProbe(Vector3 position, Renderer renderer, out SphericalHarmonicsL2 probe)
+    {
+        probe = new SphericalHarmonicsL2();
+        probe.AddAmbientLight(RenderSettings.ambientLight * RenderSettings.ambientIntensity);
+    }
 
     public static LightProbes GetLightProbesForScene(int sceneHandle) => null;
 }
 
+public enum LightProbeProxyVolumeResolution
+{
+    Low = 0,
+    Normal = 1,
+    High = 2
+}
+
+public enum LightProbeProxyVolumeQualityMode
+{
+    Auto = 0,
+    Custom = 1
+}
+
+public enum LightProbeProxyVolumeBoundingBoxMode
+{
+    AutomaticLocal = 0,
+    AutomaticWorld = 1,
+    Custom = 2
+}
+
+public enum LightProbeProxyVolumeRefreshMode
+{
+    Automatic = 0,
+    EveryFrame = 1,
+    ViaScripting = 2
+}
+
+public class LightProbeProxyVolume : Behaviour
+{
+    private Vector3 _size = Vector3.one;
+    private Vector3 _origin = Vector3.zero;
+    private LightProbeProxyVolumeResolution _resolution = LightProbeProxyVolumeResolution.Normal;
+    private LightProbeProxyVolumeBoundingBoxMode _boundingBoxMode = LightProbeProxyVolumeBoundingBoxMode.AutomaticLocal;
+    private LightProbeProxyVolumeRefreshMode _refreshMode = LightProbeProxyVolumeRefreshMode.Automatic;
+    private LightProbeProxyVolumeQualityMode _qualityMode = LightProbeProxyVolumeQualityMode.Auto;
+    private float _probePositionThreshold = 0.1f;
+    private Vector3Int _gridResolutionX = new Vector3Int(4, 4, 4);
+    private bool _isDataAvailable;
+
+    public Vector3 sizeCustom
+    {
+        get => _size;
+        set => _size = value;
+    }
+
+    public Vector3 originCustom
+    {
+        get => _origin;
+        set => _origin = value;
+    }
+
+    public Vector3 size
+    {
+        get => _size;
+        set => _size = value;
+    }
+
+    public Vector3 origin
+    {
+        get => _origin;
+        set => _origin = value;
+    }
+
+    public Vector3 center
+    {
+        get => _origin;
+        set => _origin = value;
+    }
+
+    public Vector3 boundarySize
+    {
+        get => _size;
+        set => _size = value;
+    }
+
+    public LightProbeProxyVolumeResolution resolution
+    {
+        get => _resolution;
+        set => _resolution = value;
+    }
+
+    public LightProbeProxyVolumeBoundingBoxMode boundingBoxMode
+    {
+        get => _boundingBoxMode;
+        set => _boundingBoxMode = value;
+    }
+
+    public LightProbeProxyVolumeRefreshMode refreshMode
+    {
+        get => _refreshMode;
+        set => _refreshMode = value;
+    }
+
+    public LightProbeProxyVolumeQualityMode qualityMode
+    {
+        get => _qualityMode;
+        set => _qualityMode = value;
+    }
+
+    public float probePositionThreshold
+    {
+        get => _probePositionThreshold;
+        set => _probePositionThreshold = value;
+    }
+
+    public Vector3Int gridResolutionX
+    {
+        get => _gridResolutionX;
+        set => _gridResolutionX = value;
+    }
+
+    public bool isDataAvailable => _isDataAvailable;
+
+    public void Update()
+    {
+        _isDataAvailable = true;
+    }
+}
+
+public enum ReflectionProbeType
+{
+    Cube = 0,
+    Card = 1
+}
+
+public enum ReflectionProbeClearFlags
+{
+    Skybox = 1,
+    SolidColor = 2
+}
+
+public delegate void ReflectionProbeEvent(ReflectionProbe probe, RenderTexture renderTexture, ref RenderTextureDescriptor descriptor);
+
 public class ReflectionProbe : Behaviour
 {
+    private static Cubemap? _defaultTexture;
+    private static Vector4 _defaultTextureHDRDecodeValues = new Vector4(1f, 1f, 0f, 0f);
+
     public Bounds bounds { get; set; }
-    public float nearClipPlane { get; set; }
+    public float nearClipPlane { get; set; } = 0.3f;
     public float farClipPlane { get; set; } = 1000f;
     public float intensity { get; set; } = 1f;
     public int resolution { get; set; } = 128;
     public bool boxProjection { get; set; }
     public ReflectionProbeMode mode { get; set; } = ReflectionProbeMode.Baked;
     public ReflectionProbeRefreshMode refreshMode { get; set; } = ReflectionProbeRefreshMode.OnAwake;
-    public ReflectionProbeTimeSlicingMode timeSlicingMode { get; set; }
+    public ReflectionProbeTimeSlicingMode timeSlicingMode { get; set; } = ReflectionProbeTimeSlicingMode.AllFacesAtOnce;
     public Color backgroundColor { get; set; } = Color.black;
     public float blendDistance { get; set; }
+    public Vector3 boxSize { get; set; } = Vector3.one;
     public Vector3 size { get; set; } = Vector3.one;
     public Vector3 center { get; set; }
     public int importance { get; set; } = 1;
-    public Cubemap bakedTexture { get; set; }
-    public Texture customBakedTexture { get; set; }
-    public RenderTexture realtimeTexture { get; set; }
+    public Cubemap? bakedTexture { get; set; }
+    public Texture? customBakedTexture { get; set; }
+    public Cubemap? cubemap { get; set; }
+    public RenderTexture? realtimeTexture { get; set; }
     public bool shadows { get; set; } = true;
+    public float shadowDistance { get; set; } = 100f;
+    public LightShadows shadowDistanceMode { get; set; } = LightShadows.Soft;
     public int cullingMask { get; set; } = -1;
+    public bool hdr { get; set; } = true;
+    public bool renderDynamicObjects { get; set; } = true;
+    public ReflectionProbeClearFlags clearFlags { get; set; } = ReflectionProbeClearFlags.Skybox;
+    public ReflectionProbeType type { get; set; } = ReflectionProbeType.Cube;
+
+    public static Cubemap? defaultTexture
+    {
+        get
+        {
+            if (_defaultTexture == null)
+            {
+                _defaultTexture = new Cubemap(16, TextureFormat.RGBA32, true);
+            }
+            return _defaultTexture;
+        }
+    }
+
+    public static Cubemap? defaultReflectionCubemap
+    {
+        get => RenderSettings.customReflection ?? _defaultTexture;
+        set => RenderSettings.customReflection = value;
+    }
+
+    public static Vector4 defaultTextureHDRDecodeValues => _defaultTextureHDRDecodeValues;
+
+    public static int minBakedCubemapResolution => 16;
+    public static int maxBakedCubemapResolution => 2048;
+
+    public static event ReflectionProbeEvent? reflectionProbeEvent;
+
+    public void UpdateCachedRenderData() { }
+
     public void Reset()
     {
         resolution = 128;
@@ -241,17 +444,41 @@ public class ReflectionProbe : Behaviour
         timeSlicingMode = ReflectionProbeTimeSlicingMode.AllFacesAtOnce;
         backgroundColor = Color.black;
         blendDistance = 0f;
+        boxSize = Vector3.one;
         size = Vector3.one;
         center = Vector3.zero;
         importance = 1;
         bakedTexture = null;
         customBakedTexture = null;
+        cubemap = null;
         realtimeTexture = null;
         shadows = true;
+        shadowDistance = 100f;
         cullingMask = -1;
+        hdr = true;
+        renderDynamicObjects = true;
+        clearFlags = ReflectionProbeClearFlags.Skybox;
+        nearClipPlane = 0.3f;
+        farClipPlane = 1000f;
+        intensity = 1f;
+        type = ReflectionProbeType.Cube;
     }
-    public int RenderProbe() => 0;
+
+    public int RenderProbe()
+    {
+        reflectionProbeEvent?.Invoke(this, realtimeTexture, ref _descriptor);
+        return 0;
+    }
+
+    public int RenderProbe(RenderTexture targetTexture)
+    {
+        realtimeTexture = targetTexture;
+        return RenderProbe();
+    }
+
     public bool IsFinishedRendering(int renderId) => true;
+
+    private RenderTextureDescriptor _descriptor = new RenderTextureDescriptor(128, 128);
 }
 
 public enum ReflectionProbeMode { Baked = 0, Realtime = 1, Custom = 2 }
@@ -266,14 +493,48 @@ public class Projector : Behaviour
     public float aspectRatio { get; set; } = 1f;
     public float orthographicSize { get; set; }
     public bool orthographic { get; set; }
-    public Material material { get; set; }
+    public Material? material { get; set; }
     public Color color { get; set; } = Color.white;
     public int ignoreLayers { get; set; }
 }
 
 public class Skybox : Behaviour
 {
-    public Material material { get; set; }
+    public Material? material { get; set; }
+}
+
+public class LensFlare : Behaviour
+{
+    public Flare? flare { get; set; }
+    public float brightness { get; set; } = 1f;
+    public Color color { get; set; } = Color.white;
+    public float fadeSpeed { get; set; } = 3f;
+    public bool enabled { get; set; } = true;
+}
+
+public class Tree : Component
+{
+    public Mesh? sharedMesh { get; set; }
+    public Material[] materials { get; set; } = Array.Empty<Material>();
+    public float bendFactor { get; set; }
+    public int data { get; set; }
+}
+
+public class OcclusionPortal : Component
+{
+    public bool open { get; set; } = true;
+    public Vector3 center { get; set; }
+    public Vector3 size { get; set; } = Vector3.one;
+}
+
+public class OcclusionArea : Component
+{
+    public Vector3 center { get; set; }
+    public Vector3 size { get; set; } = Vector3.one;
+    public bool isViewVolume { get; set; }
+    public int targetResolution { get; set; } = 262144;
+    public float nearClipPlane { get; set; } = 0.1f;
+    public float farClipPlane { get; set; } = 100f;
 }
 
 public enum FogMode { Linear = 1, Exponential = 2, ExponentialSquared = 3 }
@@ -294,16 +555,23 @@ public static class RenderSettings
     public static Color ambientGroundColor { get; set; } = new Color(0.047f, 0.043f, 0.035f);
     public static Color ambientLight { get; set; } = new Color(0.212f, 0.227f, 0.259f);
     public static float ambientIntensity { get; set; } = 1f;
+    public static SphericalHarmonicsL2 ambientProbe { get; set; }
     public static DefaultReflectionMode defaultReflectionMode { get; set; } = DefaultReflectionMode.Skybox;
     public static int defaultReflectionResolution { get; set; } = 128;
+    public static Cubemap? defaultReflectionCubemap { get; set; }
+    public static Cubemap? customReflection { get; set; }
     public static float reflectionIntensity { get; set; } = 1f;
     public static int reflectionBounces { get; set; } = 1;
-    public static Material skybox { get; set; }
-    public static Light sun { get; set; }
+    public static Material? skybox { get; set; }
+    public static Light? sun { get; set; }
+    public static Light? sunSource
+    {
+        get => sun;
+        set => sun = value;
+    }
     public static Color subtractiveShadowColor { get; set; } = new Color(0.42f, 0.478f, 0.627f);
     public static float flareFadeSpeed { get; set; } = 3f;
     public static float flareStrength { get; set; } = 1f;
     public static float haloStrength { get; set; } = 1f;
-    public static SphericalHarmonicsL2 ambientProbe { get; set; }
-    public static Cubemap customReflection { get; set; }
+    public static float haloSpeed { get; set; } = 1f;
 }

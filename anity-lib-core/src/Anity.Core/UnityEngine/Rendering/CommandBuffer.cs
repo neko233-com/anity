@@ -449,9 +449,53 @@ public class CommandBuffer : IDisposable
         _commands.Add(new CommandBufferCommand { type = CommandBufferType.EnableScissor, scissor = scissor });
     }
 
+    public void EnableScissorRect(Rect scissor) => EnableScissor(scissor);
+
     public void DisableScissor()
     {
         _commands.Add(new CommandBufferCommand { type = CommandBufferType.DisableScissor });
+    }
+
+    public void DisableScissorRect() => DisableScissor();
+
+    public void SetGlobalBuffer(string name, ComputeBuffer buffer)
+        => SetGlobalBuffer(Shader.PropertyToID(name), buffer);
+    public void SetGlobalBuffer(int nameID, ComputeBuffer buffer)
+    {
+        _commands.Add(new CommandBufferCommand
+        {
+            type = CommandBufferType.SetGlobalInt,
+            nameID = nameID,
+            computeBuffer = buffer,
+        });
+    }
+
+    public void SetShadowSamplingMode(RenderTargetIdentifier shadowmap, ShadowSamplingMode mode)
+    {
+        _commands.Add(new CommandBufferCommand
+        {
+            type = CommandBufferType.SetGlobalTexture,
+            rtValue = shadowmap,
+        });
+    }
+
+    public void DrawRenderers(/* CullingResults cullResults, ref DrawingSettings drawSettings, ref FilteringSettings filterSettings */)
+    {
+        _commands.Add(new CommandBufferCommand { type = CommandBufferType.DrawRenderer });
+    }
+
+    public void DrawProceduralIndexed(Matrix4x4 matrix, Material material, int shaderPass, MeshTopology topology, int indexCount, int instanceCount = 1, int startIndex = 0)
+    {
+        _commands.Add(new CommandBufferCommand
+        {
+            type = CommandBufferType.DrawProcedural,
+            matrix = matrix,
+            material = material,
+            shaderPass = shaderPass,
+            topology = topology,
+            vertexCount = indexCount,
+            instanceCount = instanceCount,
+        });
     }
 
     public void CopyTexture(Texture src, Texture dst)

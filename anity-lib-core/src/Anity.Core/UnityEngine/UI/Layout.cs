@@ -1084,7 +1084,7 @@ public class AspectRatioFitter : UIBehaviour, ILayoutSelfController
   }
 }
 
-public class LayoutElement : UIBehaviour, ILayoutElement
+public class LayoutElement : UIBehaviour, ILayoutElement, ILayoutIgnorer
 {
   private float _minWidth = -1f;
   private float _minHeight = -1f;

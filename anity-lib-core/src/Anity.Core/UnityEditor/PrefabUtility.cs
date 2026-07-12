@@ -61,7 +61,6 @@ public static class PrefabUtility
       return null;
     }
 
-    // Walk up to find the outermost prefab instance root
     var current = go;
     while (current.transform.parent is not null)
     {
@@ -85,6 +84,14 @@ public static class PrefabUtility
     var clone = (GameObject)UnityEngine.Object.Instantiate(original);
     clone.name = original.name;
     return clone;
+  }
+
+  public static GameObject? InstantiatePrefab(string assetPath)
+  {
+    if (string.IsNullOrWhiteSpace(assetPath)) return null;
+    var original = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
+    if (original is null) return null;
+    return InstantiatePrefab(original);
   }
 
   public static GameObject InstantiatePrefab(GameObject original, GameObject? parent)
@@ -195,6 +202,11 @@ public static class PrefabUtility
     return _instanceToAsset.TryGetValue(go, out var assetPath) ? assetPath : null;
   }
 
+  public static T? GetCorrespondingObjectFromSource<T>(T source) where T : Object
+  {
+    return GetCorrespondingObjectFromSource((Object)source) as T;
+  }
+
   public static Object? GetCorrespondingObjectFromSource(Object source)
   {
     if (source is null)
@@ -211,6 +223,11 @@ public static class PrefabUtility
     return GetCorrespondingObjectFromOriginalSource(source);
   }
 
+  public static T? GetCorrespondingObjectFromOriginalSource<T>(T source) where T : Object
+  {
+    return GetCorrespondingObjectFromOriginalSource((Object)source) as T;
+  }
+
   public static Object? GetCorrespondingObjectFromOriginalSource(Object source)
   {
     if (source is null)
@@ -218,7 +235,6 @@ public static class PrefabUtility
       return null;
     }
 
-    // In a real implementation, this would find the original asset
     return source;
   }
 
@@ -229,7 +245,6 @@ public static class PrefabUtility
       return null;
     }
 
-    // In a real implementation, this would find the original source
     return targetObject;
   }
 
@@ -251,7 +266,6 @@ public static class PrefabUtility
 
   public static bool IsPartOfImmutablePrefab(Object targetObject)
   {
-    // In a real implementation, this would check if the prefab is immutable
     return false;
   }
 
@@ -303,6 +317,13 @@ public static class PrefabUtility
 
   public static string SaveAsPrefabAsset(GameObject root, string savePath)
   {
+    bool success;
+    return SaveAsPrefabAsset(root, savePath, out success);
+  }
+
+  public static string SaveAsPrefabAsset(GameObject root, string savePath, out bool success)
+  {
+    success = false;
     if (root is null || string.IsNullOrWhiteSpace(savePath))
     {
       return string.Empty;
@@ -315,6 +336,7 @@ public static class PrefabUtility
     }
 
     _loadedPrefabs[savePath] = root;
+    success = true;
     return savePath;
   }
 
@@ -343,10 +365,16 @@ public static class PrefabUtility
 
   public static void UnpackPrefabInstance(GameObject instanceRoot, PrefabUnpackMode unpackMode)
   {
+    UnpackPrefabInstance(instanceRoot, unpackMode, InteractionMode.AutomatedAction);
+  }
+
+  public static void UnpackPrefabInstance(GameObject instanceRoot, PrefabUnpackMode unpackMode, InteractionMode action)
+  {
     if (instanceRoot is null) return;
     _ = unpackMode;
+    _ = action;
 
-    UnpackPrefabInstanceInternal(instanceRoot);
+    UnpackPrefabInstanceInternal(instanceRoot, unpackMode);
   }
 
   public static void UnpackPrefabInstanceAndReturnNewOutermostRoots(GameObject instanceRoot, PrefabUnpackMode unpackMode)
@@ -354,22 +382,39 @@ public static class PrefabUtility
     UnpackPrefabInstance(instanceRoot, unpackMode);
   }
 
-  private static void UnpackPrefabInstanceInternal(GameObject instanceRoot)
+  private static void UnpackPrefabInstanceInternal(GameObject instanceRoot, PrefabUnpackMode unpackMode)
   {
     _instanceToAsset.Remove(instanceRoot);
 
-    for (int i = 0; i < instanceRoot.transform.childCount; i++)
+    if (unpackMode == PrefabUnpackMode.Completely)
     {
-      var child = instanceRoot.transform.GetChild(i).gameObject;
-      if (_instanceToAsset.ContainsKey(child))
+      for (int i = 0; i < instanceRoot.transform.childCount; i++)
       {
-        _instanceToAsset.Remove(child);
+        var child = instanceRoot.transform.GetChild(i).gameObject;
+        UnpackPrefabInstanceInternal(child, unpackMode);
+      }
+    }
+    else
+    {
+      for (int i = 0; i < instanceRoot.transform.childCount; i++)
+      {
+        var child = instanceRoot.transform.GetChild(i).gameObject;
+        if (_instanceToAsset.ContainsKey(child))
+        {
+          _instanceToAsset.Remove(child);
+        }
       }
     }
   }
 
   public static string SaveAsPrefabAssetAndConnect(GameObject root, string savePath)
   {
+    return SaveAsPrefabAssetAndConnect(root, savePath, InteractionMode.AutomatedAction);
+  }
+
+  public static string SaveAsPrefabAssetAndConnect(GameObject root, string savePath, InteractionMode action)
+  {
+    _ = action;
     var result = SaveAsPrefabAsset(root, savePath);
     if (!string.IsNullOrEmpty(result))
     {
@@ -391,6 +436,17 @@ public static class PrefabUtility
     }
 
     return true;
+  }
+
+  public static Object ReplacePrefab(GameObject instance, Object targetPrefab, ReplacePrefabOptions options)
+  {
+    _ = options;
+    if (instance is null || targetPrefab is null) return null;
+    if (targetPrefab is GameObject go)
+    {
+      ReplacePrefab(instance, go);
+    }
+    return targetPrefab;
   }
 
   public static void DisconnectPrefabInstance(Object objectToDisconnect)
@@ -440,7 +496,6 @@ public static class PrefabUtility
       return false;
     }
 
-    // In a real implementation, this would apply changes back to the prefab asset
     return true;
   }
 
@@ -461,6 +516,13 @@ public static class PrefabUtility
     return true;
   }
 
+  public static void ApplyPrefabInstance(GameObject instanceRoot, InteractionMode action)
+  {
+    if (instanceRoot is null) return;
+    _ = action;
+    ApplyPrefabInstance(instanceRoot);
+  }
+
   public static void RevertPrefabInstance(GameObject instanceRoot)
   {
     if (instanceRoot is null)
@@ -472,13 +534,13 @@ public static class PrefabUtility
     {
       return;
     }
+  }
 
-    // In a real implementation, this would revert changes from the prefab asset
-    var prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
-    if (prefab is not null)
-    {
-      // Copy prefab properties back to instance
-    }
+  public static void RevertPrefabInstance(GameObject instanceRoot, InteractionMode action)
+  {
+    if (instanceRoot is null) return;
+    _ = action;
+    RevertPrefabInstance(instanceRoot);
   }
 
   public static GameObject FindPrefabInstanceRoot(GameObject instance)
@@ -498,9 +560,9 @@ public static class PrefabUtility
     return false;
   }
 
-  public static void RecordPrefabInstancePropertyModifications(GameObject instanceRoot)
+  public static void RecordPrefabInstancePropertyModifications(Object targetObject)
   {
-    _ = instanceRoot;
+    _ = targetObject;
   }
 
   public static bool IsPartOfAnyPrefab(Object targetObject)
@@ -513,18 +575,6 @@ public static class PrefabUtility
     if (gameObject is null) return PrefabAssetType.Missing;
     if (!IsPartOfPrefabInstance(gameObject)) return PrefabAssetType.NotAPrefab;
     return PrefabAssetType.Regular;
-  }
-
-  public static void ApplyPrefabInstance(GameObject instanceRoot, InteractionMode action)
-  {
-    if (instanceRoot is null) return;
-    ApplyPrefabInstance(instanceRoot);
-  }
-
-  public static void RevertPrefabInstance(GameObject instanceRoot, InteractionMode action)
-  {
-    if (instanceRoot is null) return;
-    RevertPrefabInstance(instanceRoot);
   }
 
   public static bool HasPrefabInstanceAnyOverrides(GameObject instanceRoot, bool includeDefaultOverride)
@@ -548,8 +598,7 @@ public enum PrefabInstanceStatus
   NotAPrefab,
   Connected,
   Disconnected,
-  Missing,
-  OutOfDate
+  MissingAsset
 }
 
 public enum PrefabImportMode
@@ -578,4 +627,12 @@ public enum PrefabUnpackMode
 {
   OutermostRoot,
   Completely
+}
+
+[Flags]
+public enum ReplacePrefabOptions
+{
+  Default = 0,
+  ConnectToPrefab = 1,
+  ReplaceNameBased = 2
 }

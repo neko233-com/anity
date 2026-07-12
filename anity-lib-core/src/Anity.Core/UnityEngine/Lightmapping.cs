@@ -10,13 +10,46 @@ public static class Lightmapping
     private static LightmapData[] _lightmaps = Array.Empty<LightmapData>();
     private static bool _isBaking;
     private static float _bakeProgress;
+    private static bool _isDone = true;
 
     public static bool giWorkflowMode { get; set; }
     public static bool realtimeGI { get; set; }
     public static bool bakedGI { get; set; } = true;
 
     public static bool isBaking => _isBaking;
+    public static bool isDone => _isDone;
+    public static bool isRunning => _isBaking;
     public static float bakeProgress => _bakeProgress;
+
+    public static float indirectOutputScale
+    {
+        get => GetValue<float>(nameof(indirectOutputScale), 1f);
+        set => SetValue(nameof(indirectOutputScale), value);
+    }
+
+    public static float albedoBoost
+    {
+        get => GetValue<float>(nameof(albedoBoost), 1f);
+        set => SetValue(nameof(albedoBoost), value);
+    }
+
+    public static bool realtimeEnvironmentLighting
+    {
+        get => GetValue<bool>(nameof(realtimeEnvironmentLighting), true);
+        set => SetValue(nameof(realtimeEnvironmentLighting), value);
+    }
+
+    public static bool enlightenSceneLighting
+    {
+        get => GetValue<bool>(nameof(enlightenSceneLighting), false);
+        set => SetValue(nameof(enlightenSceneLighting), value);
+    }
+
+    public static LightmapParameters? lightmapParameters
+    {
+        get => GetValue<LightmapParameters>(nameof(lightmapParameters), LightmapSettings.lightmapParameters);
+        set => SetValue(nameof(lightmapParameters), value!);
+    }
 
     public static bool lightProbeOcculsionData
     {
@@ -85,12 +118,6 @@ public static class Lightmapping
         set => SetValue(nameof(mixedLightingMode), value);
     }
 
-    public static bool realtimeEnvironmentLighting
-    {
-        get => GetValue<bool>(nameof(realtimeEnvironmentLighting), true);
-        set => SetValue(nameof(realtimeEnvironmentLighting), value);
-    }
-
     public static bool finalGather
     {
         get => GetValue<bool>(nameof(finalGather));
@@ -107,12 +134,6 @@ public static class Lightmapping
     {
         get => GetValue<LightmapBakeFiltering>(nameof(finalGatherFiltering));
         set => SetValue(nameof(finalGatherFiltering), value);
-    }
-
-    public static float albedoBoost
-    {
-        get => GetValue<float>(nameof(albedoBoost), 1f);
-        set => SetValue(nameof(albedoBoost), value);
     }
 
     public static bool exportTrainingData
@@ -176,6 +197,12 @@ public static class Lightmapping
         _lightmaps = Array.Empty<LightmapData>();
         Cancel();
     }
+
+    public static void ClearLightmaps()
+    {
+        Clear();
+    }
+
     public static void ClearDiskCache() { _bakedLightmaps.Clear(); }
     public static void ClearLightingDataAsset() { _settings.Clear(); lightingDataAsset = null; }
     public static void ClearBakedData()
@@ -184,19 +211,22 @@ public static class Lightmapping
         _lightmaps = Array.Empty<LightmapData>();
     }
 
-    public static void Bake()
+    public static bool Bake()
     {
         _isBaking = true;
+        _isDone = false;
         _bakeProgress = 0f;
         LightmappingBakeStarted?.Invoke();
         onStarted?.Invoke();
         SimulateBake();
+        return _isDone;
     }
 
     public static AsyncOperation BakeAsync()
     {
         var op = new AsyncOperation();
         _isBaking = true;
+        _isDone = false;
         _bakeProgress = 0f;
         LightmappingBakeStarted?.Invoke();
         onStarted?.Invoke();
@@ -209,6 +239,7 @@ public static class Lightmapping
         await System.Threading.Tasks.Task.Delay(100);
         _bakeProgress = 1f;
         _isBaking = false;
+        _isDone = true;
         BakeCompleted?.Invoke();
         bakeCompleted?.Invoke();
         onCompleted?.Invoke();
@@ -220,6 +251,7 @@ public static class Lightmapping
     {
         _bakeProgress = 1f;
         _isBaking = false;
+        _isDone = true;
         BakeCompleted?.Invoke();
         bakeCompleted?.Invoke();
         onCompleted?.Invoke();
@@ -235,10 +267,9 @@ public static class Lightmapping
     public static void Cancel()
     {
         _isBaking = false;
+        _isDone = true;
         _bakeProgress = 0f;
     }
-
-    public static bool isRunning => _isBaking;
 
     public static LightingSettings? GetLightmapSettings()
     {
@@ -291,7 +322,7 @@ public enum LightmapsMode
 {
     NonDirectional,
     CombinedDirectional,
-    SeparatedDirectional
+    SeparateDirectional
 }
 
 public enum LightmapBakeFiltering

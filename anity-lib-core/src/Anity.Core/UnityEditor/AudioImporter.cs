@@ -1,62 +1,106 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace UnityEditor;
 
 public class AudioImporter : AssetImporter
 {
-  public AudioImporterLoadType loadType { get; set; } = AudioImporterLoadType.DecompressOnLoad;
-  public AudioCompressionFormat compressionFormat { get; set; } = AudioCompressionFormat.Vorbis;
-  public float quality { get; set; } = 1f;
+  private readonly Dictionary<string, AudioImporterSampleSettings> _overrideSettings = new();
+  private AudioImporterSampleSettings _defaultSampleSettings;
+
+  public AudioImporter()
+  {
+    _defaultSampleSettings = new AudioImporterSampleSettings
+    {
+      compressionFormat = AudioCompressionFormat.Vorbis,
+      quality = 1f,
+      loadType = AudioClipLoadType.DecompressOnLoad,
+      sampleRateSetting = AudioSampleRateSetting.PreserveSampleRate,
+      sampleRateOverride = 44100
+    };
+  }
+
   public bool loadInBackground { get; set; }
   public bool preloadAudioData { get; set; } = true;
   public bool ambisonic { get; set; }
-  public AudioSampleRateSetting sampleRateSetting { get; set; } = AudioSampleRateSetting.PreserveSampleRate;
-  public uint sampleRateOverride { get; set; } = 44100;
   public bool forceToMono { get; set; }
   public bool normalize { get; set; }
-  public AudioClipLoadType loadInBackgroundType { get; set; } = AudioClipLoadType.DecompressOnLoad;
-  public AudioCompressionFormat defaultCompressionFormat { get; set; } = AudioCompressionFormat.PCM;
 
-  public void GetOverrideSampleSettings(string platform, out AudioImporterSampleSettings settings)
+  public AudioImporterSampleSettings defaultSampleSettings
   {
-    settings = new AudioImporterSampleSettings();
+    get => _defaultSampleSettings;
+    set => _defaultSampleSettings = value;
   }
 
-  public void SetOverrideSampleSettings(string platform, AudioImporterSampleSettings settings)
+  public AudioClipLoadType loadType
   {
-    _ = platform;
-    _ = settings;
+    get => _defaultSampleSettings.loadType;
+    set => _defaultSampleSettings.loadType = value;
   }
 
-  public void ClearOverrideSampleSettings(string platform)
+  public AudioCompressionFormat compressionFormat
   {
-    _ = platform;
+    get => _defaultSampleSettings.compressionFormat;
+    set => _defaultSampleSettings.compressionFormat = value;
+  }
+
+  public float quality
+  {
+    get => _defaultSampleSettings.quality;
+    set => _defaultSampleSettings.quality = value;
+  }
+
+  public AudioSampleRateSetting sampleRateSetting
+  {
+    get => _defaultSampleSettings.sampleRateSetting;
+    set => _defaultSampleSettings.sampleRateSetting = value;
+  }
+
+  public uint sampleRateOverride
+  {
+    get => _defaultSampleSettings.sampleRateOverride;
+    set => _defaultSampleSettings.sampleRateOverride = value;
+  }
+
+  public AudioClipLoadType loadInBackgroundType
+  {
+    get => _defaultSampleSettings.loadType;
+    set => _defaultSampleSettings.loadType = value;
+  }
+
+  public AudioCompressionFormat defaultCompressionFormat
+  {
+    get => _defaultSampleSettings.compressionFormat;
+    set => _defaultSampleSettings.compressionFormat = value;
   }
 
   public bool ContainsSampleSettingsOverride(string platform)
   {
-    _ = platform;
-    return false;
+    return _overrideSettings.ContainsKey(platform);
+  }
+
+  public AudioImporterSampleSettings GetOverrideSampleSettings(string platform)
+  {
+    if (_overrideSettings.TryGetValue(platform, out var settings))
+      return settings;
+    return _defaultSampleSettings;
+  }
+
+  public void SetOverrideSampleSettings(string platform, AudioImporterSampleSettings settings)
+  {
+    if (string.IsNullOrEmpty(platform)) return;
+    _overrideSettings[platform] = settings;
+  }
+
+  public void ClearOverrideSampleSettings(string platform)
+  {
+    _overrideSettings.Remove(platform);
   }
 
   public static new AudioImporter GetAtPath(string path)
   {
     return new AudioImporter { assetPath = path };
   }
-}
-
-public enum AudioImporterLoadType
-{
-  DecompressOnLoad,
-  CompressedInMemory,
-  Streaming
-}
-
-public enum AudioClipLoadType
-{
-  DecompressOnLoad,
-  CompressedInMemory,
-  Streaming
 }
 
 public enum AudioCompressionFormat
@@ -73,6 +117,13 @@ public enum AudioCompressionFormat
   ATRAC9
 }
 
+public enum AudioClipLoadType
+{
+  DecompressOnLoad,
+  CompressedInMemory,
+  Streaming
+}
+
 public enum AudioSampleRateSetting
 {
   PreserveSampleRate,
@@ -85,6 +136,6 @@ public struct AudioImporterSampleSettings
   public AudioCompressionFormat compressionFormat;
   public float quality;
   public AudioClipLoadType loadType;
-  public uint sampleRateSetting;
+  public AudioSampleRateSetting sampleRateSetting;
   public uint sampleRateOverride;
 }

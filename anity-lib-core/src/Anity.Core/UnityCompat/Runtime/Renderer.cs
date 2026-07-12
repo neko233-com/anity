@@ -756,3 +756,70 @@ public enum ReflectionProbeUsage
     BlendProbesAndSkybox,
     Simple
 }
+
+public sealed class SortingLayer
+{
+    private static readonly List<SortingLayer> _layers = new();
+    private static int _nextId = 1;
+
+    public int id { get; }
+    public string name { get; }
+    public int value { get; }
+
+    private SortingLayer(string name, int value)
+    {
+        id = _nextId++;
+        this.name = name;
+        this.value = value;
+    }
+
+    static SortingLayer()
+    {
+        AddLayer("Default", 0);
+    }
+
+    public static SortingLayer[] layers => _layers.ToArray();
+
+    public static int GetLayerValueFromName(string name)
+    {
+        var layer = _layers.Find(l => l.name == name);
+        return layer?.value ?? 0;
+    }
+
+    public static string GetName(int id)
+    {
+        var layer = _layers.Find(l => l.id == id);
+        return layer?.name ?? "Default";
+    }
+
+    public static int GetLayerValueFromID(int id)
+    {
+        var layer = _layers.Find(l => l.id == id);
+        return layer?.value ?? 0;
+    }
+
+    public static SortingLayer GetSortingLayer(int id)
+    {
+        return _layers.Find(l => l.id == id) ?? _layers[0];
+    }
+
+    public static SortingLayer GetSortingLayerByName(string name)
+    {
+        return _layers.Find(l => l.name == name) ?? _layers[0];
+    }
+
+    public static SortingLayer AddLayer(string name, int value)
+    {
+        var existing = _layers.Find(l => l.name == name);
+        if (existing != null) return existing;
+        var layer = new SortingLayer(name, value);
+        _layers.Add(layer);
+        _layers.Sort((a, b) => a.value.CompareTo(b.value));
+        return layer;
+    }
+
+    public static bool IsValid(int id)
+    {
+        return _layers.Exists(l => l.id == id);
+    }
+}

@@ -14,24 +14,24 @@ public enum SpriteSortPoint
 
 public class SpriteMask : Renderer
 {
-    private Sprite _sprite;
-    private int _alphaCutoff = 128;
+    private Sprite? _sprite;
+    private float _alphaCutoff = 0.5f;
     private int _frontSortingLayerID;
     private int _frontSortingOrder = 1;
     private int _backSortingLayerID;
     private int _backSortingOrder;
-    private bool _customRange;
+    private bool _isCustomRange;
     private SpriteSortPoint _sortPoint = SpriteSortPoint.Center;
     private bool _flipX;
     private bool _flipY;
 
-    public Sprite sprite
+    public Sprite? sprite
     {
         get => _sprite;
         set => _sprite = value;
     }
 
-    public int alphaCutoff
+    public float alphaCutoff
     {
         get => _alphaCutoff;
         set => _alphaCutoff = value;
@@ -61,10 +61,16 @@ public class SpriteMask : Renderer
         set => _backSortingOrder = value;
     }
 
+    public bool isCustomRange
+    {
+        get => _isCustomRange;
+        set => _isCustomRange = value;
+    }
+
     public bool customRange
     {
-        get => _customRange;
-        set => _customRange = value;
+        get => _isCustomRange;
+        set => _isCustomRange = value;
     }
 
     public SpriteSortPoint sortPoint

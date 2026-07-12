@@ -1,5 +1,13 @@
 namespace UnityEngine;
 
+public enum WeightedMode
+{
+    None = 0,
+    In = 1,
+    Out = 2,
+    Both = 3
+}
+
 public struct Keyframe
 {
   public float time;
@@ -8,7 +16,8 @@ public struct Keyframe
   public float outTangent;
   public float inWeight;
   public float outWeight;
-  public int weightedMode;
+  public WeightedMode weightedMode;
+  public int tangentMode;
 
   public Keyframe(float time, float value)
   {
@@ -18,7 +27,8 @@ public struct Keyframe
     outTangent = 0f;
     inWeight = 0.3333333f;
     outWeight = 0.3333333f;
-    weightedMode = 0;
+    weightedMode = WeightedMode.None;
+    tangentMode = 0;
   }
 
   public Keyframe(float time, float value, float inTangent, float outTangent)
@@ -29,6 +39,7 @@ public struct Keyframe
     this.outTangent = outTangent;
     inWeight = 0.3333333f;
     outWeight = 0.3333333f;
-    weightedMode = 0;
+    weightedMode = WeightedMode.None;
+    tangentMode = 0;
   }
 }

@@ -166,14 +166,14 @@ namespace UnityEngine.Rendering.Universal
         "Draw Opaque Objects",
         true,
         RenderQueueRange.opaque,
-        m_Data != null ? m_Data.opaqueLayerMask : -1);
+        (uint)(m_Data != null ? m_Data.opaqueLayerMask : -1));
       EnqueuePass(m_OpaquePass);
 
       m_TransparentPass = new DrawObjectsPass(
         "Draw Transparent Objects",
         false,
         RenderQueueRange.transparent,
-        m_Data != null ? m_Data.transparentLayerMask : -1);
+        (uint)(m_Data != null ? m_Data.transparentLayerMask : -1));
       EnqueuePass(m_TransparentPass);
     }
 
@@ -255,7 +255,7 @@ namespace UnityEngine.Rendering.Universal
         new[] { new ShaderTagId("SRPDefaultUnlit"), new ShaderTagId("UniversalForward"), new ShaderTagId("Universal2D") },
         true,
         RenderQueueRange.all,
-        m_Data != null ? m_Data.light2DLayerMask : -1);
+        (uint)(m_Data != null ? m_Data.light2DLayerMask : -1));
       EnqueuePass(m_SpritePass);
     }
 

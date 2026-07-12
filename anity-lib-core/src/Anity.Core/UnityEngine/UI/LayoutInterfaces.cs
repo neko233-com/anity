@@ -31,6 +31,11 @@ public interface ILayoutElement2D : ILayoutElement
 {
 }
 
+public interface ILayoutIgnorer
+{
+  bool ignoreLayout { get; }
+}
+
 public interface ILayoutTransform
 {
   Vector2 anchoredPosition { get; set; }

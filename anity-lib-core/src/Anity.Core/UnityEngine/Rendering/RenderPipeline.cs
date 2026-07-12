@@ -3,39 +3,30 @@ using System.Collections.Generic;
 
 namespace UnityEngine.Rendering;
 
-public enum CullingOptions
-{
-    None = 0,
-    ForceEvenIfCameraIsNotActive = 1,
-    OcclusionCull = 2,
-    NearestPortal = 4,
-}
-
-public struct CullingParameters
-{
-    public Matrix4x4 cullingMatrix;
-    public Vector3 worldOrigin;
-    public bool stereoProjectionMatrix;
-    public Vector3 lodParameters;
-    public int cullingMask;
-    public float shadowDistance;
-    public bool conservative;
-    public Vector4[] shadowCascadeDistances;
-    public CullingOptions cullingOptions;
-    public float layerCullDistances;
-}
-
 public struct ShadowDrawingSettings
 {
     public CullingResults cullingResults;
     public int lightIndex;
     public ShadowSplitData splitData;
+    public bool useRenderingLayerMaskTest;
+    public PerObjectData perObjectData;
 
     public ShadowDrawingSettings(CullingResults cullingResults, int lightIndex)
     {
         this.cullingResults = cullingResults;
         this.lightIndex = lightIndex;
         splitData = default;
+        useRenderingLayerMaskTest = false;
+        perObjectData = PerObjectData.None;
+    }
+
+    public ShadowDrawingSettings(CullingResults cullingResults, int lightIndex, ShadowSplitData splitData)
+    {
+        this.cullingResults = cullingResults;
+        this.lightIndex = lightIndex;
+        this.splitData = splitData;
+        useRenderingLayerMaskTest = false;
+        perObjectData = PerObjectData.None;
     }
 }
 
@@ -53,6 +44,16 @@ public struct RenderStateBlock
     public DepthState depthState;
     public StencilState stencilState;
     public int stencilReference;
+
+    public RenderStateBlock(RenderStateMask mask)
+    {
+        this.mask = mask;
+        blendState = BlendState.Opaque;
+        rasterState = RasterState.Default;
+        depthState = DepthState.Default;
+        stencilState = StencilState.Default;
+        stencilReference = 0;
+    }
 }
 
 public abstract class RenderPipeline : IDisposable

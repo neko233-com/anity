@@ -6,7 +6,47 @@ namespace UnityEngine.Rendering;
 public struct ScriptableCullingParameters
 {
     public Camera camera;
+    public Matrix4x4 cullingMatrix;
+    public Vector3 worldOrigin;
+    public bool cullStereoSeparate;
+    public CullingOptions cullingOptions;
+    public Vector3 lodParameters;
+    public int cullingMask;
     public float shadowDistance;
+    public bool conservative;
+    public Vector4[] shadowCascadeDistances;
+    public float[] layerCullDistances;
+    public bool stereoProjectionMatrix;
+
+    public ScriptableCullingParameters(Camera camera)
+    {
+        this.camera = camera;
+        cullingMatrix = camera != null ? camera.projectionMatrix * camera.worldToCameraMatrix : Matrix4x4.identity;
+        worldOrigin = camera != null && camera.transform != null ? camera.transform.position : Vector3.zero;
+        cullStereoSeparate = false;
+        cullingOptions = CullingOptions.None;
+        lodParameters = new Vector3(0, 0, QualitySettings.lodBias);
+        cullingMask = camera != null ? camera.cullingMask : -1;
+        shadowDistance = QualitySettings.shadowDistance;
+        conservative = false;
+        shadowCascadeDistances = null;
+        layerCullDistances = null;
+        stereoProjectionMatrix = false;
+    }
+
+    public static bool GetCullingParameters(Camera camera, out ScriptableCullingParameters parameters)
+    {
+        parameters = new ScriptableCullingParameters(camera);
+        return camera != null;
+    }
+}
+
+public enum CullingOptions
+{
+    None = 0,
+    ForceEvenIfCameraIsNotActive = 1,
+    OcclusionCull = 2,
+    NearestPortal = 4,
 }
 
 public static class GraphicsSettings
@@ -489,23 +529,6 @@ public enum ShadowCastingMode
     ShadowsOnly = 3
 }
 
-public enum LightShadows
-{
-    None = 0,
-    Hard = 1,
-    Soft = 2
-}
-
-public enum LightType
-{
-    Spot = 0,
-    Directional = 1,
-    Point = 2,
-    Area = 3,
-    Rectangle = 3,
-    Disc = 4
-}
-
 public enum RenderMode
 {
     ScreenSpaceOverlay = 0,
@@ -628,57 +651,84 @@ public enum PerObjectData
     Lightmaps = 1 << 3,
     LightData = 1 << 4,
     MotionVectors = 1 << 5,
-    LightIndices = 1 << 6,
     ReflectionProbeData = 1 << 7,
+    ShadowMask = 1 << 10,
     OcclusionProbe = 1 << 8,
     OcclusionProbeProxyVolume = 1 << 9,
-    ShadowMask = 1 << 10,
 }
 
 [Flags]
 public enum SortingCriteria
 {
     None = 0,
-    SortByDistance = 1,
-    SortByCommonOpaque = 2,
-    SortByTransparency = 4,
-    SortBySortingLayer = 8,
-    SortBySortingOrder = 16,
-    SortByRenderQueue = 32,
-    AllOpaque = SortByCommonOpaque | SortBySortingLayers | SortByRenderQueue,
-    AllTransparent = SortByDistance | SortByTransparency | SortBySortingLayers,
-    CommonOpaque = SortByCommonOpaque,
-    CommonTransparent = SortByTransparency,
-    SortBySortingLayers = SortBySortingLayer | SortBySortingOrder,
+    SortingLayer = 1 << 0,
+    RenderQueue = 1 << 1,
+    BackToFront = 1 << 2,
+    FrontToBack = 1 << 3,
+    QuantizedFrontToBack = 1 << 4,
+    OptimizeStateChanges = 1 << 5,
+    CanvasOrder = 1 << 6,
+    CommonOpaque = SortingLayer | RenderQueue | FrontToBack | OptimizeStateChanges,
+    CommonTransparent = SortingLayer | RenderQueue | BackToFront | OptimizeStateChanges,
+    AllAlpha = BackToFront | FrontToBack | QuantizedFrontToBack,
+    All = 0x7F
+}
+
+public enum DistanceMetric
+{
+    Perspective = 0,
+    Orthographic = 1,
+    Default = 0,
+    CustomAxis = 2
 }
 
 public struct VisibleLight
 {
     public LightType lightType;
+    public Light light;
     public Color finalColor;
-    public Vector3 lightPosition;
-    public Vector3 lightDirection;
+    public Matrix4x4 localToWorldMatrix;
+    public Matrix4x4 worldToLocalMatrix;
+    public Rect screenRect;
+    public bool intersectsFarPlane;
+    public bool intersectsNearPlane;
+    public bool visible;
     public float range;
     public float spotAngle;
-    public Matrix4x4 localToWorldMatrix;
-    public VisibleLightFlags flags;
     public float intensity;
-}
 
-[Flags]
-public enum VisibleLightFlags { None = 0, IntersectsNearPlane = 1, IntersectsFarPlane = 2 }
+    public Vector3 lightPosition
+    {
+        get
+        {
+            var v = localToWorldMatrix.GetColumn(3);
+            return new Vector3(v.x, v.y, v.z);
+        }
+    }
+
+    public Vector3 lightDirection
+    {
+        get
+        {
+            var v = -localToWorldMatrix.GetColumn(2);
+            return new Vector3(v.x, v.y, v.z).normalized;
+        }
+    }
+}
 
 public struct VisibleReflectionProbe
 {
+    public Bounds bounds;
+    public ReflectionProbe probe;
+    public Texture texture;
+    public float blendDistance;
+    public int importance;
+    public bool boxProjection;
+    public bool hdr;
     public Vector3 center;
     public Vector3 extents;
     public int probeIndex;
-    public float blendDistance;
-    public BoxProjection boxProjection;
-    public int importance;
 }
-
-public enum BoxProjection { None, All }
 
 public struct SphericalHarmonicsL2
 {

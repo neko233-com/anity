@@ -15,6 +15,7 @@ public class Animation : Behaviour, IEnumerable
     private float _time;
     private bool _isPlaying;
     private bool _animatePhysics;
+    private AnimationCullingType _cullingType;
 
     public AnimationClip clip
     {
@@ -45,6 +46,12 @@ public class Animation : Behaviour, IEnumerable
     {
         get => _animatePhysics;
         set => _animatePhysics = value;
+    }
+
+    public AnimationCullingType cullingType
+    {
+        get => _cullingType;
+        set => _cullingType = value;
     }
 
     public bool isPlaying => _isPlaying;
@@ -394,4 +401,12 @@ public enum AnimationBlendMode
 {
     Blend = 0,
     Additive = 1
+}
+
+public enum AnimationCullingType
+{
+    AlwaysAnimate = 0,
+    BasedOnRenderers = 1,
+    BasedOnClipBounds = 2,
+    BasedOnUserBounds = 3
 }

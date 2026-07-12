@@ -18,6 +18,10 @@ public class AnimationClip : Motion
     private readonly List<AnimationEvent> _events = new();
     private bool _quaternionContinuityEnsured;
 
+    public static AnimationClip Empty => new AnimationClip { name = "Empty" };
+
+    public bool enabled { get; set; } = true;
+
     public AnimationClip()
     {
         frameRate = 60f;

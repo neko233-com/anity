@@ -103,7 +103,11 @@ namespace UnityEngine.Rendering.Universal
 
     protected void DrawOpaquePass(ScriptableRenderContext context, ref RenderingData renderingData)
     {
-      var drawOpaqueSettings = new DrawingSettings(new ShaderTagId("SRPDefaultUnlit"), SortingCriteria.CommonOpaque)
+      var sortingSettings = new SortingSettings(renderingData.cameraData.camera)
+      {
+        criteria = SortingCriteria.CommonOpaque
+      };
+      var drawOpaqueSettings = new DrawingSettings(new ShaderTagId("SRPDefaultUnlit"), sortingSettings)
       {
         enableDynamicBatching = renderingData.supportsDynamicBatching,
         enableInstancing = renderingData.supportsInstancing
@@ -116,7 +120,11 @@ namespace UnityEngine.Rendering.Universal
 
     protected void DrawTransparentPass(ScriptableRenderContext context, ref RenderingData renderingData)
     {
-      var drawTransparentSettings = new DrawingSettings(new ShaderTagId("SRPDefaultUnlit"), SortingCriteria.CommonTransparent)
+      var sortingSettings = new SortingSettings(renderingData.cameraData.camera)
+      {
+        criteria = SortingCriteria.CommonTransparent
+      };
+      var drawTransparentSettings = new DrawingSettings(new ShaderTagId("SRPDefaultUnlit"), sortingSettings)
       {
         enableDynamicBatching = renderingData.supportsDynamicBatching,
         enableInstancing = renderingData.supportsInstancing
@@ -206,7 +214,7 @@ namespace UnityEngine.Rendering.Universal
     private FilteringSettings m_FilteringSettings;
     private SortingCriteria m_SortingCriteria;
 
-    public DrawObjectsPass(string profilerTag, ShaderTagId[] shaderTagIds, bool opaque, RenderQueueRange renderQueueRange, int layerMask)
+    public DrawObjectsPass(string profilerTag, ShaderTagId[] shaderTagIds, bool opaque, RenderQueueRange renderQueueRange, uint layerMask)
     {
       m_ShaderTagIds = shaderTagIds;
       m_IsOpaque = opaque;
@@ -215,14 +223,18 @@ namespace UnityEngine.Rendering.Universal
       renderPassEvent = opaque ? RenderPassEvent.BeforeRenderingOpaques : RenderPassEvent.BeforeRenderingTransparents;
     }
 
-    public DrawObjectsPass(string profilerTag, bool opaque, RenderQueueRange renderQueueRange, int layerMask)
+    public DrawObjectsPass(string profilerTag, bool opaque, RenderQueueRange renderQueueRange, uint layerMask)
       : this(profilerTag, new[] { new ShaderTagId("SRPDefaultUnlit"), new ShaderTagId("UniversalForward") }, opaque, renderQueueRange, layerMask)
     {
     }
 
     public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
     {
-      var drawingSettings = new DrawingSettings(m_ShaderTagIds[0], m_SortingCriteria)
+      var sortingSettings = new SortingSettings(renderingData.cameraData.camera)
+      {
+        criteria = m_SortingCriteria
+      };
+      var drawingSettings = new DrawingSettings(m_ShaderTagIds[0], sortingSettings)
       {
         enableDynamicBatching = renderingData.supportsDynamicBatching,
         enableInstancing = renderingData.supportsInstancing

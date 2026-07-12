@@ -8,6 +8,8 @@ public class Coroutine
   internal bool Finished;
   internal bool WaitingForSeconds;
   internal float WaitTimeLeft;
+  internal bool WaitingForSecondsRealtime;
+  internal float WaitRealtimeTimeLeft;
   internal bool WaitingForFixedUpdate;
   internal bool WaitingForEndOfFrame;
   internal CustomYieldInstruction WaitingForCustomYield;

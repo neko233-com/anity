@@ -39,6 +39,11 @@ public class AnimationCurve
   public WrapMode postWrapMode { get; set; }
   public int length => _keys.Count;
 
+  public Keyframe this[int index]
+  {
+    get => _keys[index];
+  }
+
   public static AnimationCurve Linear(float timeStart, float valueStart, float timeEnd, float valueEnd)
   {
     return new AnimationCurve(

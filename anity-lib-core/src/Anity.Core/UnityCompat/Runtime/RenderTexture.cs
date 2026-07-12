@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine.Rendering;
 
 namespace UnityEngine;
 
@@ -57,6 +58,32 @@ public enum VRTextureUsage
     DeviceSpecific = 3
 }
 
+public enum ShadowSamplingMode
+{
+    CompareDepths = 0,
+    StencilDepths = 1,
+    SoftShadows = 2
+}
+
+public enum CustomRenderTextureUpdateMode
+{
+    OnLoad = 0,
+    Realtime = 1,
+    OnDemand = 2
+}
+
+public enum CustomRenderTextureInitializationSource
+{
+    TextureAndColor = 0,
+    Material = 1
+}
+
+public enum CustomRenderTextureUpdateZoneSpace
+{
+    Normalized = 0,
+    Pixel = 1
+}
+
 public struct RenderTextureDescriptor
 {
     public int width { get; set; }
@@ -64,7 +91,9 @@ public struct RenderTextureDescriptor
     public int volumeDepth { get; set; }
     public int msaaSamples { get; set; }
     public RenderTextureFormat colorFormat { get; set; }
+    public GraphicsFormat graphicsFormat { get; set; }
     public int depthBufferBits { get; set; }
+    public int mipCount { get; set; }
     public TextureDimension dimension { get; set; }
     public bool sRGB { get; set; }
     public bool useMipMap { get; set; }
@@ -73,25 +102,30 @@ public struct RenderTextureDescriptor
     public RenderTextureMemoryless memoryless { get; set; }
     public VRTextureUsage vrUsage { get; set; }
     public int bindMS { get; set; }
+    public ShadowSamplingMode shadowSamplingMode { get; set; }
 
     public RenderTextureDescriptor(int width, int height) : this(width, height, RenderTextureFormat.Default, 0) { }
     public RenderTextureDescriptor(int width, int height, RenderTextureFormat colorFormat) : this(width, height, colorFormat, 0) { }
-    public RenderTextureDescriptor(int width, int height, RenderTextureFormat colorFormat, int depthBufferBits)
+    public RenderTextureDescriptor(int width, int height, RenderTextureFormat colorFormat, int depthBufferBits) : this(width, height, colorFormat, depthBufferBits, 0) { }
+    public RenderTextureDescriptor(int width, int height, RenderTextureFormat colorFormat, int depthBufferBits, int mipCount)
     {
         this.width = width;
         this.height = height;
         volumeDepth = 1;
         msaaSamples = 1;
         this.colorFormat = colorFormat;
+        graphicsFormat = GraphicsFormat.None;
         this.depthBufferBits = depthBufferBits;
+        this.mipCount = mipCount;
         dimension = TextureDimension.Tex2D;
         sRGB = true;
-        useMipMap = false;
+        useMipMap = mipCount > 0;
         autoGenerateMips = true;
         enableRandomWrite = false;
         memoryless = RenderTextureMemoryless.None;
         vrUsage = VRTextureUsage.None;
         bindMS = 0;
+        shadowSamplingMode = ShadowSamplingMode.CompareDepths;
     }
 }
 
@@ -102,12 +136,14 @@ public class RenderTexture : Texture
     private bool _mipsDirty;
     private bool _restoreExpected;
     private static readonly Stack<RenderTexture> _activeTemporary = new();
+    private RenderTextureDescriptor _descriptor;
 
     public new int width { get; set; }
     public new int height { get; set; }
-    public int depth { get; }
+    public int depth { get; protected set; }
     public int antiAliasing { get; set; }
     public RenderTextureFormat format { get; set; }
+    public GraphicsFormat graphicsFormat { get; set; }
     public bool useMipMap { get; set; }
     public bool autoGenerateMips { get; set; }
     public bool enableRandomWrite { get; set; }
@@ -121,8 +157,40 @@ public class RenderTexture : Texture
     public RenderTextureReadWrite sRGB { get; set; }
     public bool bindTextureMS { get; set; }
     public bool isPowerOfTwo { get; set; }
+    public bool doubleBuffered { get; set; }
+    public ShadowSamplingMode shadowSamplingMode { get; set; }
     public RenderBuffer colorBuffer { get; }
     public RenderBuffer depthBuffer { get; }
+
+    public RenderTextureDescriptor descriptor
+    {
+        get => _descriptor;
+        set
+        {
+            _descriptor = value;
+            width = value.width;
+            height = value.height;
+            depth = value.depthBufferBits;
+            volumeDepth = value.volumeDepth;
+            msaaSamples = value.msaaSamples;
+            antiAliasing = value.msaaSamples;
+            format = value.colorFormat;
+            graphicsFormat = value.graphicsFormat;
+            dimension = value.dimension;
+            useMipMap = value.useMipMap;
+            autoGenerateMips = value.autoGenerateMips;
+            enableRandomWrite = value.enableRandomWrite;
+            memorylessMode = value.memoryless;
+            vrUsage = value.vrUsage;
+            bindTextureMS = value.bindMS > 0;
+            shadowSamplingMode = value.shadowSamplingMode;
+            sRGB = value.sRGB ? RenderTextureReadWrite.sRGB : RenderTextureReadWrite.Linear;
+            base.width = width;
+            base.height = height;
+            base.dimension = dimension;
+        }
+    }
+
     public IntPtr GetNativeDepthBufferPtr() => IntPtr.Zero;
 
     public static RenderTexture active
@@ -142,22 +210,10 @@ public class RenderTexture : Texture
 
     public RenderTexture(int width, int height, int depth, RenderTextureFormat format)
     {
-        this.width = width;
-        this.height = height;
-        this.depth = depth;
-        this.format = format;
+        var desc = new RenderTextureDescriptor(width, height, format, depth);
+        descriptor = desc;
         filterMode = FilterMode.Point;
         wrapMode = TextureWrapMode.Repeat;
-        antiAliasing = 1;
-        msaaSamples = 1;
-        volumeDepth = 1;
-        dimension = TextureDimension.Tex2D;
-        sRGB = RenderTextureReadWrite.Default;
-        memorylessMode = RenderTextureMemoryless.None;
-        vrUsage = VRTextureUsage.None;
-        base.width = width;
-        base.height = height;
-        base.dimension = dimension;
     }
 
     public RenderTexture(int width, int height, int depth, RenderTextureFormat format, RenderTextureReadWrite readWrite)
@@ -168,26 +224,7 @@ public class RenderTexture : Texture
 
     public RenderTexture(RenderTextureDescriptor desc)
     {
-        width = desc.width;
-        height = desc.height;
-        depth = desc.depthBufferBits;
-        format = desc.colorFormat;
-        antiAliasing = desc.msaaSamples;
-        msaaSamples = desc.msaaSamples;
-        volumeDepth = desc.volumeDepth;
-        dimension = desc.dimension;
-        useMipMap = desc.useMipMap;
-        autoGenerateMips = desc.autoGenerateMips;
-        enableRandomWrite = desc.enableRandomWrite;
-        memorylessMode = desc.memoryless;
-        vrUsage = desc.vrUsage;
-        if (desc.sRGB)
-            sRGB = RenderTextureReadWrite.sRGB;
-        else
-            sRGB = RenderTextureReadWrite.Linear;
-        base.width = width;
-        base.height = height;
-        base.dimension = dimension;
+        descriptor = desc;
     }
 
     public bool IsCreated() => _isCreated;
@@ -259,10 +296,106 @@ public class RenderTexture : Texture
     }
 }
 
+public class CustomRenderTexture : RenderTexture
+{
+    private bool _doubleBuffered;
+    private CustomRenderTextureUpdateMode _updateMode = CustomRenderTextureUpdateMode.OnLoad;
+    private CustomRenderTextureInitializationSource _initializationSource = CustomRenderTextureInitializationSource.TextureAndColor;
+    private CustomRenderTextureUpdateZoneSpace _updateZoneSpace = CustomRenderTextureUpdateZoneSpace.Normalized;
+    private Texture _initializationTexture;
+    private Material _initializationMaterial;
+    private Material _updateMaterial;
+    private Color _initializationColor = Color.clear;
+
+    public new bool doubleBuffered
+    {
+        get => _doubleBuffered;
+        set { _doubleBuffered = value; base.doubleBuffered = value; }
+    }
+
+    public CustomRenderTextureUpdateMode updateMode
+    {
+        get => _updateMode;
+        set => _updateMode = value;
+    }
+
+    public CustomRenderTextureInitializationSource initializationSource
+    {
+        get => _initializationSource;
+        set => _initializationSource = value;
+    }
+
+    public CustomRenderTextureUpdateZoneSpace updateZoneSpace
+    {
+        get => _updateZoneSpace;
+        set => _updateZoneSpace = value;
+    }
+
+    public Texture initializationTexture
+    {
+        get => _initializationTexture;
+        set => _initializationTexture = value;
+    }
+
+    public Material initializationMaterial
+    {
+        get => _initializationMaterial;
+        set => _initializationMaterial = value;
+    }
+
+    public Material updateMaterial
+    {
+        get => _updateMaterial;
+        set => _updateMaterial = value;
+    }
+
+    public Color initializationColor
+    {
+        get => _initializationColor;
+        set => _initializationColor = value;
+    }
+
+    public CustomRenderTexture(int width, int height) : base(width, height, 0) { }
+    public CustomRenderTexture(int width, int height, RenderTextureFormat format) : base(width, height, 0, format) { }
+    public CustomRenderTexture(int width, int height, RenderTextureFormat format, RenderTextureReadWrite readWrite) : base(width, height, 0, format, readWrite) { }
+
+    public void Initialize() { }
+    public void Update(int count = 1) { }
+    public void ClearUpdateZones() { }
+}
+
 public struct RenderBuffer
 {
     public RenderTextureFormat format { get; set; }
+    public RenderBufferLoadAction loadAction { get; set; }
+    public RenderBufferStoreAction storeAction { get; set; }
     private bool _debugModeLoaded;
     public IntPtr GetNativeRenderBufferPtr() => IntPtr.Zero;
     public void LoadStoreActionDebugModeSettings() { _debugModeLoaded = true; }
+}
+
+public struct RenderTargetSetup
+{
+    public RenderBuffer[] color { get; set; }
+    public RenderBuffer depth { get; set; }
+    public int mipLevel { get; set; }
+    public CubemapFace cubemapFace { get; set; }
+    public int depthSlice { get; set; }
+    public RenderBufferLoadAction[] colorLoad { get; set; }
+    public RenderBufferStoreAction[] colorStore { get; set; }
+    public RenderBufferLoadAction depthLoad { get; set; }
+    public RenderBufferStoreAction depthStore { get; set; }
+
+    public RenderTargetSetup(RenderBuffer color, RenderBuffer depth)
+    {
+        this.color = new[] { color };
+        this.depth = depth;
+        mipLevel = 0;
+        cubemapFace = CubemapFace.Unknown;
+        depthSlice = 0;
+        colorLoad = null;
+        colorStore = null;
+        depthLoad = RenderBufferLoadAction.Load;
+        depthStore = RenderBufferStoreAction.Store;
+    }
 }
