@@ -1,3 +1,17 @@
+﻿# PLAN
+
+## 2026-07-13k（本次）— IL2CPP 端到端打包管线 + CLI 对接 + goal 验收
+
+### 已完成
+- **Il2CppPackagePipeline**：convert → link.xml/metadata/cpp → LinkPlayer → Launch（managed 回退）
+- **CLI `-il2cpp`**：完整 Package+Launch；`-build*Player` + IL2CPP 写 `Il2CppOutputProject` + `.il2cpp.json`
+- **测试**：Il2CppPackagePipeline ≥13；CLI Il2Cpp package/launch；Core **213** / AB **22** / Agent **13** / Cli **15**
+- **.gitignore**：Library/Temp/bin/obj/native build*/Il2CppOutputProject 已覆盖；无 build-ci 入仓
+
+### 下一次要做（优先）
+1. Vulkan 真 VkSurface/SwapchainKHR
+2. Metal CAMetalLayer 上屏
+3. Checklist 剩余 🟡 模块按迁移阻塞优先级补齐
 # PLAN
 
 ## 2026-07-13j（本次）— AB.Compare 门禁 + IL2CPP Player 链接启动 + Metal/Vulkan Swapchain
@@ -751,3 +765,4 @@
 1. 完善 URP Shader 和材质系统（URP/Lit、URP/Unlit 等）
 2. 实现编辑器主窗口框架（菜单栏、工具栏、状态栏、Dock 布局）
 3. 实现 SceneView 场景绘制与 Gizmos 系统
+

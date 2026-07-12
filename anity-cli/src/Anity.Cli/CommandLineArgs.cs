@@ -141,8 +141,9 @@ Unity-compatible:
   -silent-crashes            Suppress crash dialogs
 
 Anity extensions:
-  -il2cpp                    Force IL2CPP player mode / conversion
-  -il2cppOutput <dir>        IL2CPP output directory
+  -il2cpp                    Full IL2CPP package: convert → artifacts → link → launch
+  -il2cppOutput <dir>        IL2CPP output directory (default Library/Il2CppBuildCache)
+                             With -build*Player also emits Il2CppOutputProject next to player
   -screenshot <file.png>     Capture screenshot
   -screenshotSuperSize <n>   Super-size (1-8)
   -agent                     Enable Anity.Agent extension session

@@ -111,4 +111,56 @@ public class CommandLineArgsTests
         Assert.Equal(0, code);
         Assert.Contains("batchmode=1", host.LogText);
     }
+
+    [Fact]
+    public void CliHost_Il2Cpp_Package_AndLaunch()
+    {
+        string outDir = Path.Combine(Path.GetTempPath(), "cli_il2_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var host = new CliHost();
+            int code = host.Run(new[] { "-batchmode", "-quit", "-nographics", "-il2cpp", "-il2cppOutput", outDir });
+            Assert.Equal(0, code);
+            Assert.Contains("il2cpp=1", host.LogText);
+            Assert.Contains("il2cppOutput=", host.LogText);
+            Assert.True(File.Exists(Path.Combine(outDir, "link.xml")));
+            Assert.True(File.Exists(Path.Combine(outDir, "Il2CppMetadata.map")));
+            Assert.True(File.Exists(Path.Combine(outDir, "PlayerMain.cpp")));
+            Assert.True(
+                File.Exists(Path.Combine(outDir, "player.managed"))
+                || File.Exists(Path.Combine(outDir, "AnityIl2CppPlayer.exe"))
+                || File.Exists(Path.Combine(outDir, "AnityIl2CppPlayer")));
+            Assert.Contains("launchOk=True", host.LogText);
+        }
+        finally
+        {
+            try { if (Directory.Exists(outDir)) Directory.Delete(outDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void CliHost_BuildWindows64_WithIl2Cpp_Packages()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cli_bp_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string player = Path.Combine(root, "Game.exe");
+        try
+        {
+            var host = new CliHost();
+            int code = host.Run(new[]
+            {
+                "-batchmode", "-quit", "-nographics",
+                "-il2cpp",
+                "-buildWindows64Player", player
+            });
+            Assert.Equal(0, code);
+            Assert.True(Directory.Exists(Path.Combine(root, "Il2CppOutputProject"))
+                        || host.LogText.Contains("il2cppPlayerPackage="));
+            Assert.True(File.Exists(player + ".il2cpp.json") || host.LogText.Contains("il2cppPlayerPackage="));
+        }
+        finally
+        {
+            try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
+        }
+    }
 }

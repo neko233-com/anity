@@ -68,12 +68,15 @@ public sealed class CliHost
             if (parsed.Il2Cpp)
             {
                 WriteLine("il2cpp=1");
-                Il2CppRuntime.EnterIl2CppPlayerMode();
                 string outDir = parsed.Il2CppOutput ?? Path.Combine(Directory.GetCurrentDirectory(), "Library", "Il2CppBuildCache");
-                PlayerSettings.SetScriptingBackend(BuildTargetGroup.Standalone, ScriptingImplementation.IL2CPP);
-                var ok = Il2CppBuilder.BuildFromLoadedDomain(outDir);
-                WriteLine(ok ? $"il2cppOutput={outDir}" : $"il2cpp failed: {Il2CppBuilder.lastError}");
-                if (!ok) Fail(Il2CppBuilder.lastError);
+                // Full packaging path: convert → artifacts → link/launch (managed if no C++ compiler)
+                var pkg = Il2CppPackagePipeline.Package(outDir, tryNativeLink: true, launch: true);
+                WriteLine(pkg.success
+                    ? $"il2cppOutput={outDir} nativeLinked={pkg.nativeLinked} launchOk={pkg.launchOk}"
+                    : $"il2cpp failed: {pkg.error}");
+                if (!string.IsNullOrEmpty(Il2CppPackagePipeline.lastReport))
+                    WriteLine("il2cppReport=" + Il2CppPackagePipeline.lastReport);
+                if (!pkg.success) Fail(pkg.error);
             }
 
             if (!string.IsNullOrEmpty(parsed.BuildTarget))
@@ -157,6 +160,29 @@ public sealed class CliHost
             };
             if (opt.scenes.Length == 0)
                 opt.scenes = new[] { "Assets/Scenes/Main.unity" };
+
+            // When -il2cpp is set (or backend already IL2CPP), package IL2CPP next to player
+            bool wantIl2Cpp = p.Il2Cpp;
+            try
+            {
+                var group = EditorUserBuildSettings.BuildTargetToBuildTargetGroup(target);
+                wantIl2Cpp = wantIl2Cpp || PlayerSettings.GetScriptingBackend(group) == ScriptingImplementation.IL2CPP;
+            }
+            catch { }
+
+            if (wantIl2Cpp)
+            {
+                var pkg = Il2CppPackagePipeline.PackageForPlayer(path, tryNativeLink: true, launch: false);
+                WriteLine(pkg.success
+                    ? $"il2cppPlayerPackage={pkg.outputDirectory} nativeLinked={pkg.nativeLinked}"
+                    : $"il2cppPlayerPackage failed: {pkg.error}");
+                if (!pkg.success)
+                {
+                    Fail(pkg.error);
+                    return;
+                }
+            }
+
             var report = BuildPipeline.BuildPlayer(opt);
             WriteLine($"build {target} → {path} result={report.summary.result}");
         }
@@ -198,6 +224,12 @@ public sealed class CliHost
         {
             ("ScreenCapture.CreateTexture", () => { var t = ScreenCapture.CaptureScreenshotAsTexture(); return t != null && t.width > 0; }),
             ("Il2Cpp.ForceMode", () => { Il2CppRuntime.EnterIl2CppPlayerMode(); return Il2CppRuntime.IsIl2Cpp; }),
+            ("Il2Cpp.PackagePipeline", () =>
+            {
+                string d = Path.Combine(Path.GetTempPath(), "cli_il2pkg_" + Guid.NewGuid().ToString("N"));
+                var r = Il2CppPackagePipeline.Package(d, tryNativeLink: false, launch: true);
+                return r.success && Il2CppPackagePipeline.ValidatePackageLayout(d);
+            }),
             ("Agent.Session", () => { var s = AgentRuntime.Default.CreateSession(); return s != null && !string.IsNullOrEmpty(s.Id); }),
             ("Vector3.Normalize", () => Vector3.one.normalized.magnitude > 0.9f),
             ("ColorSpace.Linear", () => { QualitySettings.activeColorSpace = UnityEngine.ColorSpace.Linear; return QualitySettings.activeColorSpace == UnityEngine.ColorSpace.Linear; }),
