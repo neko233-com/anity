@@ -646,6 +646,8 @@ public struct StyleEnum<T> where T : struct
 {
   public StyleKeyword keyword;
   public T value;
+  public static implicit operator StyleEnum<T>(T value) => new() { value = value };
+  public static implicit operator StyleEnum<T>(StyleKeyword keyword) => new() { keyword = keyword };
 }
 
 public struct StyleBackground

@@ -178,6 +178,47 @@ public class MouseOutEvent : EventBase<MouseOutEvent>
 {
 }
 
+public class PointerDownEvent : EventBase<PointerDownEvent>
+{
+  public int button { get; set; }
+  public int clickCount { get; set; }
+  public Vector2 position { get; set; }
+  public Vector2 localPosition { get; set; }
+  public bool shiftKey { get; set; }
+  public bool ctrlKey { get; set; }
+  public bool altKey { get; set; }
+  public bool commandKey { get; set; }
+}
+
+public class PointerUpEvent : EventBase<PointerUpEvent>
+{
+  public int button { get; set; }
+  public int clickCount { get; set; }
+  public Vector2 position { get; set; }
+  public Vector2 localPosition { get; set; }
+  public bool shiftKey { get; set; }
+  public bool ctrlKey { get; set; }
+  public bool altKey { get; set; }
+  public bool commandKey { get; set; }
+}
+
+public class PointerMoveEvent : EventBase<PointerMoveEvent>
+{
+  public Vector2 position { get; set; }
+  public Vector2 deltaPosition { get; set; }
+  public Vector2 delta { get; set; }
+  public int button { get; set; }
+  public bool shiftKey { get; set; }
+  public bool ctrlKey { get; set; }
+}
+
+public class ClickEvent : EventBase<ClickEvent>
+{
+  public int button { get; set; }
+  public int clickCount { get; set; }
+  public Vector2 position { get; set; }
+}
+
 public class ContextualMenuPopulateEvent : EventBase<ContextualMenuPopulateEvent>
 {
   public ContextualMenuManager menuManager { get; set; }
