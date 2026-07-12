@@ -158,7 +158,8 @@ public static class Debug
   public static ILogger unityLogger => _unityLogger;
   public static ILogger logger => _unityLogger;
   public static bool isDebugBuild => true;
-  public static bool developerConsoleEnabled => true;
+  public static bool developerConsoleVisible { get; set; } = true;
+  public static bool developerConsoleEnabled { get => developerConsoleVisible; set => developerConsoleVisible = value; }
   public static bool isDebugBuildEnabled => true;
 
   internal static IReadOnlyList<DebugLine> debugLines => _debugLines.AsReadOnly();
@@ -205,6 +206,8 @@ public static class Debug
 
   public static void LogAssert(object? message) => unityLogger.LogAssertion(message);
   public static void LogAssert(object? message, Object? context) => unityLogger.LogAssertion(message, context);
+  public static void LogAssertion(object? message) => unityLogger.LogAssertion(message);
+  public static void LogAssertion(object? message, Object? context) => unityLogger.LogAssertion(message, context);
 
   public static void Assert(bool condition)
   {

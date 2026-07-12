@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
+using Unity.Jobs;
 
 namespace UnityEngine;
 
@@ -13,6 +15,10 @@ public partial class Mesh : Object
     private List<Vector2> _uv2 = new();
     private List<Vector2> _uv3 = new();
     private List<Vector2> _uv4 = new();
+    private List<Vector2> _uv5 = new();
+    private List<Vector2> _uv6 = new();
+    private List<Vector2> _uv7 = new();
+    private List<Vector2> _uv8 = new();
     private List<Color> _colors = new();
     private List<Color32> _colors32 = new();
     private List<Matrix4x4> _bindposes = new();
@@ -74,6 +80,30 @@ public partial class Mesh : Object
         set => SetUVs(3, value != null ? new List<Vector2>(value) : new List<Vector2>());
     }
 
+    public Vector2[] uv5
+    {
+        get => _uv5.ToArray();
+        set => SetUVs(4, value != null ? new List<Vector2>(value) : new List<Vector2>());
+    }
+
+    public Vector2[] uv6
+    {
+        get => _uv6.ToArray();
+        set => SetUVs(5, value != null ? new List<Vector2>(value) : new List<Vector2>());
+    }
+
+    public Vector2[] uv7
+    {
+        get => _uv7.ToArray();
+        set => SetUVs(6, value != null ? new List<Vector2>(value) : new List<Vector2>());
+    }
+
+    public Vector2[] uv8
+    {
+        get => _uv8.ToArray();
+        set => SetUVs(7, value != null ? new List<Vector2>(value) : new List<Vector2>());
+    }
+
     public Color[] colors
     {
         get => _colors.ToArray();
@@ -83,7 +113,7 @@ public partial class Mesh : Object
     public Color32[] colors32
     {
         get => _colors32.ToArray();
-        set => _colors32 = value != null ? new List<Color32>(value) : new List<Color32>();
+        set => SetColors(value != null ? new List<Color32>(value) : new List<Color32>());
     }
 
     public int[] triangles
@@ -99,6 +129,19 @@ public partial class Mesh : Object
     }
 
     public int vertexCount => _vertices.Count;
+
+    public int indexCount
+    {
+        get
+        {
+            int total = 0;
+            foreach (var indices in _subMeshIndices)
+            {
+                if (indices != null) total += indices.Length;
+            }
+            return total;
+        }
+    }
 
     public int subMeshCount
     {
@@ -116,13 +159,13 @@ public partial class Mesh : Object
     public Matrix4x4[] bindposes
     {
         get => _bindposes.ToArray();
-        set => _bindposes = value != null ? new List<Matrix4x4>(value) : new List<Matrix4x4>();
+        set => SetBindposes(value != null ? new List<Matrix4x4>(value) : new List<Matrix4x4>());
     }
 
     public BoneWeight[] boneWeights
     {
         get => _boneWeights.ToArray();
-        set => _boneWeights = value != null ? new List<BoneWeight>(value) : new List<BoneWeight>();
+        set => SetBoneWeights(value != null ? new List<BoneWeight>(value) : new List<BoneWeight>());
     }
 
     public MeshTopology GetTopology(int submesh) => _topology;
@@ -147,6 +190,10 @@ public partial class Mesh : Object
         _uv2.Clear();
         _uv3.Clear();
         _uv4.Clear();
+        _uv5.Clear();
+        _uv6.Clear();
+        _uv7.Clear();
+        _uv8.Clear();
         _colors.Clear();
         _colors32.Clear();
         _bindposes.Clear();
@@ -349,7 +396,7 @@ public partial class Mesh : Object
 
     public void SetTangents(Vector4[] inTangents)
     {
-        _tangents = inTangents != null ? new List<Vector4>(inTangents) : new List<Vector4>();
+        SetTangents(inTangents != null ? new List<Vector4>(inTangents) : new List<Vector4>());
     }
 
     public void SetTangents(List<Vector4> inTangents)
@@ -379,6 +426,10 @@ public partial class Mesh : Object
             case 1: _uv2 = uvs; break;
             case 2: _uv3 = uvs; break;
             case 3: _uv4 = uvs; break;
+            case 4: _uv5 = uvs; break;
+            case 5: _uv6 = uvs; break;
+            case 6: _uv7 = uvs; break;
+            case 7: _uv8 = uvs; break;
         }
     }
 
@@ -391,6 +442,10 @@ public partial class Mesh : Object
             case 1: uvs?.AddRange(_uv2); break;
             case 2: uvs?.AddRange(_uv3); break;
             case 3: uvs?.AddRange(_uv4); break;
+            case 4: uvs?.AddRange(_uv5); break;
+            case 5: uvs?.AddRange(_uv6); break;
+            case 6: uvs?.AddRange(_uv7); break;
+            case 7: uvs?.AddRange(_uv8); break;
         }
     }
 
@@ -413,7 +468,7 @@ public partial class Mesh : Object
 
     public void SetColors(Color32[] inColors)
     {
-        _colors32 = inColors != null ? new List<Color32>(inColors) : new List<Color32>();
+        SetColors(inColors != null ? new List<Color32>(inColors) : new List<Color32>());
     }
 
     public void SetColors(List<Color32> inColors)
@@ -434,18 +489,70 @@ public partial class Mesh : Object
     }
 
     public Color[] GetColors() => _colors.ToArray();
+    public Color32[] GetColors32() => _colors32.ToArray();
+
+    public void SetBindposes(Matrix4x4[] inBindposes)
+    {
+        SetBindposes(inBindposes != null ? new List<Matrix4x4>(inBindposes) : new List<Matrix4x4>());
+    }
+
+    public void SetBindposes(List<Matrix4x4> inBindposes)
+    {
+        _bindposes = inBindposes ?? new List<Matrix4x4>();
+    }
+
+    public void GetBindposes(List<Matrix4x4> bindposes)
+    {
+        bindposes?.Clear();
+        bindposes?.AddRange(_bindposes);
+    }
+
+    public Matrix4x4[] GetBindposes() => _bindposes.ToArray();
+
+    public void SetBoneWeights(BoneWeight[] inBoneWeights)
+    {
+        SetBoneWeights(inBoneWeights != null ? new List<BoneWeight>(inBoneWeights) : new List<BoneWeight>());
+    }
+
+    public void SetBoneWeights(List<BoneWeight> inBoneWeights)
+    {
+        _boneWeights = inBoneWeights ?? new List<BoneWeight>();
+    }
+
+    public void GetBoneWeights(List<BoneWeight> boneWeights)
+    {
+        boneWeights?.Clear();
+        boneWeights?.AddRange(_boneWeights);
+    }
+
+    public BoneWeight[] GetBoneWeights() => _boneWeights.ToArray();
 
     public void UploadMeshData(bool markNoLongerReadable)
     {
         UpdateBufferSizes();
         if (markNoLongerReadable)
-            _isReadable = true;
+            _isReadable = false;
+    }
+
+    public NativeArray<T> GetVertexBufferStream<T>(int stream) where T : struct
+    {
+        _ = stream;
+        return new NativeArray<T>(0, Allocator.Persistent);
     }
 
     private void UpdateBufferSizes()
     {
-        vertexBufferSize = _vertices.Count * 12 + _normals.Count * 12 + _tangents.Count * 16 + _uv.Count * 8;
-        indexBufferSize = _triangles.Count * 4;
+        int uvSize = 0;
+        uvSize += _uv.Count * 8;
+        uvSize += _uv2.Count * 8;
+        uvSize += _uv3.Count * 8;
+        uvSize += _uv4.Count * 8;
+        uvSize += _uv5.Count * 8;
+        uvSize += _uv6.Count * 8;
+        uvSize += _uv7.Count * 8;
+        uvSize += _uv8.Count * 8;
+        vertexBufferSize = _vertices.Count * 12 + _normals.Count * 12 + _tangents.Count * 16 + uvSize;
+        indexBufferSize = _triangles.Count * (indexFormat == IndexFormat.UInt32 ? 4 : 2);
     }
 
     public void CombineMeshes(CombineInstance[] combine)

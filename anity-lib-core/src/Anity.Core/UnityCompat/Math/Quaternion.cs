@@ -3,12 +3,12 @@ using System.Numerics;
 
 namespace UnityEngine;
 
-public readonly struct Quaternion
+public struct Quaternion : IEquatable<Quaternion>
 {
-  public readonly float x;
-  public readonly float y;
-  public readonly float z;
-  public readonly float w;
+  public float x;
+  public float y;
+  public float z;
+  public float w;
 
   public Quaternion(float x, float y, float z, float w)
   {
@@ -35,6 +35,34 @@ public readonly struct Quaternion
       float roll = MathF.Atan2(sinx_cosp, cosx_cosp);
       return new Vector3(pitch * Mathf.Rad2Deg, yaw * Mathf.Rad2Deg, roll * Mathf.Rad2Deg);
     }
+    set
+    {
+      this = Euler(value.x, value.y, value.z);
+    }
+  }
+
+  public Quaternion normalized
+  {
+    get
+    {
+      var mag = MathF.Sqrt(x * x + y * y + z * z + w * w);
+      if (mag < 1e-6f) return identity;
+      var inv = 1f / mag;
+      return new Quaternion(x * inv, y * inv, z * inv, w * inv);
+    }
+  }
+
+  public void Normalize()
+  {
+    var mag = MathF.Sqrt(x * x + y * y + z * z + w * w);
+    if (mag < 1e-6f) { this = identity; return; }
+    var inv = 1f / mag;
+    x *= inv; y *= inv; z *= inv; w *= inv;
+  }
+
+  public void Set(float newX, float newY, float newZ, float newW)
+  {
+    x = newX; y = newY; z = newZ; w = newW;
   }
 
   public static Quaternion Euler(float x, float y, float z)
@@ -46,12 +74,61 @@ public readonly struct Quaternion
     return new Quaternion(q.X, q.Y, q.Z, q.W);
   }
 
+  public static Quaternion Euler(Vector3 euler)
+  {
+    return Euler(euler.x, euler.y, euler.z);
+  }
+
+  public static float Dot(Quaternion a, Quaternion b)
+  {
+    return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+  }
+
   public static Quaternion Inverse(Quaternion rotation)
   {
     var norm = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w;
     if (norm < 1e-6f) return identity;
     var invNorm = 1f / norm;
     return new Quaternion(-rotation.x * invNorm, -rotation.y * invNorm, -rotation.z * invNorm, rotation.w * invNorm);
+  }
+
+  public static Quaternion Normalize(Quaternion q)
+  {
+    return q.normalized;
+  }
+
+  public void SetFromToRotation(Vector3 fromDirection, Vector3 toDirection)
+  {
+    this = FromToRotation(fromDirection, toDirection);
+  }
+
+  public void SetLookRotation(Vector3 view)
+  {
+    this = LookRotation(view);
+  }
+
+  public void SetLookRotation(Vector3 view, Vector3 up)
+  {
+    this = LookRotation(view, up);
+  }
+
+  public void ToAngleAxis(out float angle, out Vector3 axis)
+  {
+    angle = 2f * MathF.Acos(w) * Mathf.Rad2Deg;
+    if (angle < 1e-6f)
+    {
+      axis = Vector3.forward;
+      return;
+    }
+    float s = MathF.Sqrt(1f - w * w);
+    if (s < 1e-6f)
+    {
+      axis = new Vector3(x, y, z);
+    }
+    else
+    {
+      axis = new Vector3(x / s, y / s, z / s);
+    }
   }
 
   public static Quaternion operator *(Quaternion lhs, Quaternion rhs)
@@ -84,15 +161,14 @@ public readonly struct Quaternion
       (xz - wy) * point.x + (yz + wx) * point.y + (1f - (xx + yy)) * point.z);
   }
 
-  public Quaternion normalized
+  public static bool operator ==(Quaternion lhs, Quaternion rhs)
   {
-    get
-    {
-      var mag = MathF.Sqrt(x * x + y * y + z * z + w * w);
-      if (mag < 1e-6f) return identity;
-      var inv = 1f / mag;
-      return new Quaternion(x * inv, y * inv, z * inv, w * inv);
-    }
+    return Dot(lhs, rhs) > 1f - 1e-6f;
+  }
+
+  public static bool operator !=(Quaternion lhs, Quaternion rhs)
+  {
+    return !(lhs == rhs);
   }
 
   public static Quaternion AngleAxis(float angle, Vector3 axis)
@@ -252,6 +328,23 @@ public readonly struct Quaternion
       a.z + (b.z - a.z) * t,
       a.w + (b.w - a.w) * t);
   }
+
+  public override bool Equals(object? obj)
+  {
+    return obj is Quaternion other && Equals(other);
+  }
+
+  public bool Equals(Quaternion other)
+  {
+    return x == other.x && y == other.y && z == other.z && w == other.w;
+  }
+
+  public override int GetHashCode()
+  {
+    return HashCode.Combine(x, y, z, w);
+  }
+
+  public override string ToString() => $"({x:F2}, {y:F2}, {z:F2}, {w:F2})";
 }
 
 internal static class QuaternionHelpers

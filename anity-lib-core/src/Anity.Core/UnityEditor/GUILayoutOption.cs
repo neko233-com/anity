@@ -1,4 +1,4 @@
-namespace UnityEditor;
+namespace UnityEngine;
 
 public sealed class GUILayoutOption
 {
@@ -11,4 +11,3 @@ public sealed class GUILayoutOption
     this.value = value;
   }
 }
-

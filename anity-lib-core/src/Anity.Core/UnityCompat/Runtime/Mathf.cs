@@ -134,4 +134,69 @@ public static class Mathf
     target = current + DeltaAngle(current, target);
     return SmoothDamp(current, target, ref currentVelocity, smoothTime, maxSpeed, deltaTime);
   }
+
+  public static float LerpAngle(float a, float b, float t)
+  {
+    float delta = DeltaAngle(a, b);
+    return a + delta * Clamp01(t);
+  }
+
+  public static float MoveTowardsAngle(float current, float target, float maxDelta)
+  {
+    float deltaAngle = DeltaAngle(current, target);
+    if (-maxDelta < deltaAngle && deltaAngle < maxDelta)
+      return target;
+    target = current + deltaAngle;
+    return MoveTowards(current, target, maxDelta);
+  }
+
+  public static float Sinh(float value) => MathF.Sinh(value);
+  public static float Cosh(float value) => MathF.Cosh(value);
+  public static float Tanh(float value) => MathF.Tanh(value);
+
+  public static float PerlinNoise(float x, float y)
+  {
+    return 0f;
+  }
+
+  public static float Gamma(float value, float absmax, float gamma)
+  {
+    bool negative = value < 0f;
+    float absval = Abs(value);
+    if (absval > absmax)
+      return negative ? -absval : absval;
+    float result = Pow(absval / absmax, gamma) * absmax;
+    return negative ? -result : result;
+  }
+
+  public static void ColorToHSV(Color color, out float H, out float S, out float V)
+  {
+    Color.RGBToHSV(color, out H, out S, out V);
+  }
+
+  public static Color HSVToRGB(float H, float S, float V)
+  {
+    return Color.HSVToRGB(H, S, V);
+  }
+
+  public static Color HSVToRGB(float H, float S, float V, bool hdr)
+  {
+    return Color.HSVToRGB(H, S, V, hdr);
+  }
+
+  public static float Max(params float[] values)
+  {
+    float max = values[0];
+    for (int i = 1; i < values.Length; i++)
+      if (values[i] > max) max = values[i];
+    return max;
+  }
+
+  public static float Min(params float[] values)
+  {
+    float min = values[0];
+    for (int i = 1; i < values.Length; i++)
+      if (values[i] < min) min = values[i];
+    return min;
+  }
 }

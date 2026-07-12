@@ -137,6 +137,56 @@ public static class AssetDatabase
     return _assets.Values.Any(v => ReferenceEquals(v, asset));
   }
 
+  public static bool Contains(string assetPath)
+  {
+    if (string.IsNullOrWhiteSpace(assetPath)) return false;
+    return _assets.ContainsKey(Normalize(assetPath));
+  }
+
+  public static string GetAssetOrScenePath(Object assetObject)
+  {
+    return GetAssetPath(assetObject);
+  }
+
+  public static AssetImporter[] GetImporters(string assetPath)
+  {
+    _ = assetPath;
+    return Array.Empty<AssetImporter>();
+  }
+
+  public static T[] GetImporters<T>(string assetPath) where T : AssetImporter
+  {
+    _ = assetPath;
+    return Array.Empty<T>();
+  }
+
+  public static event Action<string[]>? AssetPathChanged;
+
+  internal static void OnAssetPathChanged(string[] paths)
+  {
+    AssetPathChanged?.Invoke(paths);
+  }
+
+  public static void SaveAssetIfDirty(Object asset)
+  {
+    _ = asset;
+  }
+
+  public static bool IsForeignAsset(Object obj)
+  {
+    return Contains(obj);
+  }
+
+  public static bool IsNativeAsset(Object obj)
+  {
+    return Contains(obj);
+  }
+
+  public static bool IsMainAssetTypeAtPath(string assetPath)
+  {
+    return !string.IsNullOrEmpty(assetPath) && _assets.ContainsKey(Normalize(assetPath));
+  }
+
   public static string AssetPathToGUID(string assetPath)
   {
     return GuidFromPath(Normalize(assetPath));
@@ -787,7 +837,9 @@ public enum ImportAssetOptions
   ForceSynchronousImport = 1,
   ForceUpdate = 2,
   ImportRecursive = 4,
-  DontDownloadFromCacheServer = 8
+  DontDownloadFromCacheServer = 8,
+  DontImportAssets = 16,
+  ForceUncompressedImport = 32
 }
 
 public enum ForceReserializeAssetsOptions

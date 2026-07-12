@@ -64,6 +64,34 @@ public struct Color
     return new Color(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
   }
 
+  public float grayscale => 0.299f * r + 0.587f * g + 0.114f * b;
+
+  public Color linear
+  {
+    get
+    {
+      return new Color(
+        Mathf.GammaToLinearSpace(r),
+        Mathf.GammaToLinearSpace(g),
+        Mathf.GammaToLinearSpace(b),
+        a);
+    }
+  }
+
+  public Color gamma
+  {
+    get
+    {
+      return new Color(
+        Mathf.LinearToGammaSpace(r),
+        Mathf.LinearToGammaSpace(g),
+        Mathf.LinearToGammaSpace(b),
+        a);
+    }
+  }
+
+  public float maxColorComponent => Mathf.Max(Mathf.Max(r, g), b);
+
   public static Color HSVToRGB(float H, float S, float V)
   {
     return HSVToRGB(H, S, V, true);

@@ -10,3 +10,9 @@ public enum LogType
   Fatal
 }
 
+public enum LogOption
+{
+  None,
+  NoStacktrace
+}
+

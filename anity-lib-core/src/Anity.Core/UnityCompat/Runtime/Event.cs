@@ -257,3 +257,10 @@ public enum PointerType
   Touch,
   Pen
 }
+
+public enum FocusType
+{
+  Keyboard,
+  Mouse,
+  Native
+}

@@ -485,6 +485,7 @@ public enum ReflectionProbeMode { Baked = 0, Realtime = 1, Custom = 2 }
 public enum ReflectionProbeRefreshMode { OnAwake = 0, EveryFrame = 1, ViaScripting = 2 }
 public enum ReflectionProbeTimeSlicingMode { AllFacesAtOnce = 0, IndividualFaces = 1, NoTimeSlicing = 2 }
 
+[AddComponentMenu("Rendering/Projector")]
 public class Projector : Behaviour
 {
     public float nearClipPlane { get; set; }

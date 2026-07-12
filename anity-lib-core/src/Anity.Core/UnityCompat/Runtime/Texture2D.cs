@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace UnityEngine;
@@ -6,60 +7,58 @@ namespace UnityEngine;
 public enum TextureFormat
 {
     Alpha8 = 1,
+    ARGB4444 = 2,
     RGB24 = 3,
     RGBA32 = 4,
     ARGB32 = 5,
     RGB565 = 7,
+    R16 = 9,
     DXT1 = 10,
     DXT5 = 12,
+    RGBA4444 = 13,
+    BGRA32 = 14,
+    RHalf = 15,
+    RGHalf = 16,
+    RGBAHalf = 17,
+    RFloat = 18,
+    RGFloat = 19,
+    RGBAFloat = 20,
+    YUY2 = 21,
+    RGB9e5Float = 22,
+    RGB9E5 = 22,
+    BC6H = 24,
+    BC7 = 25,
+    BC4 = 26,
+    BC5 = 27,
+    DXT1Crunched = 28,
+    DXT5Crunched = 29,
     PVRTC_RGB2 = 30,
     PVRTC_RGBA2 = 31,
     PVRTC_RGB4 = 32,
     PVRTC_RGBA4 = 33,
     ETC_RGB4 = 34,
+    ETC_RGB4_3DS = 44,
+    ATC_RGB4 = 35,
+    ATC_RGBA8 = 36,
     ETC2_RGB = 45,
     ETC2_RGBA1 = 46,
     ETC2_RGBA8 = 47,
-    ASTC_4x4 = 48,
-    ASTC_5x5 = 49,
-    ASTC_6x6 = 50,
-    ASTC_8x8 = 51,
-    ASTC_10x10 = 52,
-    ASTC_12x12 = 53,
-    RGBAFloat = 54,
-    RGFloat = 55,
-    RFloat = 56,
-    RGBAHalf = 57,
-    RGHalf = 58,
-    RHalf = 59,
-    RInt = 60,
-    RGInt = 61,
-    RGBAInt = 62,
-    BC4 = 63,
-    BC5 = 64,
-    BC6H = 65,
-    BC7 = 66,
-    DXT1Crunched = 67,
-    DXT5Crunched = 68,
-    ETC_RGB4_3DS = 69,
-    ETC_RGBA8_3DS = 70,
-    PVRTC_2BPP_RGB = -127,
-    PVRTC_2BPP_RGBA = -127,
-    PVRTC_4BPP_RGB = -127,
-    PVRTC_4BPP_RGBA = -127,
-    BGRA32 = 71,
-    R16 = 72,
-    ARGB4444 = 73,
-    RG16 = 74,
-    RGB48 = 75,
-    RGBA64 = 76,
-    R8 = 77,
-    RG32 = 78,
-    RGB9E5 = 79,
-    RG11B10 = 80,
-    R8G8B8A8_UNorm = 81,
-    B8G8R8A8_UNorm = 82,
-    R10G10B10A2 = 83,
+    EAC_R = 48,
+    EAC_R_SIGNED = 49,
+    EAC_RG = 50,
+    EAC_RG_SIGNED = 51,
+    ASTC_4x4 = 52,
+    ASTC_5x5 = 53,
+    ASTC_6x6 = 54,
+    ASTC_8x8 = 55,
+    ASTC_10x10 = 56,
+    ASTC_12x12 = 57,
+    RG16 = 62,
+    R8 = 63,
+    RG32 = 67,
+    RGB48 = 68,
+    RGBA64 = 69,
+    R8G8B8A8_SRGB = 70,
 }
 
 public enum FilterMode
@@ -77,7 +76,7 @@ public enum TextureWrapMode
     MirrorOnce = 3,
 }
 
-public class Texture2D : Texture
+public partial class Texture2D : Texture
 {
     private Color[] _pixels;
     private Color32[] _pixels32;
@@ -85,33 +84,114 @@ public class Texture2D : Texture
     private bool _mipmapsDirty;
     private bool _isReadable = true;
     private Rect _lastReadRect;
+    private bool _linear;
     public TextureFormat format { get; set; }
     public override bool isReadable => _isReadable;
-    public int mipmapCount { get; private set; } = 1;
 
-    public Texture2D() : this(4, 4, TextureFormat.RGBA32, false)
+    private static Texture2D _whiteTexture;
+    private static Texture2D _blackTexture;
+    private static Texture2D _redTexture;
+    private static Texture2D _normalTexture;
+
+    public static Texture2D whiteTexture
+    {
+        get
+        {
+            if (_whiteTexture == null)
+            {
+                _whiteTexture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                _whiteTexture.SetPixel(0, 0, Color.white);
+                _whiteTexture.Apply(false, true);
+            }
+            return _whiteTexture;
+        }
+    }
+
+    public static Texture2D blackTexture
+    {
+        get
+        {
+            if (_blackTexture == null)
+            {
+                _blackTexture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                _blackTexture.SetPixel(0, 0, Color.black);
+                _blackTexture.Apply(false, true);
+            }
+            return _blackTexture;
+        }
+    }
+
+    public static Texture2D redTexture
+    {
+        get
+        {
+            if (_redTexture == null)
+            {
+                _redTexture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                _redTexture.SetPixel(0, 0, Color.red);
+                _redTexture.Apply(false, true);
+            }
+            return _redTexture;
+        }
+    }
+
+    public static Texture2D normalTexture
+    {
+        get
+        {
+            if (_normalTexture == null)
+            {
+                _normalTexture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                _normalTexture.SetPixel(0, 0, new Color(0.5f, 0.5f, 1f, 1f));
+                _normalTexture.Apply(false, true);
+            }
+            return _normalTexture;
+        }
+    }
+
+    public Texture2D() : this(4, 4, TextureFormat.RGBA32, false, false)
     {
     }
 
-    public Texture2D(int width, int height) : this(width, height, TextureFormat.RGBA32, false)
+    public Texture2D(int width, int height) : this(width, height, TextureFormat.RGBA32, false, false)
     {
     }
 
-    public Texture2D(int width, int height, TextureFormat format) : this(width, height, format, false)
+    public Texture2D(int width, int height, TextureFormat format) : this(width, height, format, false, false)
     {
     }
 
-    public Texture2D(int width, int height, TextureFormat format, bool mipmapChain)
+    public Texture2D(int width, int height, TextureFormat format, bool mipmapChain) : this(width, height, format, mipmapChain, false)
+    {
+    }
+
+    public Texture2D(int width, int height, TextureFormat format, int mipCount, bool linear)
     {
         this.width = width;
         this.height = height;
         this.format = format;
+        _linear = linear;
+        mipmapCount = mipCount > 0 ? mipCount : 1;
+        int pixelCount = Math.Max(1, width * height);
+        _pixels = new Color[pixelCount];
+        _pixels32 = new Color32[pixelCount];
+        dimension = TextureDimension.Tex2D;
+    }
+
+    public Texture2D(int width, int height, TextureFormat format, bool mipmapChain, bool linear)
+    {
+        this.width = width;
+        this.height = height;
+        this.format = format;
+        _linear = linear;
         mipmapCount = mipmapChain ? GenerateMipsCount(width, height) : 1;
         int pixelCount = Math.Max(1, width * height);
         _pixels = new Color[pixelCount];
         _pixels32 = new Color32[pixelCount];
         dimension = TextureDimension.Tex2D;
     }
+
+    public bool linear => _linear;
 
     public Color GetPixel(int x, int y)
     {
@@ -126,13 +206,28 @@ public class Texture2D : Texture
     public Color GetPixelBilinear(float u, float v)
     {
         if (!_isReadable) return Color.clear;
-        u = u - (int)u;
-        v = v - (int)v;
+        u = u - (float)Math.Floor(u);
+        v = v - (float)Math.Floor(v);
         if (u < 0) u += 1f;
         if (v < 0) v += 1f;
-        int x = (int)(u * (width - 1));
-        int y = (int)(v * (height - 1));
-        return GetPixel(x, y);
+
+        float fx = u * (width - 1);
+        float fy = v * (height - 1);
+        int x0 = (int)Math.Floor(fx);
+        int y0 = (int)Math.Floor(fy);
+        int x1 = Math.Min(x0 + 1, width - 1);
+        int y1 = Math.Min(y0 + 1, height - 1);
+        float tx = fx - x0;
+        float ty = fy - y0;
+
+        Color c00 = GetPixel(x0, y0);
+        Color c10 = GetPixel(x1, y0);
+        Color c01 = GetPixel(x0, y1);
+        Color c11 = GetPixel(x1, y1);
+
+        Color c0 = Color.Lerp(c00, c10, tx);
+        Color c1 = Color.Lerp(c01, c11, tx);
+        return Color.Lerp(c0, c1, ty);
     }
 
     public void SetPixel(int x, int y, Color color)
@@ -236,6 +331,7 @@ public class Texture2D : Texture
         this.width = width;
         this.height = height;
         this.format = format;
+        mipmapCount = hasMipMap ? GenerateMipsCount(width, height) : 1;
         int pixelCount = Math.Max(1, width * height);
         _pixels = new Color[pixelCount];
         _pixels32 = new Color32[pixelCount];
@@ -258,20 +354,6 @@ public class Texture2D : Texture
         _isLoaded = true;
         _lastReadRect = source;
         _mipmapsDirty = recalculateMipMaps;
-        int sx = Math.Max(0, (int)source.x);
-        int sy = Math.Max(0, (int)source.y);
-        int sw = Math.Min((int)source.width, width - destX);
-        int sh = Math.Min((int)source.height, height - destY);
-        for (int y = 0; y < sh; y++)
-        {
-            for (int x = 0; x < sw; x++)
-            {
-                int srcX = sx + x;
-                int srcY = sy + y;
-                if (srcX < width && srcY < height)
-                    SetPixel(destX + x, destY + y, GetPixel(srcX, srcY));
-            }
-        }
     }
 
     public bool LoadImage(byte[] data)
@@ -293,6 +375,10 @@ public class Texture2D : Texture
                     _pixels[i] = new Color(0.5f, 0.5f, 0.5f, 1f);
             }
         }
+        if (markNonReadable)
+        {
+            _isReadable = false;
+        }
         return true;
     }
 
@@ -313,6 +399,30 @@ public class Texture2D : Texture
         }
     }
 
+    public byte[] GetRawTextureData()
+    {
+        var result = new byte[_pixels.Length * 4];
+        for (int i = 0; i < _pixels.Length; i++)
+        {
+            result[i * 4 + 0] = (byte)(Math.Clamp(_pixels[i].r, 0f, 1f) * 255f);
+            result[i * 4 + 1] = (byte)(Math.Clamp(_pixels[i].g, 0f, 1f) * 255f);
+            result[i * 4 + 2] = (byte)(Math.Clamp(_pixels[i].b, 0f, 1f) * 255f);
+            result[i * 4 + 3] = (byte)(Math.Clamp(_pixels[i].a, 0f, 1f) * 255f);
+        }
+        return result;
+    }
+
+    public T[] GetRawTextureData<T>() where T : struct
+    {
+        byte[] raw = GetRawTextureData();
+        int elementSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+        if (elementSize <= 0) return Array.Empty<T>();
+        int count = raw.Length / elementSize;
+        var result = new T[count];
+        Buffer.BlockCopy(raw, 0, result, 0, count * elementSize);
+        return result;
+    }
+
     public byte[] EncodeToPNG()
     {
         using var ms = new MemoryStream();
@@ -325,11 +435,15 @@ public class Texture2D : Texture
         w.Write((byte)8); w.Write((byte)6); w.Write((byte)0); w.Write((byte)0); w.Write((byte)0);
         uint crc = Crc32(ms.ToArray(), 12, 17);
         w.Write(ToBigEndian(crc));
-        w.Write(ToBigEndian((uint)(_pixels.Length * 4 + 4)));
+        w.Write(ToBigEndian((uint)(_pixels.Length * 4 + height)));
         w.Write((byte)'I'); w.Write((byte)'D'); w.Write((byte)'A'); w.Write((byte)'T');
         var rawData = GetRawTextureData();
-        w.Write(rawData);
-        w.Write(ToBigEndian(Crc32(ms.ToArray(), ms.Position - rawData.Length - 4, rawData.Length + 4)));
+        for (int y = 0; y < height; y++)
+        {
+            w.Write((byte)0);
+            w.Write(rawData, y * width * 4, width * 4);
+        }
+        w.Write(ToBigEndian(Crc32(ms.ToArray(), ms.Position - (rawData.Length + height) - 4, rawData.Length + height + 4)));
         w.Write((uint)0);
         w.Write((byte)'I'); w.Write((byte)'E'); w.Write((byte)'N'); w.Write((byte)'D');
         w.Write(ToBigEndian(Crc32(ms.ToArray(), ms.Position - 4, 4)));
@@ -373,16 +487,89 @@ public class Texture2D : Texture
         return ms.ToArray();
     }
 
-    public byte[] GetRawTextureData()
+    public Rect[] PackTextures(Texture2D[] textures, int padding)
     {
-        var result = new byte[_pixels.Length * 4];
-        for (int i = 0; i < _pixels.Length; i++)
+        return PackTextures(textures, padding, 2048, false);
+    }
+
+    public Rect[] PackTextures(Texture2D[] textures, int padding, int maximumAtlasSize)
+    {
+        return PackTextures(textures, padding, maximumAtlasSize, false);
+    }
+
+    public Rect[] PackTextures(Texture2D[] textures, int padding, int maximumAtlasSize, bool makeNoLongerReadable)
+    {
+        if (textures == null || textures.Length == 0) return Array.Empty<Rect>();
+
+        int totalArea = 0;
+        int maxW = 0, maxH = 0;
+        foreach (var t in textures)
         {
-            result[i * 4 + 0] = (byte)(Math.Clamp(_pixels[i].r, 0f, 1f) * 255f);
-            result[i * 4 + 1] = (byte)(Math.Clamp(_pixels[i].g, 0f, 1f) * 255f);
-            result[i * 4 + 2] = (byte)(Math.Clamp(_pixels[i].b, 0f, 1f) * 255f);
-            result[i * 4 + 3] = (byte)(Math.Clamp(_pixels[i].a, 0f, 1f) * 255f);
+            if (t == null) continue;
+            totalArea += (t.width + padding) * (t.height + padding);
+            if (t.width > maxW) maxW = t.width;
+            if (t.height > maxH) maxH = t.height;
         }
+
+        int atlasSize = Math.Max(Math.Max(maxW + padding * 2, maxH + padding * 2), 32);
+        while (atlasSize * atlasSize < totalArea * 2 && atlasSize < maximumAtlasSize)
+            atlasSize *= 2;
+        atlasSize = Math.Min(atlasSize, maximumAtlasSize);
+
+        Resize(atlasSize, atlasSize, TextureFormat.RGBA32, false);
+
+        var result = new Rect[textures.Length];
+        int x = padding, y = padding, rowHeight = 0;
+
+        for (int i = 0; i < textures.Length; i++)
+        {
+            var t = textures[i];
+            if (t == null)
+            {
+                result[i] = new Rect(0, 0, 0, 0);
+                continue;
+            }
+
+            int tw = t.width + padding;
+            int th = t.height + padding;
+
+            if (x + tw > atlasSize - padding)
+            {
+                x = padding;
+                y += rowHeight;
+                rowHeight = 0;
+            }
+
+            if (y + th > atlasSize - padding)
+            {
+                atlasSize = Math.Min(atlasSize * 2, maximumAtlasSize);
+                Resize(atlasSize, atlasSize, TextureFormat.RGBA32, false);
+                x = padding;
+                y = padding;
+                rowHeight = 0;
+            }
+
+            var srcPixels = t.GetPixels();
+            for (int py = 0; py < t.height; py++)
+            {
+                for (int px = 0; px < t.width; px++)
+                {
+                    SetPixel(x + px, y + py, srcPixels[py * t.width + px]);
+                }
+            }
+
+            result[i] = new Rect(
+                (float)x / atlasSize,
+                (float)y / atlasSize,
+                (float)t.width / atlasSize,
+                (float)t.height / atlasSize
+            );
+
+            x += tw;
+            if (th > rowHeight) rowHeight = th;
+        }
+
+        Apply(false, makeNoLongerReadable);
         return result;
     }
 
@@ -411,13 +598,6 @@ public class Texture2D : Texture
             }
         }
         return ~crc;
-    }
-
-    private static int GenerateMipsCount(int w, int h)
-    {
-        int count = 1;
-        while (w > 1 || h > 1) { w = Math.Max(1, w / 2); h = Math.Max(1, h / 2); count++; }
-        return count;
     }
 
     private static int _copyCount;

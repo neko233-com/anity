@@ -2,7 +2,7 @@ using System;
 
 namespace UnityEngine;
 
-public struct Vector3
+public struct Vector3 : IEquatable<Vector3>
 {
   public float x;
   public float y;
@@ -15,6 +15,13 @@ public struct Vector3
     this.z = z;
   }
 
+  public Vector3(float x, float y)
+  {
+    this.x = x;
+    this.y = y;
+    this.z = 0f;
+  }
+
   public static Vector3 zero => new Vector3(0f, 0f, 0f);
   public static Vector3 one => new Vector3(1f, 1f, 1f);
   public static Vector3 up => new Vector3(0f, 1f, 0f);
@@ -23,6 +30,8 @@ public struct Vector3
   public static Vector3 left => new Vector3(-1f, 0f, 0f);
   public static Vector3 forward => new Vector3(0f, 0f, 1f);
   public static Vector3 back => new Vector3(0f, 0f, -1f);
+  public static Vector3 positiveInfinity => new Vector3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+  public static Vector3 negativeInfinity => new Vector3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
 
   public float magnitude => MathF.Sqrt(x * x + y * y + z * z);
   public float sqrMagnitude => x * x + y * y + z * z;
@@ -43,17 +52,82 @@ public struct Vector3
     else { this = zero; }
   }
 
+  public void Set(float newX, float newY, float newZ)
+  {
+    x = newX; y = newY; z = newZ;
+  }
+
+  public void Scale(Vector3 scale)
+  {
+    x *= scale.x; y *= scale.y; z *= scale.z;
+  }
+
+  public static Vector3 Scale(Vector3 a, Vector3 b)
+  {
+    return new Vector3(a.x * b.x, a.y * b.y, a.z * b.z);
+  }
+
   public static float Distance(Vector3 a, Vector3 b) => (a - b).magnitude;
   public static float DistanceSquared(Vector3 a, Vector3 b) => (a - b).sqrMagnitude;
   public static Vector3 Abs(Vector3 v) => new(MathF.Abs(v.x), MathF.Abs(v.y), MathF.Abs(v.z));
   public static float Dot(Vector3 a, Vector3 b) => a.x * b.x + a.y * b.y + a.z * b.z;
+
   public static float Angle(Vector3 from, Vector3 to)
   {
     float d = Dot(from.normalized, to.normalized);
     d = Mathf.Clamp(d, -1f, 1f);
     return Mathf.Acos(d) * Mathf.Rad2Deg;
   }
+
+  public static float SignedAngle(Vector3 from, Vector3 to, Vector3 axis)
+  {
+    float unsignedAngle = Angle(from, to);
+    float sign = MathF.Sign(Dot(axis, Cross(from, to)));
+    return unsignedAngle * sign;
+  }
+
   public static Vector3 Cross(Vector3 a, Vector3 b) => new(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+
+  public static Vector3 Reflect(Vector3 inDirection, Vector3 inNormal)
+  {
+    float factor = -2f * Dot(inNormal, inDirection);
+    return new Vector3(factor * inNormal.x + inDirection.x, factor * inNormal.y + inDirection.y, factor * inNormal.z + inDirection.z);
+  }
+
+  public static Vector3 Exclude(Vector3 excludeThis, Vector3 fromThat)
+  {
+    return fromThat - Project(fromThat, excludeThis);
+  }
+
+  public static void OrthoNormalize(ref Vector3 normal, ref Vector3 tangent)
+  {
+    normal.Normalize();
+    tangent -= Project(tangent, normal);
+    tangent.Normalize();
+  }
+
+  public static void OrthoNormalize(ref Vector3 normal, ref Vector3 tangent, ref Vector3 binormal)
+  {
+    normal.Normalize();
+    tangent -= Project(tangent, normal);
+    tangent.Normalize();
+    binormal -= Project(binormal, normal);
+    binormal -= Project(binormal, tangent);
+    binormal.Normalize();
+  }
+
+  public static Vector3 Project(Vector3 vector, Vector3 onNormal)
+  {
+    float sqrMag = Dot(onNormal, onNormal);
+    if (sqrMag < 1e-15f) return zero;
+    float dot = Dot(vector, onNormal);
+    return onNormal * (dot / sqrMag);
+  }
+
+  public static Vector3 ProjectOnPlane(Vector3 vector, Vector3 planeNormal)
+  {
+    return vector - Project(vector, planeNormal);
+  }
 
   public static Vector3 MoveTowards(Vector3 current, Vector3 target, float maxDistanceDelta)
   {
@@ -61,6 +135,11 @@ public struct Vector3
     float dist = toVector.magnitude;
     if (dist <= maxDistanceDelta || dist < 1e-6f) return target;
     return current + toVector / dist * maxDistanceDelta;
+  }
+
+  public static Vector3 MoveTowards(Vector3 current, Vector3 target, float maxDistanceDelta, float maxSpeedDelta)
+  {
+    return MoveTowards(current, target, maxDistanceDelta);
   }
 
   public static Vector3 SmoothDamp(Vector3 current, Vector3 target, ref Vector3 currentVelocity, float smoothTime, float maxSpeed)
@@ -104,18 +183,6 @@ public struct Vector3
     return new Vector3(outx, outy, outz);
   }
 
-  public static Vector3 operator +(Vector3 a, Vector3 b) => new(a.x + b.x, a.y + b.y, a.z + b.z);
-  public static Vector3 operator -(Vector3 a, Vector3 b) => new(a.x - b.x, a.y - b.y, a.z - b.z);
-  public static Vector3 operator -(Vector3 a) => new(-a.x, -a.y, -a.z);
-  public static Vector3 operator *(Vector3 a, float d) => new(a.x * d, a.y * d, a.z * d);
-  public static Vector3 operator *(float d, Vector3 a) => a * d;
-  public static Vector3 operator /(Vector3 a, float d) => new(a.x / d, a.y / d, a.z / d);
-
-  public static bool operator ==(Vector3 a, Vector3 b) => a.x == b.x && a.y == b.y && a.z == b.z;
-  public static bool operator !=(Vector3 a, Vector3 b) => !(a == b);
-
-  public static implicit operator Vector2(Vector3 v) => new Vector2(v.x, v.y);
-
   public static Vector3 Lerp(Vector3 a, Vector3 b, float t) => new(
     a.x + (b.x - a.x) * Mathf.Clamp01(t),
     a.y + (b.y - a.y) * Mathf.Clamp01(t),
@@ -126,23 +193,47 @@ public struct Vector3
     a.y + (b.y - a.y) * t,
     a.z + (b.z - a.z) * t);
 
+  public static float InverseLerp(Vector3 a, Vector3 b, Vector3 value)
+  {
+    Vector3 ab = b - a;
+    Vector3 av = value - a;
+    float dot = Vector3.Dot(av, ab);
+    if (dot < 0f) return 0f;
+    float sqrMag = Vector3.Dot(ab, ab);
+    if (dot > sqrMag) return 1f;
+    return dot / sqrMag;
+  }
+
+  public static Vector3 ClampMagnitude(Vector3 vector, float maxLength)
+  {
+    float sqr = vector.sqrMagnitude;
+    if (sqr > maxLength * maxLength)
+    {
+      return vector.normalized * maxLength;
+    }
+    return vector;
+  }
+
   public static float SqrMagnitude(Vector3 a) => a.x * a.x + a.y * a.y + a.z * a.z;
+  public float SqrMagnitude() => x * x + y * y + z * z;
 
   public static Vector3 Max(Vector3 a, Vector3 b) => new(MathF.Max(a.x, b.x), MathF.Max(a.y, b.y), MathF.Max(a.z, b.z));
   public static Vector3 Min(Vector3 a, Vector3 b) => new(MathF.Min(a.x, b.x), MathF.Min(a.y, b.y), MathF.Min(a.z, b.z));
 
-  public static Vector3 ProjectOnPlane(Vector3 vector, Vector3 planeNormal)
-  {
-    return vector - Project(vector, planeNormal);
-  }
+  public static Vector3 operator +(Vector3 a, Vector3 b) => new(a.x + b.x, a.y + b.y, a.z + b.z);
+  public static Vector3 operator -(Vector3 a, Vector3 b) => new(a.x - b.x, a.y - b.y, a.z - b.z);
+  public static Vector3 operator -(Vector3 a) => new(-a.x, -a.y, -a.z);
+  public static Vector3 operator *(Vector3 a, float d) => new(a.x * d, a.y * d, a.z * d);
+  public static Vector3 operator *(float d, Vector3 a) => a * d;
+  public static Vector3 operator *(Vector3 a, Vector3 b) => new(a.x * b.x, a.y * b.y, a.z * b.z);
+  public static Vector3 operator /(Vector3 a, float d) => new(a.x / d, a.y / d, a.z / d);
+  public static Vector3 operator /(Vector3 a, Vector3 b) => new(a.x / b.x, a.y / b.y, a.z / b.z);
 
-  public static Vector3 Project(Vector3 vector, Vector3 onNormal)
-  {
-    float sqrMag = Dot(onNormal, onNormal);
-    if (sqrMag < 1e-15f) return zero;
-    float dot = Dot(vector, onNormal);
-    return onNormal * (dot / sqrMag);
-  }
+  public static bool operator ==(Vector3 a, Vector3 b) => a.x == b.x && a.y == b.y && a.z == b.z;
+  public static bool operator !=(Vector3 a, Vector3 b) => !(a == b);
+
+  public static implicit operator Vector2(Vector3 v) => new Vector2(v.x, v.y);
+  public static implicit operator Vector4(Vector3 v) => new Vector4(v.x, v.y, v.z, 0f);
 
   public float this[int index]
   {
@@ -159,8 +250,8 @@ public struct Vector3
     }
   }
 
-  public override bool Equals(object? obj) => obj is Vector3 other && x == other.x && y == other.y && z == other.z;
+  public bool Equals(Vector3 other) => x == other.x && y == other.y && z == other.z;
+  public override bool Equals(object? obj) => obj is Vector3 other && Equals(other);
   public override int GetHashCode() => HashCode.Combine(x, y, z);
-
   public override string ToString() => $"({x:F2}, {y:F2}, {z:F2})";
 }

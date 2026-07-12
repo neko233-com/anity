@@ -254,32 +254,6 @@ public struct BoundsInt : IEquatable<BoundsInt>
     }
 }
 
-public struct RectOffset
-{
-    public int left;
-    public int right;
-    public int top;
-    public int bottom;
-
-    public RectOffset(int left, int right, int top, int bottom)
-    {
-        this.left = left;
-        this.right = right;
-        this.top = top;
-        this.bottom = bottom;
-    }
-
-    public Rect Add(Rect rect)
-    {
-        return new Rect(rect.x - left, rect.y - top, rect.width + left + right, rect.height + top + bottom);
-    }
-
-    public Rect Remove(Rect rect)
-    {
-        return new Rect(rect.x + left, rect.y + top, rect.width - left - right, rect.height - top - bottom);
-    }
-}
-
 public enum CameraClearFlags
 {
     Skybox = 1,
@@ -296,41 +270,12 @@ public enum ScaleMode
     ScaleToFit = 2,
 }
 
-public enum TextAnchor
-{
-    UpperLeft = 0,
-    UpperCenter = 1,
-    UpperRight = 2,
-    MiddleLeft = 3,
-    MiddleCenter = 4,
-    MiddleRight = 5,
-    LowerLeft = 6,
-    LowerCenter = 7,
-    LowerRight = 8,
-}
-
 public enum TextAlignment
 {
     Left = 0,
     Center = 1,
     Right = 2,
     Justified = 3,
-}
-
-public enum FontStyle
-{
-    Normal = 0,
-    Bold = 1,
-    Italic = 2,
-    BoldAndItalic = 3,
-}
-
-public enum ImageType
-{
-    Simple = 0,
-    Sliced = 1,
-    Tiled = 2,
-    Filled = 3,
 }
 
 public enum HorizontalWrapMode

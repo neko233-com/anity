@@ -30,6 +30,11 @@ public static class EditorBuildSettings
     set => _scenes = value?.ToList() ?? [];
   }
 
+  public static EditorBuildSettingsScene[] enabledScenes
+  {
+    get => _scenes.Where(s => s.enabled).ToArray();
+  }
+
   public static int selectedSceneIndex { get; set; }
 
   public static EditorBuildSettingsScene GetSceneByPath(string path)

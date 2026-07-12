@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using UnityEngine.EventSystems;
 
 namespace UnityEngine;
 
@@ -251,6 +252,32 @@ public class MonoBehaviour : Behaviour
     return coroutine;
   }
 
+  public Coroutine StartCoroutine(string methodName, object? value = null)
+  {
+    var method = GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+    if (method is not null)
+    {
+      var parameters = method.GetParameters();
+      if (parameters.Length == 0)
+      {
+        if (method.Invoke(this, null) is IEnumerator enumerator)
+        {
+          return StartCoroutine(enumerator);
+        }
+      }
+      else if (value is not null)
+      {
+        if (method.Invoke(this, new[] { value }) is IEnumerator enumerator)
+        {
+          return StartCoroutine(enumerator);
+        }
+      }
+    }
+    var coroutine = new Coroutine(null) { MethodName = methodName };
+    _coroutines.Add(coroutine);
+    return coroutine;
+  }
+
   public Coroutine StartCoroutine(string methodName, params object[] args)
   {
     _ = args;
@@ -372,24 +399,56 @@ public class MonoBehaviour : Behaviour
   protected virtual void OnDestroy() {}
   protected virtual void OnApplicationPause(bool pauseStatus) {}
   protected virtual void OnApplicationFocus(bool focusStatus) {}
+  protected virtual void OnApplicationQuit() {}
   protected virtual void OnGUI() {}
+  protected virtual void OnValidate() {}
   protected virtual void OnTransformParentChanged() {}
   protected virtual void OnTransformChildrenChanged() {}
   protected virtual void OnCanvasHierarchyChanged() {}
+  protected virtual void OnCanvasGroupChanged() {}
+  protected virtual void OnRectTransformDimensionsChange() {}
+  protected virtual void OnWillRenderObject() {}
+  protected virtual void OnPreCull() {}
+  protected virtual void OnPreRender() {}
+  protected virtual void OnPostRender() {}
+  protected virtual void OnRenderObject() {}
+  protected virtual void OnRenderImage(RenderTexture source, RenderTexture destination) {}
   protected virtual void OnCollisionEnter(Collision collision) {}
   protected virtual void OnCollisionStay(Collision collision) {}
   protected virtual void OnCollisionExit(Collision collision) {}
+  protected virtual void OnCollisionEnter2D(Collision2D collision) {}
+  protected virtual void OnCollisionStay2D(Collision2D collision) {}
+  protected virtual void OnCollisionExit2D(Collision2D collision) {}
   protected virtual void OnTriggerEnter(Collider other) {}
   protected virtual void OnTriggerStay(Collider other) {}
   protected virtual void OnTriggerExit(Collider other) {}
+  protected virtual void OnTriggerEnter2D(Collider2D other) {}
+  protected virtual void OnTriggerStay2D(Collider2D other) {}
+  protected virtual void OnTriggerExit2D(Collider2D other) {}
   protected virtual void OnMouseEnter() {}
   protected virtual void OnMouseExit() {}
   protected virtual void OnMouseDown() {}
   protected virtual void OnMouseUp() {}
+  protected virtual void OnMouseUpAsButton() {}
   protected virtual void OnMouseOver() {}
   protected virtual void OnMouseDrag() {}
   protected virtual void OnBecameVisible() {}
   protected virtual void OnBecameInvisible() {}
+  protected virtual void OnPointerEnter(PointerEventData eventData) {}
+  protected virtual void OnPointerExit(PointerEventData eventData) {}
+  protected virtual void OnPointerDown(PointerEventData eventData) {}
+  protected virtual void OnPointerUp(PointerEventData eventData) {}
+  protected virtual void OnPointerClick(PointerEventData eventData) {}
+  protected virtual void OnBeginDrag(PointerEventData eventData) {}
+  protected virtual void OnDrag(PointerEventData eventData) {}
+  protected virtual void OnEndDrag(PointerEventData eventData) {}
+  protected virtual void OnDrop(PointerEventData eventData) {}
+  protected virtual void OnScroll(PointerEventData eventData) {}
+  protected virtual void OnSelect(BaseEventData eventData) {}
+  protected virtual void OnDeselect(BaseEventData eventData) {}
+  protected virtual void OnSubmit(BaseEventData eventData) {}
+  protected virtual void OnCancel(BaseEventData eventData) {}
+  protected virtual void OnMove(AxisEventData eventData) {}
 
   internal void InternalAwake() { try { Awake(); } catch { } }
   internal void InternalOnEnable() { try { OnEnable(); } catch { } }

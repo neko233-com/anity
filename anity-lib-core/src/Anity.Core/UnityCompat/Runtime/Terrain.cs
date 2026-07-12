@@ -55,6 +55,8 @@ public class Terrain : Behaviour
         set => _treeDistance = value;
     }
 
+    public float billboardStart { get; set; } = 50f;
+
     public int treeMaximumFullLODCount
     {
         get => _treeMaximumFullLODCount;
@@ -113,7 +115,17 @@ public class Terrain : Behaviour
 
     public void SampleHeight(Vector3 worldPosition, out float height)
     {
-        height = 0f;
+        height = SampleHeight(worldPosition);
+    }
+
+    public float SampleHeight(Vector3 worldPosition)
+    {
+        if (_terrainData == null) return 0f;
+        var pos = GetPosition();
+        var scale = _terrainData.heightmapScale;
+        float x = (worldPosition.x - pos.x) / scale.x;
+        float y = (worldPosition.z - pos.z) / scale.z;
+        return pos.y + _terrainData.GetInterpolatedHeight(x, y);
     }
 
     public void ApplyDelayedHeightmapModification() { _delayedHeightmapApplied = true; }
