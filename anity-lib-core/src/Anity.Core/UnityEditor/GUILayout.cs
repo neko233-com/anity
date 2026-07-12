@@ -210,6 +210,21 @@ public static class GUILayout
     return Math.Max(0, Math.Min(selected, texts?.Length - 1 ?? 0));
   }
 
+  public static int Toolbar(int selected, string[] texts, GUIStyle style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    return Toolbar(selected, texts, options);
+  }
+
+  public static int Toolbar(int selected, GUIContent[] contents, GUIStyle style, params GUILayoutOption[]? options)
+  {
+    _ = style;
+    _ = options;
+    var texts = new string[contents?.Length ?? 0];
+    for (int i = 0; i < texts.Length; i++) texts[i] = contents?[i]?.text ?? string.Empty;
+    return Toolbar(selected, texts, options);
+  }
+
   public static Vector2 Vector2Field(string label, Vector2 value, params GUILayoutOption[]? options)
   {
     _ = label;

@@ -259,7 +259,7 @@ public class Text : MaskableGraphic, ILayoutElement
   {
   }
 
-  public virtual void OnPopulateMesh(VertexHelper vh)
+  public override void OnPopulateMesh(VertexHelper vh)
   {
     vh.Clear();
 
@@ -351,7 +351,7 @@ public class Text : MaskableGraphic, ILayoutElement
     return Mathf.Clamp(bestSize, _resizeTextMinSize, Mathf.Min(_resizeTextMaxSize, _fontSize));
   }
 
-  public void SetNativeSize()
+  public override void SetNativeSize()
   {
     if (rectTransform is null) return;
     rectTransform.anchorMin = rectTransform.anchorMax;

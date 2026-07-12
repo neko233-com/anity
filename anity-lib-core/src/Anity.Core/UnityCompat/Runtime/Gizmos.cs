@@ -13,10 +13,20 @@ public enum GizmoCommandType
   DrawCube,
   DrawIcon,
   DrawGUITexture,
+  DrawTexture,
   DrawFrustum,
+  DrawWireFrustum,
+  DrawWireCapsule,
   DrawMesh,
   DrawWireMesh,
   DrawMeshInstanced
+}
+
+public enum GizmosDrawMode
+{
+  Draw3D,
+  DrawGUI,
+  Draw2D
 }
 
 public struct GizmoCommand
@@ -28,6 +38,7 @@ public struct GizmoCommand
   public Vector3 to;
   public Vector3 center;
   public float radius;
+  public float height;
   public Vector3 size;
   public Mesh mesh;
   public Material material;
@@ -75,6 +86,82 @@ public static class Gizmos
   {
     get => _exposure;
     set => _exposure = value;
+  }
+
+  public static void SetMatrix(Matrix4x4 matrix)
+  {
+    _matrix = matrix;
+  }
+
+  public static void DrawWireCapsule(Vector3 center, float radius, float height)
+  {
+    AddCommand(new GizmoCommand
+    {
+      type = GizmoCommandType.DrawWireCapsule,
+      center = center,
+      radius = radius,
+      height = height
+    });
+  }
+
+  public static void DrawWireCapsule(Vector3 center, float radius, float height, Color color)
+  {
+    var oldColor = _color;
+    _color = color;
+    DrawWireCapsule(center, radius, height);
+    _color = oldColor;
+  }
+
+  public static void DrawWireFrustum(Vector3 center, float fov, float maxRange, float minRange, float aspect)
+  {
+    AddCommand(new GizmoCommand
+    {
+      type = GizmoCommandType.DrawWireFrustum,
+      center = center,
+      fov = fov,
+      maxRange = maxRange,
+      minRange = minRange,
+      aspect = aspect
+    });
+  }
+
+  public static void DrawWireFrustum(Vector3 center, float fov, float maxRange, float minRange, float aspect, Color color)
+  {
+    var oldColor = _color;
+    _color = color;
+    DrawWireFrustum(center, fov, maxRange, minRange, aspect);
+    _color = oldColor;
+  }
+
+  public static void DrawTexture(Rect screenRect, Texture texture)
+  {
+    AddCommand(new GizmoCommand
+    {
+      type = GizmoCommandType.DrawTexture,
+      screenRect = screenRect,
+      texture = texture
+    });
+  }
+
+  public static void DrawTexture(Rect screenRect, Texture texture, Material mat)
+  {
+    AddCommand(new GizmoCommand
+    {
+      type = GizmoCommandType.DrawTexture,
+      screenRect = screenRect,
+      texture = texture,
+      material = mat
+    });
+  }
+
+  public static void DrawTexture(Rect screenRect, Texture texture, int leftBorder, int rightBorder, int topBorder, int bottomBorder)
+  {
+    DrawTexture(screenRect, texture);
+  }
+
+  public static void DrawTexture(Rect screenRect, Texture texture, int leftBorder, int rightBorder, int topBorder, int bottomBorder, Material mat)
+  {
+    DrawTexture(screenRect, texture, mat);
   }
 
   internal static IReadOnlyList<GizmoCommand> commands => _commands.AsReadOnly();

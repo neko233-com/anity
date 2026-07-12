@@ -8,10 +8,14 @@ public static class Handles
 {
   private static readonly Stack<Matrix4x4> _matrixStack = new();
   private static readonly Stack<Camera?> _cameraStack = new();
+  private static Camera? _sceneCamera;
 
   public static Color color { get; set; } = Color.white;
   public static Color handleColor => color;
   public static Matrix4x4 matrix { get; set; } = Matrix4x4.identity;
+  public static bool lighting { get; set; } = true;
+  public static Camera? currentSceneCamera => _sceneCamera;
+  public static Camera? Camera { get => CurrentCamera; set => CurrentCamera = value; }
 
   public static float zTest
   {
@@ -194,6 +198,67 @@ public static class Handles
     _ = from;
     _ = to;
     _ = screenSpaceSize;
+  }
+
+  public static void DrawDottedLines(Vector3[] points, float screenSpaceSize)
+  {
+    _ = points;
+    _ = screenSpaceSize;
+  }
+
+  public static void DrawAAConvexPolygon(params Vector3[] points)
+  {
+    _ = points;
+  }
+
+  public static void DrawAAConvexPolygon(Color color, params Vector3[] points)
+  {
+    _ = color;
+    _ = points;
+  }
+
+  public static void DrawCamera(Camera camera)
+  {
+    _ = camera;
+  }
+
+  public static void DrawCamera(Rect position, Camera camera)
+  {
+    _ = position;
+    _ = camera;
+  }
+
+  public static void DrawTexture(Rect position, Texture image)
+  {
+    _ = position;
+    _ = image;
+  }
+
+  public static float WireDisc(Quaternion rotation, Vector3 position, Vector3 axis, float radius)
+  {
+    _ = rotation;
+    _ = axis;
+    DrawWireDisc(position, axis, radius);
+    return radius;
+  }
+
+  public static float SolidDisc(Quaternion rotation, Vector3 position, Vector3 axis, float radius)
+  {
+    _ = rotation;
+    _ = axis;
+    DrawSolidDisc(position, axis, radius);
+    return radius;
+  }
+
+  public static void AddDefaultControl(int controlId, float distance)
+  {
+    _ = controlId;
+    _ = distance;
+  }
+
+  public static void SetBoneRotation(Transform bone, Quaternion rotation)
+  {
+    if (bone != null) bone.rotation = rotation;
   }
 
   public static void DrawDottedDisc(Vector3 center, Vector3 normal, float radius, float screenSpaceSize)

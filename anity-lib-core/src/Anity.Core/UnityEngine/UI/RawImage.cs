@@ -37,7 +37,7 @@ public class RawImage : MaskableGraphic
         }
     }
 
-    protected virtual void OnPopulateMesh(VertexHelper vh)
+    public override void OnPopulateMesh(VertexHelper vh)
     {
         vh.Clear();
         var rect = rectTransform != null ? rectTransform.rect : new Rect(0f, 0f, 100f, 100f);
@@ -53,7 +53,7 @@ public class RawImage : MaskableGraphic
         vh.AddTriangle(0, 2, 3);
     }
 
-    public virtual void SetNativeSize()
+    public override void SetNativeSize()
     {
         if (_texture == null) return;
         var rt = rectTransform;

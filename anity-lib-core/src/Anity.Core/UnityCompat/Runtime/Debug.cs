@@ -218,6 +218,14 @@ public static class Debug
   {
     if (!condition) unityLogger.Log(LogType.Assert, message, context);
   }
+  public static void Assert(bool condition, string format, params object[] args)
+  {
+    if (!condition) unityLogger.LogFormat(LogType.Assert, format, args);
+  }
+  public static void AssertFormat(bool condition, string format, params object[] args)
+  {
+    if (!condition) unityLogger.LogFormat(LogType.Assert, format, args);
+  }
 
   public static void LogFormat(string format, params object[] args) => unityLogger.LogFormat(format, args);
   public static void LogFormat(LogType logType, string format, params object[] args) => unityLogger.LogFormat(logType, format, args);

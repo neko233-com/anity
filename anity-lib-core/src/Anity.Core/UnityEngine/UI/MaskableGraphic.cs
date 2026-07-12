@@ -173,6 +173,7 @@ public class Mask : MaskableGraphic, IClipper
 {
   private bool _showMaskGraphic = true;
   private Graphic? _maskGraphic;
+  private int _stencilDepth;
 
   public bool showMaskGraphic
   {
@@ -186,6 +187,7 @@ public class Mask : MaskableGraphic, IClipper
         {
           _maskGraphic.enabled = _showMaskGraphic;
         }
+        SetMaterialDirty();
       }
     }
   }
@@ -209,6 +211,10 @@ public class Mask : MaskableGraphic, IClipper
 
   public override Material GetModifiedMaterial(Material baseMaterial)
   {
+    if (baseMaterial is null)
+      return baseMaterial;
+
+    _stencilDepth = MaskUtilities.GetStencilDepth(transform, MaskUtilities.FindRootSortOverrideCanvas(transform));
     return baseMaterial;
   }
 
@@ -227,26 +233,43 @@ public class Mask : MaskableGraphic, IClipper
       clippable.Cull(rect, validRect);
       clippable.SetClipRect(rect, validRect);
     }
+
+    MaskUtilities.NotifyStencilStateChanged(this);
   }
 
   protected override void OnEnable()
   {
     base.OnEnable();
     _maskGraphic = GetComponent<Graphic>();
+    if (_maskGraphic is not null)
+    {
+      _maskGraphic.enabled = _showMaskGraphic;
+    }
     ClipperRegistry.Register(this);
+    MaskUtilities.NotifyStencilStateChanged(this);
   }
 
   protected override void OnDisable()
   {
     ClipperRegistry.Unregister(this);
+    MaskUtilities.NotifyStencilStateChanged(this);
     base.OnDisable();
+  }
+
+  protected override void OnDestroy()
+  {
+    ClipperRegistry.Unregister(this);
+    MaskUtilities.NotifyStencilStateChanged(this);
+    base.OnDestroy();
   }
 }
 
 public class RectMask2D : UIBehaviour, IClipper
 {
   private readonly List<IClippable> _clippables = new();
-  private Vector4 _cornerRadius = Vector4.zero;
+  private Vector2 _softness = Vector2.zero;
+  private Vector4 _padding = Vector4.zero;
+  private Vector2 _offset = Vector2.zero;
   private readonly RectangularVertexClipper _vertexClipper = new();
 
   public virtual Rect canvasRect
@@ -256,12 +279,55 @@ public class RectMask2D : UIBehaviour, IClipper
       var rt = transform as RectTransform;
       if (rt == null) return default;
       var canvas = GetComponentInParent<Canvas>();
-      return _vertexClipper.GetCanvasRect(rt, canvas);
+      var rect = _vertexClipper.GetCanvasRect(rt, canvas);
+      rect.x += _offset.x;
+      rect.y += _offset.y;
+      rect.xMin += _padding.x;
+      rect.yMin += _padding.y;
+      rect.xMax -= _padding.z;
+      rect.yMax -= _padding.w;
+      return rect;
     }
   }
 
-  public Vector4 softness { get; set; }
-  public Vector4 padding { get; set; }
+  public Vector2 softness
+  {
+    get => _softness;
+    set
+    {
+      if (_softness != value)
+      {
+        _softness = value;
+        MaskUtilities.Notify2DMaskStateChanged(this);
+      }
+    }
+  }
+
+  public Vector4 padding
+  {
+    get => _padding;
+    set
+    {
+      if (_padding != value)
+      {
+        _padding = value;
+        MaskUtilities.Notify2DMaskStateChanged(this);
+      }
+    }
+  }
+
+  public Vector2 offset
+  {
+    get => _offset;
+    set
+    {
+      if (_offset != value)
+      {
+        _offset = value;
+        MaskUtilities.Notify2DMaskStateChanged(this);
+      }
+    }
+  }
 
   public virtual void PerformClipping()
   {
@@ -271,6 +337,7 @@ public class RectMask2D : UIBehaviour, IClipper
     {
       clippable?.Cull(rect, validRect);
       clippable?.SetClipRect(rect, validRect);
+      clippable?.SetClipSoftness(_softness);
     }
   }
 

@@ -74,6 +74,7 @@ public sealed class VideoPlayer : Behaviour
     private float _prepareTime;
     private bool _sendFrameReadyEvents;
     private bool _prepareCompletedSent;
+    private AudioSource? _audioSource;
 
     public VideoPlayer()
     {
@@ -180,7 +181,14 @@ public sealed class VideoPlayer : Behaviour
 
     public ulong frameCount => _frameCount;
     public double length => _length;
+    public double duration => _length;
     public double clockTime => _clockTime;
+
+    public AudioSource? audioSource
+    {
+        get => _audioSource;
+        set => _audioSource = value;
+    }
 
     public VideoRenderMode renderMode
     {
@@ -468,6 +476,8 @@ public sealed class VideoClip : Object
     public uint pixelAspectRatioNumerator { get; set; }
     public uint pixelAspectRatioDenominator { get; set; }
     public ushort audioTrackCount { get; set; }
+    public bool alphaChannel { get; set; }
+    public bool hasAudio => audioTrackCount > 0;
     public double spt => frameRate > 0 ? 1.0 / frameRate : 0;
 
     public float pixelAspectRatio => pixelAspectRatioDenominator > 0

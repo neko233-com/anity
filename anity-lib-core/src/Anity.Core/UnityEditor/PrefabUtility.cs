@@ -195,6 +195,22 @@ public static class PrefabUtility
     return _instanceToAsset.TryGetValue(go, out var assetPath) ? assetPath : null;
   }
 
+  public static Object? GetCorrespondingObjectFromSource(Object source)
+  {
+    if (source is null)
+    {
+      return null;
+    }
+    return GetCorrespondingObjectFromOriginalSource(source);
+  }
+
+  public static Object? GetCorrespondingObjectFromSource(Object source, bool outermostPrefab)
+  {
+    if (source is null) return null;
+    _ = outermostPrefab;
+    return GetCorrespondingObjectFromOriginalSource(source);
+  }
+
   public static Object? GetCorrespondingObjectFromOriginalSource(Object source)
   {
     if (source is null)
@@ -250,6 +266,34 @@ public static class PrefabUtility
     return go is not null && _loadedPrefabs.ContainsValue(go);
   }
 
+  public static bool IsPrefabInstance(Object targetObject)
+  {
+    return IsPartOfPrefabInstance(targetObject);
+  }
+
+  public static GameObject? GetNearestPrefabInstanceRoot(Object componentOrGameObject)
+  {
+    if (componentOrGameObject is null) return null;
+    var go = componentOrGameObject as GameObject ?? (componentOrGameObject as Component)?.gameObject;
+    if (go is null) return null;
+
+    var current = go;
+    while (current is not null)
+    {
+      if (_instanceToAsset.ContainsKey(current))
+        return current;
+      current = current.transform.parent?.gameObject;
+    }
+    return null;
+  }
+
+  public static bool IsPartOfNonAssetPrefabInstance(Object targetObject)
+  {
+    if (targetObject is null) return false;
+    if (IsPartOfPrefabAsset(targetObject)) return false;
+    return IsPartOfPrefabInstance(targetObject);
+  }
+
   public static bool IsPrefabAsset(Object targetObject)
   {
     if (targetObject is null) return false;
@@ -264,16 +308,64 @@ public static class PrefabUtility
       return string.Empty;
     }
 
-    // Ensure directory exists
     var dir = Path.GetDirectoryName(savePath);
     if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
     {
       Directory.CreateDirectory(dir);
     }
 
-    // In a real implementation, this would serialize the prefab
-    _instanceToAsset[root] = savePath;
+    _loadedPrefabs[savePath] = root;
     return savePath;
+  }
+
+  public static bool SavePrefabAsset(GameObject root)
+  {
+    if (root is null) return false;
+
+    string? existingPath = null;
+    foreach (var kvp in _loadedPrefabs)
+    {
+      if (ReferenceEquals(kvp.Value, root))
+      {
+        existingPath = kvp.Key;
+        break;
+      }
+    }
+
+    if (string.IsNullOrEmpty(existingPath))
+    {
+      return false;
+    }
+
+    _loadedPrefabs[existingPath] = root;
+    return true;
+  }
+
+  public static void UnpackPrefabInstance(GameObject instanceRoot, PrefabUnpackMode unpackMode)
+  {
+    if (instanceRoot is null) return;
+    _ = unpackMode;
+
+    UnpackPrefabInstanceInternal(instanceRoot);
+  }
+
+  public static void UnpackPrefabInstanceAndReturnNewOutermostRoots(GameObject instanceRoot, PrefabUnpackMode unpackMode)
+  {
+    UnpackPrefabInstance(instanceRoot, unpackMode);
+  }
+
+  private static void UnpackPrefabInstanceInternal(GameObject instanceRoot)
+  {
+    _instanceToAsset.Remove(instanceRoot);
+
+    for (int i = 0; i < instanceRoot.transform.childCount; i++)
+    {
+      var child = instanceRoot.transform.GetChild(i).gameObject;
+      if (_instanceToAsset.ContainsKey(child))
+      {
+        _instanceToAsset.Remove(child);
+      }
+    }
   }
 
   public static string SaveAsPrefabAssetAndConnect(GameObject root, string savePath)
@@ -480,4 +572,10 @@ public enum InteractionMode
 {
   AutomatedAction,
   UserAction
+}
+
+public enum PrefabUnpackMode
+{
+  OutermostRoot,
+  Completely
 }

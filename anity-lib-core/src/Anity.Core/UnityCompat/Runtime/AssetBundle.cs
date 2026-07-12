@@ -9,10 +9,16 @@ public class AssetBundle : Object
     private static readonly HashSet<AssetBundle> _allLoadedBundles = new();
     private readonly Dictionary<string, Object> _assets = new();
     private Hash128 _hash;
+    private Object? _mainAsset;
 
     public Hash128 hash => _hash;
     public bool isStreamedSceneAssetBundle { get; set; }
     public uint crc { get; protected set; }
+    public Object? mainAsset
+    {
+        get => _mainAsset;
+        set => _mainAsset = value;
+    }
 
     public AssetBundle()
     {
@@ -384,4 +390,56 @@ public class AssetBundleRequest : AsyncOperation
 
 public class AssetBundleUnloadOperation : AsyncOperation
 {
+}
+
+public class AssetBundleManifest : Object
+{
+    private readonly Dictionary<string, Hash128> _bundleHashes = new();
+    private readonly Dictionary<string, string[]> _bundleDependencies = new();
+    private readonly List<string> _allBundles = new();
+
+    internal void AddBundle(string bundleName, Hash128 hash, string[]? dependencies)
+    {
+        if (string.IsNullOrEmpty(bundleName)) return;
+        if (!_allBundles.Contains(bundleName))
+            _allBundles.Add(bundleName);
+        _bundleHashes[bundleName] = hash;
+        _bundleDependencies[bundleName] = dependencies ?? Array.Empty<string>();
+    }
+
+    public string[] GetAllAssetBundles()
+    {
+        return _allBundles.ToArray();
+    }
+
+    public string[] GetAllDependencies(string assetBundleName)
+    {
+        var result = new HashSet<string>();
+        GetDependenciesRecursive(assetBundleName, result);
+        result.Remove(assetBundleName);
+        return result.ToArray();
+    }
+
+    public string[] GetDirectDependencies(string assetBundleName)
+    {
+        return _bundleDependencies.TryGetValue(assetBundleName, out var deps) ? (string[])deps.Clone() : Array.Empty<string>();
+    }
+
+    public Hash128 GetHash(string assetBundleName)
+    {
+        return _bundleHashes.TryGetValue(assetBundleName, out var hash) ? hash : default;
+    }
+
+    private void GetDependenciesRecursive(string bundleName, HashSet<string> result)
+    {
+        if (string.IsNullOrEmpty(bundleName) || result.Contains(bundleName)) return;
+        result.Add(bundleName);
+        if (_bundleDependencies.TryGetValue(bundleName, out var deps))
+        {
+            foreach (var dep in deps)
+            {
+                GetDependenciesRecursive(dep, result);
+            }
+        }
+    }
 }

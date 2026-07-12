@@ -210,6 +210,84 @@ public static class EditorUtility
     _ = target;
   }
 
+  public static string SaveFolderPanel(string title, string folder, string defaultName)
+  {
+    _ = title;
+    _ = defaultName;
+    return Normalize(folder);
+  }
+
+  public static bool CopySerialized(Object source, Object dest)
+  {
+    if (source == null || dest == null) return false;
+    var sourceType = source.GetType();
+    var destType = dest.GetType();
+    if (sourceType != destType) return false;
+    foreach (var prop in sourceType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+    {
+      if (prop.CanRead && prop.CanWrite)
+      {
+        try { prop.SetValue(dest, prop.GetValue(source)); } catch { }
+      }
+    }
+    foreach (var field in sourceType.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+    {
+      try { field.SetValue(dest, field.GetValue(source)); } catch { }
+    }
+    return true;
+  }
+
+  public static bool CopySerializedIfDifferent(Object source, Object dest)
+  {
+    if (source == null || dest == null) return false;
+    return CopySerialized(source, dest);
+  }
+
+  public static int NaturalCompare(string a, string b)
+  {
+    if (a == null && b == null) return 0;
+    if (a == null) return -1;
+    if (b == null) return 1;
+    return string.Compare(a, b, StringComparison.Ordinal);
+  }
+
+  public static int ObjectToInstanceID(Object obj)
+  {
+    if (obj == null) return 0;
+    int id = obj.GetInstanceID();
+    _instanceIDToObject[id] = obj;
+    return id;
+  }
+
+  public static Object[] CollectDependencies(Object[] roots)
+  {
+    if (roots == null) return Array.Empty<Object>();
+    var result = new HashSet<Object>();
+    foreach (var root in roots)
+    {
+      if (root != null) result.Add(root);
+      if (root is GameObject go)
+      {
+        foreach (var comp in go.GetComponents<Component>())
+        {
+          if (comp != null) result.Add(comp);
+        }
+        foreach (Transform child in go.transform)
+        {
+          result.Add(child.gameObject);
+        }
+      }
+    }
+    return result.ToArray();
+  }
+
+  public static void CompressTexture(Texture2D texture, TextureFormat format, int quality)
+  {
+    if (texture == null) return;
+    _ = format;
+    _ = quality;
+  }
+
   public static UnityEngine.Object InstanceIDToObject(int instanceID)
   {
     if (instanceID == 0) return null;

@@ -1,21 +1,31 @@
 namespace UnityEditor;
 
+using UnityEngine;
+
 public static class EditorStyles
 {
+  private static Font? _boldFont;
+  public static Font boldFont { get { _boldFont ??= new Font(); return _boldFont; } }
+
   public static GUIStyle label { get; } = new() { name = "label" };
-  public static GUIStyle boldLabel { get; } = new() { name = "boldLabel", fontSize = 12 };
+  public static GUIStyle boldLabel { get; } = new() { name = "boldLabel", fontSize = 12, fontStyle = FontStyle.Bold };
+  public static GUIStyle centeredBoldLabel { get; } = new() { name = "centeredBoldLabel", fontSize = 12, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
   public static GUIStyle miniLabel { get; } = new() { name = "miniLabel", fontSize = 10 };
+  public static GUIStyle miniBoldLabel { get; } = new() { name = "miniBoldLabel", fontSize = 10, fontStyle = FontStyle.Bold };
   public static GUIStyle whiteLabel { get; } = new() { name = "whiteLabel" };
   public static GUIStyle whiteBoldLabel { get; } = new() { name = "whiteBoldLabel", fontStyle = FontStyle.Bold };
   public static GUIStyle whiteMiniLabel { get; } = new() { name = "whiteMiniLabel", fontSize = 10 };
   public static GUIStyle redLabel { get; } = new() { name = "redLabel" };
   public static GUIStyle yellowLabel { get; } = new() { name = "yellowLabel" };
   public static GUIStyle greyLabel { get; } = new() { name = "greyLabel" };
-  public static GUIStyle centeredGreyMiniLabel { get; } = new() { name = "centeredGreyMiniLabel", fontSize = 10 };
+  public static GUIStyle centeredGreyMiniLabel { get; } = new() { name = "centeredGreyMiniLabel", fontSize = 10, alignment = TextAnchor.MiddleCenter };
   public static GUIStyle highlightLabel { get; } = new() { name = "highlightLabel" };
   public static GUIStyle selectedLabel { get; } = new() { name = "selectedLabel" };
   public static GUIStyle wordWrappedLabel { get; } = new() { name = "wordWrappedLabel", wordWrap = true };
-  public static GUIStyle miniBoldLabel { get; } = new() { name = "miniBoldLabel", fontSize = 10, fontStyle = FontStyle.Bold };
+  public static GUIStyle wordWrappedMiniLabel { get; } = new() { name = "wordWrappedMiniLabel", fontSize = 10, wordWrap = true };
+  public static GUIStyle rightAlignedLabel { get; } = new() { name = "rightAlignedLabel", alignment = TextAnchor.MiddleRight };
+  public static GUIStyle largeLabel { get; } = new() { name = "largeLabel", fontSize = 16 };
+  public static GUIStyle largeBoldLabel { get; } = new() { name = "largeBoldLabel", fontSize = 16, fontStyle = FontStyle.Bold };
 
   public static GUIStyle toolbar { get; } = new() { name = "toolbar" };
   public static GUIStyle toolbarButton { get; } = new() { name = "toolbarButton" };
@@ -49,9 +59,13 @@ public static class EditorStyles
   public static GUIStyle colorField { get; } = new() { name = "colorField" };
   public static GUIStyle curveField { get; } = new() { name = "curveField" };
   public static GUIStyle gradientField { get; } = new() { name = "gradientField" };
+  public static GUIStyle vector2Field { get; } = new() { name = "vector2Field" };
+  public static GUIStyle vector3Field { get; } = new() { name = "vector3Field" };
+  public static GUIStyle vector4Field { get; } = new() { name = "vector4Field" };
 
   public static GUIStyle button { get; } = new() { name = "button" };
   public static GUIStyle minibutton { get; } = new() { name = "minibutton", fontSize = 10 };
+  public static GUIStyle miniButton => minibutton;
   public static GUIStyle miniButtonLeft { get; } = new() { name = "miniButtonLeft" };
   public static GUIStyle miniButtonMid { get; } = new() { name = "miniButtonMid" };
   public static GUIStyle miniButtonRight { get; } = new() { name = "miniButtonRight" };
@@ -107,8 +121,6 @@ public static class EditorStyles
   public static GUIStyle sectionHeader { get; } = new() { name = "sectionHeader" };
   public static GUIStyle sectionHeaderLabel { get; } = new() { name = "sectionHeaderLabel" };
   public static GUIStyle boldLabelOnDark { get; } = new() { name = "boldLabelOnDark" };
-  public static GUIStyle largeLabel { get; } = new() { name = "largeLabel", fontSize = 16 };
-  public static GUIStyle largeBoldLabel { get; } = new() { name = "largeBoldLabel", fontSize = 16, fontStyle = FontStyle.Bold };
   public static GUIStyle titleLabel { get; } = new() { name = "titleLabel", fontSize = 18 };
   public static GUIStyle header { get; } = new() { name = "header", fontStyle = FontStyle.Bold, fontSize = 14 };
 }

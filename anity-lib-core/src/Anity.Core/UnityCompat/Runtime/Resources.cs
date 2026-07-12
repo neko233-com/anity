@@ -58,6 +58,16 @@ public static class Resources
     return type.IsAssignableFrom(value.GetType()) ? value as Object : null;
   }
 
+  public static T[] LoadAll<T>() where T : Object
+  {
+    return LoadAll<T>(string.Empty);
+  }
+
+  public static Object[] LoadAll()
+  {
+    return LoadAll(string.Empty, typeof(Object));
+  }
+
   public static T[] LoadAll<T>(string path) where T : Object
   {
     var prefix = path?.Trim('/') ?? string.Empty;
@@ -70,6 +80,11 @@ public static class Resources
     return items.ToArray();
   }
 
+  public static Object[] LoadAll(string path)
+  {
+    return LoadAll(path, typeof(Object));
+  }
+
   public static Object[] LoadAll(string path, Type type)
   {
     var prefix = path?.Trim('/') ?? string.Empty;
@@ -79,6 +94,11 @@ public static class Resources
       .Where(value => type is null || type.IsAssignableFrom(value.GetType()))
       .OfType<Object>()
       .ToArray();
+  }
+
+  public static Object[] LoadAll(Type type)
+  {
+    return LoadAll(string.Empty, type);
   }
 
   public static T? GetBuiltinResource<T>(string path) where T : Object

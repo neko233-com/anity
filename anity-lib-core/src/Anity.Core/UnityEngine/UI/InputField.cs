@@ -30,7 +30,8 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     {
         SingleLine,
         MultiLineSubmit,
-        MultiLineNewline
+        MultiLineNewline,
+        MultiLine
     }
 
     public enum CharacterValidation
@@ -60,6 +61,7 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     private float _caretBlinkRate = 0.85f;
     private int _caretWidth = 1;
     private Color _selectionColor = new Color(0.65882355f, 0.8156863f, 1f, 0.7529412f);
+    private bool _shouldHideMobileInput;
 
     private InputFieldSubmitEvent _onEndEdit = new();
     private InputFieldChangeEvent _onValueChanged = new();
@@ -168,6 +170,12 @@ public class InputField : Selectable, IPointerClickHandler, ISubmitHandler, IUpd
     {
         get => _selectionColor;
         set => _selectionColor = value;
+    }
+
+    public bool shouldHideMobileInput
+    {
+        get => _shouldHideMobileInput;
+        set => _shouldHideMobileInput = value;
     }
 
     public bool multiLine => _lineType != LineType.SingleLine;

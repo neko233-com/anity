@@ -6,6 +6,7 @@ namespace UnityEngine.AI;
 public static class NavMesh
 {
     public const int AllAreas = -1;
+    public const string WalkableAreaName = "Walkable";
 
     private static readonly Dictionary<string, int> _areaNames = new()
     {
@@ -13,6 +14,7 @@ public static class NavMesh
         { "Not Walkable", 1 },
         { "Jump", 2 },
     };
+    private static readonly List<NavMeshData> _navMeshData = new();
 
     private static readonly Dictionary<int, float> _areaCosts = new();
 
@@ -121,6 +123,27 @@ public static class NavMesh
         path.status = NavMeshPathStatus.PathComplete;
         return true;
     }
+
+    public static bool AddNavMeshData(NavMeshData navMeshData)
+    {
+        if (navMeshData == null) return false;
+        if (!_navMeshData.Contains(navMeshData))
+            _navMeshData.Add(navMeshData);
+        return true;
+    }
+
+    public static bool RemoveNavMeshData(NavMeshData navMeshData)
+    {
+        if (navMeshData == null) return false;
+        return _navMeshData.Remove(navMeshData);
+    }
+
+    public static NavMeshData BuildNavMesh()
+    {
+        var data = new NavMeshData();
+        AddNavMeshData(data);
+        return data;
+    }
 }
 
 public class NavMeshAgent : Behaviour
@@ -156,6 +179,9 @@ public class NavMeshAgent : Behaviour
     private Object? _navMeshOwner;
     private OffMeshLinkData _currentOffMeshLinkData;
     private bool _activateCurrentOffMeshLink;
+    private bool _wasReached;
+
+    public event Action? onDestinationReached;
 
     public NavMeshAgent()
     {
@@ -164,6 +190,8 @@ public class NavMeshAgent : Behaviour
         _destination = startPos;
         _steeringTarget = startPos;
     }
+
+    public bool isPathComplete => _hasPath && _currentPath != null && _currentPath.status == NavMeshPathStatus.PathComplete;
 
     public Vector3 destination
     {
@@ -359,8 +387,17 @@ public class NavMeshAgent : Behaviour
                 _hasPath = false;
                 _velocity = Vector3.zero;
                 _desiredVelocity = Vector3.zero;
+                if (!_wasReached)
+                {
+                    _wasReached = true;
+                    onDestinationReached?.Invoke();
+                }
                 return;
             }
+        }
+        else
+        {
+            _wasReached = false;
         }
 
         Vector3 dir = toTarget.normalized;
@@ -489,6 +526,7 @@ public class NavMeshObstacle : Behaviour
     private float _carveTimeThreshold = 0.5f;
     private bool _carveOnlyStationary = true;
     private NavMeshObstacleShape _shape = NavMeshObstacleShape.Capsule;
+    private Vector3 _velocity;
 
     public Vector3 center { get => _center; set => _center = value; }
     public Vector3 size { get => _size; set => _size = value; }
@@ -499,4 +537,83 @@ public class NavMeshObstacle : Behaviour
     public float carveTimeThreshold { get => _carveTimeThreshold; set => _carveTimeThreshold = Math.Max(0f, value); }
     public bool carveOnlyStationary { get => _carveOnlyStationary; set => _carveOnlyStationary = value; }
     public NavMeshObstacleShape shape { get => _shape; set => _shape = value; }
+    public Vector3 velocity { get => _velocity; set => _velocity = value; }
+}
+
+public class NavMeshData : Object
+{
+    private Bounds _sourceBounds;
+    private Vector3 _position;
+    private Quaternion _rotation = Quaternion.identity;
+
+    public Bounds sourceBounds
+    {
+        get => _sourceBounds;
+        set => _sourceBounds = value;
+    }
+
+    public Vector3 position
+    {
+        get => _position;
+        set => _position = value;
+    }
+
+    public Quaternion rotation
+    {
+        get => _rotation;
+        set => _rotation = value;
+    }
+}
+
+public class OffMeshLink : Behaviour
+{
+    private bool _activated = true;
+    private Transform? _startTransform;
+    private Transform? _endTransform;
+    private bool _costOverridden;
+    private float _costOverride = 1f;
+    private bool _autoUpdatePositions = true;
+    private bool _biDirectional = true;
+
+    public bool activated
+    {
+        get => _activated;
+        set => _activated = value;
+    }
+
+    public Transform? startTransform
+    {
+        get => _startTransform;
+        set => _startTransform = value;
+    }
+
+    public Transform? endTransform
+    {
+        get => _endTransform;
+        set => _endTransform = value;
+    }
+
+    public bool costOverridden
+    {
+        get => _costOverridden;
+        set => _costOverridden = value;
+    }
+
+    public float costOverride
+    {
+        get => _costOverride;
+        set => _costOverride = value;
+    }
+
+    public bool autoUpdatePositions
+    {
+        get => _autoUpdatePositions;
+        set => _autoUpdatePositions = value;
+    }
+
+    public bool biDirectional
+    {
+        get => _biDirectional;
+        set => _biDirectional = value;
+    }
 }

@@ -278,6 +278,64 @@ public class Scrollbar : Selectable, IBeginDragHandler, IDragHandler, IEndDragHa
     {
         _ = eventData;
     }
+
+    public override void OnMove(AxisEventData eventData)
+    {
+        if (!IsActive() || !IsInteractable())
+        {
+            base.OnMove(eventData);
+            return;
+        }
+
+        var step = 0.1f;
+        switch (eventData.moveDir)
+        {
+            case MoveDirection.Left:
+                if (axis == Axis.Horizontal)
+                {
+                    value = Mathf.Clamp01(_value + (reverseValue ? step : -step));
+                    eventData.Use();
+                }
+                else
+                {
+                    base.OnMove(eventData);
+                }
+                break;
+            case MoveDirection.Right:
+                if (axis == Axis.Horizontal)
+                {
+                    value = Mathf.Clamp01(_value + (reverseValue ? -step : step));
+                    eventData.Use();
+                }
+                else
+                {
+                    base.OnMove(eventData);
+                }
+                break;
+            case MoveDirection.Up:
+                if (axis == Axis.Vertical)
+                {
+                    value = Mathf.Clamp01(_value + (reverseValue ? -step : step));
+                    eventData.Use();
+                }
+                else
+                {
+                    base.OnMove(eventData);
+                }
+                break;
+            case MoveDirection.Down:
+                if (axis == Axis.Vertical)
+                {
+                    value = Mathf.Clamp01(_value + (reverseValue ? step : -step));
+                    eventData.Use();
+                }
+                else
+                {
+                    base.OnMove(eventData);
+                }
+                break;
+        }
+    }
 }
 
 [Serializable]

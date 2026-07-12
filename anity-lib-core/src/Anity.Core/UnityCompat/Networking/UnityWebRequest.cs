@@ -7,6 +7,15 @@ namespace UnityEngine.Networking;
 
 public class UnityWebRequest : IDisposable
 {
+    public enum Result
+    {
+        InProgress,
+        Success,
+        ConnectionError,
+        ProtocolError,
+        DataProcessingError
+    }
+
     private readonly Dictionary<string, string> _requestHeaders = new();
     private readonly Dictionary<string, string> _responseHeaders = new();
     private bool _disposed;
@@ -32,6 +41,18 @@ public class UnityWebRequest : IDisposable
     public ulong uploadedBytes { get; protected set; }
     public float uploadProgress { get; protected set; }
     public float downloadProgress { get; protected set; }
+    public float progress => isDone ? 1f : (downloadProgress + uploadProgress) / 2f;
+
+    public Result result
+    {
+        get
+        {
+            if (!isDone) return Result.InProgress;
+            if (isNetworkError) return Result.ConnectionError;
+            if (isHttpError) return Result.ProtocolError;
+            return Result.Success;
+        }
+    }
 
     public UnityWebRequest()
     {
@@ -102,7 +123,7 @@ public class UnityWebRequest : IDisposable
             responseCode = 200;
             isDone = true;
             isNetworkError = false;
-            isHttpError = false;
+            isHttpError = responseCode >= 400;
             operation.SetDone();
         }
         catch (Exception ex)

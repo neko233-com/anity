@@ -336,16 +336,26 @@ public static class BuildPipeline
     return new[] { path };
   }
 
-  public static void BuildAssetBundles(string outputPath, AssetBundleBuild[]? builds, BuildAssetBundleOptions assetBundleOptions, BuildTarget target)
+  public static AssetBundleManifest BuildAssetBundles(string outputPath, AssetBundleBuild[]? builds, BuildAssetBundleOptions assetBundleOptions, BuildTarget target)
   {
-    _ = outputPath;
-    _ = builds;
     _ = assetBundleOptions;
     _ = target;
+    var manifest = new AssetBundleManifest();
     if (!string.IsNullOrWhiteSpace(outputPath))
     {
       Directory.CreateDirectory(outputPath);
     }
+    if (builds != null)
+    {
+      foreach (var build in builds)
+      {
+        if (!string.IsNullOrEmpty(build.assetBundleName))
+        {
+          manifest.AddBundle(build.assetBundleName, default, build.assetNames ?? Array.Empty<string>());
+        }
+      }
+    }
+    return manifest;
   }
 
   public static BuildPlayerWindow BuildPlayerWindow => new BuildPlayerWindow();

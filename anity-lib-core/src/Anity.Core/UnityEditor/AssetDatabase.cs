@@ -244,10 +244,65 @@ public static class AssetDatabase
     return LoadAssetAtPath(assetPath) is Object obj ? new[] { obj } : Array.Empty<Object>();
   }
 
-  public static string GetAssetDependencyHash(string path)
+  public static Hash128 GetAssetDependencyHash(string path)
+  {
+    if (string.IsNullOrWhiteSpace(path))
+    {
+      return default;
+    }
+    var normalized = Normalize(path);
+    var hash = normalized.GetHashCode();
+    return new Hash128((uint)hash, (uint)(hash >> 16), (uint)(hash >> 8), 0);
+  }
+
+  public static bool IsMainAsset(Object obj)
+  {
+    if (obj is null) return false;
+    var path = GetAssetPath(obj);
+    if (string.IsNullOrEmpty(path)) return false;
+    var main = LoadMainAssetAtPath(path);
+    return ReferenceEquals(main, obj);
+  }
+
+  public static bool IsSubAsset(Object obj)
+  {
+    if (obj is null) return false;
+    return Contains(obj) && !IsMainAsset(obj);
+  }
+
+  public static void ForceReserializeAssets(string[] assetPaths)
+  {
+    ForceReserializeAssets(assetPaths, ForceReserializeAssetsOptions.ReserializeAssetsAndMetadata);
+  }
+
+  public static void ForceReserializeAssets(string[] assetPaths, ForceReserializeAssetsOptions options)
+  {
+    _ = options;
+    foreach (var path in assetPaths)
+    {
+      ImportAsset(path);
+    }
+  }
+
+  public static void ForceReserializeAssets(IEnumerable<string> assetPaths, ForceReserializeAssetsOptions options = ForceReserializeAssetsOptions.ReserializeAssetsAndMetadata)
+  {
+    ForceReserializeAssets(assetPaths.ToArray(), options);
+  }
+
+  public static bool WriteImportSettingsIfDirty(string path)
   {
     _ = path;
-    return "dependency-hash";
+    return false;
+  }
+
+  public static bool ValidateMoveAsset(string oldPath, string newPath)
+  {
+    oldPath = Normalize(oldPath);
+    newPath = Normalize(newPath);
+    if (string.IsNullOrEmpty(oldPath) || string.IsNullOrEmpty(newPath)) return false;
+    if (!_assets.ContainsKey(oldPath)) return false;
+    if (_assets.ContainsKey(newPath)) return false;
+    return true;
   }
 
   public static string CreateFolder(string parentFolder, string newFolderName)
@@ -733,4 +788,11 @@ public enum ImportAssetOptions
   ForceUpdate = 2,
   ImportRecursive = 4,
   DontDownloadFromCacheServer = 8
+}
+
+public enum ForceReserializeAssetsOptions
+{
+  ReserializeAssets = 1,
+  ReserializeMetadata = 2,
+  ReserializeAssetsAndMetadata = 3
 }

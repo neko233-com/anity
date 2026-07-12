@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 
 namespace UnityEngine.Audio;
 
-public class AudioMixer : Object
+public class AudioMixer : ScriptableObject
 {
     private readonly AudioMixerController _controller;
     private bool _trueSoundRestored;
@@ -15,6 +16,8 @@ public class AudioMixer : Object
     }
 
     public AudioMixer? outputAudioMixer { get; set; }
+
+    public AudioMixerGroup[] audioMixerGroupViews => _controller.m_Groups.ToArray();
 
     public AudioMixerGroup[] FindMatchingGroups(string subPath)
     {
@@ -62,6 +65,8 @@ public class AudioMixer : Object
 public class AudioMixerGroup : Object
 {
     private readonly List<AudioMixerGroupView> _views = new();
+    private float _volume = 1f;
+    private float _targetVolume = 1f;
 
     public AudioMixerGroup()
     {
@@ -77,9 +82,20 @@ public class AudioMixerGroup : Object
 
     public AudioMixerGroupView[] audioMixerGroupViews => _views.ToArray();
 
+    public float volume
+    {
+        get => _volume;
+        set => _volume = Math.Clamp(value, 0f, 1f);
+    }
+
     internal void AddView(AudioMixerGroupView view)
     {
         if (view != null) _views.Add(view);
+    }
+
+    public void SetAudioFader(float value)
+    {
+        _targetVolume = Math.Clamp(value, 0f, 1f);
     }
 }
 

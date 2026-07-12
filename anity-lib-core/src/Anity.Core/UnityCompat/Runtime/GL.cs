@@ -10,6 +10,7 @@ public static class GL
     public const int LINE_STRIP = 2;
     public const int TRIANGLE_STRIP = 5;
     public const int TRIANGLE_FAN = 6;
+    public const int QUAD_STRIP = 8;
     public const int LINES_ADJACENCY = 10;
     public const int LINE_STRIP_ADJACENCY = 11;
     public const int TRIANGLES_ADJACENCY = 12;
@@ -385,4 +386,35 @@ public static class GL
         _modelview = Matrix4x4.identity;
         _projection = Matrix4x4.identity;
     }
+
+    public static void MultiRenderTarget(RenderBuffer[] colorBuffers, RenderBuffer depthBuffer)
+    {
+        _ = colorBuffers;
+        _ = depthBuffer;
+    }
+
+    public static ImmediateModeRenderer GetImmediateRenderer(int vertexCount)
+    {
+        _ = vertexCount;
+        return new ImmediateModeRenderer();
+    }
+}
+
+public sealed class ImmediateModeRenderer
+{
+    internal ImmediateModeRenderer() { }
+
+    public void Dispose() { }
+
+    public void BaseVertex(float x, float y, float z) { _ = x; _ = y; _ = z; }
+
+    public void Color(Color c) { _ = c; }
+
+    public void Vertex(Vector3 v) { _ = v; }
+    public void Vertex(float x, float y, float z) { _ = x; _ = y; _ = z; }
+
+    public void TexCoord(Vector2 uv) { _ = uv; }
+    public void TexCoord(float x, float y) { _ = x; _ = y; }
+
+    public void Normal(Vector3 n) { _ = n; }
 }

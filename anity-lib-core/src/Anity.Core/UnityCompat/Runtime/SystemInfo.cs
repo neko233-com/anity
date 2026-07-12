@@ -56,6 +56,7 @@ public static class SystemInfo
     public static CopyTextureSupport copyTextureSupport => CopyTextureSupport.Basic | CopyTextureSupport.Copy3D | CopyTextureSupport.DifferentTypes | CopyTextureSupport.TextureToRT | CopyTextureSupport.RTToTexture;
     public static bool supportsShadows => true;
     public static bool supportsRawShadowDepthSampling => true;
+    public static bool supportsShadowDepthSampling => true;
     public static bool supportsMotionVectors => true;
     public static bool supportsComputeShadows => true;
     public static bool supports3DTextures => true;
@@ -63,8 +64,11 @@ public static class SystemInfo
     public static bool supportsCubemapArrayTextures => true;
     public static bool supportsComputeShaders => true;
     public static bool supportsInstancing => true;
+    public static bool supportsAsyncCompute => true;
     public static bool supportsGeometryShaders => true;
     public static bool supportsTessellationShaders => true;
+    public static bool supportsRayTracing => false;
+    public static bool supportsMeshShaders => false;
     public static bool supportsHardwareQuadTopology => false;
     public static bool supports32bitsIndexBuffer => true;
     public static bool supportsSparseTextures => false;
@@ -78,6 +82,10 @@ public static class SystemInfo
     public static bool supportsRenderTextures => true;
     public static bool supportsRenderToCubemap => true;
     public static bool supportsImageEffects => true;
+    public static bool supportsVerticalSync => true;
+    public static bool supportsParallelCubemapMips => false;
+    public static bool graphicsUVStartsAtTop => true;
+    public static int constantBufferOffsetAlignment => 256;
     public static bool supportsVibration => false;
     public static bool supportsGyroscope => false;
     public static bool supportsLocationService => false;

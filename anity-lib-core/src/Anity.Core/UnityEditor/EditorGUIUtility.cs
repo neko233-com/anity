@@ -7,20 +7,61 @@ namespace UnityEditor
   {
     private static readonly System.Collections.Generic.Dictionary<string, Texture2D> _icons = new();
     private static Texture2D? _whiteTexture;
+    private static Texture2D? _grayTexture;
+    private static Texture2D? _blackTexture;
+    private static Texture2D? _transparentTexture;
     private static Texture2D? _scriptIcon;
     private static Texture2D? _standardScriptIcon;
     private static int _controlID;
+    private static int _hotControl;
+    private static int _keyboardControl;
     private static float _pixelsPerPoint = 1f;
     private static Vector2 _mousePosition;
+    private static Vector2 _iconSize = new Vector2(16f, 16f);
+    private static bool _wideMode;
     private static GUIContent _tempContent = new GUIContent();
     private static string _systemCopyBuffer = string.Empty;
     private static bool _editingTextField;
+
+    static EditorGUIUtility()
+    {
+      isProSkin = true;
+    }
 
     public static float pixelsPerPoint
     {
       get => _pixelsPerPoint;
       set => _pixelsPerPoint = value;
     }
+
+    public static int hotControl
+    {
+      get => _hotControl;
+      set => _hotControl = value;
+    }
+
+    public static int keyboardControl
+    {
+      get => _keyboardControl;
+      set => _keyboardControl = value;
+    }
+
+    public static bool wideMode
+    {
+      get => _wideMode;
+      set => _wideMode = value;
+    }
+
+    public static float PixelsToPoints(float pixels) => pixels / _pixelsPerPoint;
+    public static Vector2 PixelsToPoints(Vector2 pixels) => pixels / _pixelsPerPoint;
+    public static float PointsToPixels(float points) => points * _pixelsPerPoint;
+    public static Vector2 PointsToPixels(Vector2 points) => points * _pixelsPerPoint;
+    public static Rect PixelsToPoints(Rect r) => new Rect(r.x / _pixelsPerPoint, r.y / _pixelsPerPoint, r.width / _pixelsPerPoint, r.height / _pixelsPerPoint);
+    public static Rect PointsToPixels(Rect r) => new Rect(r.x * _pixelsPerPoint, r.y * _pixelsPerPoint, r.width * _pixelsPerPoint, r.height * _pixelsPerPoint);
+
+    public static Vector2 GetIconSize() => _iconSize;
+    public static void SetIconSize(Vector2 size) => _iconSize = size;
+    public static Vector2 iconSize { get => _iconSize; set => _iconSize = value; }
 
     public static float singleLineHeight => 20f;
     public static float standardVerticalSpacing => 6f;
@@ -46,6 +87,75 @@ namespace UnityEditor
         }
         return _whiteTexture;
       }
+    }
+
+    public static Texture2D grayTexture
+    {
+      get
+      {
+        if (_grayTexture == null)
+        {
+          _grayTexture = new Texture2D(1, 1);
+          _grayTexture.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1f));
+          _grayTexture.Apply();
+        }
+        return _grayTexture;
+      }
+    }
+
+    public static Texture2D blackTexture
+    {
+      get
+      {
+        if (_blackTexture == null)
+        {
+          _blackTexture = new Texture2D(1, 1);
+          _blackTexture.SetPixel(0, 0, Color.black);
+          _blackTexture.Apply();
+        }
+        return _blackTexture;
+      }
+    }
+
+    public static Texture2D transparentTexture
+    {
+      get
+      {
+        if (_transparentTexture == null)
+        {
+          _transparentTexture = new Texture2D(1, 1);
+          _transparentTexture.SetPixel(0, 0, new Color(0f, 0f, 0f, 0f));
+          _transparentTexture.Apply();
+        }
+        return _transparentTexture;
+      }
+    }
+
+    public static GUIContent ObjectContent(Object obj, Type type)
+    {
+      _tempContent.text = obj != null ? obj.name : "None";
+      _tempContent.image = null;
+      _tempContent.tooltip = string.Empty;
+      _ = type;
+      return _tempContent;
+    }
+
+    public static void ShowObjectPicker(Action<int> selector, Type type, bool allowSceneObjects, string searchFilter = "")
+    {
+      _ = selector;
+      _ = allowSceneObjects;
+      _ = searchFilter;
+    }
+
+    public static Texture2D GetObjectThumbnail(Object obj)
+    {
+      _ = obj;
+      return FindTexture("GameObject Icon");
+    }
+
+    public static bool HasObjectThumbnail(Object obj)
+    {
+      return obj != null;
     }
 
     public static Texture2D scriptIcon

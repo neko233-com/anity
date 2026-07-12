@@ -227,18 +227,18 @@ public class Image : MaskableGraphic, ILayoutElement, ICanvasRaycastFilter
   }
 
   public override void SetNativeSize()
-  {
-    var spr = activeSprite;
-    if (spr != null && rectTransform != null)
     {
-      rectTransform.anchorMin = rectTransform.anchorMax;
-      var w = spr.rect.width / spr.pixelsPerUnit;
-      var h = spr.rect.height / spr.pixelsPerUnit;
-      rectTransform.sizeDelta = new Vector2(w, h);
+      var spr = activeSprite;
+      if (spr != null && rectTransform != null)
+      {
+        rectTransform.anchorMin = rectTransform.anchorMax;
+        var w = spr.rect.width / spr.pixelsPerUnit;
+        var h = spr.rect.height / spr.pixelsPerUnit;
+        rectTransform.sizeDelta = new Vector2(w, h);
+      }
     }
-  }
 
-  public virtual void OnPopulateMesh(VertexHelper vh)
+    public override void OnPopulateMesh(VertexHelper vh)
   {
     vh.Clear();
 

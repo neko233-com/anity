@@ -11,6 +11,9 @@ public static class Screen
     private static int _sleepTimeout = SleepTimeout.NeverSleep;
     private static ScreenOrientation _orientation = ScreenOrientation.AutoRotation;
     private static bool _orientationInitialized;
+    private static bool _hasNotch;
+    private static float _safeAreaInsetTop = 24f;
+    private static float _safeAreaInsetBottom;
 
     private static void InitializeOrientation()
     {
@@ -23,6 +26,9 @@ public static class Screen
             autorotateToPortraitUpsideDown = UnityEditor.PlayerSettings.allowedAutorotateToPortraitUpsideDown;
             autorotateToLandscapeLeft = UnityEditor.PlayerSettings.allowedAutorotateToLandscapeLeft;
             autorotateToLandscapeRight = UnityEditor.PlayerSettings.allowedAutorotateToLandscapeRight;
+            _hasNotch = true;
+            _safeAreaInsetTop = 88f;
+            _safeAreaInsetBottom = 34f;
         }
     }
 
@@ -38,7 +44,7 @@ public static class Screen
         set => _height = value;
     }
 
-    public static Resolution currentResolution => new Resolution(_width, _height, _refreshRate);
+    public static Resolution currentResolution => new(_width, _height, _refreshRate);
     public static Resolution[] resolutions => new[]
     {
         new Resolution(800, 600, 60),
@@ -84,8 +90,27 @@ public static class Screen
         set => _sleepTimeout = value;
     }
 
-    public static Rect safeArea => new Rect(0, 0, _width, _height);
-    public static Rect[] cutouts => Array.Empty<Rect>();
+    public static Rect safeArea
+    {
+        get
+        {
+            InitializeOrientation();
+            return new Rect(0, _safeAreaInsetBottom, _width, _height - _safeAreaInsetTop - _safeAreaInsetBottom);
+        }
+    }
+
+    public static Rect[] cutouts
+    {
+        get
+        {
+            InitializeOrientation();
+            if (!_hasNotch) return Array.Empty<Rect>();
+            float notchWidth = _width * 0.2f;
+            float notchX = (_width - notchWidth) * 0.5f;
+            return new[] { new Rect(notchX, _height - 30f, notchWidth, 30f) };
+        }
+    }
+
     public static float brightness { get; set; } = 1f;
     public static bool autorotateToPortrait { get; set; } = true;
     public static bool autorotateToPortraitUpsideDown { get; set; }
@@ -131,26 +156,43 @@ public static class Screen
         SetResolution(width, height, fullscreenMode);
         _refreshRate = preferredRefreshRate;
     }
+
+    public static void SetResolution(int width, int height, FullScreenMode fullscreenMode, RefreshRate preferredRefreshRate)
+    {
+        SetResolution(width, height, fullscreenMode);
+        _refreshRate = (int)preferredRefreshRate.value;
+    }
 }
 
 public struct Resolution
 {
     public int width;
     public int height;
-    public int refreshRate;
-    public int refreshRateRatioNumerator;
-    public int refreshRateRatioDenominator;
+    public RefreshRate refreshRateRatio;
+
+    public int refreshRate
+    {
+        get => (int)refreshRateRatio.value;
+        set => refreshRateRatio = new RefreshRate { numerator = (uint)value, denominator = 1 };
+    }
 
     public Resolution(int width, int height, int refreshRate)
     {
         this.width = width;
         this.height = height;
-        this.refreshRate = refreshRate;
-        refreshRateRatioNumerator = refreshRate;
-        refreshRateRatioDenominator = 1;
+        refreshRateRatio = new RefreshRate { numerator = (uint)refreshRate, denominator = 1 };
     }
 
     public override string ToString() => $"{width} x {height} @{refreshRate}Hz";
+}
+
+public struct RefreshRate
+{
+    public uint numerator;
+    public uint denominator;
+    public float value => denominator == 0 ? 0f : (float)numerator / denominator;
+
+    public override string ToString() => $"{value:F0}Hz";
 }
 
 public enum FullScreenMode
