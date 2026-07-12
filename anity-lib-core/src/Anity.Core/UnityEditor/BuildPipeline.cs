@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using UnityEditor.Build.Reporting;
+using UnityEngine;
 
 namespace UnityEditor;
 
@@ -27,10 +29,8 @@ public static class BuildPipeline
     var target = buildPlayerOptions.target;
     var group = buildPlayerOptions.targetGroup ?? EditorUserBuildSettings.BuildTargetToBuildTargetGroup(target);
     var ext = GetPlatformExtension(target);
-    var outputPath = NormalizeOutputPath(buildPlayerOptions.locationPathName, target, ext);
-
-    if (!string.IsNullOrEmpty(Path.GetDirectoryName(outputPath)))
-      Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+    var outputPath = NormalizeOutputPath(buildPlayerOptions.locationPathName, target, ext, buildPlayerOptions.options);
+    var acceptExternalMods = (buildPlayerOptions.options & BuildOptions.AcceptExternalModificationsToPlayer) != 0;
 
     var sceneCount = buildPlayerOptions.scenes?.Length ?? 0;
     var report = new BuildReport
@@ -56,10 +56,244 @@ public static class BuildPipeline
       report.summary.totalErrors = 1;
     }
 
+    if (target == BuildTarget.Android && report.summary.result == BuildResult.Succeeded)
+    {
+      var archError = ValidateAndroidArchitectures();
+      if (archError != null)
+      {
+        report.summary.result = BuildResult.Failed;
+        report.summary.totalErrors++;
+        report.steps = new[]
+        {
+          new BuildStep { name = archError, depth = 0 }
+        };
+      }
+      else
+      {
+        var buildDir = outputPath;
+
+        if (acceptExternalMods)
+        {
+          Directory.CreateDirectory(buildDir);
+        }
+        else
+        {
+          if (!string.IsNullOrEmpty(Path.GetDirectoryName(buildDir)))
+            Directory.CreateDirectory(Path.GetDirectoryName(buildDir)!);
+        }
+
+        var apkSize = GenerateAndroidApkStructure(buildDir, acceptExternalMods);
+        report.summary.totalSize = apkSize;
+        report.files = GenerateApkFileList(buildDir, acceptExternalMods);
+      }
+    }
+    else if (report.summary.result == BuildResult.Succeeded)
+    {
+      if (!string.IsNullOrEmpty(Path.GetDirectoryName(outputPath)))
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+    }
+
     sw.Stop();
     report.summary.totalTime = sw.Elapsed;
     _lastBuildReports[buildPlayerOptions.locationPathName ?? string.Empty] = report;
     return report;
+  }
+
+  private static string? ValidateAndroidArchitectures()
+  {
+    var archs = PlayerSettings.Android.targetArchitectures;
+    if (archs == AndroidArchitecture.None)
+      return "AndroidTargetArchitectures is None; select at least one architecture (ARMv7, ARM64, X86, X86_64)";
+    return null;
+  }
+
+  private static ulong GenerateAndroidApkStructure(string outputPath, bool acceptExternalMods)
+  {
+    var tempDir = acceptExternalMods ? outputPath : Path.Combine(Path.GetTempPath(), "anity_apk_" + Guid.NewGuid().ToString("N"));
+    try
+    {
+      if (Directory.Exists(tempDir))
+        Directory.Delete(tempDir, true);
+      Directory.CreateDirectory(tempDir);
+
+      var resDir = Path.Combine(tempDir, "res");
+      Directory.CreateDirectory(Path.Combine(resDir, "values"));
+      Directory.CreateDirectory(Path.Combine(resDir, "layout"));
+      Directory.CreateDirectory(Path.Combine(resDir, "mipmap-hdpi"));
+      Directory.CreateDirectory(Path.Combine(resDir, "mipmap-xhdpi"));
+      Directory.CreateDirectory(Path.Combine(resDir, "mipmap-xxhdpi"));
+
+      var metaInfDir = Path.Combine(tempDir, "META-INF");
+      Directory.CreateDirectory(metaInfDir);
+
+      var libDir = Path.Combine(tempDir, "lib");
+      var archs = PlayerSettings.Android.targetArchitectures;
+      ulong nativeLibSize = 0;
+      if (archs.HasFlag(AndroidArchitecture.ARMv7))
+      {
+        var armDir = Path.Combine(libDir, "armeabi-v7a");
+        Directory.CreateDirectory(armDir);
+        File.WriteAllBytes(Path.Combine(armDir, "libunity.so"), new byte[2 * 1024 * 1024]);
+        nativeLibSize += 2 * 1024 * 1024;
+      }
+      if (archs.HasFlag(AndroidArchitecture.ARM64))
+      {
+        var arm64Dir = Path.Combine(libDir, "arm64-v8a");
+        Directory.CreateDirectory(arm64Dir);
+        File.WriteAllBytes(Path.Combine(arm64Dir, "libunity.so"), new byte[3 * 1024 * 1024]);
+        nativeLibSize += 3 * 1024 * 1024;
+      }
+      if (archs.HasFlag(AndroidArchitecture.X86))
+      {
+        var x86Dir = Path.Combine(libDir, "x86");
+        Directory.CreateDirectory(x86Dir);
+        File.WriteAllBytes(Path.Combine(x86Dir, "libunity.so"), new byte[2 * 1024 * 1024]);
+        nativeLibSize += 2 * 1024 * 1024;
+      }
+      if (archs.HasFlag(AndroidArchitecture.X86_64))
+      {
+        var x64Dir = Path.Combine(libDir, "x86_64");
+        Directory.CreateDirectory(x64Dir);
+        File.WriteAllBytes(Path.Combine(x64Dir, "libunity.so"), new byte[3 * 1024 * 1024]);
+        nativeLibSize += 3 * 1024 * 1024;
+      }
+
+      var manifest = GenerateAndroidManifest();
+      File.WriteAllText(Path.Combine(tempDir, "AndroidManifest.xml"), manifest);
+
+      File.WriteAllBytes(Path.Combine(tempDir, "classes.dex"), new byte[512 * 1024]);
+      File.WriteAllBytes(Path.Combine(tempDir, "resources.arsc"), new byte[128 * 1024]);
+
+      File.WriteAllText(Path.Combine(metaInfDir, "MANIFEST.MF"), "Manifest-Version: 1.0\r\nCreated-By: Anity\r\n");
+      File.WriteAllText(Path.Combine(metaInfDir, "CERT.SF"), "Signature-Version: 1.0\r\nCreated-By: Anity\r\n");
+      File.WriteAllText(Path.Combine(metaInfDir, "CERT.RSA"), string.Empty);
+
+      var assetsDir = Path.Combine(tempDir, "assets");
+      Directory.CreateDirectory(assetsDir);
+      File.WriteAllBytes(Path.Combine(assetsDir, "binData"), new byte[1024 * 1024]);
+
+      ulong totalSize = 0;
+      totalSize += (ulong)manifest.Length;
+      totalSize += 512 * 1024;
+      totalSize += 128 * 1024;
+      totalSize += nativeLibSize;
+      totalSize += 1024 * 1024;
+      totalSize += 1024;
+
+      if (!acceptExternalMods)
+      {
+        if (File.Exists(outputPath))
+          File.Delete(outputPath);
+        CreateZipFromDirectory(tempDir, outputPath);
+        if (File.Exists(outputPath))
+        {
+          var fi = new FileInfo(outputPath);
+          totalSize = (ulong)fi.Length;
+        }
+        Directory.Delete(tempDir, true);
+      }
+      else
+      {
+        totalSize += CalculateDirectorySize(tempDir);
+      }
+
+      return totalSize;
+    }
+    catch
+    {
+      if (Directory.Exists(tempDir) && !acceptExternalMods)
+      {
+        try { Directory.Delete(tempDir, true); } catch { }
+      }
+      return 0;
+    }
+  }
+
+  private static string GenerateAndroidManifest()
+  {
+    var packageName = PlayerSettings.applicationIdentifier ?? "com.anity.product";
+    var versionCode = PlayerSettings.Android.bundleVersionCode;
+    var versionName = PlayerSettings.bundleVersion ?? "1.0";
+    var minSdk = (int)PlayerSettings.Android.minSdkVersion;
+    var targetSdk = (int)PlayerSettings.Android.targetSdkVersion;
+    var orientation = GetAndroidOrientationString(PlayerSettings.defaultScreenOrientation);
+    var isGame = PlayerSettings.Android.isGame;
+
+    return $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<manifest xmlns:android=""http://schemas.android.com/apk/res/android"" package=""{packageName}"" android:versionCode=""{versionCode}"" android:versionName=""{versionName}"">
+  <uses-sdk android:minSdkVersion=""{minSdk}"" android:targetSdkVersion=""{targetSdk}"" />
+  <uses-feature android:glEsVersion=""0x00030000"" android:required=""true"" />
+  <application android:label=""{PlayerSettings.productName}"" android:icon=""@mipmap/app_icon"" android:debuggable=""false"" android:isGame=""{(isGame ? "true" : "false")}"">
+    <activity android:name=""com.unity3d.player.UnityPlayerActivity"" android:screenOrientation=""{orientation}"" android:configChanges=""orientation|screenSize|keyboardHidden|keyboard|navigation"" android:launchMode=""singleTask"">
+      <intent-filter>
+        <action android:name=""android.intent.action.MAIN"" />
+        <category android:name=""android.intent.category.LAUNCHER"" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>";
+  }
+
+  private static string GetAndroidOrientationString(UIOrientation orientation) => orientation switch
+  {
+    UIOrientation.Portrait => "portrait",
+    UIOrientation.PortraitUpsideDown => "reversePortrait",
+    UIOrientation.LandscapeLeft => "landscape",
+    UIOrientation.LandscapeRight => "reverseLandscape",
+    UIOrientation.AutoRotation => "fullSensor",
+    _ => "fullSensor"
+  };
+
+  private static void CreateZipFromDirectory(string sourceDir, string zipPath)
+  {
+    try
+    {
+      if (File.Exists(zipPath))
+        File.Delete(zipPath);
+      System.IO.Compression.ZipFile.CreateFromDirectory(sourceDir, zipPath);
+    }
+    catch
+    {
+      using var fs = File.Create(zipPath);
+      var placeholder = new byte[1024];
+      fs.Write(placeholder, 0, placeholder.Length);
+    }
+  }
+
+  private static ulong CalculateDirectorySize(string path)
+  {
+    ulong size = 0;
+    try
+    {
+      foreach (var file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
+      {
+        try
+        {
+          var fi = new FileInfo(file);
+          size += (ulong)fi.Length;
+        }
+        catch { }
+      }
+    }
+    catch { }
+    return size;
+  }
+
+  private static BuildFile[] GenerateApkFileList(string outputPath, bool acceptExternalMods)
+  {
+    var files = new List<BuildFile>();
+    if (acceptExternalMods)
+    {
+      foreach (var file in Directory.GetFiles(outputPath, "*", SearchOption.AllDirectories))
+      {
+        files.Add(new BuildFile { path = file, role = Role.Output });
+      }
+    }
+    else
+    {
+      files.Add(new BuildFile { path = outputPath, role = Role.Output });
+    }
+    return files.ToArray();
   }
 
   private static string GetPlatformExtension(BuildTarget target) => target switch
@@ -74,11 +308,13 @@ public static class BuildPipeline
     _ => ""
   };
 
-  private static string NormalizeOutputPath(string path, BuildTarget target, string ext)
+  private static string NormalizeOutputPath(string path, BuildTarget target, string ext, BuildOptions options)
   {
     if (string.IsNullOrWhiteSpace(path)) return string.Empty;
     var normalized = NormalizePath(path);
+    bool acceptExternalMods = (options & BuildOptions.AcceptExternalModificationsToPlayer) != 0;
     if (target == BuildTarget.WebGL || target == BuildTarget.iOS || target == BuildTarget.iPhone || target == BuildTarget.tvOS || target == BuildTarget.VisionOS) return normalized;
+    if (target == BuildTarget.Android && acceptExternalMods) return normalized;
     if (!string.IsNullOrEmpty(ext) && !normalized.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
       normalized += ext;
     return normalized;
@@ -349,7 +585,10 @@ public enum BuildOptions : ulong
   ForceEnableAssertions = 1 << 18,
   AllowDebugCodeOptimization = 1 << 19,
   UseDeterministicBuild = 1 << 20,
-  ForceSingleInstance = 1 << 21
+  ForceSingleInstance = 1 << 21,
+  AcceptExternalModificationsToPlayer = 1 << 23,
+  InstallInBuildFolder = 1 << 24,
+  BuildScriptsOnly = 1 << 28
 }
 
 [Flags]

@@ -179,6 +179,154 @@ if (buildFail == 0) Console.WriteLine("All platform builds PASSED");
 else Console.WriteLine("Some builds FAILED");
 
 Console.WriteLine();
+Console.WriteLine("=== Screen Orientation & Design Resolution Verification ===");
+
+var orientations = new[] { ScreenOrientation.Portrait, ScreenOrientation.PortraitUpsideDown, ScreenOrientation.LandscapeLeft, ScreenOrientation.LandscapeRight, ScreenOrientation.AutoRotation };
+var resolutions = new[] { (1080, 1920), (1920, 1080), (1280, 720), (2560, 1440), (750, 1334), (1125, 2436) };
+foreach (var (w, h) in resolutions)
+{
+    Screen.SetResolution(w, h, false);
+    bool isLandscape = w > h;
+    float refW = isLandscape ? 1920f : 1080f;
+    float refH = isLandscape ? 1080f : 1920f;
+    float match = isLandscape ? 0f : 1f;
+    float scaleW = w / refW;
+    float scaleH = h / refH;
+    float scaleFactor = match == 0f ? scaleW : match == 1f ? scaleH : Mathf.Pow(scaleW, 1f - match) * Mathf.Pow(scaleH, match);
+    Console.WriteLine($"  {w}x{h,-5} ({(isLandscape?"Landscape":"Portrait")}) refRes={refW}x{refH} match={match:F1} → scaleFactor≈{scaleFactor:F3}");
+}
+
+foreach (var ori in orientations)
+{
+    Screen.orientation = ori;
+    Console.WriteLine($"  Screen.orientation = {ori}, autorotatePortrait={Screen.autorotateToPortrait}, autorotateLandscapeLeft={Screen.autorotateToLandscapeLeft}");
+}
+Screen.orientation = ScreenOrientation.AutoRotation;
+
+PlayerSettings.defaultScreenOrientation = UIOrientation.LandscapeLeft;
+PlayerSettings.allowedAutorotateToLandscapeLeft = true;
+PlayerSettings.allowedAutorotateToLandscapeRight = true;
+PlayerSettings.allowedAutorotateToPortrait = false;
+PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
+Console.WriteLine($"PlayerSettings.defaultScreenOrientation = {PlayerSettings.defaultScreenOrientation}");
+
+Console.WriteLine();
+Console.WriteLine("=== Project Template Verification ===");
+var tmpDir = Path.Combine(Path.GetTempPath(), "anity_templates");
+if (Directory.Exists(tmpDir)) try { Directory.Delete(tmpDir, true); } catch { }
+Directory.CreateDirectory(tmpDir);
+try
+{
+    var t3dLand = Path.Combine(tmpDir, "URP3D_Landscape");
+    var t3dPort = Path.Combine(tmpDir, "URP3D_Portrait");
+    var t3dAuto = Path.Combine(tmpDir, "URP3D_AutoRotate");
+    var t2dLand = Path.Combine(tmpDir, "URP2D_Landscape");
+    var tEmpty = Path.Combine(tmpDir, "Empty");
+
+    ProjectTemplates.Create3DURPProject(t3dLand, ScreenOrientation.LandscapeLeft);
+    ProjectTemplates.Create3DURPProject(t3dPort, ScreenOrientation.Portrait);
+    ProjectTemplates.Create3DURPProject(t3dAuto, ScreenOrientation.AutoRotation);
+    ProjectTemplates.Create2DURPProject(t2dLand, ScreenOrientation.LandscapeLeft);
+    ProjectTemplates.CreateEmptyProject(tEmpty);
+
+    foreach (var p in new[] { t3dLand, t3dPort, t3dAuto, t2dLand, tEmpty })
+    {
+        bool hasProj = File.Exists(Path.Combine(p, "ProjectSettings", "ProjectSettings.asset"));
+        bool hasPkg = File.Exists(Path.Combine(p, "Packages", "manifest.json"));
+        bool hasScene = Directory.GetFiles(Path.Combine(p, "Assets"), "*.unity", SearchOption.AllDirectories).Length > 0;
+        bool hasDirs = Directory.Exists(Path.Combine(p, "Assets", "Scenes"));
+        string name = Path.GetFileName(p);
+        Console.WriteLine($"  Template {name,-25}: ProjSet={hasProj}, Manifest={hasPkg}, Scene={hasScene}, Dirs={hasDirs}");
+    }
+}
+finally
+{
+    try { Directory.Delete(tmpDir, true); } catch { }
+}
+
+Console.WriteLine();
+Console.WriteLine("=== Android APK Build Verification ===");
+string apkOut = Path.Combine("Build", "Android_Vulkan.apk");
+var androidOpts = new BuildPlayerOptions {
+    scenes = new[] { "Assets/Scenes/URP3DDemo.unity" },
+    locationPathName = apkOut,
+    target = BuildTarget.Android,
+    targetGroup = BuildTargetGroup.Android,
+    options = BuildOptions.None
+};
+PlayerSettings.SetGraphicsAPIs(BuildTargetGroup.Android, new[] { GraphicsDeviceType.Vulkan });
+PlayerSettings.defaultScreenOrientation = UIOrientation.LandscapeLeft;
+PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
+PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
+PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevel33;
+PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64 | AndroidArchitecture.ARMv7;
+var apkReport = BuildPipeline.BuildPlayer(androidOpts);
+bool apkOk = apkReport.summary.result == BuildResult.Succeeded;
+Console.WriteLine($"  Android APK: {(apkOk?"OK":"FAIL")} path={apkReport.summary.outputPath} size={apkReport.summary.totalSize}");
+
+if (apkOk)
+{
+    if (Directory.Exists(apkOut))
+    {
+        bool hasManifest = File.Exists(Path.Combine(apkOut, "AndroidManifest.xml"));
+        bool hasClassesDex = File.Exists(Path.Combine(apkOut, "classes.dex"));
+        bool hasRes = Directory.Exists(Path.Combine(apkOut, "res"));
+        bool hasLib = Directory.Exists(Path.Combine(apkOut, "lib"));
+        Console.WriteLine($"  APK Structure (Gradle export): Manifest={hasManifest}, classes.dex={hasClassesDex}, res/={hasRes}, lib/={hasLib}");
+    }
+    else if (File.Exists(apkOut))
+    {
+        var fi = new FileInfo(apkOut);
+        Console.WriteLine($"  APK File: {fi.Length} bytes (binary package)");
+    }
+}
+
+string apkExportDir = Path.Combine("Build", "Android_GradleExport");
+PlayerSettings.defaultScreenOrientation = UIOrientation.LandscapeLeft;
+PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
+var apkExportOpts = new BuildPlayerOptions {
+    scenes = new[] { "Assets/Scenes/URP3DDemo.unity" },
+    locationPathName = apkExportDir,
+    target = BuildTarget.Android,
+    targetGroup = BuildTargetGroup.Android,
+    options = BuildOptions.AcceptExternalModificationsToPlayer
+};
+var apkExportReport = BuildPipeline.BuildPlayer(apkExportOpts);
+bool apkExportOk = apkExportReport.summary.result == BuildResult.Succeeded;
+if (apkExportOk && Directory.Exists(apkExportDir))
+{
+    bool hasManifest = File.Exists(Path.Combine(apkExportDir, "AndroidManifest.xml"));
+    bool hasClassesDex = File.Exists(Path.Combine(apkExportDir, "classes.dex"));
+    bool hasRes = Directory.Exists(Path.Combine(apkExportDir, "res"));
+    bool hasLib = Directory.Exists(Path.Combine(apkExportDir, "lib"));
+    bool hasAssets = Directory.Exists(Path.Combine(apkExportDir, "assets"));
+    bool hasArmv7 = Directory.Exists(Path.Combine(apkExportDir, "lib", "armeabi-v7a"));
+    bool hasArm64 = Directory.Exists(Path.Combine(apkExportDir, "lib", "arm64-v8a"));
+    Console.WriteLine($"  Android Gradle Export: {(apkExportOk?"OK":"FAIL")} path={apkExportDir}");
+    Console.WriteLine($"  Export Structure: Manifest={hasManifest}, classes.dex={hasClassesDex}, res/={hasRes}, lib/={hasLib}, assets/={hasAssets}, armv7={hasArmv7}, arm64={hasArm64}");
+}
+else
+{
+    Console.WriteLine($"  Android Gradle Export: {(apkExportOk?"OK":"FAIL")}");
+}
+
+string apkPortraitOut = Path.Combine("Build", "Android_Portrait.apk");
+PlayerSettings.defaultScreenOrientation = UIOrientation.Portrait;
+PlayerSettings.allowedAutorotateToPortrait = true;
+PlayerSettings.allowedAutorotateToLandscapeLeft = false;
+PlayerSettings.allowedAutorotateToLandscapeRight = false;
+var apkPortraitOpts = new BuildPlayerOptions {
+    scenes = new[] { "Assets/Scenes/URP3DDemo.unity" },
+    locationPathName = apkPortraitOut,
+    target = BuildTarget.Android,
+    targetGroup = BuildTargetGroup.Android,
+    options = BuildOptions.None
+};
+var apkPortraitReport = BuildPipeline.BuildPlayer(apkPortraitOpts);
+bool apkPortraitOk = apkPortraitReport.summary.result == BuildResult.Succeeded;
+Console.WriteLine($"  Android Portrait APK: {(apkPortraitOk?"OK":"FAIL")} path={apkPortraitReport.summary.outputPath}");
+
+Console.WriteLine();
 Console.WriteLine("=== Process & Runtime Verification Summary ===");
 Console.WriteLine($"Application.isPlaying: {Application.isPlaying} (expected: true in play mode)");
 Console.WriteLine($"Application.isFocused: {Application.isFocused}");

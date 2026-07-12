@@ -272,10 +272,12 @@ public static class PlayerSettings
 
   public static int defaultScreenOrientationPortrait { get; set; } = 1;
   public static UIInterfaceOrientationMask defaultInterfaceOrientation { get; set; } = UIInterfaceOrientationMask.AllButUpsideDown;
+  public static UIOrientation defaultScreenOrientation { get; set; } = UIOrientation.AutoRotation;
   public static bool allowedAutorotateToPortrait { get; set; } = true;
   public static bool allowedAutorotateToPortraitUpsideDown { get; set; }
   public static bool allowedAutorotateToLandscapeRight { get; set; } = true;
   public static bool allowedAutorotateToLandscapeLeft { get; set; } = true;
+  public static bool useAnimatedAutoRotation { get; set; } = true;
   public static bool defaultScreenOrientationLandscape { get; set; } = true;
 
   public static readonly iOSSettings iOS = new();

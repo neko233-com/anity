@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace UnityEditor;
@@ -294,15 +295,6 @@ public static class ProjectSettings
     {
         _settings[key] = value!;
     }
-}
-
-public enum UIOrientation
-{
-    Portrait,
-    PortraitUpsideDown,
-    LandscapeLeft,
-    LandscapeRight,
-    AutoRotation
 }
 
 public enum iOSShowActivityIndicatorOnLoading

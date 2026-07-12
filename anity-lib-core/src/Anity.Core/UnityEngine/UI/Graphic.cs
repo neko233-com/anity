@@ -540,17 +540,25 @@ public class CanvasScaler : UIBehaviour
   private ScreenMatchMode _screenMatchMode = ScreenMatchMode.MatchWidthOrHeight;
   private float _matchWidthOrHeight;
   private float _scaleFactor = 1f;
+  private float _uiScaleFactor = 1f;
   private float _referencePixelsPerUnit = 100f;
   private float _dynamicPixelsPerUnit = 1f;
   private float _fallbackScreenDPI = 96f;
   private float _defaultSpriteDPI = 96f;
   private Unit _physicalUnit = Unit.Points;
+  private float _physicalUnitFactor = 1f;
   private Canvas? _canvas;
 
   public ScaleMode uiScaleMode
   {
     get => _uiScaleMode;
     set { _uiScaleMode = value; Handle(); }
+  }
+
+  public float uiScaleFactor
+  {
+    get => _uiScaleFactor;
+    set { _uiScaleFactor = value; Handle(); }
   }
 
   public Vector2 referenceResolution
@@ -586,25 +594,38 @@ public class CanvasScaler : UIBehaviour
   public float dynamicPixelsPerUnit
   {
     get => _dynamicPixelsPerUnit;
-    set => _dynamicPixelsPerUnit = value;
+    set { _dynamicPixelsPerUnit = value; Handle(); }
   }
 
   public float fallbackScreenDPI
   {
     get => _fallbackScreenDPI;
-    set => _fallbackScreenDPI = value;
+    set { _fallbackScreenDPI = value; Handle(); }
   }
 
   public float defaultSpriteDPI
   {
     get => _defaultSpriteDPI;
-    set => _defaultSpriteDPI = value;
+    set { _defaultSpriteDPI = value; Handle(); }
   }
 
   public Unit physicalUnit
   {
     get => _physicalUnit;
-    set => _physicalUnit = value;
+    set { _physicalUnit = value; Handle(); }
+  }
+
+  public float physicalUnitFactor
+  {
+    get => _physicalUnitFactor;
+    set { _physicalUnitFactor = value; Handle(); }
+  }
+
+  protected override void Awake()
+  {
+    base.Awake();
+    _canvas = GetComponent<Canvas>();
+    Handle();
   }
 
   protected override void OnEnable()
@@ -647,18 +668,25 @@ public class CanvasScaler : UIBehaviour
         HandleConstantPhysicalSize();
         break;
     }
+
+    ApplyScaleFactorToCanvas();
   }
 
   protected virtual void HandleConstantPixelSize()
   {
-    _canvas.scaleFactor = _scaleFactor;
-    _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+    _scaleFactor = _uiScaleFactor;
   }
 
   protected virtual void HandleScaleWithScreenSize()
   {
     var screenWidth = (float)Screen.width;
     var screenHeight = (float)Screen.height;
+
+    if (screenWidth <= 0f || screenHeight <= 0f || _referenceResolution.x <= 0f || _referenceResolution.y <= 0f)
+    {
+      _scaleFactor = 1f;
+      return;
+    }
 
     var scaleFactorWidth = screenWidth / _referenceResolution.x;
     var scaleFactorHeight = screenHeight / _referenceResolution.y;
@@ -667,7 +695,10 @@ public class CanvasScaler : UIBehaviour
     switch (_screenMatchMode)
     {
       case ScreenMatchMode.MatchWidthOrHeight:
-        scaleFactor = Mathf.Lerp(scaleFactorWidth, scaleFactorHeight, _matchWidthOrHeight);
+        float logWidth = Mathf.Log(scaleFactorWidth, 2f);
+        float logHeight = Mathf.Log(scaleFactorHeight, 2f);
+        float logWeightedAverage = Mathf.Lerp(logWidth, logHeight, _matchWidthOrHeight);
+        scaleFactor = Mathf.Pow(2f, logWeightedAverage);
         break;
       case ScreenMatchMode.Expand:
         scaleFactor = Mathf.Min(scaleFactorWidth, scaleFactorHeight);
@@ -680,27 +711,63 @@ public class CanvasScaler : UIBehaviour
         break;
     }
 
-    _canvas.scaleFactor = scaleFactor;
-    _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+    _scaleFactor = scaleFactor;
   }
 
   protected virtual void HandleConstantPhysicalSize()
   {
-    var dpi = Screen.dpi;
-    if (dpi == 0f) dpi = _fallbackScreenDPI;
+    var currentDpi = Screen.dpi;
+    var dpi = currentDpi == 0f ? _fallbackScreenDPI : currentDpi;
 
-    float unitMultiplier = _physicalUnit switch
+    float dpiFactor;
+    switch (_physicalUnit)
     {
-      Unit.Centimeters => 2.54f,
-      Unit.Millimeters => 25.4f,
-      Unit.Inches => 1f,
-      Unit.Points => 72f,
-      Unit.Picas => 6f,
-      _ => 1f
-    };
+      case Unit.Centimeters:
+        dpiFactor = dpi / 2.54f;
+        break;
+      case Unit.Millimeters:
+        dpiFactor = dpi / 25.4f;
+        break;
+      case Unit.Inches:
+        dpiFactor = dpi;
+        break;
+      case Unit.Points:
+        dpiFactor = dpi / 72f;
+        break;
+      case Unit.Picas:
+        dpiFactor = dpi / 6f;
+        break;
+      default:
+        dpiFactor = dpi / 72f;
+        break;
+    }
 
-    _canvas.scaleFactor = dpi / (_defaultSpriteDPI / unitMultiplier);
-    _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+    _scaleFactor = _physicalUnitFactor * dpiFactor;
+
+    if (currentDpi != 0f && _defaultSpriteDPI != 0f)
+    {
+      _scaleFactor *= _fallbackScreenDPI / _defaultSpriteDPI;
+    }
+  }
+
+  protected virtual void ApplyScaleFactorToCanvas()
+  {
+    if (_canvas != null)
+    {
+      _canvas.scaleFactor = _scaleFactor;
+      _canvas.referencePixelsPerUnit = _referencePixelsPerUnit;
+
+      if (_canvas.isRootCanvas && gameObject.TryGetComponent<RectTransform>(out var rt))
+      {
+        rt.localScale = new Vector3(_scaleFactor, _scaleFactor, 1f);
+      }
+    }
+  }
+
+  public void SetScaleFactor(float scale)
+  {
+    _scaleFactor = scale;
+    ApplyScaleFactorToCanvas();
   }
 }
 

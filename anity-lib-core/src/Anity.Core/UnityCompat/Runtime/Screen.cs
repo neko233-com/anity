@@ -9,6 +9,22 @@ public static class Screen
     private static bool _fullScreen;
     private static FullScreenMode _fullScreenMode = FullScreenMode.Windowed;
     private static int _sleepTimeout = SleepTimeout.NeverSleep;
+    private static ScreenOrientation _orientation = ScreenOrientation.AutoRotation;
+    private static bool _orientationInitialized;
+
+    private static void InitializeOrientation()
+    {
+        if (_orientationInitialized) return;
+        _orientationInitialized = true;
+        if (Application.isMobilePlatform)
+        {
+            _orientation = (ScreenOrientation)UnityEditor.PlayerSettings.defaultScreenOrientation;
+            autorotateToPortrait = UnityEditor.PlayerSettings.allowedAutorotateToPortrait;
+            autorotateToPortraitUpsideDown = UnityEditor.PlayerSettings.allowedAutorotateToPortraitUpsideDown;
+            autorotateToLandscapeLeft = UnityEditor.PlayerSettings.allowedAutorotateToLandscapeLeft;
+            autorotateToLandscapeRight = UnityEditor.PlayerSettings.allowedAutorotateToLandscapeRight;
+        }
+    }
 
     public static int width
     {
@@ -72,10 +88,23 @@ public static class Screen
     public static Rect[] cutouts => Array.Empty<Rect>();
     public static float brightness { get; set; } = 1f;
     public static bool autorotateToPortrait { get; set; } = true;
-    public static bool autorotateToPortraitUpsideDown { get; set; } = true;
+    public static bool autorotateToPortraitUpsideDown { get; set; }
     public static bool autorotateToLandscapeLeft { get; set; } = true;
     public static bool autorotateToLandscapeRight { get; set; } = true;
-    public static ScreenOrientation orientation { get; set; } = ScreenOrientation.AutoRotation;
+
+    public static ScreenOrientation orientation
+    {
+        get
+        {
+            InitializeOrientation();
+            return _orientation;
+        }
+        set
+        {
+            InitializeOrientation();
+            _orientation = value;
+        }
+    }
 
     public static void SetResolution(int width, int height, bool fullscreen)
     {
@@ -134,12 +163,21 @@ public enum FullScreenMode
 
 public enum ScreenOrientation
 {
-    Portrait = 1,
-    PortraitUpsideDown = 2,
-    LandscapeLeft = 3,
-    LandscapeRight = 4,
-    AutoRotation = 5,
-    Landscape = 6
+    Portrait = 0,
+    PortraitUpsideDown = 1,
+    LandscapeLeft = 2,
+    LandscapeRight = 3,
+    AutoRotation = 4,
+    Landscape = 5
+}
+
+public enum UIOrientation
+{
+    Portrait = 0,
+    PortraitUpsideDown = 1,
+    LandscapeLeft = 2,
+    LandscapeRight = 3,
+    AutoRotation = 4
 }
 
 public static class SleepTimeout
