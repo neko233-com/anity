@@ -305,6 +305,82 @@ public static class EditorUtility
     _instanceIDToObject[obj.GetInstanceID()] = obj;
   }
 
+  public static void DisplayPopupMenu(Rect position, string menuItemPath, MenuCommand command)
+  {
+    _ = position;
+    _ = menuItemPath;
+    _ = command;
+  }
+
+  public static void UncompressTexture(Texture2D texture)
+  {
+    if (texture == null) return;
+    texture.format = TextureFormat.RGBA32;
+  }
+
+  public static bool GetObjectEnabled(UnityEngine.Object target)
+  {
+    if (target == null) return false;
+    if (target is Behaviour behaviour) return behaviour.enabled;
+    if (target is GameObject go) return go.activeSelf;
+    return true;
+  }
+
+  public static void SetObjectEnabled(UnityEngine.Object target, bool enabled)
+  {
+    if (target == null) return;
+    if (target is Behaviour behaviour) behaviour.enabled = enabled;
+    else if (target is GameObject go) go.SetActive(enabled);
+  }
+
+  private static Font? _boldFont;
+  private static Font? _numericFieldFont;
+  private static Font? _standardFont;
+
+  public static Font standardFont
+  {
+    get => _standardFont ??= new Font("Arial");
+    set => _standardFont = value;
+  }
+
+  public static Font BoldFont()
+  {
+    if (_boldFont == null)
+    {
+      _boldFont = new Font("Arial Bold");
+    }
+    return _boldFont;
+  }
+
+  public static Font NumericFieldFont()
+  {
+    if (_numericFieldFont == null)
+    {
+      _numericFieldFont = new Font("Consolas");
+    }
+    return _numericFieldFont;
+  }
+
+  public static string FormatBytes(int bytes)
+  {
+    if (bytes < 0) return "0 B";
+    string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
+    int suffixIndex = 0;
+    double size = bytes;
+    while (size >= 1024 && suffixIndex < suffixes.Length - 1)
+    {
+      size /= 1024;
+      suffixIndex++;
+    }
+    if (suffixIndex == 0) return $"{bytes} B";
+    return $"{size:0.##} {suffixes[suffixIndex]}";
+  }
+
+  public static void UpdateGlobalShaderProperties(float timeSinceStart)
+  {
+    _ = timeSinceStart;
+  }
+
   private static string Normalize(string path)
   {
     return string.IsNullOrWhiteSpace(path)

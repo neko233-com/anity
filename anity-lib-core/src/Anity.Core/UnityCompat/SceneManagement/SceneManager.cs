@@ -145,6 +145,50 @@ public static class SceneManager
     return scene != null ? UnloadByHandle(scene._handle) : new AsyncOperation();
   }
 
+  public static AsyncOperation UnloadSceneAsync(int sceneBuildIndex)
+  {
+    var scene = GetSceneByBuildIndex(sceneBuildIndex);
+    return scene.IsValid() ? UnloadByHandle(scene._handle) : new AsyncOperation();
+  }
+
+  public static AsyncOperation UnloadSceneAsync(Scene scene, UnloadSceneOptions options)
+  {
+    _ = options;
+    return UnloadSceneAsync(scene);
+  }
+
+  public static AsyncOperation UnloadSceneAsync(string sceneName, UnloadSceneOptions options)
+  {
+    _ = options;
+    return UnloadSceneAsync(sceneName);
+  }
+
+  public static AsyncOperation UnloadSceneAsync(int sceneBuildIndex, UnloadSceneOptions options)
+  {
+    _ = options;
+    return UnloadSceneAsync(sceneBuildIndex);
+  }
+
+  public static void LoadScene(string sceneName, LoadSceneParameters parameters)
+  {
+    LoadScene(sceneName, parameters.loadSceneMode);
+  }
+
+  public static void LoadScene(int buildIndex, LoadSceneParameters parameters)
+  {
+    LoadScene(buildIndex, parameters.loadSceneMode);
+  }
+
+  public static AsyncOperation LoadSceneAsync(string sceneName, LoadSceneParameters parameters)
+  {
+    return LoadSceneAsync(sceneName, parameters.loadSceneMode);
+  }
+
+  public static AsyncOperation LoadSceneAsync(int buildIndex, LoadSceneParameters parameters)
+  {
+    return LoadSceneAsync(buildIndex, parameters.loadSceneMode);
+  }
+
   internal static int CreateHandleForUntrackedScene(string sceneName, int buildIndex)
   {
     sceneName = sceneName ?? DefaultSceneName;
@@ -234,6 +278,10 @@ public static class SceneManager
     }
 
     var existing = GetSceneByName(name);
+    if (!existing.IsValid())
+    {
+      existing = GetSceneByPath(name);
+    }
     if (existing.IsValid())
     {
       existing._isLoaded = true;
@@ -241,7 +289,23 @@ public static class SceneManager
       return existing;
     }
 
-    var scene = CreateSceneInternal(name, _buildIndexToHandle.Count, true);
+    var buildIndex = -1;
+    try
+    {
+      var editorScenes = UnityEditor.EditorBuildSettings.scenes;
+      for (int i = 0; i < editorScenes.Length; i++)
+      {
+        if (editorScenes[i].enabled && string.Equals(editorScenes[i].path, name, System.StringComparison.OrdinalIgnoreCase))
+        {
+          buildIndex = i;
+          break;
+        }
+      }
+    }
+    catch { }
+    var scene = CreateSceneInternal(name, buildIndex >= 0 ? buildIndex : _buildIndexToHandle.Count, true);
+    scene.path = name;
+    _pathToHandle[name] = scene._handle;
     sceneLoaded?.Invoke(scene, mode);
 
     return scene;

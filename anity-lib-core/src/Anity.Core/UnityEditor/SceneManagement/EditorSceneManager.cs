@@ -23,21 +23,29 @@ public static class EditorSceneManager
 
   public static bool SaveScene(Scene scene)
   {
+    scene.isDirty = false;
     return true;
   }
 
   public static bool SaveScene(Scene scene, string path)
   {
+    scene.path = path;
+    scene.isDirty = false;
     return true;
   }
 
   public static bool SaveScene(Scene scene, string path, bool saveAsCopy)
   {
-    return true;
+    _ = saveAsCopy;
+    return SaveScene(scene, path);
   }
 
   public static bool CloseScene(Scene scene, bool removeScene)
   {
+    if (removeScene)
+    {
+      SceneManager.UnloadSceneAsync(scene);
+    }
     return true;
   }
 
@@ -53,7 +61,7 @@ public static class EditorSceneManager
 
   public static void MarkSceneDirty(Scene scene)
   {
-    _ = scene;
+    scene.isDirty = true;
   }
 
   public static bool SaveOpenScenes()
@@ -80,7 +88,7 @@ public static class EditorSceneManager
 
   public static Scene LoadSceneInPlayMode(string scenePath, LoadSceneParameters parameters)
   {
-    SceneManager.LoadScene(scenePath, ToRuntimeMode(parameters.loadSceneMode));
+    SceneManager.LoadScene(scenePath, parameters.loadSceneMode);
     return SceneManager.GetActiveScene();
   }
 
@@ -107,16 +115,4 @@ public enum OpenSceneMode
   Single,
   Additive,
   AdditiveWithoutLoading
-}
-
-public readonly struct LoadSceneParameters
-{
-  public readonly OpenSceneMode loadSceneMode;
-  public readonly bool loadMode;
-
-  public LoadSceneParameters(OpenSceneMode mode)
-  {
-    loadSceneMode = mode;
-    loadMode = true;
-  }
 }

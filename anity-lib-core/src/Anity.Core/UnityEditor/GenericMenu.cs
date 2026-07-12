@@ -12,6 +12,18 @@ public sealed class GenericMenu
   public delegate void MenuFunction();
   public delegate void MenuFunction2(object userData);
 
+  public bool AllowDuplicateNames { get; set; }
+
+  public void AddItem(GUIContent content, bool isOn, MenuFunction func)
+  {
+    _entries.Add(new MenuItemEntry(content?.text ?? string.Empty, func is null ? null : () => func(), false, isOn));
+  }
+
+  public void AddItem(GUIContent content, bool isOn, MenuFunction2 func, object userData)
+  {
+    _entries.Add(new MenuItemEntry(content?.text ?? string.Empty, () => func(userData), false, isOn));
+  }
+
   public void AddItem(GUIContent content, bool isOn, Action callback)
   {
     _entries.Add(new MenuItemEntry(content?.text ?? string.Empty, callback, false, isOn));
@@ -92,6 +104,22 @@ public sealed class GenericMenu
       }
       entry.Action?.Invoke();
     }
+  }
+
+  public void ShowContextMenu()
+  {
+    ShowAsContext();
+  }
+
+  public void ShowAsContextAtMousePosition()
+  {
+    ShowAsContext();
+  }
+
+  public void DropDown(UnityEngine.Vector2 position)
+  {
+    _ = position;
+    DropDown(new Rect(position.x, position.y, 0f, 0f));
   }
 
   private readonly struct MenuItemEntry

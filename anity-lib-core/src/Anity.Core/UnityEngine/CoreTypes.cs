@@ -445,65 +445,6 @@ public enum ComputeBufferMode
     SubUpdates = 8
 }
 
-public class ComputeShader : Object
-{
-    private readonly Dictionary<int, float> _floats = new();
-    private readonly Dictionary<int, int> _ints = new();
-    private readonly Dictionary<int, Vector4> _vectors = new();
-    private readonly Dictionary<int, Matrix4x4> _matrices = new();
-    private readonly Dictionary<int, Texture> _textures = new();
-    private readonly Dictionary<int, ComputeBuffer> _buffers = new();
-    private readonly HashSet<string> _kernelNames = new();
-    private int _dispatchCount;
-
-    public bool HasKernel(string name)
-    {
-        return _kernelNames.Contains(name);
-    }
-
-    public int FindKernel(string name)
-    {
-        if (string.IsNullOrEmpty(name)) return -1;
-        _kernelNames.Add(name);
-        return name.GetHashCode();
-    }
-
-    public void SetFloat(int nameID, float val)
-    {
-        _floats[nameID] = val;
-    }
-
-    public void SetInt(int nameID, int val)
-    {
-        _ints[nameID] = val;
-    }
-
-    public void SetVector(int nameID, Vector4 val)
-    {
-        _vectors[nameID] = val;
-    }
-
-    public void SetMatrix(int nameID, Matrix4x4 val)
-    {
-        _matrices[nameID] = val;
-    }
-
-    public void SetTexture(int kernelIndex, int nameID, Texture texture)
-    {
-        _textures[nameID] = texture;
-    }
-
-    public void SetBuffer(int kernelIndex, int nameID, ComputeBuffer buffer)
-    {
-        _buffers[nameID] = buffer;
-    }
-
-    public void Dispatch(int kernelIndex, int threadGroupsX, int threadGroupsY, int threadGroupsZ)
-    {
-        _dispatchCount++;
-    }
-}
-
 public class Flare : Object
 {
     public Texture texture { get; set; }

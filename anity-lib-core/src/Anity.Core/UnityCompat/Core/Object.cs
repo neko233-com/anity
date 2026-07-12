@@ -320,6 +320,12 @@ public class Object : IDisposable
     return _allObjects.FirstOrDefault(o => !o._destroyed && type.IsAssignableFrom(o.GetType()));
   }
 
+  public static Object? FindObjectOfType(Type type, bool includeInactive)
+  {
+    _ = includeInactive;
+    return FindObjectOfType(type);
+  }
+
   public static T? FindObjectOfType<T>() where T : Object
   {
     return (T?)FindObjectOfType(typeof(T));
@@ -328,6 +334,12 @@ public class Object : IDisposable
   public static Object[] FindObjectsOfType(Type type)
   {
     return _allObjects.Where(o => !o._destroyed && type.IsAssignableFrom(o.GetType())).ToArray();
+  }
+
+  public static Object[] FindObjectsOfType(Type type, bool includeInactive)
+  {
+    _ = includeInactive;
+    return FindObjectsOfType(type);
   }
 
   public static T[] FindObjectsOfType<T>() where T : Object
@@ -353,6 +365,18 @@ public class Object : IDisposable
       Array.Sort(objects, (a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));
     }
     return objects;
+  }
+
+  public static Object[] FindObjectsByType(Type type, FindObjectsInactive findObjectsInactive, FindObjectsSortMode sortMode)
+  {
+    _ = findObjectsInactive;
+    return FindObjectsByType(type, sortMode);
+  }
+
+  public static T[] FindObjectsByType<T>(FindObjectsInactive findObjectsInactive, FindObjectsSortMode sortMode) where T : Object
+  {
+    _ = findObjectsInactive;
+    return FindObjectsByType<T>(sortMode);
   }
 
   public static T? FindObjectOfType<T>(bool includeInactive) where T : Object

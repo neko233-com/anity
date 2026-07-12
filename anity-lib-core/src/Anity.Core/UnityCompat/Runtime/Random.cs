@@ -122,15 +122,19 @@ public static class Random
 
   public static Quaternion rotationUniform => rotation;
 
-  public static Color ColorHSV() => ColorHSV(0f, 1f, 0f, 1f, 0f, 1f);
-  public static Color ColorHSV(float hueMin, float hueMax) => ColorHSV(hueMin, hueMax, 0f, 1f, 0f, 1f);
-  public static Color ColorHSV(float hueMin, float hueMax, float saturationMin, float saturationMax) => ColorHSV(hueMin, hueMax, saturationMin, saturationMax, 0f, 1f);
-  public static Color ColorHSV(float hueMin, float hueMax, float saturationMin, float saturationMax, float valueMin, float valueMax)
+  public static Color ColorHSV() => ColorHSV(0f, 1f, 0f, 1f, 0f, 1f, 1f, 1f);
+  public static Color ColorHSV(float hueMin, float hueMax) => ColorHSV(hueMin, hueMax, 0f, 1f, 0f, 1f, 1f, 1f);
+  public static Color ColorHSV(float hueMin, float hueMax, float saturationMin, float saturationMax) => ColorHSV(hueMin, hueMax, saturationMin, saturationMax, 0f, 1f, 1f, 1f);
+  public static Color ColorHSV(float hueMin, float hueMax, float saturationMin, float saturationMax, float valueMin, float valueMax) => ColorHSV(hueMin, hueMax, saturationMin, saturationMax, valueMin, valueMax, 1f, 1f);
+  public static Color ColorHSV(float hueMin, float hueMax, float saturationMin, float saturationMax, float valueMin, float valueMax, float alphaMin, float alphaMax)
   {
     float h = Range(hueMin, hueMax);
     float s = Range(saturationMin, saturationMax);
     float v = Range(valueMin, valueMax);
-    return HSVToRGB(h, s, v);
+    float a = Range(alphaMin, alphaMax);
+    var color = HSVToRGB(h, s, v);
+    color.a = a;
+    return color;
   }
 
   private static Color HSVToRGB(float h, float s, float v)

@@ -11,6 +11,8 @@ public static class Undo
   private static string _groupName = string.Empty;
 
   public static event System.Action? undoRedoPerformed;
+  public static event System.Action? undoPerformed;
+  public static event System.Action? redoPerformed;
 
   public static void RecordObject(Object objectToUndo, string name)
   {
@@ -60,13 +62,14 @@ public static class Undo
     if (_undo.Count == 0) return false;
     var last = _undo.Pop();
     _redo.Push(last);
+    undoPerformed?.Invoke();
     undoRedoPerformed?.Invoke();
     return true;
   }
 
   public static bool UndoAction()
   {
-    return InvertRecording();
+    return PerformUndo();
   }
 
   public static bool Redo()
@@ -78,6 +81,7 @@ public static class Undo
 
     var last = _redo.Pop();
     _undo.Push(last);
+    redoPerformed?.Invoke();
     undoRedoPerformed?.Invoke();
     return true;
   }
@@ -156,12 +160,91 @@ public static class Undo
       var popped = _undo.Pop();
       _redo.Push(popped);
     }
+    undoPerformed?.Invoke();
     undoRedoPerformed?.Invoke();
   }
 
   public static void RegisterFullObjectHierarchyUndo(Object objectToUndo, string name)
   {
     RecordObject(objectToUndo, name);
+  }
+
+  public static void RegisterFullObjectHierarchyUndo(GameObject gameObject, string name)
+  {
+    var all = new List<Object>();
+    if (gameObject != null)
+    {
+      CollectHierarchy(gameObject.transform, all);
+    }
+    RecordObjects(all.ToArray(), name);
+  }
+
+  public static T AddComponent<T>(GameObject gameObject) where T : Component, new()
+  {
+    if (gameObject == null) return null;
+    var comp = gameObject.AddComponent<T>();
+    RegisterCreatedObjectUndo(comp, "Add " + typeof(T).Name);
+    return comp;
+  }
+
+  public static Component AddComponent(GameObject gameObject, System.Type componentType)
+  {
+    if (gameObject == null || componentType == null) return null;
+    var comp = gameObject.AddComponent(componentType);
+    RegisterCreatedObjectUndo(comp, "Add " + componentType.Name);
+    return comp;
+  }
+
+  public static void SetTransformParent(Transform transform, Transform newParent)
+  {
+    if (transform == null) return;
+    RecordObject(transform, "Set Parent");
+    transform.SetParent(newParent, true);
+  }
+
+  public static void SetTransformParent(Transform transform, Transform newParent, string name)
+  {
+    if (transform == null) return;
+    RecordObject(transform, name ?? "Set Parent");
+    transform.SetParent(newParent, true);
+  }
+
+  public static void MoveGameObjectRoot(GameObject go)
+  {
+    if (go == null) return;
+    RecordObject(go.transform, "Move To Root");
+    go.transform.SetParent(null, true);
+  }
+
+  public static void SetSiblingIndex(GameObject go, int index)
+  {
+    if (go == null) return;
+    RecordObject(go.transform, "Reorder");
+    go.transform.SetSiblingIndex(index);
+  }
+
+  public static void SetSiblingIndex(Transform transform, int index)
+  {
+    if (transform == null) return;
+    RecordObject(transform, "Reorder");
+    transform.SetSiblingIndex(index);
+  }
+
+  public static void SetAnchoredPosition(RectTransform rectTransform, Vector2 position)
+  {
+    if (rectTransform == null) return;
+    RecordObject(rectTransform, "Move Element");
+    rectTransform.anchoredPosition = position;
+  }
+
+  public static void Reorder(Transform parent, int fromIndex, int toIndex)
+  {
+    if (parent == null) return;
+    if (fromIndex < 0 || fromIndex >= parent.childCount) return;
+    if (toIndex < 0 || toIndex >= parent.childCount) return;
+    var child = parent.GetChild(fromIndex);
+    RecordObject(child, "Reorder");
+    child.SetSiblingIndex(toIndex);
   }
 
   public static int FlushUndoRecordObjects()
@@ -175,6 +258,24 @@ public static class Undo
   {
     _ = objectToUndo;
     return true;
+  }
+
+  private static void CollectHierarchy(Transform t, List<Object> list)
+  {
+    if (t == null) return;
+    if (t.gameObject != null) list.Add(t.gameObject);
+    list.Add(t);
+    if (t.gameObject != null)
+    {
+      foreach (var comp in t.gameObject.GetComponents<Component>())
+      {
+        if (comp != null && comp != t) list.Add(comp);
+      }
+    }
+    for (int i = 0; i < t.childCount; i++)
+    {
+      CollectHierarchy(t.GetChild(i), list);
+    }
   }
 
   private readonly struct UndoRecord

@@ -1,14 +1,21 @@
+using UnityEngine;
+
 namespace UnityEditor;
 
-public readonly struct MenuCommand
+public sealed class MenuCommand
 {
-  public object? context { get; }
+  public Object context { get; }
   public int userData { get; }
 
-  public MenuCommand(object? context = null, int userData = 0)
+  public MenuCommand(Object context)
+  {
+    this.context = context;
+    this.userData = 0;
+  }
+
+  public MenuCommand(Object context, int userData)
   {
     this.context = context;
     this.userData = userData;
   }
 }
-

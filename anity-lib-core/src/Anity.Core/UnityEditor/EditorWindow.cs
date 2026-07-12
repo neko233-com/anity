@@ -15,11 +15,21 @@ public abstract class EditorWindow
   private bool _initialized;
   private bool _isOpen;
   private bool _focused;
+  private GUIContent? _notification;
+  private bool _hasUnsavedChanges;
 
   public string name => GetType().Name;
   public GUIContent titleContent { get; set; } = new GUIContent("Window");
   public bool wantsMouseMove { get; set; }
   public bool wantsMouseEnterLeaveWindow { get; set; }
+  public bool autoRepaintOnSceneChange { get; set; }
+  public bool maximized { get; set; }
+  public bool hasUnsavedChanges
+  {
+    get => _hasUnsavedChanges;
+    set => _hasUnsavedChanges = value;
+  }
+  public string saveChangesMessage { get; set; } = string.Empty;
   public Vector2 minSize { get; set; } = new Vector2(160f, 120f);
   public Vector2 maxSize { get; set; } = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
   public Rect position { get; set; } = new Rect(0f, 0f, 100f, 100f);
@@ -30,6 +40,14 @@ public abstract class EditorWindow
     get
     {
       lock (_sync) return _openWindows.Count;
+    }
+  }
+
+  public static EditorWindow[] windows
+  {
+    get
+    {
+      lock (_sync) return _openWindows.Values.ToArray();
     }
   }
 
@@ -60,7 +78,13 @@ public abstract class EditorWindow
   protected virtual void OnProjectChange() {}
   protected virtual void OnSelectionChange() {}
   protected virtual void OnInspectorUpdate() {}
+  protected virtual void OnHierarchyChange() {}
   protected virtual void OnBeforeSerialize() {}
+  public virtual void SaveChanges() { _hasUnsavedChanges = false; }
+  public virtual void DiscardChanges() { _hasUnsavedChanges = false; }
+
+  public static void BeginWindows() {}
+  public static void EndWindows() {}
 
   public void Close()
   {
@@ -125,6 +149,41 @@ public abstract class EditorWindow
   public void ShowModal() => Show(true);
   public void ShowPopup() => Show(true);
   public void ShowUtility() => Show(true);
+  public void ShowTab() => Show(false);
+  public void ShowAuxWindow() => Show(true);
+
+  public void ShowAsDropDown(Rect buttonRect, Vector2 windowSize)
+  {
+    position = new Rect(buttonRect.x, buttonRect.yMax, windowSize.x, windowSize.y);
+    Show(true);
+  }
+
+  public void ShowNotification(GUIContent notification)
+  {
+    ShowNotification(notification, 4.0);
+  }
+
+  public void ShowNotification(GUIContent notification, double fadeoutWait)
+  {
+    _notification = notification;
+    _ = fadeoutWait;
+  }
+
+  public void RemoveNotification()
+  {
+    _notification = null;
+  }
+
+  public void SendEvent(Event e)
+  {
+    _ = e;
+  }
+
+  public bool SendEvent(EventType type)
+  {
+    _ = type;
+    return true;
+  }
 
   public static EditorWindow GetWindow(Type t, bool utility = false, string? title = null)
   {
