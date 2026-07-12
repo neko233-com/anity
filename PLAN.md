@@ -1,30 +1,28 @@
 # PLAN
 
+## 2026-07-13i（本次）— 真 LZ4 + UWR 证书/Cookie + Addressables 标签依赖 + IL2CPP 工具链 + Metal/Vulkan
+
+### 已完成
+- **真 LZ4 block codec**（`Lz4Codec` 纯 C#）：Encode/Decode；AB 默认 codec=LZ4，Deflate 兼容
+- **UWR Cookie/证书**：共享 CookieContainer；CertificateHandler 接 TLS 回调；Accept/Reject/Callback
+- **Addressables 标签/依赖图**：AddLabel、LoadAssetsByLabel、MergeMode Intersection、递归依赖
+- **Il2CppToolchain**：CMake/config.h/MethodMap/多 ABI、DetectCompiler、TryNativeCompile 软跳过
+- **PlatformGraphics** Metal/Vulkan 矩阵测试
+- **测试**：Core **174 全绿**；已 push `2cf7382`
+
+### 下一次要做（优先）
+1. 官方 Unity AB 二进制对照门禁（AB.Compare）
+2. IL2CPP → 真 cl/clang 全量链接与 player 启动
+3. Metal/Vulkan 原生设备交换链（anity-native）
+
 ## 2026-07-13h（本次）— UnityWebRequest + Addressables + AB ALZ4 + Instantiate 修复
 
 ### 已完成
-- **UnityWebRequest 真网络栈**
-  - `HttpClient` 发请求；`timeout`/`redirectLimit` 生效；GZip/Deflate 自动解压
-  - `file://` + 本地绝对/相对路径读取；`WaitForCompletion` 阻塞等待
-  - `Abort` 取消 CTS；DownloadHandler 分块 ReceiveData；UTF-8 BOM 剥离
-  - `DownloadHandlerAssetBundle` 内存加载 AB（缓存 data，避免 stream dispose 丢数据）
-  - 工厂：Get/Post/Put/Delete/Head/GetTexture/GetAudioClip/GetAssetBundle
-- **Addressables 官方风格**
-  - Catalog JSON Write/Load、Register/RegisterBundle、ClearCatalog
-  - LoadAssetAsync/LoadAssetsAsync/InstantiateAsync/LoadSceneAsync
-  - DownloadDependenciesAsync、GetDownloadSizeAsync、BuildPlayerContent
-  - ResourceLocator、AssetReference、AsyncOperationHandle/Status
-- **AssetBundle ChunkBasedCompression（ALZ4）**
-  - Magic `ALZ4` + Deflate 体；`MaybeCompress` 挂 BuildPipeline；`DecompressIfNeeded` 挂 LoadFromMemory
-  - Uncompressed 保持 UnityFS 头
-- **修复** `Object.Instantiate` 泛型/非泛型重载无限递归 → `InstantiateInternal`
-- **测试**：UWR 17 + Addressables 17 + AB 16 = 本批 50；Core 全量 **133 通过**
-- Screen 状态类测试加 `[Collection("ScreenState")]` 防并行 race
+- **UnityWebRequest 真网络栈**、Addressables catalog、ALZ4、Instantiate 修复
+- **测试**：Core **133 通过**
 
 ### 下一次要做（优先）
-1. 真 LZ4 帧（非 ALZ4+Deflate）与 Unity 官方 AB 二进制对照
-2. UWR 远程 HTTPS 证书/Cookie 深度；Addressables 标签/依赖图
-3. IL2CPP 真工具链；Metal/Vulkan 设备验证
+1. 真 LZ4 / UWR 证书 Cookie / Addressables 标签（见 13i）
 
 ## 2026-07-13g（本次）— PlayerPrefs/本地存储 + CI 实跑 + push
 
