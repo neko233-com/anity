@@ -1,5 +1,21 @@
 # PLAN
 
+## 2026-07-13g（本次）— PlayerPrefs/本地存储 + CI 实跑 + push
+
+### 已完成
+- **PlayerPrefs 深度对齐**
+  - 类型化存储 `{t,v}`、大小写敏感、线程安全、原子 Save
+  - Get 类型强制转换（int/float/string）、GetAllKeys/GetKeyType、SaveIfDirty
+  - `SetSavePathForTests` 隔离 CI/单测；Application.Quit / CLI quit 自动刷盘
+- **EditorPrefs** 持久化路径 + Load/Save 原子写 + 测试隔离
+- **LocalStorage** 对接 persistent/temp/streaming/data 路径读写
+- **CI** `.github/workflows/ci.yml`：dotnet build + 全量 unit tests + CLI smoke（win/ubuntu）
+- **测试**：PlayerPrefs 相关 **17 通过**；Core 全量再验
+
+### 下一次要做（优先）
+1. 继续其余模块边界测试与行为对齐（Addressables、LZ4 AB）
+2. CI 加 native cmake 矩阵与 AB.Compare 门禁（已有 job）
+
 ## 2026-07-13f（本次）— AssetBundle 全链路 + GraphicRaycaster + 测试 80 + push
 
 ### 已完成

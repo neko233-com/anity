@@ -117,6 +117,7 @@ public static class Application
     }
     if (canQuit)
     {
+      try { PlayerPrefs.SaveIfDirty(); } catch { }
       quitting?.Invoke();
     }
   }

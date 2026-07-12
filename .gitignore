@@ -167,6 +167,14 @@ secrets/
 *.pfx
 *.p12
 
+# ----- PlayerPrefs / EditorPrefs local files -----
+PlayerPrefs.json
+PlayerPrefs.json.tmp
+EditorPrefs.json
+anity-editorprefs.json
+**/Anity/PlayerPrefs/**
+**/Anity/Editor/**
+
 # ----- AI / local agent workspaces -----
 .mimocode/
 docs/compose/

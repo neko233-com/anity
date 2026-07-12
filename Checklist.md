@@ -34,7 +34,9 @@
 | `Cursor` | ✅ | visible/lockState(CursorLockMode: None/Locked/Confined)、SetCursor(texture,hotspot,CursorMode) |
 | `CullingGroup` | ✅ | enabled/onStateChanged/targetCamera、SetBoundingSpheres/SetBoundingDistances/SetBoundingSphereCount、IsVisible/GetDistance/QueryIndices/Dispose、BoundingSphere/CullingGroupEvent |
 | `LayerMask` | ✅ | NameToLayer/LayerToName字典、GetMask位运算、隐式int转换、内置层 |
-| `PlayerPrefs` | ✅ | Dictionary存储int/float/string、Set/Get/HasKey/Delete/Save、默认值参数 |
+| `PlayerPrefs` | ✅ | 类型化JSON、大小写敏感、线程安全、原子Save、类型转换、GetAllKeys、Quit刷盘；测试≥17 |
+| `EditorPrefs` | ✅ | 独立持久化、Int/Float/String/Bool、Load/Save原子写、测试隔离路径 |
+| `LocalStorage` | ✅ | persistent/temp/streaming/data 路径读写删除 |
 | `Random` | ✅ | System.Random封装、state/Random.State/InitState/value/Range(float)/Range(int)/ColorHSV(8参)/insideUnitCircle/insideUnitSphere/onUnitSphere/rotation/rotationUniform |
 | `Resources` | ✅ | Dictionary资源存储、Load/LoadAll/FindObjectsOfTypeAll、UnloadAsset/UnloadUnusedAssets、LoadAsync |
 | `JsonUtility` | ✅ | System.Text.Json序列化/反序列化、FromJsonOverwrite反射覆盖 |

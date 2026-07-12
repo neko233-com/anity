@@ -126,7 +126,11 @@ public sealed class CliHost
             }
 
             if (parsed.Quit || parsed.BatchMode)
+            {
+                try { PlayerPrefs.SaveIfDirty(); } catch { }
+                try { UnityEditor.EditorPrefs.SaveIfDirty(); } catch { }
                 WriteLine("quit=1");
+            }
 
             FlushLog(parsed.LogFile);
             return _exitCode;
