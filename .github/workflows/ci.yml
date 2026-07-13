@@ -5,10 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch/PR
+concurrency:
+  group: anity-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +33,7 @@ jobs:
             10.0.x
             8.0.x
 
-      - name: Verify environment (scripts)
+      - name: Verify environment
         shell: bash
         run: |
           if [ -f ./_scripts/verify-env.sh ]; then
@@ -37,10 +44,11 @@ jobs:
       - name: Restore & build core stack
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           dotnet build anity-lib-core/src/Anity.Core/Anity.Core.csproj -c Release --nologo
           dotnet build anity-agent/src/Anity.Agent/Anity.Agent.csproj -c Release --nologo
           dotnet build anity-cli/src/Anity.Cli/Anity.Cli.csproj -c Release --nologo
+          # Optional products — do not fail the required gate
           dotnet build anity-editor/src/Anity.Editor.Host/Anity.Editor.Host.csproj -c Release --nologo || true
           dotnet build anity-webgl/src/Anity.WebGL/Anity.WebGL.csproj -c Release --nologo || true
           dotnet build anity-hub/src/Anity.Hub/Anity.Hub.csproj -c Release --nologo || true
@@ -62,7 +70,9 @@ jobs:
       - name: Unit tests (required)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          # Single-threaded collection reduces flaky shared static state across assemblies
+          export DOTNET_CLI_UI_LANGUAGE=en
           dotnet test anity-lib-core/tests/Anity.Core.Tests/Anity.Core.Tests.csproj -c Release --nologo --verbosity minimal
           dotnet test anity-lib-core/tests/Anity.AB.Compare.Tests/Anity.AB.Compare.Tests.csproj -c Release --nologo --verbosity minimal
           dotnet test anity-agent/tests/Anity.Agent.Tests/Anity.Agent.Tests.csproj -c Release --nologo --verbosity minimal
@@ -71,9 +81,14 @@ jobs:
       - name: CLI smoke
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           CLI="anity-cli/src/Anity.Cli/bin/Release/net10.0/anity"
           if [ "${{ runner.os }}" = "Windows" ]; then CLI="${CLI}.exe"; fi
+          if [ ! -f "$CLI" ]; then
+            # Fallback path if TFM differs
+            CLI=$(find anity-cli/src/Anity.Cli/bin/Release -name 'anity' -o -name 'anity.exe' 2>/dev/null | head -n1)
+          fi
+          echo "CLI=$CLI"
           "$CLI" -version
           "$CLI" -batchmode -quit -nographics
 
@@ -84,12 +99,13 @@ jobs:
           if [ "${{ runner.os }}" = "Windows" ]; then
             pwsh -File ./_scripts/gap-audit.ps1 || true
           else
-            echo "gap-audit is PowerShell-first; skip on Unix or install pwsh"
+            echo "gap-audit is PowerShell-first; skip on Unix"
           fi
 
   ab-compare:
     runs-on: ubuntu-latest
     needs: build-and-test
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -97,13 +113,14 @@ jobs:
           dotnet-version: 10.0.x
       - name: AB compare binary gate (required)
         run: |
-          set -e
+          set -euo pipefail
           dotnet test anity-lib-core/tests/Anity.AB.Compare.Tests/Anity.AB.Compare.Tests.csproj -c Release --nologo --verbosity minimal
           echo "AB.Compare gate passed"
 
   native-graphics:
     runs-on: ${{ matrix.os }}
     needs: build-and-test
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -113,7 +130,7 @@ jobs:
       - name: Configure & build anity-native
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           cmake -S anity-native -B anity-native/build-ci -DCMAKE_BUILD_TYPE=Release
           cmake --build anity-native/build-ci --config Release
           echo "native graphics (swapchain Metal/Vulkan stubs) built"

@@ -14,13 +14,26 @@ public class Object : IDisposable
   private bool _dontDestroyOnLoad;
   private float _destroyDelay = -1f;
   private static readonly HashSet<Object> _allObjects = new();
+  private static readonly object _allObjectsLock = new();
   private static readonly List<ObjectDestroyInfo> _destroyQueue = new();
   private static int _nextInstanceId;
 
   public Object()
   {
     _instanceId = ++_nextInstanceId;
-    _allObjects.Add(this);
+    lock (_allObjectsLock)
+      _allObjects.Add(this);
+  }
+
+  /// <summary>Thread/test-safe snapshot of live objects (avoids Collection was modified).</summary>
+  private static Object[] SnapshotAllObjects()
+  {
+    lock (_allObjectsLock)
+    {
+      var arr = new Object[_allObjects.Count];
+      _allObjects.CopyTo(arr);
+      return arr;
+    }
   }
 
   public HideFlags hideFlags
@@ -76,7 +89,8 @@ public class Object : IDisposable
     }
 
     obj._destroyed = true;
-    _allObjects.Remove(obj);
+    lock (_allObjectsLock)
+      _allObjects.Remove(obj);
     _destroyQueue.RemoveAll(x => x.Target == obj);
 
     if (obj is GameObject gameObject)
@@ -324,7 +338,7 @@ public class Object : IDisposable
 
   public static Object? FindObjectOfType(Type type)
   {
-    return _allObjects.FirstOrDefault(o => !o._destroyed && type.IsAssignableFrom(o.GetType()));
+    return SnapshotAllObjects().FirstOrDefault(o => o != null && !o._destroyed && type.IsAssignableFrom(o.GetType()));
   }
 
   public static Object? FindObjectOfType(Type type, bool includeInactive)
@@ -340,7 +354,7 @@ public class Object : IDisposable
 
   public static Object[] FindObjectsOfType(Type type)
   {
-    return _allObjects.Where(o => !o._destroyed && type.IsAssignableFrom(o.GetType())).ToArray();
+    return SnapshotAllObjects().Where(o => o != null && !o._destroyed && type.IsAssignableFrom(o.GetType())).ToArray();
   }
 
   public static Object[] FindObjectsOfType(Type type, bool includeInactive)
@@ -351,7 +365,7 @@ public class Object : IDisposable
 
   public static T[] FindObjectsOfType<T>() where T : Object
   {
-    return _allObjects.OfType<T>().Where(o => !o._destroyed).ToArray();
+    return SnapshotAllObjects().OfType<T>().Where(o => !o._destroyed).ToArray();
   }
 
   public static Object[] FindObjectsByType(Type type, FindObjectsSortMode sortMode)
@@ -470,10 +484,10 @@ public class Object : IDisposable
 
   public static Object[] GetAllObjects()
   {
-    return _allObjects.Where(o => !o._destroyed).ToArray();
+    return SnapshotAllObjects().Where(o => o != null && !o._destroyed).ToArray();
   }
 
-  internal static IReadOnlyCollection<Object> AllObjects => _allObjects;
+  internal static IReadOnlyCollection<Object> AllObjects => SnapshotAllObjects();
 
   internal void RemoveComponentInternal(Component component)
   {

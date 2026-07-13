@@ -187,12 +187,24 @@ public static class StaticOcclusionCulling
         isRunning = true;
         try
         {
-            // Collect all OcclusionArea components in scenes if available; else default volume
-            var areas = UnityEngine.Object.FindObjectsOfType<OcclusionArea>();
-            if (areas != null && areas.Length > 0)
+            // Snapshot areas first — safe under concurrent tests / object registry churn
+            OcclusionArea[] areas;
+            try
             {
-                foreach (var a in areas)
-                    OcclusionCulling.RegisterArea(a);
+                areas = UnityEngine.Object.FindObjectsOfType<OcclusionArea>() ?? Array.Empty<OcclusionArea>();
+            }
+            catch
+            {
+                areas = Array.Empty<OcclusionArea>();
+            }
+
+            if (areas.Length > 0)
+            {
+                for (int i = 0; i < areas.Length; i++)
+                {
+                    if (areas[i] != null)
+                        OcclusionCulling.RegisterArea(areas[i]);
+                }
             }
             else
             {

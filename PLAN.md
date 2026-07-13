@@ -1,5 +1,22 @@
 # PLAN
 
+## 2026-07-13q — CI 根因修复：Public 仓库 + Object 枚举竞态
+
+### 根因
+- GitHub Actions 注解：`payments have failed or spending limit needs to be increased`
+- Job **从未分配 runner**（steps 空、3–5 秒失败）——非代码失败
+- 仓库曾为 **private**，免费额度/账单阻断 runner
+
+### 已完成
+- 仓库改为 **public**（公开仓库 Actions 免费）
+- `Object.FindObjects*` 快照 + 锁，消除 `Collection was modified` 竞态
+- `StaticOcclusionCulling.Compute` 安全枚举
+- `ci.yml`：concurrency、timeout、`workflow_dispatch`、`set -euo pipefail`
+
+### 验收
+- 本地 Release Core 全绿
+- GitHub Actions anity-ci 全 job success
+
 ## 2026-07-13p — Vulkan Android/X11/Wayland surface + Timeline Signal/Window
 
 ### 已完成
