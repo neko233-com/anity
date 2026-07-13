@@ -14,8 +14,9 @@
 - `ci.yml`：concurrency、timeout、`workflow_dispatch`、`set -euo pipefail`
 
 ### 验收
-- 本地 Release Core 全绿
-- GitHub Actions anity-ci 全 job success
+- 本地 Release Core 全绿（345）
+- GitHub Actions **anity-ci 全 job success**（run 29222163518）
+- 额外修复：`IsMsvcCl` 在 Linux 上正确解析 Windows 风格 `cl.exe` 路径
 
 ## 2026-07-13p — Vulkan Android/X11/Wayland surface + Timeline Signal/Window
 
