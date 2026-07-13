@@ -607,24 +607,5 @@ namespace UnityEngine.Rendering
   }
 }
 
-public class AnimationCurve
-{
-    public Keyframe[] keys { get; set; } = Array.Empty<Keyframe>();
-    public float preWrapMode { get; set; }
-    public float postWrapMode { get; set; }
+// AnimationCurve / Keyframe live in UnityEngine (UnityCompat/Runtime) — do not redefine here.
 
-    public AnimationCurve() { }
-    public AnimationCurve(params Keyframe[] keys) { this.keys = keys; }
-    public float Evaluate(float time) => 0f;
-
-    public static AnimationCurve Linear(float start, float end, float duration = 1f) => new();
-    public static AnimationCurve EaseInOut(float start, float end, float duration = 1f) => new();
-}
-
-public struct Keyframe
-{
-    public float time;
-    public float value;
-    public float inTangent;
-    public float outTangent;
-}

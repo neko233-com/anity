@@ -27,6 +27,8 @@
 | `Plane` | ✅ | normal/distance、三点构造、Raycast射线相交、GetDistanceToPoint/ClosestPointOnPlane/GetSide/SameSide/Flip/Translate |
 | `Color/Color32` | ✅ | r/g/b/a、基本运算、*float运算符、Color↔Color32隐式转换、Lerp/grayscale/linear/gamma/maxColorComponent、Vector4隐式转换 |
 | `Mathf` | ✅ | 完整数学 API；**PerlinNoise** 为 Improved Perlin 映射到 Unity [0,1] 区间（非恒 0） |
+| `AnimationCurve` | ✅ | Cubic Hermite + tangents；Linear/EaseInOut/Constant；Loop/PingPong wrap；SmoothTangents；测试≥14 |
+| `Vector3.Slerp` | ✅ | Slerp/SlerpUnclamped 球面插值 |
 | `Time` | ✅ | time/timeScale/unscaledTime/fixedDeltaTime/fixedUnscaledTime/smoothDeltaTime/timeSinceLevelLoad/frameCount/realtimeSinceStartup/captureDeltaTime/maximumDeltaTime/maximumParticleDeltaTime/inFixedTimeStep、双精度变体timeAsDouble/unscaledTimeAsDouble/fixedTimeAsDouble/fixedUnscaledTimeAsDouble/realtimeSinceStartupAsDouble/timeSinceLevelLoadAsDouble |
 | `Application` | ✅ | 进程信息(PID/isPlaying/isFocused/isPaused/isBatchMode/isEditor)、真实平台路径(dataPath/persistentDataPath/streamingAssetsPath/temporaryCachePath)、RuntimePlatform自动检测(OS/Arch)、unityVersion="2022.3.61f1"、identifier/companyName/productName/version/buildGUID与PlayerSettings同步、systemLanguage/internetReachability/runInBackground/targetFrameRate/sleepTimeout/installMode/sandboxType/productGUID/cloudProjectId/genuine、Quit/OpenURL/SetLogCallback/RequestAdvertisingIdentifierAsync、事件:focusChanged/pausing/logMessageReceived/lowMemory/wantsToQuit/deepLinkActivated |
 | `Debug` | ✅ | ILogger/ILogHandler接口、ConsoleLogHandler、Log/Warning/Error/LogException/LogAssertion/Assert、LogFormat全系列、developerConsoleVisible/isDebugBuild/unityLogger、LogType/LogOption枚举 |

@@ -1,4 +1,18 @@
-﻿# PLAN
+# PLAN
+
+## 2026-07-13m — AnimationCurve Hermite + Vector3.Slerp + multipart + 去假 Curve
+
+### 已完成
+- **删除** `Volume.cs` 全局假 `AnimationCurve`/`Keyframe`（`Evaluate=>0` 污染 API）
+- **AnimationCurve**：Cubic Hermite 求值、Linear 正确斜率、EaseInOut/Constant、Loop wrap
+- **Vector3.Slerp / SlerpUnclamped** 球面插值
+- **UnityWebRequest.SerializeFormSections** 真 multipart body；GenerateBoundary 可打印
+- **测试**：AnimationCurveAndMathDepth **14**；Core **239** 全绿
+
+### 下一次
+1. Vulkan 真 surface/swapchain
+2. Metal CAMetalLayer
+3. 继续清其它全局假类型 / 深度行为
 
 ## 2026-07-13k（本次）— IL2CPP 端到端打包管线 + CLI 对接 + goal 验收
 

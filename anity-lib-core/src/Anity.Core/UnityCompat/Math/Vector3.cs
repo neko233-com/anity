@@ -193,6 +193,51 @@ public struct Vector3 : IEquatable<Vector3>
     a.y + (b.y - a.y) * t,
     a.z + (b.z - a.z) * t);
 
+  /// <summary>Spherical linear interpolation (Unity Vector3.Slerp).</summary>
+  public static Vector3 Slerp(Vector3 a, Vector3 b, float t)
+  {
+    t = Mathf.Clamp01(t);
+    return SlerpUnclamped(a, b, t);
+  }
+
+  public static Vector3 SlerpUnclamped(Vector3 a, Vector3 b, float t)
+  {
+    float magA = a.magnitude;
+    float magB = b.magnitude;
+    if (magA < 1e-6f || magB < 1e-6f)
+      return LerpUnclamped(a, b, t);
+
+    Vector3 na = a / magA;
+    Vector3 nb = b / magB;
+    float dot = Mathf.Clamp(Dot(na, nb), -1f, 1f);
+    // Nearly parallel → lerp
+    if (dot > 0.9995f)
+    {
+      Vector3 r = LerpUnclamped(a, b, t);
+      float mag = Mathf.Lerp(magA, magB, t);
+      float rm = r.magnitude;
+      return rm > 1e-6f ? r * (mag / rm) : zero;
+    }
+    // Opposite / angled: spherical
+    if (dot < -0.9995f)
+    {
+      // pick orthogonal axis
+      Vector3 axis = MathF.Abs(na.x) < 0.9f ? Cross(na, right) : Cross(na, up);
+      axis.Normalize();
+      float ang = MathF.PI * t;
+      Vector3 dir = na * MathF.Cos(ang) + axis * MathF.Sin(ang);
+      return dir * Mathf.Lerp(magA, magB, t);
+    }
+    float theta = MathF.Acos(dot) * t;
+    Vector3 relative = (nb - na * dot);
+    float relMag = relative.magnitude;
+    if (relMag < 1e-6f) return LerpUnclamped(a, b, t);
+    relative /= relMag;
+    Vector3 dir2 = na * MathF.Cos(theta) + relative * MathF.Sin(theta);
+    float outMag = Mathf.Lerp(magA, magB, t);
+    return dir2 * outMag;
+  }
+
   public static float InverseLerp(Vector3 a, Vector3 b, Vector3 value)
   {
     Vector3 ab = b - a;

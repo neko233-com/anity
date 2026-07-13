@@ -465,8 +465,49 @@ public class UnityWebRequest : IDisposable
 
     public static string EscapeURL(string s) => Uri.EscapeDataString(s);
     public static string UnEscapeURL(string s) => Uri.UnescapeDataString(s);
-    public static string SerializeFormSections(List<IMultipartFormSection> sections, byte[] boundary) => string.Empty;
-    public static byte[] GenerateBoundary() => Guid.NewGuid().ToByteArray();
+
+    /// <summary>
+    /// Serialize multipart form sections into body string (Unity API returns string; binary as Latin1).
+    /// </summary>
+    public static string SerializeFormSections(List<IMultipartFormSection> sections, byte[] boundary)
+    {
+        if (sections == null || sections.Count == 0) return string.Empty;
+        byte[] bound = boundary != null && boundary.Length > 0 ? boundary : GenerateBoundary();
+        string boundStr = Encoding.ASCII.GetString(bound);
+        using var ms = new MemoryStream();
+        foreach (var section in sections)
+        {
+            if (section == null) continue;
+            string header = "--" + boundStr + "\r\n";
+            header += "Content-Disposition: form-data; name=\"" + (section.sectionName ?? "") + "\"";
+            if (!string.IsNullOrEmpty(section.fileName))
+                header += "; filename=\"" + section.fileName + "\"";
+            header += "\r\n";
+            if (!string.IsNullOrEmpty(section.contentType))
+                header += "Content-Type: " + section.contentType + "\r\n";
+            header += "\r\n";
+            var hb = Encoding.UTF8.GetBytes(header);
+            ms.Write(hb, 0, hb.Length);
+            var data = section.sectionData ?? Array.Empty<byte>();
+            ms.Write(data, 0, data.Length);
+            var crlf = Encoding.ASCII.GetBytes("\r\n");
+            ms.Write(crlf, 0, crlf.Length);
+        }
+        var end = Encoding.ASCII.GetBytes("--" + boundStr + "--\r\n");
+        ms.Write(end, 0, end.Length);
+        // Unity returns string — use ISO-8859-1 so byte values 0-255 survive
+        return Encoding.GetEncoding("iso-8859-1").GetString(ms.ToArray());
+    }
+
+    public static byte[] GenerateBoundary()
+    {
+        // Unity-style printable boundary (not raw GUID bytes)
+        var raw = Guid.NewGuid().ToByteArray();
+        var sb = new StringBuilder(32);
+        for (int i = 0; i < raw.Length; i++)
+            sb.Append(raw[i].ToString("x2"));
+        return Encoding.ASCII.GetBytes(sb.ToString());
+    }
     public static string SerializeSimpleForm(Dictionary<string, string> formFields)
     {
         if (formFields == null || formFields.Count == 0) return string.Empty;

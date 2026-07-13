@@ -46,9 +46,12 @@ public class AnimationCurve
 
   public static AnimationCurve Linear(float timeStart, float valueStart, float timeEnd, float valueEnd)
   {
+    // Unity: constant slope as in/out tangents so Hermite reduces to linear
+    float dt = timeEnd - timeStart;
+    float slope = MathF.Abs(dt) > 1e-8f ? (valueEnd - valueStart) / dt : 0f;
     return new AnimationCurve(
-      new Keyframe(timeStart, valueStart, 0f, 0f),
-      new Keyframe(timeEnd, valueEnd, 0f, 0f)
+      new Keyframe(timeStart, valueStart, 0f, slope),
+      new Keyframe(timeEnd, valueEnd, slope, 0f)
     );
   }
 
@@ -62,11 +65,11 @@ public class AnimationCurve
 
   public static AnimationCurve EaseInOut(float timeStart, float valueStart, float timeEnd, float valueEnd)
   {
-    var curve = new AnimationCurve();
-    var startKey = new Keyframe(timeStart, valueStart) { outTangent = 0f };
-    var endKey = new Keyframe(timeEnd, valueEnd) { inTangent = 0f };
-    curve.AddKey(startKey);
-    curve.AddKey(endKey);
+    // Unity EaseInOut: zero end-tangents (smooth ease)
+    var curve = new AnimationCurve(
+      new Keyframe(timeStart, valueStart, 0f, 0f),
+      new Keyframe(timeEnd, valueEnd, 0f, 0f)
+    );
     return curve;
   }
 
@@ -134,18 +137,44 @@ public class AnimationCurve
 
   private float EvaluateSegment(float time)
   {
+    // Sort-stable: keys assumed ordered by AddKey BinarySearch
     for (var i = 1; i < _keys.Count; i++)
     {
       if (time <= _keys[i].time)
       {
         var a = _keys[i - 1];
         var b = _keys[i];
-        var t = (time - a.time) / MathF.Max(1e-6f, b.time - a.time);
-        return a.value + (b.value - a.value) * t;
+        return Hermite(a, b, time);
       }
     }
 
     return _keys[^1].value;
+  }
+
+  /// <summary>
+  /// Cubic Hermite spline matching Unity AnimationCurve (tangent = dValue/dTime).
+  /// </summary>
+  private static float Hermite(Keyframe a, Keyframe b, float time)
+  {
+    float dx = b.time - a.time;
+    if (MathF.Abs(dx) < 1e-8f)
+      return a.value;
+
+    float t = (time - a.time) / dx;
+    t = t < 0f ? 0f : (t > 1f ? 1f : t);
+    float t2 = t * t;
+    float t3 = t2 * t;
+
+    // Hermite basis
+    float h00 = 2f * t3 - 3f * t2 + 1f;
+    float h10 = t3 - 2f * t2 + t;
+    float h01 = -2f * t3 + 3f * t2;
+    float h11 = t3 - t2;
+
+    // Unity tangents are in value/time units → scale by segment length
+    float m0 = a.outTangent * dx;
+    float m1 = b.inTangent * dx;
+    return h00 * a.value + h10 * m0 + h01 * b.value + h11 * m1;
   }
 
   public int AddKey(float time, float value)
