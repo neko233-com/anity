@@ -1,11 +1,11 @@
 name: anity-ci
 
+# Only run when a version tag is pushed (e.g. v1.0.0) — not on every commit.
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
+    tags:
+      - "v*"
+  workflow_dispatch: # manual run when needed
 
 concurrency:
   group: anity-ci-${{ github.workflow }}-${{ github.ref }}
@@ -35,6 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "Tag: ${GITHUB_REF_NAME:-manual}"
           dotnet --info
           # Required stack
           dotnet build anity-lib-core/src/Anity.Core/Anity.Core.csproj -c Release --nologo -v minimal
