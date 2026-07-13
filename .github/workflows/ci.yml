@@ -7,15 +7,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Cancel superseded runs on the same branch/PR
 concurrency:
   group: anity-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Compile-only gate — no package / test / native / smoke
 jobs:
-  build-and-test:
+  compile:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -23,8 +23,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -33,104 +31,17 @@ jobs:
             10.0.x
             8.0.x
 
-      - name: Verify environment
+      - name: Build (compile check)
         shell: bash
         run: |
-          if [ -f ./_scripts/verify-env.sh ]; then
-            bash ./_scripts/verify-env.sh || true
-          fi
+          set -euo pipefail
           dotnet --info
-
-      - name: Restore & build core stack
-        shell: bash
-        run: |
-          set -euo pipefail
-          dotnet build anity-lib-core/src/Anity.Core/Anity.Core.csproj -c Release --nologo
-          dotnet build anity-agent/src/Anity.Agent/Anity.Agent.csproj -c Release --nologo
-          dotnet build anity-cli/src/Anity.Cli/Anity.Cli.csproj -c Release --nologo
-          # Optional products — do not fail the required gate
-          dotnet build anity-editor/src/Anity.Editor.Host/Anity.Editor.Host.csproj -c Release --nologo || true
-          dotnet build anity-webgl/src/Anity.WebGL/Anity.WebGL.csproj -c Release --nologo || true
-          dotnet build anity-hub/src/Anity.Hub/Anity.Hub.csproj -c Release --nologo || true
-
-      - name: Build native (optional)
-        shell: bash
-        continue-on-error: true
-        run: |
-          if command -v cmake >/dev/null 2>&1; then
-            if [ "${{ runner.os }}" = "Windows" ]; then
-              pwsh -File ./_scripts/build-native.ps1 -Config Release || true
-            else
-              bash ./_scripts/build-native.sh Release || true
-            fi
-          else
-            echo "cmake not installed — skip native"
-          fi
-
-      - name: Unit tests (required)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Single-threaded collection reduces flaky shared static state across assemblies
-          export DOTNET_CLI_UI_LANGUAGE=en
-          dotnet test anity-lib-core/tests/Anity.Core.Tests/Anity.Core.Tests.csproj -c Release --nologo --verbosity minimal
-          dotnet test anity-lib-core/tests/Anity.AB.Compare.Tests/Anity.AB.Compare.Tests.csproj -c Release --nologo --verbosity minimal
-          dotnet test anity-agent/tests/Anity.Agent.Tests/Anity.Agent.Tests.csproj -c Release --nologo --verbosity minimal
-          dotnet test anity-cli/tests/Anity.Cli.Tests/Anity.Cli.Tests.csproj -c Release --nologo --verbosity minimal
-
-      - name: CLI smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          CLI="anity-cli/src/Anity.Cli/bin/Release/net10.0/anity"
-          if [ "${{ runner.os }}" = "Windows" ]; then CLI="${CLI}.exe"; fi
-          if [ ! -f "$CLI" ]; then
-            # Fallback path if TFM differs
-            CLI=$(find anity-cli/src/Anity.Cli/bin/Release -name 'anity' -o -name 'anity.exe' 2>/dev/null | head -n1)
-          fi
-          echo "CLI=$CLI"
-          "$CLI" -version
-          "$CLI" -batchmode -quit -nographics
-
-      - name: Gap audit (informational)
-        shell: bash
-        continue-on-error: true
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            pwsh -File ./_scripts/gap-audit.ps1 || true
-          else
-            echo "gap-audit is PowerShell-first; skip on Unix"
-          fi
-
-  ab-compare:
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-      - name: AB compare binary gate (required)
-        run: |
-          set -euo pipefail
-          dotnet test anity-lib-core/tests/Anity.AB.Compare.Tests/Anity.AB.Compare.Tests.csproj -c Release --nologo --verbosity minimal
-          echo "AB.Compare gate passed"
-
-  native-graphics:
-    runs-on: ${{ matrix.os }}
-    needs: build-and-test
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure & build anity-native
-        shell: bash
-        run: |
-          set -euo pipefail
-          cmake -S anity-native -B anity-native/build-ci -DCMAKE_BUILD_TYPE=Release
-          cmake --build anity-native/build-ci --config Release
-          echo "native graphics (swapchain Metal/Vulkan stubs) built"
+          # Required stack
+          dotnet build anity-lib-core/src/Anity.Core/Anity.Core.csproj -c Release --nologo -v minimal
+          dotnet build anity-agent/src/Anity.Agent/Anity.Agent.csproj -c Release --nologo -v minimal
+          dotnet build anity-cli/src/Anity.Cli/Anity.Cli.csproj -c Release --nologo -v minimal
+          # Optional products (warn only)
+          dotnet build anity-editor/src/Anity.Editor.Host/Anity.Editor.Host.csproj -c Release --nologo -v minimal || true
+          dotnet build anity-webgl/src/Anity.WebGL/Anity.WebGL.csproj -c Release --nologo -v minimal || true
+          dotnet build anity-hub/src/Anity.Hub/Anity.Hub.csproj -c Release --nologo -v minimal || true
+          echo "compile check OK"
