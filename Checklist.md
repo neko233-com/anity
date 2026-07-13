@@ -34,7 +34,7 @@
 | `Debug` | ✅ | ILogger/ILogHandler接口、ConsoleLogHandler、Log/Warning/Error/LogException/LogAssertion/Assert、LogFormat全系列、developerConsoleVisible/isDebugBuild/unityLogger、LogType/LogOption枚举 |
 | `Input` | ✅ | HashSet存储key/button状态、GetKey/Button/axis、SimulateKeyDown测试API、touchCount/touches(Touch[])/GetTouch、Gyroscope/Compass/LocationService、DeviceOrientation、IMECompositionMode、AccelerationEvent、ResetInputAxes、multiTouchEnabled/touchPressureSupported、onDeviceOrientationChange |
 | `Cursor` | ✅ | visible/lockState(CursorLockMode: None/Locked/Confined)、SetCursor(texture,hotspot,CursorMode) |
-| `CullingGroup` | ✅ | enabled/onStateChanged/targetCamera、SetBoundingSpheres/SetBoundingDistances/SetBoundingSphereCount、IsVisible/GetDistance/QueryIndices/Dispose、BoundingSphere/CullingGroupEvent |
+| `CullingGroup` | ✅ | enabled/onStateChanged/targetCamera、SetBoundingSpheres/SetBoundingDistances/SetBoundingSphereCount、IsVisible/GetDistance/QueryIndices/Dispose、**Query(viewer)** 距离带+OcclusionCulling 联动、BoundingSphere/CullingGroupEvent |
 | `LayerMask` | ✅ | NameToLayer/LayerToName字典、GetMask位运算、隐式int转换、内置层 |
 | `PlayerPrefs` | ✅ | 类型化JSON、大小写敏感、线程安全、原子Save、类型转换、GetAllKeys、Quit刷盘；测试≥17 |
 | `EditorPrefs` | ✅ | 独立持久化、Int/Float/String/Bool、Load/Save原子写、测试隔离路径 |
@@ -62,7 +62,8 @@
 | `CapsuleCollider` | ✅ | center/radius/height/direction、世界空间AABB |
 | `MeshCollider` | ✅ | 基础形状、世界空间AABB |
 | `CharacterController` | ✅ | SimpleMove重力+速度、Move分步碰撞检测+CollisionFlags、isGrounded |
-| `WheelCollider` | ✅ | 悬挂弹簧阻尼、frictionCurve、motor/brake/steer、rpm、GetGroundHit |
+| `WheelCollider` | ✅ | 悬挂弹簧阻尼、frictionCurve、motor/brake/steer、rpm、GetGroundHit/GetWorldPose、ConfigureVehicleSubsteps |
+| `VehicleChassis` / `VehicleUtility` | ✅ | 多轮编排、ApplyInput 油门/转向/刹车、CreateSimpleCar 四轮布局；测试≥10 |
 | `Physics` | ✅ | Raycast/RaycastAll、SphereCast/BoxCast/CapsuleCast（含All版本）、OverlapSphere/Box/Capsule（含NonAlloc）、CheckSphere/Box/Capsule |
 | `PhysicsScene` | ✅ | Simulate转发 |
 | `Physics.Simulate` | ✅ | PhysicsWorld：重力积分→速度积分→两两碰撞检测→冲量响应（弹性/摩擦力）→位置校正→OnTriggerEnter/Stay/Exit |
@@ -185,6 +186,7 @@
 | `Font` | ✅ | 基础字体属性 |
 | `TextAnchor/TextAlignment/FontStyle` | ✅ | 枚举 |
 | `CanvasRenderer` (底层) | ✅ | 见 UI |
+| `GUI` / `GUIUtility` / `GUISkin` | ✅ | 即时模式控件命中与状态；见 Editor 节 IMGUI 交互 |
 
 ---
 
@@ -330,7 +332,10 @@
 | `ComputeShader/ComputeBuffer/GraphicsBuffer` | ✅ | ComputeBuffer(count/stride/SetData/GetData/SetCounterValue/Dispose/SetData(Array)/GetData(Array)/count/stride)、GraphicsBuffer(target/stride/count)、AsyncGPUReadback(Request)、GraphicsFence |
 | `ReflectionProbe` | ✅ | type/mode/importance/intensity/boxProjection/clearFlags/backgroundColor |
 | `LightProbeGroup/LightProbes/SphericalHarmonicsL2` | ✅ | LightProbeGroup(positions)/LightProbes(InterpolateProbe)、SphericalHarmonicsL2完整SH系数 |
-| `LODGroup/LOD/OcclusionArea/OcclusionPortal` | ✅ | LODGroup(LODs/fadeMode/SetLODs/RecalculateBounds/ForceLOD)、LOD(screenRelativeTransitionHeight/renderers)、LODFadeMode |
+| `LODGroup/LOD/OcclusionArea/OcclusionPortal` | ✅ | LODGroup(LODs/fadeMode/SetLODs/RecalculateBounds/ForceLOD)、LOD(screenRelativeTransitionHeight/renderers)、LODFadeMode、OcclusionArea/Portal |
+| `OcclusionCulling` / Umbra | ✅ | Bake 网格 PVS、IsVisible 查询、Portal 关闭遮挡、RegisterArea/Portal、queryCount；**StaticOcclusionCulling.Compute/Cancel/Clear**；StaticBatchingUtility 标记 static+网格合并；测试≥16 |
+| `StreamingAssets` | ✅ | root/GetPath/Exists/ReadWrite 文本与字节、GetFiles/GetDirectories、GetFileUrl(file://)、CopyFrom、测试隔离 SetRootForTests；对齐 Application.streamingAssetsPath；测试≥14 |
+| `Wind` / `WindZone` | ✅ | Directional/Spherical、pulse/turbulence、OnEnable 注册/GetWindAt 合成；测试≥7 |
 
 ---
 
@@ -554,6 +559,9 @@
 | `EditorUtility` | ✅ | DisplayDialog/ProgressBar/ClearProgressBar/SaveFilePanel/OpenFilePanel/SetDirty/InstanceIDToObject/FormatBytes/NaturalCompare |
 | `EditorPrefs` | ✅ | 独立Dictionary(Editor专属)、SetInt/GetInt/SetFloat/GetFloat/SetString/GetString/HasKey/DeleteKey/DeleteAll |
 | `GUILayout/IMGUI/Event` | ✅ | Event(Current/type/mousePosition/keyCode/button/Use)、EventType(MouseDown/Up/Move/KeyDown/Up/Repaint/ScrollWheel/DragPerform等)、GUILayout(Begin/EndArea/Horizontal/Vertical/ScrollView/Button/Box/Label/TextField/PasswordField/Toggle/Slider/Toolbar/SelectionGrid/Window/Space/FlexibleSpace)、BeginScrollView/BeginArea push/pop scope栈、Handles.BeginGUI/EndGUI矩阵相机栈、EditorPrefs.Save序列化为JSON |
+| `GUI` IMGUI 交互 | ✅ | 稳定 ControlId、Button MouseDown/Up 命中、Toggle 翻转、TextField 输入/Backspace/maxLength、H/V Slider 拖拽、BeginGroup 状态栈、Window 回调、GUIUtility hotControl/matrix；测试≥17 |
+| `Playables` / `PlayableDirector` | ✅ | PlayableGraph Play/Stop/Evaluate/SetTime、ScriptPlayable&lt;T&gt;、ScriptPlayableOutput、PlayableAsset、Director Hold/Loop/None、played/paused/stopped 事件；测试≥16 |
+| `Timeline` | ✅ | TimelineAsset/TrackAsset/TimelineClip、Animation/Audio/Activation/Control/Signal/PlayableTrack、GetClipsAt/muted、CreatePlayable 接 Director；测试≥16 |
 | `MaterialEditor` | ✅ | 继承Editor、customShaderGUI/isVisible/firstInspectedEditor、OnInspectorGUI/OnHeaderGUI/DrawHeader/DrawPropertiesExcluding、DefaultShaderProperty/TexturePropertySingleLine/TwoLine/ColorProperty/FloatProperty/RangeProperty/VectorProperty/ShaderProperty、RenderQueueField/EnableInstancingField/DoubleSidedGIField/LightmapEmissionFlagsProperty/EmissionEnabledProperty、DrawPreview/GetPreviewTitle/OnPreviewSettings、静态RegisterPropertyChangeUndo/FixupEmissiveFlag/GetDefaultShaderProperty |
 | `ShaderImporter` | ✅ | 继承AssetImporter、defaultTextureCompression/preprocessorOverride/shaderCompilerPlatforms(HashSet)/disableOptimizations/nonModifiableTextures、OnImportAsset/GetShaderCompilerDefines/SetShaderCompilerDefines |
 | `ShaderUtil` | ✅ | 完整API：FindShader/GetPropertyCount/GetPropertyType/GetPropertyName/GetPropertyDescription/GetRangeLimits/GetTexDim/GetTextureBindingIndex/GetBufferBindingIndex/GetMaterialProperties/IsShaderPropertyHidden/IsPassEnabled/SetPassEnabled/GetBlendFactors/GetZTest/GetZWrite/GetCullMode/GetStencilOp/GetStencilComp/GetStencilRefForPass/GetShaderKeywords/GetRenderQueue/SetRenderQueue/HasInstancing/IsShaderCompiled/GetCustomEditor/WarmupShaderFromCollection/CalculateFogStencil/GetGlobalTextureDimension/CreateShaderMaterial/GetDependency/GetDependencyNames/CompileShader/SetShaderVariantCollection/ClearShaderCache/ApplyMaterialPropertyBlock |

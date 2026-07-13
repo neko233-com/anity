@@ -1,7 +1,7 @@
 namespace UnityEngine;
 
 [AddComponentMenu("Miscellaneous/Wind Zone")]
-public class WindZone : Behaviour
+public class WindZone : MonoBehaviour
 {
   private WindZoneMode _mode = WindZoneMode.Directional;
   private float _radius = 10f;
@@ -19,7 +19,7 @@ public class WindZone : Behaviour
   public float radius
   {
     get => _radius;
-    set => _radius = value;
+    set => _radius = Mathf.Max(0f, value);
   }
 
   public float windMain
@@ -44,6 +44,24 @@ public class WindZone : Behaviour
   {
     get => _windPulseFrequency;
     set => _windPulseFrequency = value;
+  }
+
+  protected override void OnEnable()
+  {
+    base.OnEnable();
+    Wind.Register(this);
+  }
+
+  protected override void OnDisable()
+  {
+    Wind.Unregister(this);
+    base.OnDisable();
+  }
+
+  protected override void OnDestroy()
+  {
+    Wind.Unregister(this);
+    base.OnDestroy();
   }
 }
 

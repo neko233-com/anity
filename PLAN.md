@@ -1,5 +1,22 @@
 # PLAN
 
+## 2026-07-13o — Umbra/Wind/Vehicles/IMGUI/Director/Timeline/StreamingAssets 全落地
+
+### 已完成
+- **OcclusionCulling (Umbra 子集)**：Bake 网格、IsVisible、Portal 遮挡、Area 注册、StaticOcclusionCulling.Compute/Cancel/Clear；StaticBatchingUtility 标记 static + 网格合并
+- **StreamingAssets**：root 覆盖、读写、列表、file:// URL、CopyFrom；对齐 Application.streamingAssetsPath
+- **Wind**：WindZone OnEnable 注册、Directional/Spherical 求值、多区叠加
+- **Vehicles**：VehicleChassis + VehicleUtility.CreateSimpleCar；WheelCollider 编排油门/转向/刹车
+- **IMGUI**：稳定 ControlId；Button/Toggle/TextField/Slider 真命中交互
+- **Playables/Director/Timeline**：PlayableGraph、PlayableDirector(Hold/Loop/None)、TimelineAsset 轨道/Clip、PlayableAsset
+- **CullingGroup.Query**：距离带 + OcclusionCulling 联动
+- **测试**：本批 **80** 新测全绿；Core 全量 **324** 全绿
+
+### 下一次
+1. Android ANativeWindow / X11 surface
+2. Timeline 编辑器窗口与 Signal 发射深度
+3. 真 Umbra 二进制 bake 格式（若需与官方数据互通）
+
 ## 2026-07-13n — Vulkan surface/swapchain + Metal CAMetalLayer 全落地
 
 ### 已完成

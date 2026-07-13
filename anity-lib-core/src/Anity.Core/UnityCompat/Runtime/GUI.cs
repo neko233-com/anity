@@ -111,26 +111,86 @@ public static class GUI
 
   public static bool Button(Rect position, string text)
   {
-    _ = position; _ = text;
-    return false;
+    _ = text;
+    return DoButton(position);
   }
 
   public static bool Button(Rect position, GUIContent content)
   {
-    _ = position; _ = content;
-    return false;
+    _ = content;
+    return DoButton(position);
   }
 
   public static bool Button(Rect position, string text, GUIStyle style)
   {
-    _ = position; _ = text; _ = style;
-    return false;
+    _ = text; _ = style;
+    return DoButton(position);
   }
 
   public static bool Button(Rect position, GUIContent content, GUIStyle style)
   {
-    _ = position; _ = content; _ = style;
+    _ = content; _ = style;
+    return DoButton(position);
+  }
+
+  private static int StableControlId(Rect position, int seed)
+  {
+    unchecked
+    {
+      int h = seed;
+      h = (h * 397) ^ position.x.GetHashCode();
+      h = (h * 397) ^ position.y.GetHashCode();
+      h = (h * 397) ^ position.width.GetHashCode();
+      h = (h * 397) ^ position.height.GetHashCode();
+      return h == 0 ? 1 : h;
+    }
+  }
+
+  private static bool DoButton(Rect position)
+  {
+    if (!_enabled) return false;
+    var e = Event.current;
+    if (e == null) return false;
+    int id = StableControlId(position, 0xB007);
+    bool hover = position.Contains(e.mousePosition);
+    if (e.type == EventType.MouseDown && e.button == 0 && hover)
+    {
+      _hotControl = id;
+      e.Use();
+      return false;
+    }
+    if (e.type == EventType.MouseUp && e.button == 0 && _hotControl == id)
+    {
+      _hotControl = 0;
+      e.Use();
+      if (hover)
+      {
+        _changed = true;
+        return true;
+      }
+    }
     return false;
+  }
+
+  /// <summary>Test/runtime: inject a full click on rect (MouseDown+Up at center).</summary>
+  public static void SimulateClick(Rect position)
+  {
+    var center = new Vector2(position.x + position.width * 0.5f, position.y + position.height * 0.5f);
+    Event.current = new Event
+    {
+      type = EventType.MouseDown,
+      button = 0,
+      mousePosition = center,
+      clickCount = 1
+    };
+    DoButton(position);
+    Event.current = new Event
+    {
+      type = EventType.MouseUp,
+      button = 0,
+      mousePosition = center,
+      clickCount = 1
+    };
   }
 
   public static void Box(Rect position, string text)
@@ -160,49 +220,102 @@ public static class GUI
 
   public static bool RepeatButton(Rect position, string text)
   {
-    _ = position; _ = text;
-    return false;
+    _ = text;
+    return DoRepeatButton(position);
   }
 
   public static bool RepeatButton(Rect position, GUIContent content)
   {
-    _ = position; _ = content;
-    return false;
+    _ = content;
+    return DoRepeatButton(position);
   }
 
   public static bool RepeatButton(Rect position, string text, GUIStyle style)
   {
-    _ = position; _ = text; _ = style;
-    return false;
+    _ = text; _ = style;
+    return DoRepeatButton(position);
   }
 
   public static bool RepeatButton(Rect position, GUIContent content, GUIStyle style)
   {
-    _ = position; _ = content; _ = style;
-    return false;
+    _ = content; _ = style;
+    return DoRepeatButton(position);
+  }
+
+  private static bool DoRepeatButton(Rect position)
+  {
+    if (!_enabled) return false;
+    var e = Event.current;
+    if (e == null) return false;
+    int id = StableControlId(position, 0xBEE7);
+    bool hover = position.Contains(e.mousePosition);
+    if (e.type == EventType.MouseDown && e.button == 0 && hover)
+    {
+      _hotControl = id;
+      e.Use();
+      return true;
+    }
+    if (e.type == EventType.MouseDrag && _hotControl == id && hover)
+      return true;
+    if (e.type == EventType.MouseUp && _hotControl == id)
+    {
+      _hotControl = 0;
+      e.Use();
+    }
+    return _hotControl == id && hover;
   }
 
   public static string TextField(Rect position, string text)
   {
-    _ = position;
-    return text;
+    return DoTextField(position, text, -1);
   }
 
   public static string TextField(Rect position, string text, int maxLength)
   {
-    _ = position; _ = maxLength;
-    return text;
+    return DoTextField(position, text, maxLength);
   }
 
   public static string TextField(Rect position, string text, GUIStyle style)
   {
-    _ = position; _ = style;
-    return text;
+    _ = style;
+    return DoTextField(position, text, -1);
   }
 
   public static string TextField(Rect position, string text, int maxLength, GUIStyle style)
   {
-    _ = position; _ = maxLength; _ = style;
+    _ = style;
+    return DoTextField(position, text, maxLength);
+  }
+
+  private static string DoTextField(Rect position, string text, int maxLength)
+  {
+    text ??= string.Empty;
+    if (!_enabled) return text;
+    var e = Event.current;
+    if (e == null) return text;
+    int id = StableControlId(position, 0x7E87);
+    if (e.type == EventType.MouseDown && position.Contains(e.mousePosition))
+    {
+      _keyboardControl = id;
+      e.Use();
+    }
+    if (_keyboardControl == id && e.type == EventType.KeyDown)
+    {
+      if (e.keyCode == KeyCode.Backspace && text.Length > 0)
+      {
+        text = text.Substring(0, text.Length - 1);
+        _changed = true;
+        e.Use();
+      }
+      else if (e.character != '\0' && !char.IsControl(e.character))
+      {
+        text += e.character;
+        if (maxLength > 0 && text.Length > maxLength)
+          text = text.Substring(0, maxLength);
+        _changed = true;
+        e.Use();
+      }
+    }
     return text;
   }
 
@@ -256,25 +369,39 @@ public static class GUI
 
   public static bool Toggle(Rect position, bool value, string text)
   {
-    _ = position; _ = text;
-    return value;
+    _ = text;
+    return DoToggle(position, value);
   }
 
   public static bool Toggle(Rect position, bool value, GUIContent content)
   {
-    _ = position; _ = content;
-    return value;
+    _ = content;
+    return DoToggle(position, value);
   }
 
   public static bool Toggle(Rect position, bool value, string text, GUIStyle style)
   {
-    _ = position; _ = text; _ = style;
-    return value;
+    _ = text; _ = style;
+    return DoToggle(position, value);
   }
 
   public static bool Toggle(Rect position, bool value, GUIContent content, GUIStyle style)
   {
-    _ = position; _ = content; _ = style;
+    _ = content; _ = style;
+    return DoToggle(position, value);
+  }
+
+  private static bool DoToggle(Rect position, bool value)
+  {
+    if (!_enabled) return value;
+    var e = Event.current;
+    if (e == null) return value;
+    if (e.type == EventType.MouseDown && e.button == 0 && position.Contains(e.mousePosition))
+    {
+      value = !value;
+      _changed = true;
+      e.Use();
+    }
     return value;
   }
 
@@ -328,26 +455,100 @@ public static class GUI
 
   public static float HorizontalSlider(Rect position, float value, float leftValue, float rightValue)
   {
-    _ = position;
-    return Mathf.Clamp(value, Mathf.Min(leftValue, rightValue), Mathf.Max(leftValue, rightValue));
+    return DoHorizontalSlider(position, value, leftValue, rightValue);
   }
 
   public static float HorizontalSlider(Rect position, float value, float leftValue, float rightValue, GUIStyle slider, GUIStyle thumb)
   {
-    _ = position; _ = slider; _ = thumb;
-    return Mathf.Clamp(value, Mathf.Min(leftValue, rightValue), Mathf.Max(leftValue, rightValue));
+    _ = slider; _ = thumb;
+    return DoHorizontalSlider(position, value, leftValue, rightValue);
+  }
+
+  private static float DoHorizontalSlider(Rect position, float value, float leftValue, float rightValue)
+  {
+    float min = Mathf.Min(leftValue, rightValue);
+    float max = Mathf.Max(leftValue, rightValue);
+    value = Mathf.Clamp(value, min, max);
+    if (!_enabled) return value;
+    var e = Event.current;
+    if (e == null) return value;
+    int id = StableControlId(position, 0x51D0);
+    bool hover = position.Contains(e.mousePosition);
+    if (e.type == EventType.MouseDown && e.button == 0 && hover)
+    {
+      _hotControl = id;
+      float t0 = position.width > 0 ? (e.mousePosition.x - position.x) / position.width : 0f;
+      value = Mathf.Lerp(leftValue, rightValue, Mathf.Clamp01(t0));
+      _changed = true;
+      e.Use();
+    }
+    if (e.type == EventType.MouseDrag && _hotControl == id)
+    {
+      float t = position.width > 0 ? (e.mousePosition.x - position.x) / position.width : 0f;
+      t = Mathf.Clamp01(t);
+      float next = Mathf.Lerp(leftValue, rightValue, t);
+      if (!Mathf.Approximately(next, value))
+      {
+        value = next;
+        _changed = true;
+      }
+      e.Use();
+    }
+    if (e.type == EventType.MouseUp && _hotControl == id)
+    {
+      _hotControl = 0;
+      e.Use();
+    }
+    return value;
   }
 
   public static float VerticalSlider(Rect position, float value, float topValue, float bottomValue)
   {
-    _ = position;
-    return Mathf.Clamp(value, Mathf.Min(topValue, bottomValue), Mathf.Max(topValue, bottomValue));
+    return DoVerticalSlider(position, value, topValue, bottomValue);
   }
 
   public static float VerticalSlider(Rect position, float value, float topValue, float bottomValue, GUIStyle slider, GUIStyle thumb)
   {
-    _ = position; _ = slider; _ = thumb;
-    return Mathf.Clamp(value, Mathf.Min(topValue, bottomValue), Mathf.Max(topValue, bottomValue));
+    _ = slider; _ = thumb;
+    return DoVerticalSlider(position, value, topValue, bottomValue);
+  }
+
+  private static float DoVerticalSlider(Rect position, float value, float topValue, float bottomValue)
+  {
+    float min = Mathf.Min(topValue, bottomValue);
+    float max = Mathf.Max(topValue, bottomValue);
+    value = Mathf.Clamp(value, min, max);
+    if (!_enabled) return value;
+    var e = Event.current;
+    if (e == null) return value;
+    int id = StableControlId(position, 0x51D1);
+    bool hover = position.Contains(e.mousePosition);
+    if (e.type == EventType.MouseDown && e.button == 0 && hover)
+    {
+      _hotControl = id;
+      float t0 = position.height > 0 ? (e.mousePosition.y - position.y) / position.height : 0f;
+      value = Mathf.Lerp(topValue, bottomValue, Mathf.Clamp01(t0));
+      _changed = true;
+      e.Use();
+    }
+    if (e.type == EventType.MouseDrag && _hotControl == id)
+    {
+      float t = position.height > 0 ? (e.mousePosition.y - position.y) / position.height : 0f;
+      t = Mathf.Clamp01(t);
+      float next = Mathf.Lerp(topValue, bottomValue, t);
+      if (!Mathf.Approximately(next, value))
+      {
+        value = next;
+        _changed = true;
+      }
+      e.Use();
+    }
+    if (e.type == EventType.MouseUp && _hotControl == id)
+    {
+      _hotControl = 0;
+      e.Use();
+    }
+    return value;
   }
 
   public static Vector2 HorizontalScrollbar(Rect position, Vector2 value, float size, float leftValue, float rightValue)

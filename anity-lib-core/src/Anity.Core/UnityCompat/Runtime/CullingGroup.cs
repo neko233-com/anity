@@ -185,4 +185,45 @@ public sealed class CullingGroup : IDisposable
       });
     }
   }
+
+  /// <summary>
+  /// Evaluate visibility + distance bands from a world position (camera stand-in).
+  /// Integrates with OcclusionCulling when enabled.
+  /// </summary>
+  public void Query(Vector3 viewerPosition)
+  {
+    if (!_enabled || _disposed) return;
+    for (int i = 0; i < _boundingSphereCount; i++)
+    {
+      var sphere = _boundingSpheres[i];
+      float dist = Vector3.Distance(viewerPosition, sphere.position);
+      var bounds = new Bounds(sphere.position, Vector3.one * (sphere.radius * 2f));
+      bool visible = OcclusionCulling.IsVisible(viewerPosition, bounds);
+      // Distance-only cull if beyond last band
+      byte band = 0;
+      if (_boundingDistances != null && _boundingDistances.Length > 0)
+      {
+        band = (byte)_boundingDistances.Length;
+        for (int b = 0; b < _boundingDistances.Length; b++)
+        {
+          if (dist <= _boundingDistances[b])
+          {
+            band = (byte)b;
+            break;
+          }
+        }
+        if (band >= _boundingDistances.Length)
+          visible = false;
+      }
+      SetVisibility(i, visible, band);
+    }
+  }
+
+  public void Query()
+  {
+    Vector3 pos = Vector3.zero;
+    if (targetCamera != null && targetCamera.transform != null)
+      pos = targetCamera.transform.position;
+    Query(pos);
+  }
 }

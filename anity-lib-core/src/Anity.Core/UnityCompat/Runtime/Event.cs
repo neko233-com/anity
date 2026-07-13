@@ -260,7 +260,9 @@ public enum PointerType
 
 public enum FocusType
 {
-  Keyboard,
-  Mouse,
-  Native
+  Keyboard = 0,
+  Passive = 1,
+  Native = 2,
+  /// <summary>Alias kept for older EditorGUI call sites.</summary>
+  Mouse = Passive
 }

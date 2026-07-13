@@ -109,6 +109,18 @@ public static class StaticBatchingUtility
     public static void Combine(GameObject staticBatchRoot)
     {
         if (staticBatchRoot == null) return;
+        // Mark hierarchy static (Unity marks static for batching eligibility)
+        var transforms = staticBatchRoot.GetComponentsInChildren<Transform>(true);
+        if (transforms != null)
+        {
+            for (int i = 0; i < transforms.Length; i++)
+            {
+                if (transforms[i] != null && transforms[i].gameObject != null)
+                    transforms[i].gameObject.isStatic = true;
+            }
+        }
+        staticBatchRoot.isStatic = true;
+
         var renderers = staticBatchRoot.GetComponentsInChildren<MeshRenderer>(true);
         var combinedVerts = new List<Vector3>();
         var combinedNorms = new List<Vector3>();
@@ -146,11 +158,9 @@ public static class StaticBatchingUtility
             for (int t = 0; t < tris.Length; t++)
                 combinedIndices.Add(tris[t] + vertexOffset);
             vertexOffset += verts.Length;
-
-            r.gameObject.isStatic = true;
         }
 
-        if (combinedVerts.Count > 0 && staticBatchRoot != null)
+        if (combinedVerts.Count > 0)
         {
             var combinedMesh = new Mesh();
             combinedMesh.vertices = combinedVerts.ToArray();
@@ -164,6 +174,10 @@ public static class StaticBatchingUtility
     public static void Combine(GameObject[] gos, GameObject staticBatchRoot)
     {
         if (gos == null) return;
+        for (int i = 0; i < gos.Length; i++)
+        {
+            if (gos[i] != null) gos[i].isStatic = true;
+        }
         var tempRoot = staticBatchRoot ?? new GameObject("__StaticBatch");
         for (int i = 0; i < gos.Length; i++)
         {
