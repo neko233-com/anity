@@ -91,11 +91,19 @@ public static class Il2CppToolchain
 
     /// <summary>
     /// True only for MSVC driver <c>cl.exe</c>. Must NOT match clang/clang++ (starts with "cl").
+    /// Path-separator agnostic so Windows-style paths still parse on Linux CI.
     /// </summary>
     public static bool IsMsvcCl(string compilerPath)
     {
         if (string.IsNullOrEmpty(compilerPath)) return false;
-        string name = Path.GetFileNameWithoutExtension(compilerPath).ToLowerInvariant();
+        // Normalize separators so GetFileName works on all hosts
+        string normalized = compilerPath.Replace('\\', '/').Trim();
+        // Take last segment after / or remaining string
+        int slash = normalized.LastIndexOf('/');
+        string file = slash >= 0 ? normalized.Substring(slash + 1) : normalized;
+        // Strip extension (.exe / .bat / none)
+        int dot = file.LastIndexOf('.');
+        string name = (dot > 0 ? file.Substring(0, dot) : file).ToLowerInvariant();
         return name == "cl";
     }
 
