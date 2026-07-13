@@ -1,5 +1,19 @@
 # PLAN
 
+## 2026-07-13n — Vulkan surface/swapchain + Metal CAMetalLayer 全落地
+
+### 已完成
+- **Vulkan**：Instance surface 扩展、Win32 `VkSurfaceKHR`、`VkSwapchainKHR` 创建/acquire/present；无窗 headless 软件 ring；无 SDK 时 stub 仍链
+- **Metal**：`CAMetalLayer` 自建/外接、drawableSize、HDR EDR、displaySync、acquire/present commandBuffer
+- **C API**：PresentCount / HasNativeSurface / BackendKind
+- **C#**：`NativeGraphicsDevice` 暴露上述字段
+- **测试**：Swapchain **18**；Core **244** 全绿；native cmake build-batch OK
+
+### 下一次
+1. Android `ANativeWindow` surface
+2. X11/Wayland surface
+3. 继续编辑器/物理深度
+
 ## 2026-07-13m — AnimationCurve Hermite + Vector3.Slerp + multipart + 去假 Curve
 
 ### 已完成

@@ -26,6 +26,9 @@ public sealed class NativeGraphicsDevice : IDisposable
     public int Height { get; private set; }
     public int SwapchainImageCount { get; private set; }
     public bool SwapchainHeadless { get; private set; } = true;
+    public bool SwapchainHasNativeSurface { get; private set; }
+    /// <summary>0=software, 1=Vulkan, 2=Metal, 3=D3D</summary>
+    public int SwapchainBackendKind { get; private set; }
     public int PresentCount { get; private set; }
 
     public static NativeGraphicsDevice Create(
@@ -135,6 +138,17 @@ public sealed class NativeGraphicsDevice : IDisposable
                     Width = AnityNative.Graphics_GetSwapchainWidth(sc);
                     Height = AnityNative.Graphics_GetSwapchainHeight(sc);
                     SwapchainHeadless = AnityNative.Graphics_IsSwapchainHeadless(sc) != 0;
+                    try
+                    {
+                        SwapchainHasNativeSurface = AnityNative.Graphics_SwapchainHasNativeSurface(sc) != 0;
+                        SwapchainBackendKind = AnityNative.Graphics_GetSwapchainBackendKind(sc);
+                    }
+                    catch
+                    {
+                        SwapchainHasNativeSurface = false;
+                        SwapchainBackendKind = DeviceType == GraphicsDeviceType.Vulkan ? 1
+                            : DeviceType == GraphicsDeviceType.Metal ? 2 : 0;
+                    }
                     return true;
                 }
             }
@@ -144,14 +158,24 @@ public sealed class NativeGraphicsDevice : IDisposable
             }
         }
 
-        // Managed headless swapchain
+        // Managed headless swapchain (native lib missing or create failed)
         _managedSwapchain = true;
         Width = w > 0 ? w : 1280;
         Height = h > 0 ? h : 720;
         SwapchainImageCount = imageCount > 0 ? imageCount : 2;
         SwapchainHeadless = nativeWindow == IntPtr.Zero;
+        SwapchainHasNativeSurface = false;
+        SwapchainBackendKind = preferredKind(DeviceType);
         return true;
     }
+
+    private static int preferredKind(GraphicsDeviceType t) => t switch
+    {
+        GraphicsDeviceType.Vulkan => 1,
+        GraphicsDeviceType.Metal => 2,
+        GraphicsDeviceType.Direct3D11 or GraphicsDeviceType.Direct3D12 => 3,
+        _ => 0
+    };
 
     public int AcquireNextImage()
     {

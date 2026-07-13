@@ -80,6 +80,11 @@ ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainImageCount(const AnitySwa
 ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainWidth(const AnitySwapchain* swapchain);
 ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainHeight(const AnitySwapchain* swapchain);
 ANITY_API int32_t ANITY_CALL AnityGraphics_IsSwapchainHeadless(const AnitySwapchain* swapchain);
+ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainPresentCount(const AnitySwapchain* swapchain);
+/* 1 if backend created real VkSurface/CAMetalLayer (may still be offscreen) */
+ANITY_API int32_t ANITY_CALL AnityGraphics_SwapchainHasNativeSurface(const AnitySwapchain* swapchain);
+/* Backend tag: 0=unknown/headless software, 1=Vulkan, 2=Metal, 3=D3D11 */
+ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainBackendKind(const AnitySwapchain* swapchain);
 
 #ifdef __cplusplus
 }

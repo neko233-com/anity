@@ -544,7 +544,7 @@
 | `Il2CppPlayerHost` | ✅ | BuildPlayer/Launch/LaunchManaged；native exe 或 managed 回退；测试≥13 |
 | `Il2CppPackagePipeline` | ✅ | 端到端 convert→artifacts→link→launch；CLI `-il2cpp`/`-build*Player`；测试≥13 |
 | `PlatformGraphics` Metal/Vulkan | ✅ | iOS→Metal、Android→Vulkan、Force/PreferredApis；测试≥11 |
-| `Native Swapchain` | ✅ | Create/Acquire/Present API；Vulkan/Metal/headless；NativeGraphicsDevice.CreateSwapchain；测试≥13 |
+| `Native Swapchain` | ✅ | Create/Acquire/Present；Vulkan Win32 surface+VkSwapchainKHR + headless ring；Metal CAMetalLayer/EDR；PresentCount/HasNativeSurface/BackendKind；测试≥18 |
 | `InternalEditorUtility` | ✅ | **完整UnityEditorInternal API**：inBatchMode/isHumanControllable/isApplicationActive/hasProLicense/unityVersion/isProSkin/unityPreferencesFolder/projectPath、tags/layers/sortingLayerNames/sortingLayerUniqueIDs/asmrefGUIDs/assemblyNames、ReloadAssemblies/RequestScriptReload/IsRecompiling、OpenFileAtLineExternal、LoadRequiredAdditionalDataToWindow、LoadWindowLayout、GetAllGlobalTags/GetAllLayers/TagToLayer/LayerToTag、IsNativeModule/GetScriptAssemblies/GetEditorScriptAssemblies/GetRuntimeScriptAssemblies/GetAssemblyPath/GetAssemblies、IsInEditor/IsInPlayer/GetPlatformDefines/GetDefinesForAssembly/GetPredefinedDefines、RepaintAll/SetDirty/IsObjectAManagedReference、GetSerializedObjectProperties/GetActiveSceneName/GetOpenScenes/IsSceneSaved/GetSceneAssetPath、FindAssets/GetAssetPath/GUIDToAssetPath/AssetPathToGUID、CalculateBounds真实Renderer包围盒计算、SetIconForObject/GetIconForObject图标管理、scriptReloaded事件 |
 | `BuildCallbacks` | ✅ | 接口定义 |
 | `EditorSettings` | ✅ | Dictionary存储、serializationMode、defaultBehaviorMode、enterPlayModeOptions、spritePackerMode、asyncShaderCompilation、cacheServer配置、projectGenerationRootNamespace、DefineSymbols等完整属性 |

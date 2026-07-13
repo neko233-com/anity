@@ -178,6 +178,15 @@ public static class AnityNative
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_IsSwapchainHeadless")]
     public static extern int Graphics_IsSwapchainHeadless(IntPtr swapchain);
 
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetSwapchainPresentCount")]
+    public static extern int Graphics_GetSwapchainPresentCount(IntPtr swapchain);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_SwapchainHasNativeSurface")]
+    public static extern int Graphics_SwapchainHasNativeSurface(IntPtr swapchain);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetSwapchainBackendKind")]
+    public static extern int Graphics_GetSwapchainBackendKind(IntPtr swapchain);
+
     // --- HDR ---
     [StructLayout(LayoutKind.Sequential)]
     public struct HDRDisplayInfo

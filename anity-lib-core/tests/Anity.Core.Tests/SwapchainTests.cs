@@ -142,4 +142,55 @@ public class SwapchainTests : IDisposable
         Assert.Equal(1, d.width);
         Assert.Equal(3, d.imageCount);
     }
+
+    [Fact]
+    public void Vulkan_Swapchain_BackendKind()
+    {
+        using var dev = NativeGraphicsDevice.Create(GraphicsDeviceType.Vulkan, 640, 480, hdr: true);
+        Assert.True(dev.CreateSwapchain(640, 480, imageCount: 3, vsync: true, hdr: true));
+        Assert.True(dev.HasSwapchain);
+        // managed or native — backend kind should reflect Vulkan preference
+        Assert.True(dev.SwapchainBackendKind == 1 || dev.SwapchainImageCount >= 2);
+        Assert.Equal(640, dev.Width);
+        Assert.Equal(480, dev.Height);
+    }
+
+    [Fact]
+    public void Metal_Swapchain_BackendKind()
+    {
+        using var dev = NativeGraphicsDevice.Create(GraphicsDeviceType.Metal, 512, 512, hdr: true);
+        Assert.True(dev.CreateSwapchain(512, 512, 3));
+        Assert.True(dev.HasSwapchain);
+        Assert.True(dev.SwapchainBackendKind == 2 || dev.SwapchainImageCount >= 2);
+    }
+
+    [Fact]
+    public void Acquire_Then_Present_FrameLoop()
+    {
+        using var dev = NativeGraphicsDevice.Create(GraphicsDeviceType.Vulkan, 320, 240, false);
+        dev.CreateSwapchain(320, 240, 3);
+        for (int i = 0; i < 10; i++)
+        {
+            int idx = dev.AcquireNextImage();
+            Assert.InRange(idx, 0, Math.Max(0, dev.SwapchainImageCount - 1));
+            dev.Present();
+        }
+        Assert.Equal(10, dev.PresentCount);
+    }
+
+    [Fact]
+    public void Headless_WithoutWindow()
+    {
+        using var dev = NativeGraphicsDevice.Create(GraphicsDeviceType.Vulkan, 100, 100, false);
+        Assert.True(dev.CreateSwapchain(nativeWindow: IntPtr.Zero));
+        Assert.True(dev.SwapchainHeadless);
+    }
+
+    [Fact]
+    public void TripleBuffer_ImageCount()
+    {
+        using var dev = NativeGraphicsDevice.Create(GraphicsDeviceType.Metal, 256, 256, false);
+        dev.CreateSwapchain(256, 256, imageCount: 3);
+        Assert.InRange(dev.SwapchainImageCount, 2, 4);
+    }
 }

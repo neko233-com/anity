@@ -12,10 +12,16 @@ extern "C" AnityResult AnityGraphics_CreateVulkan(const AnityGraphicsDeviceDesc*
 extern "C" void AnityGraphics_Vulkan_Destroy(AnityGraphicsDevice*);
 extern "C" AnityResult AnityGraphics_Vulkan_CreateSwapchain(AnityGraphicsDevice*, const AnitySwapchainDesc*, AnitySwapchain**);
 extern "C" void AnityGraphics_Vulkan_DestroySwapchain(AnitySwapchain*);
+extern "C" AnityResult AnityGraphics_Vulkan_Acquire(AnitySwapchain*, int32_t*);
+extern "C" AnityResult AnityGraphics_Vulkan_Present(AnitySwapchain*);
+extern "C" int32_t AnityGraphics_Vulkan_SwapchainHasNativeSurface(const AnitySwapchain*);
 extern "C" AnityResult AnityGraphics_CreateMetal(const AnityGraphicsDeviceDesc*, AnityGraphicsDevice**);
 extern "C" void AnityGraphics_Metal_Destroy(AnityGraphicsDevice*);
 extern "C" AnityResult AnityGraphics_Metal_CreateSwapchain(AnityGraphicsDevice*, const AnitySwapchainDesc*, AnitySwapchain**);
 extern "C" void AnityGraphics_Metal_DestroySwapchain(AnitySwapchain*);
+extern "C" AnityResult AnityGraphics_Metal_Acquire(AnitySwapchain*, int32_t*);
+extern "C" AnityResult AnityGraphics_Metal_Present(AnitySwapchain*);
+extern "C" int32_t AnityGraphics_Metal_SwapchainHasNativeLayer(const AnitySwapchain*);
 
 static AnityResult CreateHeadlessSwapchain(
     AnityGraphicsDevice* device, const AnitySwapchainDesc* desc, AnitySwapchain** out) {
@@ -201,6 +207,13 @@ void ANITY_CALL AnityGraphics_DestroySwapchain(AnitySwapchain* swapchain) {
 
 AnityResult ANITY_CALL AnityGraphics_AcquireNextImage(AnitySwapchain* swapchain, int32_t* outImageIndex) {
   if (!swapchain) return ANITY_ERR_INVALID_ARG;
+  AnityGraphicsDevice* dev = swapchain->device;
+  if (dev) {
+    if (dev->type == ANITY_GFX_VULKAN)
+      return AnityGraphics_Vulkan_Acquire(swapchain, outImageIndex);
+    if (dev->type == ANITY_GFX_METAL)
+      return AnityGraphics_Metal_Acquire(swapchain, outImageIndex);
+  }
   swapchain->currentImage = (swapchain->currentImage + 1) % (swapchain->imageCount > 0 ? swapchain->imageCount : 1);
   if (outImageIndex) *outImageIndex = swapchain->currentImage;
   return ANITY_OK;
@@ -208,6 +221,13 @@ AnityResult ANITY_CALL AnityGraphics_AcquireNextImage(AnitySwapchain* swapchain,
 
 AnityResult ANITY_CALL AnityGraphics_PresentSwapchain(AnitySwapchain* swapchain) {
   if (!swapchain) return ANITY_ERR_INVALID_ARG;
+  AnityGraphicsDevice* dev = swapchain->device;
+  if (dev) {
+    if (dev->type == ANITY_GFX_VULKAN)
+      return AnityGraphics_Vulkan_Present(swapchain);
+    if (dev->type == ANITY_GFX_METAL)
+      return AnityGraphics_Metal_Present(swapchain);
+  }
   swapchain->presentCount++;
   return ANITY_OK;
 }
@@ -223,6 +243,27 @@ int32_t ANITY_CALL AnityGraphics_GetSwapchainHeight(const AnitySwapchain* swapch
 }
 int32_t ANITY_CALL AnityGraphics_IsSwapchainHeadless(const AnitySwapchain* swapchain) {
   return swapchain ? swapchain->headless : 1;
+}
+int32_t ANITY_CALL AnityGraphics_GetSwapchainPresentCount(const AnitySwapchain* swapchain) {
+  return swapchain ? swapchain->presentCount : 0;
+}
+int32_t ANITY_CALL AnityGraphics_SwapchainHasNativeSurface(const AnitySwapchain* swapchain) {
+  if (!swapchain || !swapchain->device) return 0;
+  if (swapchain->device->type == ANITY_GFX_VULKAN)
+    return AnityGraphics_Vulkan_SwapchainHasNativeSurface(swapchain);
+  if (swapchain->device->type == ANITY_GFX_METAL)
+    return AnityGraphics_Metal_SwapchainHasNativeLayer(swapchain);
+  return 0;
+}
+int32_t ANITY_CALL AnityGraphics_GetSwapchainBackendKind(const AnitySwapchain* swapchain) {
+  if (!swapchain || !swapchain->device) return 0;
+  switch (swapchain->device->type) {
+    case ANITY_GFX_VULKAN: return 1;
+    case ANITY_GFX_METAL: return 2;
+    case ANITY_GFX_D3D11:
+    case ANITY_GFX_D3D12: return 3;
+    default: return 0;
+  }
 }
 
 } // extern "C"
