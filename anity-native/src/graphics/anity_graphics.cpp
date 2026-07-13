@@ -15,6 +15,7 @@ extern "C" void AnityGraphics_Vulkan_DestroySwapchain(AnitySwapchain*);
 extern "C" AnityResult AnityGraphics_Vulkan_Acquire(AnitySwapchain*, int32_t*);
 extern "C" AnityResult AnityGraphics_Vulkan_Present(AnitySwapchain*);
 extern "C" int32_t AnityGraphics_Vulkan_SwapchainHasNativeSurface(const AnitySwapchain*);
+extern "C" int32_t AnityGraphics_Vulkan_GetSwapchainSurfaceKind(const AnitySwapchain*);
 extern "C" AnityResult AnityGraphics_CreateMetal(const AnityGraphicsDeviceDesc*, AnityGraphicsDevice**);
 extern "C" void AnityGraphics_Metal_Destroy(AnityGraphicsDevice*);
 extern "C" AnityResult AnityGraphics_Metal_CreateSwapchain(AnityGraphicsDevice*, const AnitySwapchainDesc*, AnitySwapchain**);
@@ -264,6 +265,14 @@ int32_t ANITY_CALL AnityGraphics_GetSwapchainBackendKind(const AnitySwapchain* s
     case ANITY_GFX_D3D12: return 3;
     default: return 0;
   }
+}
+
+int32_t ANITY_CALL AnityGraphics_GetSwapchainSurfaceKind(const AnitySwapchain* swapchain) {
+  if (!swapchain || !swapchain->device) return 0;
+  if (swapchain->device->type == ANITY_GFX_VULKAN)
+    return AnityGraphics_Vulkan_GetSwapchainSurfaceKind(swapchain);
+  /* Metal CAMetalLayer counts as native surface kind 0 (use HasNativeSurface) */
+  return 0;
 }
 
 } // extern "C"

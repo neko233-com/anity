@@ -29,7 +29,33 @@ public sealed class NativeGraphicsDevice : IDisposable
     public bool SwapchainHasNativeSurface { get; private set; }
     /// <summary>0=software, 1=Vulkan, 2=Metal, 3=D3D</summary>
     public int SwapchainBackendKind { get; private set; }
+    /// <summary>0=none, 1=Win32, 2=Android ANativeWindow, 3=X11, 4=Wayland</summary>
+    public int SwapchainSurfaceKind { get; private set; }
     public int PresentCount { get; private set; }
+
+    /// <summary>Compile-time Vulkan surface platforms: bit0=Win32, bit1=Android, bit2=X11, bit3=Wayland.</summary>
+    public static int VulkanSupportedSurfaceMask
+    {
+        get
+        {
+            if (!AnityNative.Available) return ExpectedSurfaceMaskForHost();
+            try { return AnityNative.Graphics_Vulkan_GetSupportedSurfaceMask(); }
+            catch { return ExpectedSurfaceMaskForHost(); }
+        }
+    }
+
+    public static int ExpectedSurfaceMaskForHost()
+    {
+        // Managed fallback when native absent — report host OS compile expectations
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.Windows))
+            return 1; // Win32
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.Linux))
+            return 4 | 8; // X11 | Wayland capability
+        // Android / other: mask reported by native when present
+        return 0;
+    }
 
     public static NativeGraphicsDevice Create(
         GraphicsDeviceType preferred,
@@ -142,12 +168,14 @@ public sealed class NativeGraphicsDevice : IDisposable
                     {
                         SwapchainHasNativeSurface = AnityNative.Graphics_SwapchainHasNativeSurface(sc) != 0;
                         SwapchainBackendKind = AnityNative.Graphics_GetSwapchainBackendKind(sc);
+                        SwapchainSurfaceKind = AnityNative.Graphics_GetSwapchainSurfaceKind(sc);
                     }
                     catch
                     {
                         SwapchainHasNativeSurface = false;
                         SwapchainBackendKind = DeviceType == GraphicsDeviceType.Vulkan ? 1
                             : DeviceType == GraphicsDeviceType.Metal ? 2 : 0;
+                        SwapchainSurfaceKind = 0;
                     }
                     return true;
                 }
@@ -166,6 +194,7 @@ public sealed class NativeGraphicsDevice : IDisposable
         SwapchainHeadless = nativeWindow == IntPtr.Zero;
         SwapchainHasNativeSurface = false;
         SwapchainBackendKind = preferredKind(DeviceType);
+        SwapchainSurfaceKind = 0;
         return true;
     }
 

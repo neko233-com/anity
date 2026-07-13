@@ -179,6 +179,9 @@ public class PlayableDirector : MonoBehaviour
     private DirectorUpdateMode _updateMode = DirectorUpdateMode.GameTime;
     private PlayableAsset _playableAsset;
     private bool _graphReady;
+    private double _previousTime;
+    private UnityEngine.Timeline.SignalReceiver _signalReceiver;
+    private int _signalsEmitted;
 
     public PlayableAsset playableAsset
     {
@@ -190,6 +193,15 @@ public class PlayableDirector : MonoBehaviour
                 RebuildGraph();
         }
     }
+
+    /// <summary>Optional receiver for Timeline SignalTrack emissions.</summary>
+    public UnityEngine.Timeline.SignalReceiver signalReceiver
+    {
+        get => _signalReceiver;
+        set => _signalReceiver = value;
+    }
+
+    public int signalsEmitted => _signalsEmitted;
 
     public DirectorUpdateMode timeUpdateMode
     {
@@ -253,6 +265,8 @@ public class PlayableDirector : MonoBehaviour
         _state = PlayState.Playing;
         if (_time <= 0 && initialTime > 0)
             _time = initialTime;
+        _previousTime = _time;
+        ResetSignalEmitters();
         if (_graph != null && _graph.IsValid())
             _graph.Play();
         played?.Invoke(this);
@@ -268,6 +282,9 @@ public class PlayableDirector : MonoBehaviour
     {
         _state = PlayState.Paused;
         _time = 0;
+        _previousTime = 0;
+        _signalsEmitted = 0;
+        ResetSignalEmitters();
         if (_graph != null && _graph.IsValid())
             _graph.Stop();
         stopped?.Invoke(this);
@@ -283,6 +300,8 @@ public class PlayableDirector : MonoBehaviour
     public void Evaluate(float deltaTime)
     {
         EnsureGraph();
+        double prev = _time;
+        bool looped = false;
         if (_state == PlayState.Playing)
         {
             _time += deltaTime;
@@ -293,6 +312,7 @@ public class PlayableDirector : MonoBehaviour
                 {
                     case DirectorWrapMode.Loop:
                         _time = _time % dur;
+                        looped = true;
                         break;
                     case DirectorWrapMode.None:
                         _time = dur;
@@ -305,11 +325,36 @@ public class PlayableDirector : MonoBehaviour
                 }
             }
         }
+        EmitSignals(prev, _time, looped);
+        _previousTime = _time;
         if (_graph != null && _graph.IsValid())
         {
             _graph.SetTime(_time);
             _graph.Evaluate(deltaTime);
         }
+    }
+
+    private void ResetSignalEmitters()
+    {
+        if (_playableAsset is UnityEngine.Timeline.TimelineAsset ta)
+        {
+            foreach (var t in ta.GetOutputTracks())
+            {
+                if (t is UnityEngine.Timeline.SignalTrack st)
+                    st.ResetEmittedFlags();
+            }
+        }
+    }
+
+    private void EmitSignals(double previousTime, double currentTime, bool looped)
+    {
+        if (_playableAsset is not UnityEngine.Timeline.TimelineAsset ta) return;
+        var receiver = _signalReceiver;
+        if (receiver == null && gameObject != null)
+            receiver = gameObject.GetComponent<UnityEngine.Timeline.SignalReceiver>();
+        int n = UnityEngine.Timeline.SignalUtility.EvaluateTimelineSignals(
+            ta, previousTime, currentTime, receiver, looped);
+        _signalsEmitted += n;
     }
 
     public void RebuildGraph()

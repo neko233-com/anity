@@ -187,6 +187,14 @@ public static class AnityNative
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetSwapchainBackendKind")]
     public static extern int Graphics_GetSwapchainBackendKind(IntPtr swapchain);
 
+    /// <summary>0=none, 1=Win32, 2=Android, 3=X11, 4=Wayland</summary>
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetSwapchainSurfaceKind")]
+    public static extern int Graphics_GetSwapchainSurfaceKind(IntPtr swapchain);
+
+    /// <summary>bit0=Win32, bit1=Android, bit2=X11, bit3=Wayland</summary>
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_Vulkan_GetSupportedSurfaceMask")]
+    public static extern int Graphics_Vulkan_GetSupportedSurfaceMask();
+
     // --- HDR ---
     [StructLayout(LayoutKind.Sequential)]
     public struct HDRDisplayInfo

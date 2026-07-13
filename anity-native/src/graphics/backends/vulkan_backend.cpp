@@ -14,12 +14,37 @@
 #include <vulkan/vulkan_win32.h>
 #endif
 
+#if defined(__ANDROID__)
+#include <android/native_window.h>
+#include <vulkan/vulkan_android.h>
+#endif
+
+#if defined(ANITY_HAS_X11)
+#include <X11/Xlib.h>
+#include <vulkan/vulkan_xlib.h>
+#endif
+
+#if defined(ANITY_HAS_WAYLAND)
+#include <wayland-client.h>
+#include <vulkan/vulkan_wayland.h>
+#endif
+
+/* Surface kind: 0=none/headless, 1=Win32, 2=Android ANativeWindow, 3=X11, 4=Wayland */
+enum AnityVkSurfaceKind : int32_t {
+  ANITY_VK_SURFACE_NONE = 0,
+  ANITY_VK_SURFACE_WIN32 = 1,
+  ANITY_VK_SURFACE_ANDROID = 2,
+  ANITY_VK_SURFACE_X11 = 3,
+  ANITY_VK_SURFACE_WAYLAND = 4
+};
+
 struct VkSwapchainState {
   int32_t width = 0;
   int32_t height = 0;
   int32_t imageCount = 2;
   int32_t headless = 1;
   int32_t hasNativeSurface = 0;
+  int32_t surfaceKind = ANITY_VK_SURFACE_NONE;
   VkSurfaceKHR surface = VK_NULL_HANDLE;
   VkSwapchainKHR swapchain = VK_NULL_HANDLE;
   std::vector<VkImage> images;
@@ -37,6 +62,10 @@ struct VkState {
   uint32_t queueFamily = 0;
   bool hasSurfaceExt = false;
   bool hasSwapchainExt = false;
+  bool hasWin32SurfaceExt = false;
+  bool hasAndroidSurfaceExt = false;
+  bool hasXlibSurfaceExt = false;
+  bool hasWaylandSurfaceExt = false;
 };
 
 static bool HasExtension(const char* name, const std::vector<VkExtensionProperties>& props) {
@@ -65,12 +94,28 @@ extern "C" AnityResult AnityGraphics_CreateVulkan(
     st->hasSurfaceExt = true;
   }
 #if defined(_WIN32)
-  if (HasExtension(VK_KHR_WIN32_SURFACE_EXTENSION_NAME, instExts))
+  if (HasExtension(VK_KHR_WIN32_SURFACE_EXTENSION_NAME, instExts)) {
     enabledInst.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+    st->hasWin32SurfaceExt = true;
+  }
 #endif
 #if defined(__ANDROID__)
-  if (HasExtension("VK_KHR_android_surface", instExts))
-    enabledInst.push_back("VK_KHR_android_surface");
+  if (HasExtension(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, instExts)) {
+    enabledInst.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
+    st->hasAndroidSurfaceExt = true;
+  }
+#endif
+#if defined(ANITY_HAS_X11)
+  if (HasExtension(VK_KHR_XLIB_SURFACE_EXTENSION_NAME, instExts)) {
+    enabledInst.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+    st->hasXlibSurfaceExt = true;
+  }
+#endif
+#if defined(ANITY_HAS_WAYLAND)
+  if (HasExtension(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME, instExts)) {
+    enabledInst.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
+    st->hasWaylandSurfaceExt = true;
+  }
 #endif
 
   VkApplicationInfo app{};
@@ -185,7 +230,7 @@ extern "C" void AnityGraphics_Vulkan_Destroy(AnityGraphicsDevice* device) {
 static AnityResult CreateWin32Surface(VkState* st, void* nativeWindow, VkSurfaceKHR* outSurface) {
   *outSurface = VK_NULL_HANDLE;
 #if defined(_WIN32)
-  if (!nativeWindow || !st->hasSurfaceExt) return ANITY_ERR_NOT_SUPPORTED;
+  if (!nativeWindow || !st->hasSurfaceExt || !st->hasWin32SurfaceExt) return ANITY_ERR_NOT_SUPPORTED;
   HWND hwnd = reinterpret_cast<HWND>(nativeWindow);
   if (!IsWindow(hwnd)) return ANITY_ERR_INVALID_ARG;
 
@@ -200,6 +245,105 @@ static AnityResult CreateWin32Surface(VkState* st, void* nativeWindow, VkSurface
   (void)nativeWindow;
   return ANITY_ERR_NOT_SUPPORTED;
 #endif
+}
+
+/* Android: nativeWindow is ANativeWindow* from ANativeActivity / SurfaceView. */
+static AnityResult CreateAndroidSurface(VkState* st, void* nativeWindow, VkSurfaceKHR* outSurface) {
+  *outSurface = VK_NULL_HANDLE;
+#if defined(__ANDROID__)
+  if (!nativeWindow || !st->hasSurfaceExt || !st->hasAndroidSurfaceExt) return ANITY_ERR_NOT_SUPPORTED;
+  ANativeWindow* window = reinterpret_cast<ANativeWindow*>(nativeWindow);
+  if (ANativeWindow_getWidth(window) <= 0) return ANITY_ERR_INVALID_ARG;
+
+  VkAndroidSurfaceCreateInfoKHR sci{};
+  sci.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+  sci.window = window;
+  VkResult vr = vkCreateAndroidSurfaceKHR(st->instance, &sci, nullptr, outSurface);
+  return vr == VK_SUCCESS ? ANITY_OK : ANITY_ERR_DEVICE_LOST;
+#else
+  (void)st;
+  (void)nativeWindow;
+  return ANITY_ERR_NOT_SUPPORTED;
+#endif
+}
+
+/* X11: nativeWindow is AnityX11NativeWindow* (see anity_graphics.h). */
+static AnityResult CreateX11Surface(VkState* st, void* nativeWindow, VkSurfaceKHR* outSurface) {
+  *outSurface = VK_NULL_HANDLE;
+#if defined(ANITY_HAS_X11)
+  if (!nativeWindow || !st->hasSurfaceExt || !st->hasXlibSurfaceExt) return ANITY_ERR_NOT_SUPPORTED;
+  auto* xw = reinterpret_cast<AnityX11NativeWindow*>(nativeWindow);
+  if (!xw->display || xw->window == 0) return ANITY_ERR_INVALID_ARG;
+
+  VkXlibSurfaceCreateInfoKHR sci{};
+  sci.sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
+  sci.dpy = reinterpret_cast<Display*>(xw->display);
+  sci.window = (Window)xw->window;
+  VkResult vr = vkCreateXlibSurfaceKHR(st->instance, &sci, nullptr, outSurface);
+  return vr == VK_SUCCESS ? ANITY_OK : ANITY_ERR_DEVICE_LOST;
+#else
+  (void)st;
+  (void)nativeWindow;
+  return ANITY_ERR_NOT_SUPPORTED;
+#endif
+}
+
+/* Wayland: nativeWindow is AnityWaylandNativeWindow* (see anity_graphics.h). */
+static AnityResult CreateWaylandSurface(VkState* st, void* nativeWindow, VkSurfaceKHR* outSurface) {
+  *outSurface = VK_NULL_HANDLE;
+#if defined(ANITY_HAS_WAYLAND)
+  if (!nativeWindow || !st->hasSurfaceExt || !st->hasWaylandSurfaceExt) return ANITY_ERR_NOT_SUPPORTED;
+  auto* ww = reinterpret_cast<AnityWaylandNativeWindow*>(nativeWindow);
+  if (!ww->display || !ww->surface) return ANITY_ERR_INVALID_ARG;
+
+  VkWaylandSurfaceCreateInfoKHR sci{};
+  sci.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+  sci.display = reinterpret_cast<wl_display*>(ww->display);
+  sci.surface = reinterpret_cast<wl_surface*>(ww->surface);
+  VkResult vr = vkCreateWaylandSurfaceKHR(st->instance, &sci, nullptr, outSurface);
+  return vr == VK_SUCCESS ? ANITY_OK : ANITY_ERR_DEVICE_LOST;
+#else
+  (void)st;
+  (void)nativeWindow;
+  return ANITY_ERR_NOT_SUPPORTED;
+#endif
+}
+
+/* Try platform surfaces in priority order for this build. */
+static AnityResult CreatePlatformSurface(VkState* st, void* nativeWindow, VkSurfaceKHR* outSurface, int32_t* outKind) {
+  *outSurface = VK_NULL_HANDLE;
+  if (outKind) *outKind = ANITY_VK_SURFACE_NONE;
+  if (!nativeWindow) return ANITY_ERR_INVALID_ARG;
+
+#if defined(__ANDROID__)
+  if (CreateAndroidSurface(st, nativeWindow, outSurface) == ANITY_OK && *outSurface) {
+    if (outKind) *outKind = ANITY_VK_SURFACE_ANDROID;
+    return ANITY_OK;
+  }
+#endif
+
+#if defined(_WIN32)
+  if (CreateWin32Surface(st, nativeWindow, outSurface) == ANITY_OK && *outSurface) {
+    if (outKind) *outKind = ANITY_VK_SURFACE_WIN32;
+    return ANITY_OK;
+  }
+#endif
+
+#if defined(ANITY_HAS_X11)
+  if (CreateX11Surface(st, nativeWindow, outSurface) == ANITY_OK && *outSurface) {
+    if (outKind) *outKind = ANITY_VK_SURFACE_X11;
+    return ANITY_OK;
+  }
+#endif
+
+#if defined(ANITY_HAS_WAYLAND)
+  if (CreateWaylandSurface(st, nativeWindow, outSurface) == ANITY_OK && *outSurface) {
+    if (outKind) *outKind = ANITY_VK_SURFACE_WAYLAND;
+    return ANITY_OK;
+  }
+#endif
+
+  return ANITY_ERR_NOT_SUPPORTED;
 }
 
 extern "C" AnityResult AnityGraphics_Vulkan_CreateSwapchain(
@@ -232,9 +376,11 @@ extern "C" AnityResult AnityGraphics_Vulkan_CreateSwapchain(
   vst->imageCount = sc->imageCount;
   vst->headless = sc->headless;
 
-  /* Try native surface + real VkSwapchainKHR when window provided */
+  /* Try native surface (Win32 / Android ANativeWindow / X11 / Wayland) + real VkSwapchainKHR */
   if (desc->nativeWindow && st->hasSurfaceExt && st->hasSwapchainExt) {
-    if (CreateWin32Surface(st, desc->nativeWindow, &vst->surface) == ANITY_OK && vst->surface) {
+    int32_t kind = ANITY_VK_SURFACE_NONE;
+    if (CreatePlatformSurface(st, desc->nativeWindow, &vst->surface, &kind) == ANITY_OK && vst->surface) {
+      vst->surfaceKind = kind;
       VkBool32 supported = VK_FALSE;
       vkGetPhysicalDeviceSurfaceSupportKHR(st->phys, st->queueFamily, vst->surface, &supported);
       if (supported) {
@@ -397,6 +543,29 @@ extern "C" int32_t AnityGraphics_Vulkan_SwapchainHasNativeSurface(const AnitySwa
   return reinterpret_cast<const VkSwapchainState*>(swapchain->backend)->hasNativeSurface;
 }
 
+extern "C" int32_t AnityGraphics_Vulkan_GetSwapchainSurfaceKind(const AnitySwapchain* swapchain) {
+  if (!swapchain || !swapchain->backend) return ANITY_VK_SURFACE_NONE;
+  return reinterpret_cast<const VkSwapchainState*>(swapchain->backend)->surfaceKind;
+}
+
+/* Compile-time supported surface platforms bitmask: bit0=Win32, bit1=Android, bit2=X11, bit3=Wayland */
+extern "C" int32_t AnityGraphics_Vulkan_GetSupportedSurfaceMask() {
+  int32_t mask = 0;
+#if defined(_WIN32)
+  mask |= 1; /* Win32 */
+#endif
+#if defined(__ANDROID__)
+  mask |= 2; /* Android */
+#endif
+#if defined(ANITY_HAS_X11)
+  mask |= 4; /* X11 */
+#endif
+#if defined(ANITY_HAS_WAYLAND)
+  mask |= 8; /* Wayland */
+#endif
+  return mask;
+}
+
 #else
 
 extern "C" AnityResult AnityGraphics_CreateVulkan(
@@ -416,6 +585,12 @@ extern "C" AnityResult AnityGraphics_Vulkan_Present(AnitySwapchain*) {
   return ANITY_ERR_NOT_SUPPORTED;
 }
 extern "C" int32_t AnityGraphics_Vulkan_SwapchainHasNativeSurface(const AnitySwapchain*) {
+  return 0;
+}
+extern "C" int32_t AnityGraphics_Vulkan_GetSwapchainSurfaceKind(const AnitySwapchain*) {
+  return 0;
+}
+extern "C" int32_t AnityGraphics_Vulkan_GetSupportedSurfaceMask() {
   return 0;
 }
 

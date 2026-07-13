@@ -118,6 +118,39 @@ public static class PlatformGraphics
     public static bool SupportsTextureFormat(TextureFormat format) =>
         TextureCompressionUtility.IsFormatSupportedOnAPI(format, ActiveDeviceType);
 
+    /// <summary>Vulkan native window surface kind expected for a target platform.</summary>
+    public enum VulkanSurfaceKind
+    {
+        None = 0,
+        Win32 = 1,
+        Android = 2,
+        X11 = 3,
+        Wayland = 4
+    }
+
+    /// <summary>Primary Vulkan surface kind for platform (nativeWindow packing).</summary>
+    public static VulkanSurfaceKind GetVulkanSurfaceKind(TargetPlatform platform) => platform switch
+    {
+        TargetPlatform.Windows => VulkanSurfaceKind.Win32,
+        TargetPlatform.Android => VulkanSurfaceKind.Android,
+        TargetPlatform.Linux => VulkanSurfaceKind.X11, // Wayland also supported when available
+        _ => VulkanSurfaceKind.None
+    };
+
+    /// <summary>Whether platform uses a native window surface for Vulkan present (vs headless).</summary>
+    public static bool PlatformUsesVulkanNativeSurface(TargetPlatform platform) =>
+        platform is TargetPlatform.Windows or TargetPlatform.Android or TargetPlatform.Linux;
+
+    /// <summary>Native window pointer type documentation for CreateSwapchain(nativeWindow).</summary>
+    public static string DescribeNativeWindowType(TargetPlatform platform) => platform switch
+    {
+        TargetPlatform.Windows => "HWND",
+        TargetPlatform.Android => "ANativeWindow*",
+        TargetPlatform.Linux => "AnityX11NativeWindow* or AnityWaylandNativeWindow*",
+        TargetPlatform.iOS or TargetPlatform.MacOS => "CAMetalLayer*",
+        _ => "nullptr (headless)"
+    };
+
     public static string GetShaderTargetName() => ActiveDeviceType switch
     {
         GraphicsDeviceType.Metal => "metal",

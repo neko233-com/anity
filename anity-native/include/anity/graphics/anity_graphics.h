@@ -86,6 +86,30 @@ ANITY_API int32_t ANITY_CALL AnityGraphics_SwapchainHasNativeSurface(const Anity
 /* Backend tag: 0=unknown/headless software, 1=Vulkan, 2=Metal, 3=D3D11 */
 ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainBackendKind(const AnitySwapchain* swapchain);
 
+/*
+ * Vulkan surface kind for active swapchain:
+ * 0=none/headless, 1=Win32 HWND, 2=Android ANativeWindow, 3=X11, 4=Wayland
+ */
+ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainSurfaceKind(const AnitySwapchain* swapchain);
+
+/*
+ * Compile-time Vulkan surface platform mask:
+ * bit0=Win32, bit1=Android, bit2=X11, bit3=Wayland
+ */
+ANITY_API int32_t ANITY_CALL AnityGraphics_Vulkan_GetSupportedSurfaceMask(void);
+
+/* Packing for X11: pass as nativeWindow to CreateSwapchain on Linux. */
+typedef struct AnityX11NativeWindow {
+  void* display;       /* Display* */
+  unsigned long window; /* Window XID */
+} AnityX11NativeWindow;
+
+/* Packing for Wayland: pass as nativeWindow to CreateSwapchain. */
+typedef struct AnityWaylandNativeWindow {
+  void* display; /* wl_display* */
+  void* surface; /* wl_surface* */
+} AnityWaylandNativeWindow;
+
 #ifdef __cplusplus
 }
 #endif

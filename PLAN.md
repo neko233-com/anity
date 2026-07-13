@@ -1,5 +1,20 @@
 # PLAN
 
+## 2026-07-13p — Vulkan Android/X11/Wayland surface + Timeline Signal/Window
+
+### 已完成
+- **Vulkan 多平台 surface**：Win32 HWND、Android `ANativeWindow`、X11（`AnityX11NativeWindow`）、Wayland（可选）；`surfaceKind` + 支持掩码 API
+- **CMake**：Android `android` lib；Linux 可选 X11 / Wayland-client
+- **C#**：`SwapchainSurfaceKind`、`VulkanSupportedSurfaceMask`、`PlatformGraphics.GetVulkanSurfaceKind/DescribeNativeWindowType`
+- **Timeline Signal**：`SignalAsset`/`SignalEmitter`/`SignalReceiver`/`SignalTrack`/`SignalUtility`；Director Evaluate 跨时间点发射（含 Loop）
+- **TimelineWindow**：编辑器播放头、轨道/Clip/Signal 添加、Play/Pause/Stop/Tick
+- **测试**：本批 **21** 新测 + 相关 66 绿；native build-batch OK
+
+### 下一次
+1. 真机/模拟器上验证 ANativeWindow 与 X11 present
+2. Timeline Marker 接口完整对齐（IMarker）
+3. Umbra 官方 bake 二进制（可选）
+
 ## 2026-07-13o — Umbra/Wind/Vehicles/IMGUI/Director/Timeline/StreamingAssets 全落地
 
 ### 已完成
@@ -13,8 +28,8 @@
 - **测试**：本批 **80** 新测全绿；Core 全量 **324** 全绿
 
 ### 下一次
-1. Android ANativeWindow / X11 surface
-2. Timeline 编辑器窗口与 Signal 发射深度
+1. ~~Android ANativeWindow / X11 surface~~ → 见 13p
+2. ~~Timeline 编辑器窗口与 Signal 发射深度~~ → 见 13p
 3. 真 Umbra 二进制 bake 格式（若需与官方数据互通）
 
 ## 2026-07-13n — Vulkan surface/swapchain + Metal CAMetalLayer 全落地

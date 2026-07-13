@@ -64,7 +64,7 @@ public class ActivationTrack : TrackAsset { }
 public class AnimationTrack : TrackAsset { }
 public class AudioTrack : TrackAsset { }
 public class ControlTrack : TrackAsset { }
-public class SignalTrack : TrackAsset { }
+// SignalTrack defined in Signals.cs with emitters
 public class PlayableTrack : TrackAsset { }
 
 /// <summary>UnityEngine.Timeline.TimelineAsset</summary>
