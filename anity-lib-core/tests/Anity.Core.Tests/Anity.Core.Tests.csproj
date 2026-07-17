@@ -20,4 +20,31 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Anity.Core\Anity.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup Condition="'$(AnityRequireNative)' == 'true'">
+    <None Include="..\..\..\anity-native\build\libanity_native*.dylib"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\..\anity-native\build\libanity_native*.so*"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\..\anity-native\build\anity_native.dll"
+          Condition="Exists('..\..\..\anity-native\build\anity_native.dll')"
+          Link="anity_native.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="RemoveNativeRuntimeFromManagedOnlyTests"
+          BeforeTargets="Build"
+          Condition="'$(AnityRequireNative)' != 'true'">
+    <ItemGroup>
+      <_NativeTestRuntime Include="$(TargetDir)libanity_native*.dylib" />
+      <_NativeTestRuntime Include="$(TargetDir)libanity_native*.so*" />
+      <_NativeTestRuntime Include="$(TargetDir)anity_native.dll" />
+    </ItemGroup>
+    <Delete Files="@(_NativeTestRuntime)" />
+  </Target>
 </Project>

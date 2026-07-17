@@ -8,6 +8,20 @@ extern "C" {
 
 typedef struct AnityVec3 { float x, y, z; } AnityVec3;
 typedef struct AnityVec2 { float x, y; } AnityVec2;
+typedef struct AnityQuat { float x, y, z, w; } AnityQuat;
+
+/* Resolves Unity ConstantForce world/local vectors in the native physics layer. */
+ANITY_API int32_t ANITY_CALL AnityPhysics3D_ResolveConstantForce(
+    AnityVec3 force, AnityVec3 relativeForce,
+    AnityVec3 torque, AnityVec3 relativeTorque,
+    AnityQuat rotation,
+    AnityVec3* outForce, AnityVec3* outTorque);
+
+/* Resolves Unity ConstantForce2D world/local force and torque. */
+ANITY_API int32_t ANITY_CALL AnityPhysics2D_ResolveConstantForce(
+    AnityVec2 force, AnityVec2 relativeForce,
+    AnityQuat rotation, float torque,
+    AnityVec2* outForce, float* outTorque);
 
 /* 3D sphere-sphere continuous TOI (matches ContinuousCollision semantics) */
 ANITY_API int32_t ANITY_CALL AnityPhysics3D_SphereSphereTOI(

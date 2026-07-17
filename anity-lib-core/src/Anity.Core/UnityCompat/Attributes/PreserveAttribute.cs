@@ -2,6 +2,18 @@ using System;
 
 namespace UnityEngine.Scripting
 {
+  [AttributeUsage(AttributeTargets.All, Inherited = false)]
+  internal sealed class RequiredByNativeCodeAttribute : Attribute
+  {
+    public bool GenerateProxy { get; set; }
+    public bool Optional { get; set; }
+  }
+
+  [AttributeUsage(AttributeTargets.All, Inherited = false)]
+  internal sealed class UsedByNativeCodeAttribute : Attribute
+  {
+  }
+
   /// <summary>
   /// Prevents the linked IL2CPP code generator from stripping the attributed type or member.
   /// Unity-compatible preserve attribute for IL2CPP/AOT builds.

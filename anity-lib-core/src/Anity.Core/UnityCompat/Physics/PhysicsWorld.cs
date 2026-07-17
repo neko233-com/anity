@@ -949,16 +949,26 @@ internal class PhysicsWorld
 
     public void Simulate(float step)
     {
+        CleanupDestroyed();
+
         foreach (var rb in _rigidbodies)
         {
-            if (rb != null) rb.ApplyForces(step);
+            if (!IsActive(rb)) continue;
+            foreach (ConstantForce constantForce in rb.GetComponents<ConstantForce>())
+            {
+                if (!constantForce.isActiveAndEnabled) continue;
+                constantForce.Resolve(out Vector3 force, out Vector3 torque);
+                rb.AddForce(force, ForceMode.Force);
+                rb.AddTorque(torque, ForceMode.Force);
+            }
+            rb.ApplyForces(step);
         }
 
         ApplyJoints(step);
 
         foreach (var rb in _rigidbodies)
         {
-            if (rb == null) continue;
+            if (!IsActive(rb)) continue;
             // Continuous / ContinuousDynamic / ContinuousSpeculative: parameterized TOI CCD
             if (rb.collisionDetectionMode != CollisionDetectionMode.Discrete)
                 ContinuousCollision.IntegrateWithCCD(rb, step, this);
@@ -968,7 +978,7 @@ internal class PhysicsWorld
 
         foreach (var wheel in _wheels)
         {
-            if (wheel != null) wheel.UpdateWheel(step);
+            if (IsActive(wheel) && wheel.enabled) wheel.UpdateWheel(step);
         }
 
         var currentCollisions = new HashSet<CollisionPair>();
@@ -976,7 +986,7 @@ internal class PhysicsWorld
 
         foreach (var c in _colliders)
         {
-            if (c != null) c.ClearContacts();
+            c.ClearContacts();
         }
 
         for (int i = 0; i < _colliders.Count; i++)
@@ -985,7 +995,7 @@ internal class PhysicsWorld
             {
                 var a = _colliders[i];
                 var b = _colliders[j];
-                if (a == null || b == null || !a.enabled || !b.enabled) continue;
+                if (!IsActive(a) || !IsActive(b) || !a.enabled || !b.enabled) continue;
                 if (GetIgnoreCollision(a, b)) continue;
                 int la = a.gameObject?.layer ?? 0;
                 int lb = b.gameObject?.layer ?? 0;
@@ -1070,9 +1080,25 @@ internal class PhysicsWorld
 
         foreach (var rb in _rigidbodies)
         {
-            if (rb != null) rb.CheckSleep(_sleepThreshold);
+            if (IsActive(rb)) rb.CheckSleep(_sleepThreshold);
         }
     }
+
+    private void CleanupDestroyed()
+    {
+        _colliders.RemoveAll(component => component is null || component.IsDestroyed || component.gameObject is null);
+        _rigidbodies.RemoveAll(component => component is null || component.IsDestroyed || component.gameObject is null);
+        _joints.RemoveAll(component => component is null || component.IsDestroyed || component.gameObject is null);
+        _wheels.RemoveAll(component => component is null || component.IsDestroyed || component.gameObject is null);
+        _collisionStates.RemoveWhere(pair => pair.A is null || pair.B is null || pair.A.IsDestroyed || pair.B.IsDestroyed);
+        _triggerStates.RemoveWhere(pair => pair.A is null || pair.B is null || pair.A.IsDestroyed || pair.B.IsDestroyed);
+    }
+
+    private static bool IsActive(Component component)
+        => component is not null
+            && !component.IsDestroyed
+            && component.gameObject is not null
+            && component.gameObject.activeInHierarchy;
 
     private Collision CreateCollision(Collider a, Collider b, Vector3 normal, float pen, Vector3 relVel)
     {
@@ -1085,7 +1111,7 @@ internal class PhysicsWorld
     {
         foreach (var joint in _joints)
         {
-            if (joint == null) continue;
+            if (!IsActive(joint)) continue;
             if (joint is SpringJoint springJoint)
             {
                 ApplySpringJoint(springJoint, step);

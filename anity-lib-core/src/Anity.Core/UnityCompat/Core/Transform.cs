@@ -2,10 +2,16 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using Anity.Core.Runtime.Native;
+using UnityEngine.SceneManagement;
 
 namespace UnityEngine;
 
-public class Transform : Component, IEnumerable<Transform>
+[Bindings.NativeHeader("Configuration/UnityConfigure.h")]
+[Bindings.NativeHeader("Runtime/Transform/ScriptBindings/TransformScriptBindings.h")]
+[Bindings.NativeHeader("Runtime/Transform/Transform.h")]
+[Scripting.RequiredByNativeCode]
+public class Transform : Component, IEnumerable
 {
   private readonly List<Transform> _children = new();
   private Transform? _parent;
@@ -13,12 +19,42 @@ public class Transform : Component, IEnumerable<Transform>
   private Quaternion _localRotation = Quaternion.identity;
   private Vector3 _localScale = Vector3.one;
   private bool _hasChanged;
+  private int _hierarchyCapacity = 4;
 
-  public Transform()
+  protected Transform()
   {
     _localPosition = Vector3.zero;
   }
 
+  internal static Transform CreateForGameObject(GameObject owner)
+  {
+    return new Transform { gameObject = owner };
+  }
+
+  internal void AdoptStateFrom(Transform source)
+  {
+    if (source is null || ReferenceEquals(this, source)) return;
+    _localPosition = source._localPosition;
+    _localRotation = source._localRotation;
+    _localScale = source._localScale;
+    _hasChanged = source._hasChanged;
+    _hierarchyCapacity = source._hierarchyCapacity;
+    _parent = source._parent;
+    if (_parent is not null)
+    {
+      int index = _parent._children.IndexOf(source);
+      if (index >= 0) _parent._children[index] = this;
+    }
+    foreach (Transform child in source._children)
+    {
+      child._parent = this;
+      _children.Add(child);
+    }
+    source._children.Clear();
+    source._parent = null;
+  }
+
+  [Bindings.NativeProperty("HasChangedDeprecated")]
   public bool hasChanged
   {
     get => _hasChanged;
@@ -72,7 +108,7 @@ public class Transform : Component, IEnumerable<Transform>
     get
     {
       if (_parent is null) return _localRotation;
-      return _parent.rotation * _localRotation;
+      return _parent.rotation * ApplyParentScaleSigns(_localRotation, _parent.lossyScale);
     }
     set
     {
@@ -82,7 +118,8 @@ public class Transform : Component, IEnumerable<Transform>
       }
       else
       {
-        _localRotation = Quaternion.Inverse(_parent.rotation) * value;
+        Quaternion parentRelativeRotation = Quaternion.Inverse(_parent.rotation) * value;
+        _localRotation = ApplyParentScaleSigns(parentRelativeRotation, _parent.lossyScale);
       }
       _hasChanged = true;
     }
@@ -112,12 +149,19 @@ public class Transform : Component, IEnumerable<Transform>
   {
     get
     {
-      if (_parent is null) return _localScale;
-      var parentScale = _parent.lossyScale;
+      Matrix4x4 matrix = localToWorldMatrix;
+      Quaternion worldRotation = rotation;
+      if (AnityNative.TryProjectTransformLossyScale(
+            ToNative(matrix), ToNative(worldRotation), out AnityNative.TransformVector3 nativeScale))
+        return new Vector3(nativeScale.x, nativeScale.y, nativeScale.z);
+
+      Vector3 axisX = worldRotation * Vector3.right;
+      Vector3 axisY = worldRotation * Vector3.up;
+      Vector3 axisZ = worldRotation * Vector3.forward;
       return new Vector3(
-        parentScale.x * _localScale.x,
-        parentScale.y * _localScale.y,
-        parentScale.z * _localScale.z);
+        Vector3.Dot(new Vector3(matrix.m00, matrix.m10, matrix.m20), axisX),
+        Vector3.Dot(new Vector3(matrix.m01, matrix.m11, matrix.m21), axisY),
+        Vector3.Dot(new Vector3(matrix.m02, matrix.m12, matrix.m22), axisZ));
     }
   }
 
@@ -135,15 +179,53 @@ public class Transform : Component, IEnumerable<Transform>
 
   public int childCount => _children.Count;
 
-  public Vector3 forward => rotation * Vector3.forward;
-  public Vector3 up => rotation * Vector3.up;
-  public Vector3 right => rotation * Vector3.right;
+  public Vector3 forward
+  {
+    get => rotation * Vector3.forward;
+    set => rotation = Quaternion.LookRotation(value);
+  }
 
-  public Matrix4x4 localToWorldMatrix => Matrix4x4.TRS(position, rotation, lossyScale);
-  public Matrix4x4 worldToLocalMatrix => localToWorldMatrix.inverse;
+  public Vector3 up
+  {
+    get => rotation * Vector3.up;
+    set => rotation = Quaternion.FromToRotation(Vector3.up, value);
+  }
 
-  public IEnumerator<Transform> GetEnumerator() => _children.GetEnumerator();
-  IEnumerator IEnumerable.GetEnumerator() => _children.GetEnumerator();
+  public Vector3 right
+  {
+    get => rotation * Vector3.right;
+    set => rotation = Quaternion.FromToRotation(Vector3.right, value);
+  }
+
+  public Matrix4x4 localToWorldMatrix
+  {
+    get
+    {
+      Matrix4x4 parentMatrix = _parent?.localToWorldMatrix ?? Matrix4x4.identity;
+      if (AnityNative.TryComposeTransformLocalToWorld(
+            ToNative(parentMatrix), ToNative(_localPosition), ToNative(_localRotation), ToNative(_localScale),
+            out AnityNative.TransformMatrix4x4 nativeMatrix))
+        return FromNative(nativeMatrix);
+
+      return parentMatrix * Matrix4x4.TRS(_localPosition, _localRotation, _localScale);
+    }
+  }
+
+  public Matrix4x4 worldToLocalMatrix
+  {
+    get
+    {
+      Matrix4x4 parentMatrix = _parent?.worldToLocalMatrix ?? Matrix4x4.identity;
+      if (AnityNative.TryComposeTransformWorldToLocal(
+            ToNative(parentMatrix), ToNative(_localPosition), ToNative(_localRotation), ToNative(_localScale),
+            out AnityNative.TransformMatrix4x4 nativeMatrix))
+        return FromNative(nativeMatrix);
+
+      return InverseTrs(_localPosition, _localRotation, _localScale) * parentMatrix;
+    }
+  }
+
+  public IEnumerator GetEnumerator() => _children.GetEnumerator();
 
   public int GetSiblingIndex()
   {
@@ -178,16 +260,23 @@ public class Transform : Component, IEnumerable<Transform>
     SetSiblingIndex(_parent.childCount);
   }
 
+  [Bindings.FreeFunction("GetChild", HasExplicitThis = true)]
+  [Bindings.NativeThrows]
   public Transform GetChild(int index)
   {
     return _children[index];
   }
 
-  public Transform? Find(string name)
+  public Transform? Find(string n)
   {
-    if (name.Contains('/'))
+    if (n is null)
+      return null;
+    if (n.Length == 0)
+      return this;
+
+    if (n.Contains('/'))
     {
-      var parts = name.Split('/');
+      var parts = n.Split('/');
       Transform current = this;
       foreach (var part in parts)
       {
@@ -207,31 +296,16 @@ public class Transform : Component, IEnumerable<Transform>
       return current;
     }
 
-    foreach (var child in _children)
-    {
-      if (string.Equals(child.gameObject?.name, name, StringComparison.Ordinal))
-      {
-        return child;
-      }
-
-      var deeper = child.Find(name);
-      if (deeper is not null)
-      {
-        return deeper;
-      }
-    }
-
-    return null;
+    return _children.FirstOrDefault(child => string.Equals(child.gameObject?.name, n, StringComparison.Ordinal));
   }
 
-  public bool IsChildOf(Transform parent)
+  [Bindings.FreeFunction("Internal_IsChildOrSameTransform", HasExplicitThis = true)]
+  public bool IsChildOf([Bindings.NotNull("ArgumentNullException")] Transform parent)
   {
     if (parent is null)
-    {
-      return false;
-    }
+      throw new ArgumentNullException(nameof(parent));
 
-    for (var current = _parent; current is not null; current = current._parent)
+    for (Transform? current = this; current is not null; current = current._parent)
     {
       if (ReferenceEquals(current, parent))
       {
@@ -242,11 +316,12 @@ public class Transform : Component, IEnumerable<Transform>
     return false;
   }
 
-  public void SetParent(Transform? parent)
+  public void SetParent(Transform? p)
   {
-    SetParent(parent, true);
+    SetParent(p, true);
   }
 
+  [Bindings.FreeFunction("SetParent", HasExplicitThis = true)]
   public void SetParent(Transform? parent, bool worldPositionStays)
   {
     if (ReferenceEquals(_parent, parent))
@@ -254,7 +329,7 @@ public class Transform : Component, IEnumerable<Transform>
       return;
     }
 
-    if (parent is not null && IsChildOf(parent))
+    if (parent is not null && (ReferenceEquals(parent, this) || parent.IsChildOf(this)))
     {
       return;
     }
@@ -262,14 +337,17 @@ public class Transform : Component, IEnumerable<Transform>
     Vector3 prevPosition = position;
     Quaternion prevRotation = rotation;
     Vector3 prevScale = lossyScale;
-
-    if (_parent is not null)
-    {
-      _parent._children.Remove(this);
-      try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged", null, SendMessageOptions.DontRequireReceiver); } catch { }
-    }
+    Vector3 prevLocalPosition = _localPosition;
+    Quaternion prevLocalRotation = _localRotation;
+    Vector3 prevLocalScale = _localScale;
 
     Transform? oldParent = _parent;
+    Scene oldScene = gameObject?.scene ?? default;
+    if (oldParent is not null)
+      oldParent._children.Remove(this);
+    else if (gameObject is not null && oldScene.IsValid())
+      SceneManager.UnregisterRootGameObject(gameObject, oldScene);
+
     _parent = parent;
 
     if (_parent is not null)
@@ -279,42 +357,53 @@ public class Transform : Component, IEnumerable<Transform>
         _parent._children.Add(this);
       }
 
+      if (gameObject is not null && _parent.gameObject is not null && gameObject.scene != _parent.gameObject.scene)
+        gameObject.SetSceneInternal(_parent.gameObject.scene);
+
       if (worldPositionStays)
       {
         _localPosition = _parent.InverseTransformPoint(prevPosition);
-        _localRotation = Quaternion.Inverse(_parent.rotation) * prevRotation;
-        var parentScale = _parent.lossyScale;
+        Quaternion parentRelativeRotation = Quaternion.Inverse(_parent.rotation) * prevRotation;
+        _localRotation = ApplyParentScaleSigns(parentRelativeRotation, _parent.lossyScale);
+        _localScale = Vector3.one;
+        Vector3 unitScaleProjection = lossyScale;
         _localScale = new Vector3(
-          MathF.Abs(parentScale.x) > 1e-6f ? prevScale.x / parentScale.x : prevScale.x,
-          MathF.Abs(parentScale.y) > 1e-6f ? prevScale.y / parentScale.y : prevScale.y,
-          MathF.Abs(parentScale.z) > 1e-6f ? prevScale.z / parentScale.z : prevScale.z);
+          DivideScale(prevScale.x, unitScaleProjection.x),
+          DivideScale(prevScale.y, unitScaleProjection.y),
+          DivideScale(prevScale.z, unitScaleProjection.z));
       }
     }
     else
     {
-      _localPosition = prevPosition;
-      _localRotation = prevRotation;
-      _localScale = prevScale;
+      _localPosition = worldPositionStays ? prevPosition : prevLocalPosition;
+      _localRotation = worldPositionStays ? prevRotation : prevLocalRotation;
+      _localScale = worldPositionStays ? prevScale : prevLocalScale;
+      if (gameObject is not null && oldScene.IsValid())
+        SceneManager.RegisterRootGameObject(gameObject, oldScene);
     }
 
+    root.EnsureHierarchyCapacity();
     _hasChanged = true;
-    try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged", null, SendMessageOptions.DontRequireReceiver); } catch { }
-    for (int i = 0; i < childCount; i++)
-    {
-      _children[i].OnParentTransformChanged();
-    }
+    NotifyParentChangedRecursive();
+    NotifyChildrenChanged(oldParent);
+    NotifyChildrenChanged(_parent);
   }
 
-  private void OnParentTransformChanged()
+  private void NotifyParentChangedRecursive()
   {
     _hasChanged = true;
     try { if (gameObject is not null) gameObject.SendMessage("OnTransformParentChanged", null, SendMessageOptions.DontRequireReceiver); } catch { }
     for (int i = 0; i < childCount; i++)
-    {
-      _children[i].OnParentTransformChanged();
-    }
+      _children[i].NotifyParentChangedRecursive();
   }
 
+  private static void NotifyChildrenChanged(Transform? transform)
+  {
+    try { transform?.gameObject?.SendMessage("OnTransformChildrenChanged", null, SendMessageOptions.DontRequireReceiver); }
+    catch { }
+  }
+
+  [Bindings.FreeFunction("DetachChildren", HasExplicitThis = true)]
   public void DetachChildren()
   {
     foreach (var child in _children.ToArray())
@@ -330,7 +419,7 @@ public class Transform : Component, IEnumerable<Transform>
     Translate(x, y, z, Space.Self);
   }
 
-  public void Translate(float x, float y, float z, Space relativeTo)
+  public void Translate(float x, float y, float z, [Internal.DefaultValue("Space.Self")] Space relativeTo)
   {
     Translate(new Vector3(x, y, z), relativeTo);
   }
@@ -340,7 +429,7 @@ public class Transform : Component, IEnumerable<Transform>
     Translate(translation, Space.Self);
   }
 
-  public void Translate(Vector3 translation, Space relativeTo)
+  public void Translate(Vector3 translation, [Internal.DefaultValue("Space.Self")] Space relativeTo)
   {
     if (relativeTo == Space.World)
     {
@@ -369,12 +458,22 @@ public class Transform : Component, IEnumerable<Transform>
     }
   }
 
-  public void Rotate(Vector3 eulerAngles, Space relativeTo = Space.Self)
+  public void Rotate(Vector3 eulers)
   {
-    Rotate(eulerAngles.x, eulerAngles.y, eulerAngles.z, relativeTo);
+    Rotate(eulers, Space.Self);
   }
 
-  public void Rotate(float xAngle, float yAngle, float zAngle, Space relativeTo = Space.Self)
+  public void Rotate(Vector3 eulers, [Internal.DefaultValue("Space.Self")] Space relativeTo)
+  {
+    Rotate(eulers.x, eulers.y, eulers.z, relativeTo);
+  }
+
+  public void Rotate(float xAngle, float yAngle, float zAngle)
+  {
+    Rotate(xAngle, yAngle, zAngle, Space.Self);
+  }
+
+  public void Rotate(float xAngle, float yAngle, float zAngle, [Internal.DefaultValue("Space.Self")] Space relativeTo)
   {
     var rot = Quaternion.Euler(xAngle, yAngle, zAngle);
     if (relativeTo == Space.Self)
@@ -388,7 +487,12 @@ public class Transform : Component, IEnumerable<Transform>
     _hasChanged = true;
   }
 
-  public void Rotate(Vector3 axis, float angle, Space relativeTo = Space.Self)
+  public void Rotate(Vector3 axis, float angle)
+  {
+    Rotate(axis, angle, Space.Self);
+  }
+
+  public void Rotate(Vector3 axis, float angle, [Internal.DefaultValue("Space.Self")] Space relativeTo)
   {
     if (relativeTo == Space.Self)
     {
@@ -411,12 +515,19 @@ public class Transform : Component, IEnumerable<Transform>
     _hasChanged = true;
   }
 
+  [Obsolete("warning use Transform.Rotate instead.")]
   public void RotateAround(Vector3 axis, float angle)
   {
     RotateAround(position, axis, angle);
   }
 
-  public void LookAt(Vector3 worldPosition, Vector3 worldUp)
+  [Obsolete("warning use Transform.Rotate instead.")]
+  public void RotateAroundLocal(Vector3 axis, float angle)
+  {
+    Rotate(axis, angle, Space.Self);
+  }
+
+  public void LookAt(Vector3 worldPosition, [Internal.DefaultValue("Vector3.up")] Vector3 worldUp)
   {
     var dir = worldPosition - position;
     if (dir.sqrMagnitude < 1e-6f) return;
@@ -428,7 +539,7 @@ public class Transform : Component, IEnumerable<Transform>
     LookAt(worldPosition, Vector3.up);
   }
 
-  public void LookAt(Transform? target, Vector3 worldUp)
+  public void LookAt(Transform? target, [Internal.DefaultValue("Vector3.up")] Vector3 worldUp)
   {
     if (target is null) return;
     LookAt(target.position, worldUp);
@@ -526,6 +637,149 @@ public class Transform : Component, IEnumerable<Transform>
   {
     return InverseTransformPoint(new Vector3(x, y, z));
   }
+
+  public void TransformDirections(ReadOnlySpan<Vector3> directions, Span<Vector3> transformedDirections)
+    => TransformSpan(directions, transformedDirections, TransformDirection, nameof(TransformDirections));
+
+  public void TransformDirections(Span<Vector3> directions)
+    => TransformDirections((ReadOnlySpan<Vector3>)directions, directions);
+
+  public void InverseTransformDirections(ReadOnlySpan<Vector3> directions, Span<Vector3> transformedDirections)
+    => TransformSpan(directions, transformedDirections, InverseTransformDirection, nameof(InverseTransformDirections));
+
+  public void InverseTransformDirections(Span<Vector3> directions)
+    => InverseTransformDirections((ReadOnlySpan<Vector3>)directions, directions);
+
+  public void TransformVectors(ReadOnlySpan<Vector3> vectors, Span<Vector3> transformedVectors)
+    => TransformSpan(vectors, transformedVectors, TransformVector, nameof(TransformVectors));
+
+  public void TransformVectors(Span<Vector3> vectors)
+    => TransformVectors((ReadOnlySpan<Vector3>)vectors, vectors);
+
+  public void InverseTransformVectors(ReadOnlySpan<Vector3> vectors, Span<Vector3> transformedVectors)
+    => TransformSpan(vectors, transformedVectors, InverseTransformVector, nameof(InverseTransformVectors));
+
+  public void InverseTransformVectors(Span<Vector3> vectors)
+    => InverseTransformVectors((ReadOnlySpan<Vector3>)vectors, vectors);
+
+  public void TransformPoints(ReadOnlySpan<Vector3> positions, Span<Vector3> transformedPositions)
+    => TransformSpan(positions, transformedPositions, TransformPoint, nameof(TransformPoints));
+
+  public void TransformPoints(Span<Vector3> positions)
+    => TransformPoints((ReadOnlySpan<Vector3>)positions, positions);
+
+  public void InverseTransformPoints(ReadOnlySpan<Vector3> positions, Span<Vector3> transformedPositions)
+    => TransformSpan(positions, transformedPositions, InverseTransformPoint, nameof(InverseTransformPoints));
+
+  public void InverseTransformPoints(Span<Vector3> positions)
+    => InverseTransformPoints((ReadOnlySpan<Vector3>)positions, positions);
+
+  [Obsolete("FindChild has been deprecated. Use Find instead (UnityUpgradable) -> Find([mscorlib] System.String)", false)]
+  public Transform? FindChild(string n) => Find(n);
+
+  [Obsolete("warning use Transform.childCount instead (UnityUpgradable) -> Transform.childCount", false)]
+  [Bindings.NativeMethod("GetChildrenCount")]
+  public int GetChildCount() => childCount;
+
+  public int hierarchyCapacity
+  {
+    get => root._hierarchyCapacity;
+    set
+    {
+      Transform hierarchyRoot = root;
+      hierarchyRoot._hierarchyCapacity = Math.Max(value, hierarchyRoot.hierarchyCount);
+    }
+  }
+
+  public int hierarchyCount => root.CountHierarchy();
+
+  private static void TransformSpan(
+    ReadOnlySpan<Vector3> source,
+    Span<Vector3> destination,
+    Func<Vector3, Vector3> transform,
+    string methodName)
+  {
+    if (source.Length != destination.Length)
+      throw new InvalidOperationException($"Both spans passed to Transform.{methodName}() must be the same length");
+
+    if (source.Overlaps(destination, out int elementOffset) && elementOffset > 0)
+    {
+      for (int i = source.Length - 1; i >= 0; i--)
+        destination[i] = transform(source[i]);
+      return;
+    }
+
+    for (int i = 0; i < source.Length; i++)
+      destination[i] = transform(source[i]);
+  }
+
+  private int CountHierarchy()
+  {
+    int count = 1;
+    foreach (Transform child in _children)
+      count += child.CountHierarchy();
+    return count;
+  }
+
+  private void EnsureHierarchyCapacity()
+  {
+    Transform hierarchyRoot = root;
+    int count = hierarchyRoot.CountHierarchy();
+    int capacity = Math.Max(4, hierarchyRoot._hierarchyCapacity);
+    while (capacity < count)
+      capacity *= 2;
+    hierarchyRoot._hierarchyCapacity = capacity;
+  }
+
+  private static float DivideScale(float desiredScale, float projectedUnitScale)
+    => projectedUnitScale == 0f ? 0f : desiredScale / projectedUnitScale;
+
+  private static Quaternion ApplyParentScaleSigns(Quaternion value, Vector3 parentLossyScale)
+  {
+    float signX = parentLossyScale.x < 0f ? -1f : 1f;
+    float signY = parentLossyScale.y < 0f ? -1f : 1f;
+    float signZ = parentLossyScale.z < 0f ? -1f : 1f;
+    return new Quaternion(
+      value.x * signY * signZ,
+      value.y * signX * signZ,
+      value.z * signX * signY,
+      value.w);
+  }
+
+  private static Matrix4x4 InverseTrs(Vector3 position, Quaternion rotation, Vector3 scale)
+  {
+    Vector3 reciprocalScale = new Vector3(
+      scale.x == 0f ? 0f : 1f / scale.x,
+      scale.y == 0f ? 0f : 1f / scale.y,
+      scale.z == 0f ? 0f : 1f / scale.z);
+    return Matrix4x4.Scale(reciprocalScale)
+      * Matrix4x4.Rotate(Quaternion.Inverse(rotation))
+      * Matrix4x4.Translate(-position);
+  }
+
+  private static AnityNative.TransformVector3 ToNative(Vector3 value)
+    => new AnityNative.TransformVector3(value.x, value.y, value.z);
+
+  private static AnityNative.TransformQuaternion ToNative(Quaternion value)
+    => new AnityNative.TransformQuaternion(value.x, value.y, value.z, value.w);
+
+  private static AnityNative.TransformMatrix4x4 ToNative(Matrix4x4 value)
+    => new AnityNative.TransformMatrix4x4
+    {
+      m00 = value.m00, m01 = value.m01, m02 = value.m02, m03 = value.m03,
+      m10 = value.m10, m11 = value.m11, m12 = value.m12, m13 = value.m13,
+      m20 = value.m20, m21 = value.m21, m22 = value.m22, m23 = value.m23,
+      m30 = value.m30, m31 = value.m31, m32 = value.m32, m33 = value.m33
+    };
+
+  private static Matrix4x4 FromNative(AnityNative.TransformMatrix4x4 value)
+    => new Matrix4x4
+    {
+      m00 = value.m00, m01 = value.m01, m02 = value.m02, m03 = value.m03,
+      m10 = value.m10, m11 = value.m11, m12 = value.m12, m13 = value.m13,
+      m20 = value.m20, m21 = value.m21, m22 = value.m22, m23 = value.m23,
+      m30 = value.m30, m31 = value.m31, m32 = value.m32, m33 = value.m33
+    };
 
   internal static Vector3 QuaternionToEuler(Quaternion q)
   {

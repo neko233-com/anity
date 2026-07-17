@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using UnityEngine.UI;
 
 namespace UnityEngine;
@@ -15,6 +16,9 @@ public static class UnityRuntime
   public static void Tick(float deltaTime)
   {
     Time.Tick(deltaTime);
+
+    AsyncOperation.ProcessPendingOperations();
+    AsyncInstantiateOperation.ProcessPendingOperations();
 
     Input.UpdatePerFrame();
 
@@ -63,9 +67,18 @@ public static class UnityRuntime
       }
     }
 
-    try { CanvasUpdateRegistry.instance.PerformUpdate(); } catch { }
+    UnityEngine.VFX.VFXManager.ProcessPlayerLoopUpdate();
 
-    Camera.RenderAll();
+    try { Canvas.ForceUpdateCanvases(); } catch { }
+
+    try
+    {
+      Camera.RenderAll();
+    }
+    finally
+    {
+      UnityEngine.VFX.VFXManager.CompletePlayerLoopCulling();
+    }
 
     foreach (var mb in _cachedMonoBehaviours)
     {
@@ -78,13 +91,21 @@ public static class UnityRuntime
 
     Object.TickDestroyQueue();
 
+    AsyncOperation.DispatchDeferredCompletionCallbacks();
+
     Debug.TickLines(deltaTime);
   }
 
   private static void UpdateCachedObjects()
   {
-    _cachedMonoBehaviours = Object.FindObjectsOfType<MonoBehaviour>();
+    _cachedMonoBehaviours = Object.FindObjectsOfType<MonoBehaviour>()
+      .OrderBy(GetDefaultExecutionOrder)
+      .ThenBy(behaviour => behaviour.GetInstanceID())
+      .ToArray();
     _cachedAnimators = Object.FindObjectsOfType<Animator>();
     _cachedParticleSystems = Object.FindObjectsOfType<ParticleSystem>();
   }
+
+  private static int GetDefaultExecutionOrder(MonoBehaviour behaviour)
+    => behaviour.GetType().GetCustomAttribute<DefaultExecutionOrder>(true)?.order ?? 0;
 }

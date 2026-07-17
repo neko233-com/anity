@@ -474,11 +474,13 @@ public static class Addressables
                     SceneManager.LoadScene(sceneName, mode);
                 scene = SceneManager.GetActiveScene();
                 if (string.IsNullOrEmpty(scene.name))
-                    scene = new Scene(sceneName, -1, activateOnLoad);
+                    scene = SceneManager.CreateScene(sceneName);
             }
             catch
             {
-                scene = new Scene(sceneName, -1, activateOnLoad);
+                scene = SceneManager.GetSceneByName(sceneName);
+                if (!scene.IsValid())
+                    scene = SceneManager.CreateScene(sceneName);
             }
             var inst = new SceneInstance
             {

@@ -1,40 +1,63 @@
-using UnityEngine.UI;
-
 namespace UnityEngine;
 
-public enum Axis
+[Bindings.NativeHeader("Runtime/Transform/RectTransform.h")]
+[NativeClass("UI::RectTransform")]
+public sealed class RectTransform : Transform
 {
-  Horizontal = 0,
-  Vertical = 1
-}
+  public enum Axis
+  {
+    Horizontal = 0,
+    Vertical = 1
+  }
 
-public enum Edge
-{
-  Left = 0,
-  Right = 1,
-  Top = 2,
-  Bottom = 3
-}
+  public enum Edge
+  {
+    Left = 0,
+    Right = 1,
+    Top = 2,
+    Bottom = 3
+  }
 
-public class RectTransform : Transform
-{
-  private Vector2 _anchoredPosition;
-  private Vector2 _sizeDelta;
+  public delegate void ReapplyDrivenProperties(RectTransform driven);
+
+  public static event ReapplyDrivenProperties? reapplyDrivenProperties;
+
+  private Vector2 _sizeDelta = new(100f, 100f);
   private Vector2 _anchorMin = new(0.5f, 0.5f);
   private Vector2 _anchorMax = new(0.5f, 0.5f);
   private Vector2 _pivot = new(0.5f, 0.5f);
-  private Vector3 _anchoredPosition3D;
+  private Object? _drivenByObject;
+  private DrivenTransformProperties _drivenProperties;
 
   public Vector2 anchoredPosition
   {
-    get => _anchoredPosition;
-    set => _anchoredPosition = value;
+    get
+    {
+      Vector2 reference = GetAnchorReference();
+      Vector3 position = localPosition;
+      return new Vector2(position.x - reference.x, position.y - reference.y);
+    }
+    set
+    {
+      Vector2 reference = GetAnchorReference();
+      Vector3 position = localPosition;
+      localPosition = new Vector3(value.x + reference.x, value.y + reference.y, position.z);
+    }
   }
 
   public Vector3 anchoredPosition3D
   {
-    get => _anchoredPosition3D;
-    set => _anchoredPosition3D = value;
+    get
+    {
+      Vector2 anchored = anchoredPosition;
+      return new Vector3(anchored.x, anchored.y, localPosition.z);
+    }
+    set
+    {
+      anchoredPosition = new Vector2(value.x, value.y);
+      Vector3 position = localPosition;
+      localPosition = new Vector3(position.x, position.y, value.z);
+    }
   }
 
   public Vector2 sizeDelta
@@ -63,31 +86,23 @@ public class RectTransform : Transform
 
   public Vector2 offsetMin
   {
-    get
-    {
-      Rect pr = GetParentRect();
-      return new Vector2(rect.xMin - pr.xMin, rect.yMin - pr.yMin);
-    }
+    get => anchoredPosition - Vector2.Scale(sizeDelta, pivot);
     set
     {
-      Rect pr = GetParentRect();
-      _anchoredPosition.x = value.x + _sizeDelta.x * _pivot.x + pr.width * _anchorMin.x;
-      _anchoredPosition.y = value.y + _sizeDelta.y * _pivot.y + pr.height * _anchorMin.y;
+      Vector2 offset = value - (anchoredPosition - Vector2.Scale(sizeDelta, pivot));
+      sizeDelta -= offset;
+      anchoredPosition += Vector2.Scale(offset, Vector2.one - pivot);
     }
   }
 
   public Vector2 offsetMax
   {
-    get
-    {
-      Rect pr = GetParentRect();
-      return new Vector2(rect.xMax - pr.xMax, rect.yMax - pr.yMax);
-    }
+    get => anchoredPosition + Vector2.Scale(sizeDelta, Vector2.one - pivot);
     set
     {
-      Rect pr = GetParentRect();
-      _anchoredPosition.x = value.x - _sizeDelta.x * (1f - _pivot.x) + pr.width * _anchorMax.x;
-      _anchoredPosition.y = value.y - _sizeDelta.y * (1f - _pivot.y) + pr.height * _anchorMax.y;
+      Vector2 offset = value - (anchoredPosition + Vector2.Scale(sizeDelta, Vector2.one - pivot));
+      sizeDelta += offset;
+      anchoredPosition += Vector2.Scale(offset, pivot);
     }
   }
 
@@ -95,103 +110,98 @@ public class RectTransform : Transform
   {
     get
     {
-      float w, h;
-      bool anchorsSameX = MathF.Abs(_anchorMax.x - _anchorMin.x) < 1e-5f;
-      bool anchorsSameY = MathF.Abs(_anchorMax.y - _anchorMin.y) < 1e-5f;
-      Rect pr = GetParentRect();
-      if (anchorsSameX) w = _sizeDelta.x;
-      else w = pr.width * (_anchorMax.x - _anchorMin.x) + _sizeDelta.x;
-      if (anchorsSameY) h = _sizeDelta.y;
-      else h = pr.height * (_anchorMax.y - _anchorMin.y) + _sizeDelta.y;
+      Vector2 parentSize = GetParentSize();
+      float w = parentSize.x * (_anchorMax.x - _anchorMin.x) + _sizeDelta.x;
+      float h = parentSize.y * (_anchorMax.y - _anchorMin.y) + _sizeDelta.y;
       return new Rect(-_pivot.x * w, -_pivot.y * h, w, h);
     }
   }
 
-  private Rect GetParentRect()
+  public Object? drivenByObject => _drivenByObject;
+
+  private Vector2 GetParentSize()
   {
-    if (parent is RectTransform prt) return prt.rect;
-    return new Rect(-10000f, -10000f, 20000f, 20000f);
+    if (parent is RectTransform parentRect)
+      return parentRect.rect.size;
+    return Vector2.zero;
   }
 
-  public void GetLocalCorners(Vector3[] corners)
+  private Vector2 GetAnchorReference()
   {
-    if (corners is null || corners.Length < 4) return;
+    if (parent is not RectTransform parentRect)
+      return Vector2.zero;
+    Rect parentArea = parentRect.rect;
+    float anchorX = _anchorMin.x + (_anchorMax.x - _anchorMin.x) * _pivot.x;
+    float anchorY = _anchorMin.y + (_anchorMax.y - _anchorMin.y) * _pivot.y;
+    return new Vector2(
+      parentArea.x + parentArea.width * anchorX,
+      parentArea.y + parentArea.height * anchorY);
+  }
+
+  public void GetLocalCorners(Vector3[] fourCornersArray)
+  {
+    if (fourCornersArray is null || fourCornersArray.Length < 4) return;
     Rect r = rect;
-    corners[0] = new Vector3(r.xMin, r.yMin, 0f);
-    corners[1] = new Vector3(r.xMax, r.yMin, 0f);
-    corners[2] = new Vector3(r.xMax, r.yMax, 0f);
-    corners[3] = new Vector3(r.xMin, r.yMax, 0f);
+    fourCornersArray[0] = new Vector3(r.xMin, r.yMin, 0f);
+    fourCornersArray[1] = new Vector3(r.xMin, r.yMax, 0f);
+    fourCornersArray[2] = new Vector3(r.xMax, r.yMax, 0f);
+    fourCornersArray[3] = new Vector3(r.xMax, r.yMin, 0f);
   }
 
-  public void GetWorldCorners(Vector3[] corners)
+  public void GetWorldCorners(Vector3[] fourCornersArray)
   {
-    if (corners is null || corners.Length < 4) return;
-    GetLocalCorners(corners);
+    if (fourCornersArray is null || fourCornersArray.Length < 4) return;
+    GetLocalCorners(fourCornersArray);
     Matrix4x4 mat = localToWorldMatrix;
     for (int i = 0; i < 4; i++)
-    {
-      corners[i] = mat.MultiplyPoint(corners[i]);
-    }
+      fourCornersArray[i] = mat.MultiplyPoint(fourCornersArray[i]);
   }
 
   public void SetInsetAndSizeFromParentEdge(Edge edge, float inset, float size)
   {
-    float posX = _anchoredPosition.x;
-    float posY = _anchoredPosition.y;
-    switch (edge)
-    {
-      case Edge.Left:
-        _anchorMax = new Vector2(_anchorMin.x, _anchorMax.y);
-        _sizeDelta = new Vector2(size, _sizeDelta.y);
-        posX = inset + size * _pivot.x;
-        break;
-      case Edge.Right:
-        _anchorMin = new Vector2(_anchorMax.x, _anchorMin.y);
-        _sizeDelta = new Vector2(size, _sizeDelta.y);
-        float xOffset = 1f - _pivot.x;
-        posX = -inset - size * xOffset;
-        break;
-      case Edge.Top:
-        _anchorMin = new Vector2(_anchorMin.x, _anchorMax.y);
-        _sizeDelta = new Vector2(_sizeDelta.x, size);
-        float yOffset = 1f - _pivot.y;
-        posY = -inset - size * yOffset;
-        break;
-      case Edge.Bottom:
-        _anchorMax = new Vector2(_anchorMax.x, _anchorMin.y);
-        _sizeDelta = new Vector2(_sizeDelta.x, size);
-        posY = inset + size * _pivot.y;
-        break;
-    }
-    _anchoredPosition = new Vector2(posX, posY);
+    int axis = edge == Edge.Top || edge == Edge.Bottom ? 1 : 0;
+    bool end = edge == Edge.Top || edge == Edge.Right;
+    float anchorValue = end ? 1f : 0f;
+    Vector2 minimum = anchorMin;
+    Vector2 maximum = anchorMax;
+    minimum[axis] = anchorValue;
+    maximum[axis] = anchorValue;
+    anchorMin = minimum;
+    anchorMax = maximum;
+
+    Vector2 delta = sizeDelta;
+    delta[axis] = size;
+    sizeDelta = delta;
+
+    Vector2 position = anchoredPosition;
+    position[axis] = end ? -inset - size * (1f - pivot[axis]) : inset + size * pivot[axis];
+    anchoredPosition = position;
   }
 
   public void SetSizeWithCurrentAnchors(Axis axis, float size)
   {
-    if (axis == Axis.Horizontal)
-    {
-      _sizeDelta = new Vector2(size, _sizeDelta.y);
-    }
-    else
-    {
-      _sizeDelta = new Vector2(_sizeDelta.x, size);
-    }
+    int index = (int)axis;
+    Vector2 delta = sizeDelta;
+    Vector2 parentSize = GetParentSize();
+    delta[index] = size - parentSize[index] * (anchorMax[index] - anchorMin[index]);
+    sizeDelta = delta;
   }
 
-  public void ForceUpdateRects()
+  [Bindings.NativeMethod("UpdateIfTransformDispatchIsDirty")]
+  public void ForceUpdateRectTransforms()
   {
-    LayoutRebuilder.ForceRebuildLayoutImmediate(this);
-    Canvas.ForceUpdateCanvases();
   }
 
-  public static void ForceUpdateRects(RectTransform[] rectTransforms)
+  internal DrivenTransformProperties drivenProperties => _drivenProperties;
+
+  internal void SetDriven(Object? driver, DrivenTransformProperties properties)
   {
-    if (rectTransforms == null) return;
-    foreach (var rt in rectTransforms)
-    {
-      if (rt != null)
-        LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
-    }
-    Canvas.ForceUpdateCanvases();
+    _drivenByObject = driver;
+    _drivenProperties = properties;
+  }
+
+  internal static void SendReapplyDrivenProperties(RectTransform driven)
+  {
+    reapplyDrivenProperties?.Invoke(driven);
   }
 }

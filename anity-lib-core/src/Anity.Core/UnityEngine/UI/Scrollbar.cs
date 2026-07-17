@@ -1,5 +1,6 @@
 using System;
 using UnityEngine.EventSystems;
+using Axis = UnityEngine.RectTransform.Axis;
 
 namespace UnityEngine.UI;
 

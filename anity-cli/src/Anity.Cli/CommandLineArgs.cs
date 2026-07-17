@@ -37,6 +37,10 @@ public sealed class CommandLineArgs
     public bool Agent { get; set; }
     public string? AgentPrompt { get; set; }
     public string? AgentSession { get; set; }
+    public string? AgentApiKey { get; set; }
+    public string? AgentBaseUrl { get; set; }
+    public string? AgentModel { get; set; }
+    public double? AgentTimeoutSeconds { get; set; }
     public bool Help { get; set; }
     public bool Version { get; set; }
     public List<string> CustomArgs { get; } = new();
@@ -94,6 +98,14 @@ public sealed class CommandLineArgs
                 case "agent": r.Agent = true; break;
                 case "agentprompt": r.AgentPrompt = Next(); break;
                 case "agentsession": r.AgentSession = Next(); break;
+                case "agentapikey": r.AgentApiKey = Next(); break;
+                case "agentbaseurl": r.AgentBaseUrl = Next(); break;
+                case "agentmodel": r.AgentModel = Next(); break;
+                case "agenttimeoutseconds":
+                    if (double.TryParse(Next(), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out double timeout))
+                        r.AgentTimeoutSeconds = timeout;
+                    break;
                 case "h":
                 case "help":
                 case "?": r.Help = true; break;
@@ -149,6 +161,10 @@ Anity extensions:
   -agent                     Enable Anity.Agent extension session
   -agentPrompt <text>        Run one agent turn
   -agentSession <id>         Resume agent session
+  -agentApiKey <key>         API key (prefer ANITY_AGENT_API_KEY environment variable)
+  -agentBaseUrl <url>        OpenAI-compatible base URL (or ANITY_AGENT_BASE_URL)
+  -agentModel <model>        Model name (or ANITY_AGENT_MODEL)
+  -agentTimeoutSeconds <n>   Per-request timeout (0 < n <= 600)
 
   -help                      Show this help
   -version                   Print version

@@ -9,7 +9,16 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(ANITY_NATIVE_SHARED "Build shared library" ON)
-option(ANITY_ENABLE_VULKAN "Enable Vulkan backend" ON)
+if(APPLE)
+  # Apple player/editor builds use Metal. Keeping Vulkan enabled by default here
+  # can accidentally bind the engine dylib to an Android Emulator copy of
+  # libvulkan, which is not a redistributable runtime dependency. Developers
+  # can still opt in explicitly for MoltenVK validation.
+  set(ANITY_ENABLE_VULKAN_DEFAULT OFF)
+else()
+  set(ANITY_ENABLE_VULKAN_DEFAULT ON)
+endif()
+option(ANITY_ENABLE_VULKAN "Enable Vulkan backend" ${ANITY_ENABLE_VULKAN_DEFAULT})
 option(ANITY_ENABLE_D3D11 "Enable D3D11 backend (Windows)" ON)
 option(ANITY_ENABLE_METAL "Enable Metal backend (Apple)" ON)
 option(ANITY_ENABLE_HDR "Enable HDR pipeline" ON)
@@ -30,7 +39,13 @@ target_include_directories(anity_native
 
 target_sources(anity_native PRIVATE
   src/core/anity_core.cpp
+  src/math/anity_matrix.cpp
+  src/transform/anity_transform.cpp
+  src/ui/anity_ui_renderer.cpp
   src/graphics/anity_graphics.cpp
+  src/graphics/anity_graphics_ui.cpp
+  src/graphics/anity_graphics_texture.cpp
+  src/graphics/anity_graphics_vfx.cpp
   src/graphics/anity_hdr.cpp
   src/graphics/backends/null_backend.cpp
   src/graphics/backends/vulkan_backend.cpp
@@ -54,7 +69,7 @@ endif()
 
 if(WIN32 AND ANITY_ENABLE_D3D11)
   target_compile_definitions(anity_native PRIVATE ANITY_HAS_D3D11=1)
-  target_link_libraries(anity_native PRIVATE d3d11 dxgi)
+  target_link_libraries(anity_native PRIVATE d3d11 dxgi d3dcompiler)
 endif()
 
 if(ANITY_ENABLE_VULKAN)
@@ -113,9 +128,12 @@ set_target_properties(anity_native PROPERTIES
   VERSION ${PROJECT_VERSION}
   SOVERSION 0
   WINDOWS_EXPORT_ALL_SYMBOLS ON
-  # MinGW defaults to lib*.dll; Unity-style load name is anity_native.dll
-  PREFIX ""
 )
+
+if(WIN32)
+  # MinGW defaults to lib*.dll; Unity-style Windows load name is anity_native.dll.
+  set_target_properties(anity_native PROPERTIES PREFIX "")
+endif()
 
 install(TARGETS anity_native
   RUNTIME DESTINATION bin

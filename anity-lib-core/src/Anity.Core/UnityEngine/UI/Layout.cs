@@ -78,6 +78,7 @@ internal class LayoutRebuildProxy : ICanvasElement
 
 public class LayoutGroup : UIBehaviour, ILayoutElement, ILayoutGroup, ICanvasElement
 {
+  private DrivenRectTransformTracker _tracker;
   private RectOffset? _padding;
   private TextAnchor _childAlignment = TextAnchor.UpperLeft;
   private bool _childControlWidth;
@@ -154,6 +155,7 @@ public class LayoutGroup : UIBehaviour, ILayoutElement, ILayoutGroup, ICanvasEle
 
   public virtual void CalculateLayoutInputHorizontal()
   {
+    _tracker.Clear();
     rectChildren.Clear();
     for (var i = 0; i < transform.childCount; i++)
     {
@@ -208,6 +210,7 @@ public class LayoutGroup : UIBehaviour, ILayoutElement, ILayoutGroup, ICanvasEle
 
   protected override void OnDisable()
   {
+    _tracker.Clear();
     base.OnDisable();
     LayoutRebuilder.MarkLayoutForRebuild(transform as RectTransform);
   }
@@ -238,7 +241,18 @@ public class LayoutGroup : UIBehaviour, ILayoutElement, ILayoutGroup, ICanvasEle
 
   protected void SetChildAlongAxis(RectTransform rect, int axis, float pos)
   {
-    SetChildAlongAxis(rect, axis, pos, axis == 0 ? rect.sizeDelta.x : rect.sizeDelta.y);
+    if (rect == null) return;
+
+    _tracker.Add(this, rect, DrivenTransformProperties.Anchors |
+      (axis == 0 ? DrivenTransformProperties.AnchoredPositionX : DrivenTransformProperties.AnchoredPositionY));
+
+    rect.anchorMin = Vector2.up;
+    rect.anchorMax = Vector2.up;
+    Vector2 anchoredPosition = rect.anchoredPosition;
+    anchoredPosition[axis] = axis == 0
+      ? pos + rect.sizeDelta[axis] * rect.pivot[axis]
+      : -pos - rect.sizeDelta[axis] * (1f - rect.pivot[axis]);
+    rect.anchoredPosition = anchoredPosition;
   }
 
   protected void SetChildAlongAxis(RectTransform rect, int axis, float pos, float size)
@@ -247,6 +261,13 @@ public class LayoutGroup : UIBehaviour, ILayoutElement, ILayoutGroup, ICanvasEle
 
     var rt = rect;
     var pivot = rt.pivot;
+    _tracker.Add(this, rt, DrivenTransformProperties.Anchors |
+      (axis == 0
+        ? DrivenTransformProperties.AnchoredPositionX | DrivenTransformProperties.SizeDeltaX
+        : DrivenTransformProperties.AnchoredPositionY | DrivenTransformProperties.SizeDeltaY));
+
+    rt.anchorMin = Vector2.up;
+    rt.anchorMax = Vector2.up;
 
     if (axis == 0)
     {
@@ -260,7 +281,7 @@ public class LayoutGroup : UIBehaviour, ILayoutElement, ILayoutGroup, ICanvasEle
     else
     {
       var anchoredPosition = rt.anchoredPosition;
-      anchoredPosition.y = pos + size * pivot.y;
+      anchoredPosition.y = -pos - size * (1f - pivot.y);
       rt.anchoredPosition = anchoredPosition;
       var sizeDelta = rt.sizeDelta;
       sizeDelta.y = size;
@@ -863,6 +884,7 @@ public class ContentSizeFitter : UIBehaviour, ILayoutSelfController
 
   private FitMode _horizontalFit = FitMode.Unconstrained;
   private FitMode _verticalFit = FitMode.Unconstrained;
+  private DrivenRectTransformTracker _tracker;
 
   public FitMode horizontalFit
   {
@@ -881,6 +903,7 @@ public class ContentSizeFitter : UIBehaviour, ILayoutSelfController
   public virtual void SetLayoutHorizontal()
   {
     if (rectTransform == null) return;
+    _tracker.Clear();
     HandleSelfFittingAlongAxis(0);
   }
 
@@ -893,7 +916,15 @@ public class ContentSizeFitter : UIBehaviour, ILayoutSelfController
   private void HandleSelfFittingAlongAxis(int axis)
   {
     var fitting = axis == 0 ? horizontalFit : verticalFit;
-    if (fitting == FitMode.Unconstrained) return;
+    if (fitting == FitMode.Unconstrained)
+    {
+      _tracker.Add(this, rectTransform, DrivenTransformProperties.None);
+      return;
+    }
+
+    _tracker.Add(this, rectTransform, axis == 0
+      ? DrivenTransformProperties.SizeDeltaX
+      : DrivenTransformProperties.SizeDeltaY);
 
     var layoutElement = GetComponent<ILayoutElement>();
     if (layoutElement == null) return;
@@ -904,7 +935,7 @@ public class ContentSizeFitter : UIBehaviour, ILayoutSelfController
     else
       size = axis == 0 ? LayoutUtility.GetPreferredWidth(layoutElement) : LayoutUtility.GetPreferredHeight(layoutElement);
 
-    rectTransform.SetSizeWithCurrentAnchors((Axis)axis, size);
+    rectTransform.SetSizeWithCurrentAnchors((RectTransform.Axis)axis, size);
   }
 
   protected override void OnEnable()
@@ -917,6 +948,13 @@ public class ContentSizeFitter : UIBehaviour, ILayoutSelfController
   {
     base.OnRectTransformDimensionsChange();
     SetDirty();
+  }
+
+  protected override void OnDisable()
+  {
+    _tracker.Clear();
+    LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
+    base.OnDisable();
   }
 
   private void SetDirty()
@@ -972,6 +1010,7 @@ public class AspectRatioFitter : UIBehaviour, ILayoutSelfController
 
   private Mode _aspectMode = Mode.None;
   private float _aspectRatio = 1f;
+  private DrivenRectTransformTracker _tracker;
 
   public Mode aspectMode
   {
@@ -995,68 +1034,46 @@ public class AspectRatioFitter : UIBehaviour, ILayoutSelfController
   private RectTransform rectTransform => transform as RectTransform;
   private RectTransform? parent => transform.parent as RectTransform;
 
-  public void SetLayoutHorizontal()
+  public virtual void SetLayoutHorizontal()
   {
-    UpdateRect();
   }
 
-  public void SetLayoutVertical()
+  public virtual void SetLayoutVertical()
   {
-    UpdateRect();
   }
 
   private void UpdateRect()
   {
+    _tracker.Clear();
     if (rectTransform == null || _aspectMode == Mode.None) return;
-
-    var parentRect = parent != null ? parent.rect : new Rect(0, 0, Screen.width, Screen.height);
-    var sizeDelta = rectTransform.sizeDelta;
-    var anchorMin = rectTransform.anchorMin;
-    var anchorMax = rectTransform.anchorMax;
-
-    var anchorWidth = parentRect.width * (anchorMax.x - anchorMin.x);
-    var anchorHeight = parentRect.height * (anchorMax.y - anchorMin.y);
-
-    var width = anchorWidth + sizeDelta.x;
-    var height = anchorHeight + sizeDelta.y;
 
     switch (_aspectMode)
     {
       case Mode.WidthControlsHeight:
-        height = width / _aspectRatio;
+        _tracker.Add(this, rectTransform, DrivenTransformProperties.SizeDeltaY);
+        rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, rectTransform.rect.width / _aspectRatio);
         break;
       case Mode.HeightControlsWidth:
-        width = height * _aspectRatio;
+        _tracker.Add(this, rectTransform, DrivenTransformProperties.SizeDeltaX);
+        rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, rectTransform.rect.height * _aspectRatio);
         break;
       case Mode.FitInParent:
-        if (width == 0f) width = 1f;
-        var ratio = width / height;
-        if (ratio > _aspectRatio)
-        {
-          width = height * _aspectRatio;
-        }
-        else
-        {
-          height = width / _aspectRatio;
-        }
-        break;
       case Mode.EnvelopeParent:
-        if (width == 0f) width = 1f;
-        var ratio2 = width / height;
-        if (ratio2 < _aspectRatio)
-        {
-          width = height * _aspectRatio;
-        }
+        if (parent == null) break;
+        _tracker.Add(this, rectTransform, DrivenTransformProperties.Anchors |
+          DrivenTransformProperties.AnchoredPosition | DrivenTransformProperties.SizeDelta);
+        rectTransform.anchorMin = Vector2.zero;
+        rectTransform.anchorMax = Vector2.one;
+        rectTransform.anchoredPosition = Vector2.zero;
+        Vector2 parentSize = parent.rect.size;
+        Vector2 fittedDelta = Vector2.zero;
+        if ((parentSize.y * _aspectRatio < parentSize.x) ^ (_aspectMode == Mode.FitInParent))
+          fittedDelta.y = parentSize.x / _aspectRatio - parentSize.y;
         else
-        {
-          height = width / _aspectRatio;
-        }
+          fittedDelta.x = parentSize.y * _aspectRatio - parentSize.x;
+        rectTransform.sizeDelta = fittedDelta;
         break;
     }
-
-    sizeDelta.x = width - anchorWidth;
-    sizeDelta.y = height - anchorHeight;
-    rectTransform.sizeDelta = sizeDelta;
   }
 
   protected override void OnEnable()
@@ -1077,10 +1094,17 @@ public class AspectRatioFitter : UIBehaviour, ILayoutSelfController
     SetDirty();
   }
 
+  protected override void OnDisable()
+  {
+    _tracker.Clear();
+    LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
+    base.OnDisable();
+  }
+
   private void SetDirty()
   {
     if (!IsActive()) return;
-    LayoutRebuilder.MarkLayoutForRebuild(rectTransform);
+    UpdateRect();
   }
 }
 

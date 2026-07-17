@@ -9,5 +9,7 @@
 
   <ItemGroup Condition="Exists('../../../anity-lib-core/src/Anity.Core/Anity.Core.csproj')">
     <ProjectReference Include="../../../anity-lib-core/src/Anity.Core/Anity.Core.csproj" />
+    <ProjectReference Include="../../../anity-agent/src/Anity.Agent/Anity.Agent.csproj"
+                      AdditionalProperties="GeneratePackageOnBuild=false" />
   </ItemGroup>
 </Project>

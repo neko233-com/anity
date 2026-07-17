@@ -1,5 +1,6 @@
 namespace UnityEngine.SceneManagement;
 
+[System.Serializable]
 public struct LoadSceneParameters
 {
   public LoadSceneMode loadSceneMode { get; set; }

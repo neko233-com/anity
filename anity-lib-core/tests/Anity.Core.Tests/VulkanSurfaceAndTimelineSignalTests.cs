@@ -11,6 +11,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>Vulkan multi-platform surface mapping + Timeline Signal + TimelineWindow — ≥20 cases.</summary>
+[Collection("ScreenState")]
 public class VulkanSurfaceAndTimelineSignalTests : IDisposable
 {
     public void Dispose()

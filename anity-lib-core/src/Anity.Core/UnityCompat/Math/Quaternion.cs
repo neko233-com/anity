@@ -203,14 +203,15 @@ public struct Quaternion : IEquatable<Quaternion>
     }
     upwards = Vector3.Cross(forward, right).normalized;
 
+    // Unity's rotation matrix stores the local right/up/forward axes as columns.
     float m00 = right.x;
-    float m01 = right.y;
-    float m02 = right.z;
-    float m10 = upwards.x;
+    float m01 = upwards.x;
+    float m02 = forward.x;
+    float m10 = right.y;
     float m11 = upwards.y;
-    float m12 = upwards.z;
-    float m20 = forward.x;
-    float m21 = forward.y;
+    float m12 = forward.y;
+    float m20 = right.z;
+    float m21 = upwards.z;
     float m22 = forward.z;
 
     float trace = m00 + m11 + m22;
@@ -274,6 +275,8 @@ public struct Quaternion : IEquatable<Quaternion>
   {
     float dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
     dot = Mathf.Clamp(MathF.Abs(dot), 0f, 1f);
+    if (dot > 1f - 1e-6f)
+      return 0f;
     return Mathf.Acos(Mathf.Min(dot, 1f)) * 2f * Mathf.Rad2Deg;
   }
 

@@ -1,5 +1,6 @@
 #define ANITY_NATIVE_BUILD
 #include "anity_graphics_device.h"
+#include "anity/ui/anity_ui_renderer.h"
 #include <new>
 #include <cstring>
 
@@ -23,6 +24,12 @@ extern "C" void AnityGraphics_Metal_DestroySwapchain(AnitySwapchain*);
 extern "C" AnityResult AnityGraphics_Metal_Acquire(AnitySwapchain*, int32_t*);
 extern "C" AnityResult AnityGraphics_Metal_Present(AnitySwapchain*);
 extern "C" int32_t AnityGraphics_Metal_SwapchainHasNativeLayer(const AnitySwapchain*);
+extern "C" AnityResult AnityGraphics_Metal_ReadbackSwapchainRGBA8(
+    AnitySwapchain*, uint8_t*, int32_t, int32_t*);
+extern "C" AnityResult AnityGraphics_D3D11_ReadbackSwapchainRGBA8(
+    AnitySwapchain*, uint8_t*, int32_t, int32_t*);
+extern "C" AnityResult AnityGraphics_Vulkan_ReadbackSwapchainRGBA8(
+    AnitySwapchain*, uint8_t*, int32_t, int32_t*);
 
 static AnityResult CreateHeadlessSwapchain(
     AnityGraphicsDevice* device, const AnitySwapchainDesc* desc, AnitySwapchain** out) {
@@ -114,6 +121,9 @@ void ANITY_CALL AnityGraphics_DestroyDevice(AnityGraphicsDevice* device) {
     AnityGraphics_DestroySwapchain(device->swapchain);
     device->swapchain = nullptr;
   }
+  AnityGraphics_DestroyUIUpload(device);
+  AnityGraphics_DestroyTextureRegistry(device);
+  AnityGraphics_DestroyVFXEventRegistry(device);
   if (device->type == ANITY_GFX_D3D11 || device->type == ANITY_GFX_D3D12)
     AnityGraphics_D3D11_Destroy(device);
   else if (device->type == ANITY_GFX_VULKAN)
@@ -129,6 +139,11 @@ AnityGraphicsDeviceType ANITY_CALL AnityGraphics_GetDeviceType(const AnityGraphi
 
 AnityResult ANITY_CALL AnityGraphics_BeginFrame(AnityGraphicsDevice* device) {
   if (!device) return ANITY_ERR_INVALID_ARG;
+  device->frameId++;
+  if (device->uiCanvas) {
+    AnityResult uiResult = AnityUICanvas_BeginFrame(device->uiCanvas, device->frameId);
+    if (uiResult != ANITY_OK) return uiResult;
+  }
   if (device->type == ANITY_GFX_D3D11 || device->type == ANITY_GFX_D3D12)
     return AnityGraphics_D3D11_BeginFrame(device);
   return ANITY_OK;
@@ -136,6 +151,10 @@ AnityResult ANITY_CALL AnityGraphics_BeginFrame(AnityGraphicsDevice* device) {
 
 AnityResult ANITY_CALL AnityGraphics_EndFrame(AnityGraphicsDevice* device) {
   if (!device) return ANITY_ERR_INVALID_ARG;
+  if (device->uiCanvas) {
+    AnityResult uiResult = AnityGraphics_SubmitUICanvas(device, device->uiCanvas);
+    if (uiResult != ANITY_OK) return uiResult;
+  }
   return ANITY_OK;
 }
 
@@ -248,6 +267,24 @@ int32_t ANITY_CALL AnityGraphics_IsSwapchainHeadless(const AnitySwapchain* swapc
 int32_t ANITY_CALL AnityGraphics_GetSwapchainPresentCount(const AnitySwapchain* swapchain) {
   return swapchain ? swapchain->presentCount : 0;
 }
+AnityResult ANITY_CALL AnityGraphics_ReadbackSwapchainRGBA8(
+    AnitySwapchain* swapchain, uint8_t* pixels, int32_t pixelCapacity,
+    int32_t* outWritten) {
+  if (!swapchain || pixelCapacity < 0 || !outWritten)
+    return ANITY_ERR_INVALID_ARG;
+  if (swapchain->device && swapchain->device->type == ANITY_GFX_VULKAN)
+    return AnityGraphics_Vulkan_ReadbackSwapchainRGBA8(
+        swapchain, pixels, pixelCapacity, outWritten);
+  if (swapchain->device && swapchain->device->type == ANITY_GFX_METAL)
+    return AnityGraphics_Metal_ReadbackSwapchainRGBA8(
+        swapchain, pixels, pixelCapacity, outWritten);
+  if (swapchain->device && (swapchain->device->type == ANITY_GFX_D3D11 ||
+      swapchain->device->type == ANITY_GFX_D3D12))
+    return AnityGraphics_D3D11_ReadbackSwapchainRGBA8(
+        swapchain, pixels, pixelCapacity, outWritten);
+  *outWritten = 0;
+  return ANITY_ERR_NOT_SUPPORTED;
+}
 int32_t ANITY_CALL AnityGraphics_SwapchainHasNativeSurface(const AnitySwapchain* swapchain) {
   if (!swapchain || !swapchain->device) return 0;
   if (swapchain->device->type == ANITY_GFX_VULKAN)
@@ -257,7 +294,7 @@ int32_t ANITY_CALL AnityGraphics_SwapchainHasNativeSurface(const AnitySwapchain*
   return 0;
 }
 int32_t ANITY_CALL AnityGraphics_GetSwapchainBackendKind(const AnitySwapchain* swapchain) {
-  if (!swapchain || !swapchain->device) return 0;
+  if (!swapchain || !swapchain->device || !swapchain->device->backend) return 0;
   switch (swapchain->device->type) {
     case ANITY_GFX_VULKAN: return 1;
     case ANITY_GFX_METAL: return 2;

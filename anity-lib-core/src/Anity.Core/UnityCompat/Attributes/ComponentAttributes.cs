@@ -2,25 +2,26 @@ using System;
 
 namespace UnityEngine
 {
-    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = true)]
-    public class RequireComponentAttribute : Attribute
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
+    [Scripting.RequiredByNativeCode]
+    public sealed class RequireComponent : Attribute
     {
-        public Type m_Type0 { get; }
-        public Type? m_Type1 { get; }
-        public Type? m_Type2 { get; }
+        public Type m_Type0;
+        public Type? m_Type1;
+        public Type? m_Type2;
 
-        public RequireComponentAttribute(Type requiredComponent)
+        public RequireComponent(Type requiredComponent)
         {
             m_Type0 = requiredComponent;
         }
 
-        public RequireComponentAttribute(Type requiredComponent, Type requiredComponent2)
+        public RequireComponent(Type requiredComponent, Type requiredComponent2)
         {
             m_Type0 = requiredComponent;
             m_Type1 = requiredComponent2;
         }
 
-        public RequireComponentAttribute(Type requiredComponent, Type requiredComponent2, Type requiredComponent3)
+        public RequireComponent(Type requiredComponent, Type requiredComponent2, Type requiredComponent3)
         {
             m_Type0 = requiredComponent;
             m_Type1 = requiredComponent2;
@@ -28,35 +29,72 @@ namespace UnityEngine
         }
     }
 
-    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
-    public class AddComponentMenuAttribute : Attribute
+    public sealed class AddComponentMenu : Attribute
     {
         public string componentMenu { get; }
-        public int componentOrder { get; set; }
+        public int componentOrder { get; }
 
-        public AddComponentMenuAttribute(string menuName)
+        public AddComponentMenu(string menuName)
         {
             componentMenu = menuName;
         }
 
-        public AddComponentMenuAttribute(string menuName, int order)
+        public AddComponentMenu(string menuName, int order)
         {
             componentMenu = menuName;
             componentOrder = order;
         }
     }
 
-    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
-    public class DisallowMultipleComponentAttribute : Attribute { }
+    [AttributeUsage(AttributeTargets.Class, Inherited = false)]
+    [Scripting.RequiredByNativeCode]
+    public sealed class DisallowMultipleComponent : Attribute { }
 
-    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
-    public class ExecuteInEditModeAttribute : Attribute { }
+    [Scripting.UsedByNativeCode]
+    public sealed class ExecuteInEditMode : Attribute { }
 
-    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = true)]
-    public class ExecuteAlwaysAttribute : Attribute { }
+    [Scripting.UsedByNativeCode]
+    public sealed class ExecuteAlways : Attribute { }
 
-    [AttributeUsage(AttributeTargets.Field, AllowMultiple = false, Inherited = true)]
-    public class HideInInspectorAttribute : Attribute { }
+    [Scripting.UsedByNativeCode]
+    public sealed class HideInInspector : Attribute { }
+
+    [AttributeUsage(AttributeTargets.Class)]
+    [Scripting.UsedByNativeCode]
+    public class DefaultExecutionOrder : Attribute
+    {
+        public int order { get; }
+
+        public DefaultExecutionOrder(int order)
+        {
+            this.order = order;
+        }
+    }
+
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    [Scripting.UsedByNativeCode]
+    public class HelpURLAttribute : Attribute
+    {
+        public string URL { get; }
+
+        public HelpURLAttribute(string url)
+        {
+            URL = url;
+        }
+    }
+
+    [AttributeUsage(AttributeTargets.Field, AllowMultiple = true, Inherited = true)]
+    public class ContextMenuItemAttribute : PropertyAttribute
+    {
+        public readonly string name;
+        public readonly string function;
+
+        public ContextMenuItemAttribute(string name, string function)
+        {
+            this.name = name;
+            this.function = function;
+        }
+    }
 
     [AttributeUsage(AttributeTargets.Field, AllowMultiple = false, Inherited = true)]
     public class SpaceAttribute : PropertyAttribute

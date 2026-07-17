@@ -22,7 +22,6 @@ public class GraphicRaycasterTests
         if (mode == RenderMode.ScreenSpaceCamera)
         {
             canvas.planeDistance = 10f;
-            canvas.SetupRenderMode();
         }
         var ray = go.AddComponent<GraphicRaycaster>();
         var imgGo = new GameObject("Img");

@@ -58,9 +58,8 @@ public class VehicleChassis : MonoBehaviour
     public float brakeTorque => _brakeTorque;
     public float steerAngle => _steerAngle;
 
-    protected override void Awake()
+    private void Awake()
     {
-        base.Awake();
         _body = GetComponent<Rigidbody>();
         RefreshWheels();
     }
@@ -137,9 +136,8 @@ public class VehicleChassis : MonoBehaviour
 
     public bool AllWheelsGrounded() => _wheels.Count > 0 && CountGroundedWheels() == _wheels.Count;
 
-    protected override void FixedUpdate()
+    private void FixedUpdate()
     {
-        base.FixedUpdate();
         UpdateVehicle(Time.fixedDeltaTime);
     }
 }

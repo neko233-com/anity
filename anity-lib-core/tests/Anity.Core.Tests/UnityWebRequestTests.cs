@@ -9,6 +9,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>UnityWebRequest — ≥12 boundary cases (file://, headers, handlers, abort).</summary>
+[Collection(ComponentAttributeBehaviorCollection.Name)]
 public class UnityWebRequestTests : IDisposable
 {
     private readonly string _dir;

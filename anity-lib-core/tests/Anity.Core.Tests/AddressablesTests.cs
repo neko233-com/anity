@@ -10,6 +10,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>Addressables catalog/load/instantiate — ≥10 boundary cases.</summary>
+[Collection(AssetPipelineStateCollection.Name)]
 public class AddressablesTests : IDisposable
 {
     private readonly string _dir;

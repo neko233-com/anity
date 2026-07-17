@@ -4,36 +4,42 @@ namespace UnityEngine;
 
 public static class Random
 {
-  private static System.Random _rng = new();
+  private const uint SeedMultiplier = 1812433253u;
+  private const uint FloatMantissaMask = 0x007fffffu;
+  private const float FloatMantissaMaximum = 8388607f;
+  private static State _state = CreateState(unchecked((uint)Environment.TickCount));
   private static int _currentSeed;
 
+  [Serializable]
   public struct State
   {
-    public int seed;
-    public int[] buffer;
-    public int index;
+    [SerializeField] private int s0;
+    [SerializeField] private int s1;
+    [SerializeField] private int s2;
+    [SerializeField] private int s3;
 
-    public State(int seed)
+    internal State(uint seed)
     {
-      this.seed = seed;
-      buffer = new int[56];
-      index = 0;
-      var r = new System.Random(seed);
-      for (int i = 0; i < buffer.Length; i++)
-      {
-        buffer[i] = r.Next();
-      }
+      uint word0 = seed;
+      uint word1 = unchecked(SeedMultiplier * word0 + 1u);
+      uint word2 = unchecked(SeedMultiplier * word1 + 1u);
+      uint word3 = unchecked(SeedMultiplier * word2 + 1u);
+      s0 = unchecked((int)word0);
+      s1 = unchecked((int)word1);
+      s2 = unchecked((int)word2);
+      s3 = unchecked((int)word3);
     }
+
+    internal uint S0 { readonly get => unchecked((uint)s0); set => s0 = unchecked((int)value); }
+    internal uint S1 { readonly get => unchecked((uint)s1); set => s1 = unchecked((int)value); }
+    internal uint S2 { readonly get => unchecked((uint)s2); set => s2 = unchecked((int)value); }
+    internal uint S3 { readonly get => unchecked((uint)s3); set => s3 = unchecked((int)value); }
   }
 
   public static State state
   {
-    get => new State(_currentSeed);
-    set
-    {
-      _currentSeed = value.seed;
-      _rng = new System.Random(_currentSeed);
-    }
+    get => _state;
+    set => _state = value;
   }
 
   public static int seed
@@ -42,17 +48,19 @@ public static class Random
     set => InitState(value);
   }
 
-  public static float value => (float)_rng.NextDouble();
+  public static float value
+  {
+    get
+    {
+      uint word = NextUInt();
+      return (word & FloatMantissaMask) / FloatMantissaMaximum;
+    }
+  }
 
   public static void InitState(int seed)
   {
     _currentSeed = seed;
-    _rng = new System.Random(seed);
-  }
-
-  public static void InitSeed(int seed)
-  {
-    InitState(seed);
+    _state = CreateState(unchecked((uint)seed));
   }
 
   public static float Range(float minInclusive, float maxInclusive)
@@ -64,7 +72,21 @@ public static class Random
   public static int Range(int minInclusive, int maxExclusive)
   {
     if (minInclusive >= maxExclusive) return minInclusive;
-    return _rng.Next(minInclusive, maxExclusive);
+    long range = (long)maxExclusive - minInclusive;
+    long offset = Math.Min((long)(value * range), range - 1);
+    return checked((int)(minInclusive + offset));
+  }
+
+  private static State CreateState(uint seed) => new(seed);
+
+  private static uint NextUInt()
+  {
+    uint value = _state.S0 ^ (_state.S0 << 11);
+    _state.S0 = _state.S1;
+    _state.S1 = _state.S2;
+    _state.S2 = _state.S3;
+    _state.S3 = _state.S3 ^ (_state.S3 >> 19) ^ value ^ (value >> 8);
+    return _state.S3;
   }
 
   public static Vector3 insideUnitSphere

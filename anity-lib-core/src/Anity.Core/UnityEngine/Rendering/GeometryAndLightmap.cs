@@ -2,14 +2,15 @@ using System;
 
 namespace UnityEngine;
 
-public enum FrustumPlanes
+[Serializable]
+public struct FrustumPlanes
 {
-    Left = 0,
-    Right = 1,
-    Bottom = 2,
-    Top = 3,
-    Near = 4,
-    Far = 5
+    public float left;
+    public float right;
+    public float bottom;
+    public float top;
+    public float zNear;
+    public float zFar;
 }
 
 public static class GeometryUtility

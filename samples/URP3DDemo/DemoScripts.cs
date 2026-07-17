@@ -7,7 +7,7 @@ namespace Anity.Demos.URP3D
     {
         public Vector3 rotationSpeed = new Vector3(0, 90, 0);
         public bool _updateCalled;
-        protected override void Update()
+        private void Update()
         {
             _updateCalled = true;
             transform.Rotate(rotationSpeed * Time.deltaTime);
@@ -18,8 +18,8 @@ namespace Anity.Demos.URP3D
     {
         public int _collisionCount;
         public int _triggerCount;
-        protected override void OnCollisionEnter(Collision c) { _collisionCount++; }
-        protected override void OnTriggerEnter(Collider c) { _triggerCount++; }
+        private void OnCollisionEnter(Collision c) { _collisionCount++; }
+        private void OnTriggerEnter(Collider c) { _triggerCount++; }
         public void AddImpulse() { var rb = GetComponent<Rigidbody>(); if (rb != null) rb.AddForce(Vector3.up * 5, ForceMode.Impulse); }
     }
 
@@ -44,13 +44,13 @@ namespace Anity.Demos.URP3D
             _coroutineTicks++;
             _coroutineComplete = true;
         }
-        protected override void Start() { StartCoroutine(TestCoroutine()); }
+        private void Start() { StartCoroutine(TestCoroutine()); }
     }
 
     public class InvokeTester : MonoBehaviour
     {
         public int _invokeCount;
-        protected override void Start() { InvokeRepeating("Tick", 0.1f, 0.1f); }
+        private void Start() { InvokeRepeating("Tick", 0.1f, 0.1f); }
         void Tick() { _invokeCount++; }
     }
 }

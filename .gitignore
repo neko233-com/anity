@@ -15,6 +15,7 @@
 *.csproj.user
 *.VC.db
 *.VC.VC.opendb
+*.userprefs
 *.swp
 *~
 
@@ -49,6 +50,8 @@ out/
 publish/
 TestResults/
 [Tt]est[Rr]esult*/
+*.xcresult/
+DerivedData/
 *.il
 *.ilk
 *.meta.bak
@@ -65,6 +68,10 @@ artifacts/
 *.snupkg
 **/[Pp]ackages/*
 !**/[Pp]ackages/build/
+# Reproducible Unity probe package manifests are source, not restored NuGet payloads.
+!_scripts/unity-vfx-spawner-probe/Packages/
+!_scripts/unity-vfx-spawner-probe/Packages/manifest.json
+!_scripts/unity-vfx-spawner-probe/Packages/packages-lock.json
 project.lock.json
 project.fragment.lock.json
 artifacts/
@@ -75,9 +82,18 @@ artifacts/
 *.temp
 *.cache
 !**/packages.lock.json
+parity-evidence/*-current.json
+_scripts/unity-vfx-spawner-probe/Assets/Resources/Generated/
 *.pid
 *.seed
 *.pid.lock
+*.trace
+*.etl
+*.memgraph
+*.heap
+*.profraw
+*.profdata
+*.dmp
 
 # ----- .NET tooling / coverage -----
 *.coverage
@@ -134,6 +150,11 @@ Il2CppOutputProject/
 anity-native/build/
 anity-native/build-*/
 anity-native/cmake-build-*/
+CMakeUserPresets.json
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/compile_commands.json
 **/anity_native.dll
 **/libanity_native.*
 !anity-native/include/
@@ -145,6 +166,8 @@ player.log
 TestResults.xml
 agent_capture*.png
 sc_*.png
+**/AnityAgent/Audit/
+**/tool-audit.jsonl*
 
 # ----- Android / Gradle (export & local) -----
 .gradle/
@@ -154,6 +177,9 @@ local.properties
 
 # ----- Node (tooling / local agents) -----
 node_modules/
+.vite/
+.turbo/
+.pnpm-store/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -180,6 +206,8 @@ anity-editorprefs.json
 .mimocode/
 docs/compose/
 .claude/
+.codex/
+.agents/
 *.local.md
 
 # ----- Submodule / nested build artifacts -----
@@ -198,8 +226,6 @@ modules/**/[Tt]emp/
 *.old
 .nuke/temp/
 **/BenchmarkDotNet.Artifacts/
-)
 
 # Local MCP tooling
 mcps/
-

@@ -16,16 +16,29 @@ namespace UnityEngine
     [AttributeUsage(AttributeTargets.Field)]
     public sealed class DelayedAttribute : PropertyAttribute { }
 
-    [AttributeUsage(AttributeTargets.Method)]
-    public sealed class ContextMenuAttribute : Attribute
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+    [Scripting.RequiredByNativeCode]
+    public sealed class ContextMenu : Attribute
     {
-        public string menuItem { get; }
-        public bool validate { get; set; }
-        public int priority { get; set; }
+        public readonly string menuItem;
+        public readonly bool validate;
+        public readonly int priority;
 
-        public ContextMenuAttribute(string itemName)
+        public ContextMenu(string itemName)
+            : this(itemName, false)
+        {
+        }
+
+        public ContextMenu(string itemName, bool isValidateFunction)
+            : this(itemName, isValidateFunction, 1000000)
+        {
+        }
+
+        public ContextMenu(string itemName, bool isValidateFunction, int priority)
         {
             menuItem = itemName;
+            validate = isValidateFunction;
+            this.priority = priority;
         }
     }
 

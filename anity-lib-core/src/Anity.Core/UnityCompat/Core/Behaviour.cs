@@ -2,11 +2,14 @@ using System;
 
 namespace UnityEngine;
 
+[Bindings.NativeHeader("Runtime/Mono/MonoBehaviour.h")]
+[Scripting.UsedByNativeCode]
 public class Behaviour : Component
 {
   private bool _enabled = true;
-  private bool _wasEnabled;
 
+  [Bindings.NativeProperty]
+  [Scripting.RequiredByNativeCode]
   public bool enabled
   {
     get => _enabled;
@@ -33,8 +36,6 @@ public class Behaviour : Component
     }
   }
 
-  public bool useGUILayout { get; set; } = true;
-  public bool runInEditMode { get; set; }
-
+  [Bindings.NativeProperty]
   public bool isActiveAndEnabled => _enabled && gameObject is not null && gameObject.activeInHierarchy;
 }

@@ -45,7 +45,7 @@ public enum BlockingObjects
   All = 3
 }
 
-public struct UIVertex
+internal struct LegacyUIVertex
 {
   public Vector3 position;
   public Vector3 normal;
@@ -56,7 +56,7 @@ public struct UIVertex
   public Vector2 uv2;
   public Vector2 uv3;
 
-  public static UIVertex simpleVert = new()
+  public static LegacyUIVertex simpleVert = new()
   {
     position = Vector3.zero,
     normal = new Vector3(0f, 0f, -1f),
@@ -379,7 +379,7 @@ public abstract class Graphic : UIBehaviour, ICanvasElement
   }
 }
 
-public class CanvasRenderer : MonoBehaviour
+internal class LegacyCanvasRenderer : MonoBehaviour
 {
   private Color _color = Color.white;
   private float _alpha = 1f;

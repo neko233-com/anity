@@ -87,6 +87,8 @@ public partial class Texture2D : Texture
 {
     private Color[] _pixels;
     private Color32[] _pixels32;
+    private Color[][] _mipPixels = Array.Empty<Color[]>();
+    private Color32[][] _mipPixels32 = Array.Empty<Color32[]>();
     private bool _isLoaded;
     private bool _mipmapsDirty;
     private bool _isReadable = true;
@@ -178,10 +180,8 @@ public partial class Texture2D : Texture
         this.height = height;
         this.format = format;
         _linear = linear;
-        mipmapCount = mipCount > 0 ? mipCount : 1;
-        int pixelCount = Math.Max(1, width * height);
-        _pixels = new Color[pixelCount];
-        _pixels32 = new Color32[pixelCount];
+        mipmapCount = Math.Min(mipCount > 0 ? mipCount : 1, GenerateMipsCount(width, height));
+        InitializeMipStorage();
         dimension = TextureDimension.Tex2D;
     }
 
@@ -192,45 +192,52 @@ public partial class Texture2D : Texture
         this.format = format;
         _linear = linear;
         mipmapCount = mipmapChain ? GenerateMipsCount(width, height) : 1;
-        int pixelCount = Math.Max(1, width * height);
-        _pixels = new Color[pixelCount];
-        _pixels32 = new Color32[pixelCount];
+        InitializeMipStorage();
         dimension = TextureDimension.Tex2D;
     }
 
     public bool linear => _linear;
 
     public Color GetPixel(int x, int y)
+        => GetPixel(x, y, 0);
+
+    public Color GetPixel(int x, int y, [Internal.DefaultValue("0")] int mipLevel)
     {
         if (!_isReadable) return Color.clear;
-        if (x < 0 || y < 0 || x >= width || y >= height)
+        if (!TryGetMip(mipLevel, out Color[] pixels, out _, out int mipWidth, out int mipHeight) ||
+            x < 0 || y < 0 || x >= mipWidth || y >= mipHeight)
         {
             return Color.clear;
         }
-        return _pixels[y * width + x];
+        return pixels[y * mipWidth + x];
     }
 
     public Color GetPixelBilinear(float u, float v)
+        => GetPixelBilinear(u, v, 0);
+
+    public Color GetPixelBilinear(float u, float v, [Internal.DefaultValue("0")] int mipLevel)
     {
         if (!_isReadable) return Color.clear;
+        if (!TryGetMip(mipLevel, out _, out _, out int mipWidth, out int mipHeight))
+            return Color.clear;
         u = u - (float)Math.Floor(u);
         v = v - (float)Math.Floor(v);
         if (u < 0) u += 1f;
         if (v < 0) v += 1f;
 
-        float fx = u * (width - 1);
-        float fy = v * (height - 1);
+        float fx = u * (mipWidth - 1);
+        float fy = v * (mipHeight - 1);
         int x0 = (int)Math.Floor(fx);
         int y0 = (int)Math.Floor(fy);
-        int x1 = Math.Min(x0 + 1, width - 1);
-        int y1 = Math.Min(y0 + 1, height - 1);
+        int x1 = Math.Min(x0 + 1, mipWidth - 1);
+        int y1 = Math.Min(y0 + 1, mipHeight - 1);
         float tx = fx - x0;
         float ty = fy - y0;
 
-        Color c00 = GetPixel(x0, y0);
-        Color c10 = GetPixel(x1, y0);
-        Color c01 = GetPixel(x0, y1);
-        Color c11 = GetPixel(x1, y1);
+        Color c00 = GetPixel(x0, y0, mipLevel);
+        Color c10 = GetPixel(x1, y0, mipLevel);
+        Color c01 = GetPixel(x0, y1, mipLevel);
+        Color c11 = GetPixel(x1, y1, mipLevel);
 
         Color c0 = Color.Lerp(c00, c10, tx);
         Color c1 = Color.Lerp(c01, c11, tx);
@@ -238,14 +245,20 @@ public partial class Texture2D : Texture
     }
 
     public void SetPixel(int x, int y, Color color)
+        => SetPixel(x, y, color, 0);
+
+    public void SetPixel(int x, int y, Color color, [Internal.DefaultValue("0")] int mipLevel)
     {
         if (!_isReadable) return;
-        if (x < 0 || y < 0 || x >= width || y >= height)
+        if (!TryGetMip(mipLevel, out Color[] pixels, out Color32[] pixels32,
+                out int mipWidth, out int mipHeight) ||
+            x < 0 || y < 0 || x >= mipWidth || y >= mipHeight)
         {
             return;
         }
-        _pixels[y * width + x] = color;
-        _pixels32[y * width + x] = color;
+        int index = y * mipWidth + x;
+        pixels[index] = color;
+        pixels32[index] = color;
     }
 
     public Color[] GetPixels()
@@ -258,7 +271,9 @@ public partial class Texture2D : Texture
 
     public Color[] GetPixels(int miplevel)
     {
-        return GetPixels();
+        if (!_isReadable || !TryGetMip(miplevel, out Color[] pixels, out _, out _, out _))
+            return Array.Empty<Color>();
+        return (Color[])pixels.Clone();
     }
 
     public void SetPixels(Color[] colors)
@@ -275,7 +290,13 @@ public partial class Texture2D : Texture
 
     public void SetPixels(Color[] colors, int miplevel)
     {
-        SetPixels(colors);
+        if (!_isReadable) return;
+        if (colors == null) throw new ArgumentNullException(nameof(colors));
+        if (!TryGetMip(miplevel, out Color[] pixels, out Color32[] pixels32, out _, out _))
+            return;
+        int count = Math.Min(colors.Length, pixels.Length);
+        Array.Copy(colors, pixels, count);
+        for (int index = 0; index < count; index++) pixels32[index] = colors[index];
     }
 
     public void SetPixels32(Color32[] colors)
@@ -292,7 +313,13 @@ public partial class Texture2D : Texture
 
     public void SetPixels32(Color32[] colors, int miplevel)
     {
-        SetPixels32(colors);
+        if (!_isReadable) return;
+        if (colors == null) throw new ArgumentNullException(nameof(colors));
+        if (!TryGetMip(miplevel, out Color[] pixels, out Color32[] pixels32, out _, out _))
+            return;
+        int count = Math.Min(colors.Length, pixels32.Length);
+        Array.Copy(colors, pixels32, count);
+        for (int index = 0; index < count; index++) pixels[index] = colors[index];
     }
 
     public Color32[] GetPixels32()
@@ -305,7 +332,9 @@ public partial class Texture2D : Texture
 
     public Color32[] GetPixels32(int miplevel)
     {
-        return GetPixels32();
+        if (!_isReadable || !TryGetMip(miplevel, out _, out Color32[] pixels, out _, out _))
+            return Array.Empty<Color32>();
+        return (Color32[])pixels.Clone();
     }
 
     public void Apply()
@@ -321,11 +350,36 @@ public partial class Texture2D : Texture
     public void Apply(bool updateMipmaps, bool makeNoLongerReadable)
     {
         _isLoaded = true;
-        _mipmapsDirty = true;
+        _mipmapsDirty = updateMipmaps;
+        if (updateMipmaps && mipmapCount > 1) GenerateMipChain();
+        IncrementUpdateCount();
+        Anity.Core.Runtime.Native.NativeGraphicsDevice.Current?.EnsureTexture(this);
         if (makeNoLongerReadable)
         {
             _isReadable = false;
         }
+    }
+
+    internal byte[] GetNativeRgba32()
+    {
+        int pixelCount = 0;
+        for (int mip = 0; mip < _mipPixels32.Length; mip++)
+            pixelCount = checked(pixelCount + _mipPixels32[mip].Length);
+        var result = new byte[checked(pixelCount * 4)];
+        int output = 0;
+        for (int mip = 0; mip < _mipPixels32.Length; mip++)
+        {
+            Color32[] pixels = _mipPixels32[mip];
+            for (int index = 0; index < pixels.Length; index++)
+            {
+                Color32 pixel = pixels[index];
+                result[output++] = pixel.r;
+                result[output++] = pixel.g;
+                result[output++] = pixel.b;
+                result[output++] = pixel.a;
+            }
+        }
+        return result;
     }
 
     public bool Resize(int width, int height)
@@ -339,9 +393,7 @@ public partial class Texture2D : Texture
         this.height = height;
         this.format = format;
         mipmapCount = hasMipMap ? GenerateMipsCount(width, height) : 1;
-        int pixelCount = Math.Max(1, width * height);
-        _pixels = new Color[pixelCount];
-        _pixels32 = new Color32[pixelCount];
+        InitializeMipStorage();
         _isReadable = true;
         return true;
     }
@@ -392,31 +444,94 @@ public partial class Texture2D : Texture
     public void LoadRawTextureData(byte[] data)
     {
         if (data == null) return;
-        int byteCount = _pixels.Length * 4;
-        int copyCount = Math.Min(data.Length, byteCount);
-        for (int i = 0; i < copyCount / 4; i++)
+        int input = 0;
+        for (int mip = 0; mip < _mipPixels.Length && input + 3 < data.Length; mip++)
         {
-            _pixels[i] = new Color(
-                data[i * 4 + 0] / 255f,
-                data[i * 4 + 1] / 255f,
-                data[i * 4 + 2] / 255f,
-                data[i * 4 + 3] / 255f
-            );
-            _pixels32[i] = _pixels[i];
+            for (int index = 0; index < _mipPixels[mip].Length && input + 3 < data.Length; index++)
+            {
+                var pixel = new Color32(data[input], data[input + 1], data[input + 2], data[input + 3]);
+                _mipPixels32[mip][index] = pixel;
+                _mipPixels[mip][index] = pixel;
+                input += 4;
+            }
         }
     }
 
     public byte[] GetRawTextureData()
     {
-        var result = new byte[_pixels.Length * 4];
-        for (int i = 0; i < _pixels.Length; i++)
+        return GetNativeRgba32();
+    }
+
+    internal int GetMipWidth(int mipLevel) => Math.Max(1, width >> mipLevel);
+    internal int GetMipHeight(int mipLevel) => Math.Max(1, height >> mipLevel);
+
+    private void InitializeMipStorage()
+    {
+        mipmapCount = Math.Max(1, Math.Min(mipmapCount, GenerateMipsCount(width, height)));
+        _mipPixels = new Color[mipmapCount][];
+        _mipPixels32 = new Color32[mipmapCount][];
+        for (int mip = 0; mip < mipmapCount; mip++)
         {
-            result[i * 4 + 0] = (byte)(Math.Clamp(_pixels[i].r, 0f, 1f) * 255f);
-            result[i * 4 + 1] = (byte)(Math.Clamp(_pixels[i].g, 0f, 1f) * 255f);
-            result[i * 4 + 2] = (byte)(Math.Clamp(_pixels[i].b, 0f, 1f) * 255f);
-            result[i * 4 + 3] = (byte)(Math.Clamp(_pixels[i].a, 0f, 1f) * 255f);
+            int pixelCount = checked(GetMipWidth(mip) * GetMipHeight(mip));
+            _mipPixels[mip] = new Color[pixelCount];
+            _mipPixels32[mip] = new Color32[pixelCount];
         }
-        return result;
+        _pixels = _mipPixels[0];
+        _pixels32 = _mipPixels32[0];
+    }
+
+    private bool TryGetMip(int mipLevel, out Color[] pixels, out Color32[] pixels32,
+        out int mipWidth, out int mipHeight)
+    {
+        if (mipLevel < 0 || mipLevel >= _mipPixels.Length)
+        {
+            pixels = Array.Empty<Color>();
+            pixels32 = Array.Empty<Color32>();
+            mipWidth = 0;
+            mipHeight = 0;
+            return false;
+        }
+        pixels = _mipPixels[mipLevel];
+        pixels32 = _mipPixels32[mipLevel];
+        mipWidth = GetMipWidth(mipLevel);
+        mipHeight = GetMipHeight(mipLevel);
+        return true;
+    }
+
+    private void GenerateMipChain()
+    {
+        for (int mip = 1; mip < mipmapCount; mip++)
+        {
+            Color[] source = _mipPixels[mip - 1];
+            Color[] destination = _mipPixels[mip];
+            Color32[] destination32 = _mipPixels32[mip];
+            int sourceWidth = GetMipWidth(mip - 1);
+            int sourceHeight = GetMipHeight(mip - 1);
+            int destinationWidth = GetMipWidth(mip);
+            int destinationHeight = GetMipHeight(mip);
+            for (int y = 0; y < destinationHeight; y++)
+            {
+                for (int x = 0; x < destinationWidth; x++)
+                {
+                    int x0 = Math.Min(sourceWidth - 1, x * 2);
+                    int x1 = Math.Min(sourceWidth - 1, x0 + 1);
+                    int y0 = Math.Min(sourceHeight - 1, y * 2);
+                    int y1 = Math.Min(sourceHeight - 1, y0 + 1);
+                    Color c00 = source[y0 * sourceWidth + x0];
+                    Color c10 = source[y0 * sourceWidth + x1];
+                    Color c01 = source[y1 * sourceWidth + x0];
+                    Color c11 = source[y1 * sourceWidth + x1];
+                    Color value = new(
+                        (c00.r + c10.r + c01.r + c11.r) * 0.25f,
+                        (c00.g + c10.g + c01.g + c11.g) * 0.25f,
+                        (c00.b + c10.b + c01.b + c11.b) * 0.25f,
+                        (c00.a + c10.a + c01.a + c11.a) * 0.25f);
+                    int index = y * destinationWidth + x;
+                    destination[index] = value;
+                    destination32[index] = value;
+                }
+            }
+        }
     }
 
     public T[] GetRawTextureData<T>() where T : struct

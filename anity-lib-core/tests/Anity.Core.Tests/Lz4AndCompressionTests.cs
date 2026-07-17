@@ -9,6 +9,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>Real LZ4 codec + AssetBundle ALZ4/LZ4 compression — ≥12 cases.</summary>
+[Collection(AssetPipelineStateCollection.Name)]
 public class Lz4AndCompressionTests : IDisposable
 {
     private readonly string _dir;

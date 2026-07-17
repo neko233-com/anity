@@ -6,7 +6,7 @@
 
 ## 〇、终极目标（强制）
 
-**完全对标 Unity 2022.3.x Pro（LTS），API 与功能效果必须一模一样。**
+**完全对标 Unity 2022.3.61f1 Pro（LTS），API 与功能效果必须一模一样。**
 
 1. **API 签名**：命名空间、类型、成员、枚举值、重载、事件、特性与 Unity 2022.3 Pro **逐字一致**（可多实现内部类型，但公开表面必须兼容）。
 2. **行为与效果**：运行时语义、物理/渲染/音频/动画结果、编辑器交互与 Unity 2022 Pro **功能等价**；允许实现路径不同，**不允许**“只有签名、没有效果”的空壳长期存在。
@@ -86,6 +86,12 @@
 - **每个功能模块至少 10 个测试用例**，覆盖：正常路径、边界值、非法参数、空引用、多线程/并发（如适用）、平台分支、与 Unity 语义对照
 - 测试工程：`anity-lib-core/tests/`、`anity-agent/tests/`、`anity-cli/tests/` 等；用 xUnit
 - 新增功能 **必须同步提交 ≥10 用例**，否则不得在 Checklist 标 ✅
+
+### 11. Unity 官方包（强制）
+- 最终对等范围包含 Unity 2022.3.61f1 随编辑器/Package Manager 提供的官方包；至少包含 **Shader Graph 14.x、Visual Effect Graph 14.x、URP 14.x、Timeline、UGUI、Test Framework、Collections、Burst、Mathematics、Input System、Addressables** 等。
+- 每个官方包必须对齐 package manifest、依赖、程序集与公开 API、资源格式/importer、菜单/窗口/Inspector/节点编辑器、代码生成、运行时语义、样例和平台兼容矩阵；不得用同名空包或只读资产解析器冒充完成。
+- Shader Graph 必须覆盖 `.shadergraph` / `.shadersubgraph`、Blackboard、node/slot/edge、Target/SubTarget、Custom Function、预览、variant 与 URP HLSL 生成；VFX Graph 必须覆盖 `.vfx`、系统/上下文/block/operator、GPU simulation、事件、属性、output 与编辑器交互。
+- 产品渲染主路径仍是 URP 14.x；官方包中仅服务 HDRP 的分支保留兼容资产/API 审计，但不得把 HDRP 变成 Anity 产品渲染管线。
 
 ---
 

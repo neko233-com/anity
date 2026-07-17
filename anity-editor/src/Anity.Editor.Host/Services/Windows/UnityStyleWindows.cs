@@ -25,6 +25,8 @@ internal static class UnityStyleWindows
 
   public static EditorWindow OpenSearch() => SearchWindow.Show(null);
 
+  public static EditorWindow OpenAgent() => AgentEditorWindow.ShowWindow();
+
   public static EditorWindow OpenByName(string name) => name switch
   {
     "Scene View" or "Scene" => OpenSceneView(),
@@ -34,6 +36,7 @@ internal static class UnityStyleWindows
     "Inspector" => OpenInspector(),
     "Console" => OpenConsole(),
     "Search" or "Quick Search" => OpenSearch(),
+    "Anity Agent" or "Agent" => OpenAgent(),
     _ => OpenSceneView()
   };
 
@@ -46,6 +49,7 @@ internal static class UnityStyleWindows
     "Inspector" => typeof(InspectorWindow),
     "Console" => typeof(ConsoleWindow),
     "Search" or "Quick Search" => typeof(SearchWindow),
+    "Anity Agent" or "Agent" => typeof(AgentEditorWindow),
     _ => typeof(SceneView)
   };
 }
