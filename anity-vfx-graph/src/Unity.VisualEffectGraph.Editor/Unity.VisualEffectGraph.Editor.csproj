@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>Unity.VisualEffectGraph.Editor</AssemblyName>
+    <RootNamespace>UnityEditor.VFX</RootNamespace>
+    <PackageId>Anity.VisualEffectGraph</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Anity implementation of the Unity 2022.3 Visual Effect Graph 14.x editor package.</Description>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../anity-lib-core/src/Anity.Core/Anity.Core.csproj" />
+  </ItemGroup>
+</Project>

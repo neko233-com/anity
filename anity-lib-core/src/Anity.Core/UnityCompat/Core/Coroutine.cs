@@ -13,6 +13,7 @@ public class Coroutine
   internal bool WaitingForFixedUpdate;
   internal bool WaitingForEndOfFrame;
   internal CustomYieldInstruction WaitingForCustomYield;
+  internal AsyncOperation WaitingForAsyncOperation;
   internal Coroutine WaitingForCoroutine;
 
   public Coroutine(IEnumerator? routine)

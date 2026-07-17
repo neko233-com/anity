@@ -16,6 +16,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Anity.Cli\Anity.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Anity.Cli\Anity.Cli.csproj"
+                      AdditionalProperties="GeneratePackageOnBuild=false" />
   </ItemGroup>
 </Project>

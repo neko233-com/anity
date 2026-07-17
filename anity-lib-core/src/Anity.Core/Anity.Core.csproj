@@ -8,6 +8,7 @@
     <Authors>Anity Team</Authors>
     <Description>Shared contracts and runtime primitives for Anity.</Description>
     <Version>0.1.0</Version>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 
   <!-- Unity 模式：使用官方 DLL，排除自研实现 -->
@@ -24,8 +25,20 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" Version="8.0.0" />
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
     <PackageReference Include="System.Runtime.Loader" Version="4.3.0" />
     <PackageReference Include="Microsoft.Bcl.HashCode" Version="1.1.1" />
   </ItemGroup>
+
+  <Target Name="BuildUnityMetadataFixups"
+          BeforeTargets="CoreCompile"
+          Condition="'$(UseUnityDll)' != 'true'">
+    <Exec Command="dotnet build &quot;$(MSBuildProjectDirectory)/../../../_scripts/Anity.MetadataFixups/Anity.MetadataFixups.csproj&quot; --configuration $(Configuration) --nologo --verbosity quiet" />
+  </Target>
+
+  <Target Name="ApplyUnityMetadataFixups"
+          AfterTargets="CopyFilesToOutputDirectory"
+          Condition="'$(UseUnityDll)' != 'true'">
+    <Exec Command="dotnet &quot;$(MSBuildProjectDirectory)/../../../_scripts/Anity.MetadataFixups/bin/$(Configuration)/net10.0/Anity.MetadataFixups.dll&quot; &quot;$(TargetPath)&quot;" />
+  </Target>
 </Project>

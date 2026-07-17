@@ -1,6 +1,20 @@
 #pragma once
 #include "anity/graphics/anity_graphics.h"
 
+struct AnityGraphicsUIUploadState;
+struct AnityGraphicsTextureRegistry;
+struct AnityGraphicsVFXEventRegistry;
+
+struct AnityGraphicsVFXPlanarDrawPacket {
+  AnityGraphicsVFXPlanarOutputDesc output;
+  float localToWorld[16];
+  uint64_t generation;
+  int32_t aliveCount;
+  int32_t effectSortOrder;
+  int32_t pendingInitialize;
+  int32_t reserved;
+};
+
 struct AnityGraphicsDevice {
   AnityGraphicsDeviceType type;
   int32_t width;
@@ -11,7 +25,16 @@ struct AnityGraphicsDevice {
   int32_t supportsHdr;
   void* backend; /* backend-private state (D3D11State*, VkState*, ...) */
   AnitySwapchain* swapchain; /* optional owned swapchain */
+  uint64_t frameId = 0;
+  AnityUICanvas* uiCanvas = nullptr; /* non-owning */
+  AnityGraphicsUIUploadState* uiUpload = nullptr;
+  AnityGraphicsTextureRegistry* textures = nullptr;
+  AnityGraphicsVFXEventRegistry* vfxEvents = nullptr;
 };
+
+void AnityGraphics_DestroyUIUpload(AnityGraphicsDevice* device);
+void AnityGraphics_DestroyTextureRegistry(AnityGraphicsDevice* device);
+void AnityGraphics_DestroyVFXEventRegistry(AnityGraphicsDevice* device);
 
 struct AnitySwapchain {
   AnityGraphicsDevice* device;

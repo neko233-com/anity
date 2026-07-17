@@ -80,6 +80,22 @@ public class CommandLineArgsTests
     }
 
     [Fact]
+    public void Parse_AgentConnectionOptions()
+    {
+        var a = CommandLineArgs.Parse(new[]
+        {
+            "-agentApiKey", "secret",
+            "-agentBaseUrl", "https://gateway.example/v1",
+            "-agentModel", "custom-model",
+            "-agentTimeoutSeconds", "12.5"
+        });
+        Assert.Equal("secret", a.AgentApiKey);
+        Assert.Equal("https://gateway.example/v1", a.AgentBaseUrl);
+        Assert.Equal("custom-model", a.AgentModel);
+        Assert.Equal(12.5, a.AgentTimeoutSeconds);
+    }
+
+    [Fact]
     public void Parse_Version_Help()
     {
         Assert.True(CommandLineArgs.Parse(new[] { "-version" }).Version);
@@ -92,6 +108,8 @@ public class CommandLineArgsTests
         Assert.Contains("-batchmode", CommandLineArgs.HelpText);
         Assert.Contains("-executeMethod", CommandLineArgs.HelpText);
         Assert.Contains("-il2cpp", CommandLineArgs.HelpText);
+        Assert.Contains("ANITY_AGENT_API_KEY", CommandLineArgs.HelpText);
+        Assert.Contains("-agentBaseUrl", CommandLineArgs.HelpText);
     }
 
     [Fact]

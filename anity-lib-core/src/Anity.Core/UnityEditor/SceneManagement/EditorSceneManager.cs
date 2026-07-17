@@ -23,14 +23,14 @@ public static class EditorSceneManager
 
   public static bool SaveScene(Scene scene)
   {
-    scene.isDirty = false;
+    SceneManager.SetSceneIsDirty(scene.handle, false);
     return true;
   }
 
   public static bool SaveScene(Scene scene, string path)
   {
-    scene.path = path;
-    scene.isDirty = false;
+    SceneManager.SetScenePath(scene.handle, path);
+    SceneManager.SetSceneIsDirty(scene.handle, false);
     return true;
   }
 
@@ -61,7 +61,7 @@ public static class EditorSceneManager
 
   public static void MarkSceneDirty(Scene scene)
   {
-    scene.isDirty = true;
+    SceneManager.SetSceneIsDirty(scene.handle, true);
   }
 
   public static bool SaveOpenScenes()

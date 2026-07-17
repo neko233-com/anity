@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEditor.Search;
 using UnityEditor.SceneManagement;
+using Anity.Editor.Host.Services.Windows;
 
 namespace Anity.Editor.Host.Services;
 
@@ -26,6 +27,9 @@ internal static class EditorMenuCommands
 
   [MenuItem("Window/General/Console %#c")]
   public static void OpenConsole() => ConsoleWindow.ShowWindow();
+
+  [MenuItem("Window/Anity/Agent")]
+  public static void OpenAnityAgent() => AgentEditorWindow.ShowWindow();
 
   [MenuItem("Edit/Search All... _%k")] // Ctrl+K
   public static void OpenQuickSearch() => SearchService.OpenQuickSearch();

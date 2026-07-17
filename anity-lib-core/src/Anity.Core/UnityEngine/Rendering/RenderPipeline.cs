@@ -97,8 +97,12 @@ public abstract class RenderPipeline : IDisposable
         var cmd = CommandBufferPool.Get("Camera.Render");
         cmd.ClearRenderTarget(true, true, camera.backgroundColor);
         context.ExecuteCommandBuffer(cmd);
-        CommandBufferPool.Release(cmd);
         ExecuteRender(context, camera);
+        // Native Planar VFX is an immediate transparent pass in the first
+        // production subset. Submit it after the recorded camera clear and
+        // scene work so the framebuffer is not cleared over the particles.
+        UnityEngine.VFX.VFXManager.ProcessCameraCommandFromRenderLoop(camera, cmd);
+        CommandBufferPool.Release(cmd);
     }
 
     protected abstract void ExecuteRender(ScriptableRenderContext context, Camera camera);

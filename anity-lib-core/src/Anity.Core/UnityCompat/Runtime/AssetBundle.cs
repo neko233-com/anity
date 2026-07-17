@@ -78,10 +78,11 @@ public class AssetBundle : Object
     public AssetBundleRequest LoadAssetAsync(string name, Type type)
     {
         var request = new AssetBundleRequest();
-        var asset = LoadAsset(name, type);
-        request.SetAsset(asset);
-        request.SetAllAssets(asset != null ? new[] { asset } : Array.Empty<Object>());
-        request.SetDone();
+        request.Configure(() =>
+        {
+            var asset = LoadAsset(name, type);
+            request.SetResults(asset, asset != null ? new[] { asset } : Array.Empty<Object>());
+        });
         return request;
     }
 
@@ -125,11 +126,11 @@ public class AssetBundle : Object
     public AssetBundleRequest LoadAllAssetsAsync(Type type)
     {
         var request = new AssetBundleRequest();
-        var allAssets = LoadAllAssets(type);
-        request.SetAllAssets(allAssets);
-        if (allAssets.Length > 0)
-            request.SetAsset(allAssets[0]);
-        request.SetDone();
+        request.Configure(() =>
+        {
+            var allAssets = LoadAllAssets(type);
+            request.SetResults(allAssets.Length > 0 ? allAssets[0] : null, allAssets);
+        });
         return request;
     }
 
@@ -174,11 +175,11 @@ public class AssetBundle : Object
     public AssetBundleRequest LoadAssetWithSubAssetsAsync(string name, Type type)
     {
         var request = new AssetBundleRequest();
-        var assets = LoadAssetWithSubAssets(name, type);
-        request.SetAllAssets(assets);
-        if (assets.Length > 0)
-            request.SetAsset(assets[0]);
-        request.SetDone();
+        request.Configure(() =>
+        {
+            var assets = LoadAssetWithSubAssets(name, type);
+            request.SetResults(assets.Length > 0 ? assets[0] : null, assets);
+        });
         return request;
     }
 
@@ -212,8 +213,7 @@ public class AssetBundle : Object
     public AssetBundleUnloadOperation UnloadAsync(bool unloadAllLoadedObjects)
     {
         var op = new AssetBundleUnloadOperation();
-        Unload(unloadAllLoadedObjects);
-        op.SetDone();
+        op.Schedule(() => Unload(unloadAllLoadedObjects));
         return op;
     }
 
@@ -262,9 +262,7 @@ public class AssetBundle : Object
     public static AssetBundleCreateRequest LoadFromFileAsync(string path, uint crc, ulong offset)
     {
         var request = new AssetBundleCreateRequest();
-        var bundle = LoadFromFile(path, crc, offset);
-        request.SetAssetBundle(bundle);
-        request.SetDone();
+        request.Configure(() => LoadFromFile(path, crc, offset));
         return request;
     }
 
@@ -303,9 +301,7 @@ public class AssetBundle : Object
     public static AssetBundleCreateRequest LoadFromMemoryAsync(byte[] binary, uint crc)
     {
         var request = new AssetBundleCreateRequest();
-        var bundle = LoadFromMemory(binary, crc);
-        request.SetAssetBundle(bundle);
-        request.SetDone();
+        request.Configure(() => LoadFromMemory(binary, crc));
         return request;
     }
 
@@ -341,9 +337,7 @@ public class AssetBundle : Object
     public static AssetBundleCreateRequest LoadFromStreamAsync(Stream stream, uint crc, uint managedReadBufferSize)
     {
         var request = new AssetBundleCreateRequest();
-        var bundle = LoadFromStream(stream, crc, managedReadBufferSize);
-        request.SetAssetBundle(bundle);
-        request.SetDone();
+        request.Configure(() => LoadFromStream(stream, crc, managedReadBufferSize));
         return request;
     }
 
@@ -386,95 +380,84 @@ public class AssetBundle : Object
     }
 }
 
+[Bindings.NativeHeader("Modules/AssetBundle/Public/AssetBundleLoadFromAsyncOperation.h")]
+[Scripting.RequiredByNativeCode]
 public class AssetBundleCreateRequest : AsyncOperation
 {
     private AssetBundle? _assetBundle;
 
-    public AssetBundle? assetBundle => _assetBundle;
+    public AssetBundle? assetBundle
+    {
+        get
+        {
+            CompleteScheduledNow();
+            return _assetBundle;
+        }
+    }
 
     public AssetBundleCreateRequest() : base(false)
     {
     }
 
-    internal void SetAssetBundle(AssetBundle? bundle)
+    internal void Configure(Func<AssetBundle?> loader)
     {
-        _assetBundle = bundle;
-    }
-
-    public AssetBundleCreateRequest GetAwaiter()
-    {
-        return this;
-    }
-
-    public bool IsCompleted => isDone;
-
-    public AssetBundle? GetResult()
-    {
-        return _assetBundle;
+        Schedule(() => _assetBundle = loader());
     }
 }
 
-public class AssetBundleRequest : AsyncOperation
+[Bindings.NativeHeader("Modules/AssetBundle/Public/AssetBundleLoadAssetOperation.h")]
+[Scripting.RequiredByNativeCode]
+public class AssetBundleRequest : ResourceRequest
 {
     private Object? _asset;
     private Object[] _allAssets = Array.Empty<Object>();
 
-    public Object? asset => _asset;
+    public new Object? asset => base.asset;
 
-    public T? assetAsTyped<T>() where T : Object
+    public Object[] allAssets
     {
-        return _asset as T;
+        get
+        {
+            CompleteScheduledNow();
+            return (Object[])_allAssets.Clone();
+        }
     }
 
-    public Object[] allAssets => _allAssets;
-
-    public AssetBundleRequest() : base(false)
+    public AssetBundleRequest()
     {
     }
 
-    internal void SetAsset(Object? asset)
+    [Bindings.NativeMethod("GetLoadedAsset")]
+    protected override Object? GetResult()
+    {
+        CompleteScheduledNow();
+        return _asset;
+    }
+
+    internal void Configure(Action loader)
+    {
+        Schedule(loader);
+    }
+
+    internal void SetResults(Object? asset, Object[] assets)
     {
         _asset = asset;
-    }
-
-    internal void SetAllAssets(Object[] assets)
-    {
         _allAssets = assets ?? Array.Empty<Object>();
-    }
-
-    public AssetBundleRequest GetAwaiter()
-    {
-        return this;
-    }
-
-    public bool IsCompleted => isDone;
-
-    public Object? GetResult()
-    {
-        return _asset;
     }
 }
 
+[Bindings.NativeHeader("Modules/AssetBundle/Public/AssetBundleUnloadOperation.h")]
+[Scripting.RequiredByNativeCode]
 public class AssetBundleUnloadOperation : AsyncOperation
 {
     public AssetBundleUnloadOperation() : base(false)
     {
     }
 
-    internal void SetDone()
+    [Bindings.NativeMethod("WaitForCompletion")]
+    public void WaitForCompletion()
     {
-        isDone = true;
-    }
-
-    public AssetBundleUnloadOperation GetAwaiter()
-    {
-        return this;
-    }
-
-    public bool IsCompleted => isDone;
-
-    public void GetResult()
-    {
+        CompleteScheduledNow();
     }
 }
 

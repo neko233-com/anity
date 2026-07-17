@@ -1,5 +1,6 @@
 namespace UnityEngine.SceneManagement;
 
+[System.Flags]
 public enum LocalPhysicsMode
 {
   None = 0,

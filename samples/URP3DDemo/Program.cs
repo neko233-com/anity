@@ -92,7 +92,7 @@ Console.WriteLine($"Avg frame: {totalFrameMs / frameCount:F3}ms");
 Console.WriteLine($"Max frame: {maxFrameMs:F3}ms");
 Console.WriteLine($"Camera count: {Camera.allCameras.Length}");
 Console.WriteLine($"Active scene: {SceneManager.GetActiveScene().name}");
-Console.WriteLine($"Canvas count: {Canvas.canvases.Count}");
+Console.WriteLine($"Canvas count: {UnityEngine.Object.FindObjectsOfType<Canvas>().Length}");
 Console.WriteLine($"UIRebuilds: {DemoScene.UIRebuildCount}");
 Console.WriteLine($"Animator count: {DemoScene.AnimatorCount}");
 Console.WriteLine($"ParticleSystems: {DemoScene.ParticleSystemCount}");

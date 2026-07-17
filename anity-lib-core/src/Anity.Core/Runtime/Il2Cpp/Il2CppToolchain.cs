@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 namespace Anity.Core.Runtime.Il2Cpp;
 
 /// <summary>
@@ -157,19 +159,11 @@ public static class Il2CppToolchain
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            using var p = Process.Start(psi);
-            if (p == null)
-            {
-                lastCompileLog = "Failed to start compiler";
-                return false;
-            }
-            string stdout = p.StandardOutput.ReadToEnd();
-            string stderr = p.StandardError.ReadToEnd();
-            p.WaitForExit(60_000);
-            lastCompileLog = $"compiler={compiler}\nargs={args}\nexit={p.ExitCode}\n{stdout}\n{stderr}";
+            bool exited = RunRedirectedProcess(psi, 60_000, out int exitCode, out string stdout, out string stderr);
+            lastCompileLog = $"compiler={compiler}\nargs={args}\nexit={exitCode}\n{stdout}\n{stderr}";
             File.WriteAllText(Path.Combine(il2cppOutputDir, "compile.log"), lastCompileLog);
             // cl may still fail without VS env — treat non-zero as soft fail logged
-            return p.ExitCode == 0 || File.Exists(objOut);
+            return exited && (exitCode == 0 || File.Exists(objOut));
         }
         catch (Exception ex)
         {
@@ -260,18 +254,10 @@ public static class Il2CppToolchain
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
-            using var p = Process.Start(psi);
-            if (p == null)
-            {
-                lastCompileLog = "failed to start linker/compiler";
-                return false;
-            }
-            string stdout = p.StandardOutput.ReadToEnd();
-            string stderr = p.StandardError.ReadToEnd();
-            p.WaitForExit(120_000);
-            lastCompileLog = $"link compiler={compiler}\nargs={args}\nexit={p.ExitCode}\n{stdout}\n{stderr}";
+            bool exited = RunRedirectedProcess(psi, 120_000, out int exitCode, out string stdout, out string stderr);
+            lastCompileLog = $"link compiler={compiler}\nargs={args}\nexit={exitCode}\n{stdout}\n{stderr}";
             File.WriteAllText(Path.Combine(il2cppOutputDir, "link.log"), lastCompileLog);
-            bool ok = p.ExitCode == 0 && File.Exists(outExe);
+            bool ok = exited && exitCode == 0 && File.Exists(outExe);
             if (ok)
                 lastCompileLog += "\nplayer=" + outExe;
             return ok;
@@ -293,7 +279,12 @@ public static class Il2CppToolchain
 
         int count = 0;
         bool msvc = IsMsvcCl(compiler);
-        foreach (var cpp in Directory.GetFiles(il2cppOutputDir, "*.cpp"))
+        string[] cppFiles = Directory.GetFiles(il2cppOutputDir, "*.cpp");
+        var options = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount)
+        };
+        Parallel.ForEach(cppFiles, options, cpp =>
         {
             string name = Path.GetFileNameWithoutExtension(cpp);
             string obj = Path.Combine(il2cppOutputDir, name + (msvc ? ".obj" : ".o"));
@@ -312,14 +303,48 @@ public static class Il2CppToolchain
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
-                using var p = Process.Start(psi);
-                if (p == null) continue;
-                p.WaitForExit(60_000);
-                if (File.Exists(obj)) count++;
+                bool exited = RunRedirectedProcess(psi, 60_000, out int exitCode, out _, out _);
+                if (exited && exitCode == 0 && File.Exists(obj)) Interlocked.Increment(ref count);
             }
             catch { }
-        }
+        });
         return count;
+    }
+
+    private static bool RunRedirectedProcess(
+        ProcessStartInfo startInfo,
+        int timeoutMilliseconds,
+        out int exitCode,
+        out string stdout,
+        out string stderr)
+    {
+        exitCode = -1;
+        stdout = string.Empty;
+        stderr = string.Empty;
+        using var process = Process.Start(startInfo);
+        if (process == null)
+            return false;
+
+        Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+        bool exited = process.WaitForExit(timeoutMilliseconds);
+        if (!exited)
+        {
+            try { process.Kill(); } catch { }
+            try { process.WaitForExit(5_000); } catch { }
+        }
+
+        try { Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 5_000); } catch { }
+        if (stdoutTask.IsCompletedSuccessfully) stdout = stdoutTask.GetAwaiter().GetResult();
+        if (stderrTask.IsCompletedSuccessfully) stderr = stderrTask.GetAwaiter().GetResult();
+        if (!exited)
+        {
+            stderr += $"\nProcess timed out after {timeoutMilliseconds} ms.";
+            return false;
+        }
+
+        exitCode = process.ExitCode;
+        return true;
     }
 
     private static string GenerateConfigHeader(TargetAbi abi)

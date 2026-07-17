@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Anity.Editor.Host.Models;
 using UnityEditor;
 using UnityEngine;
+using Anity.Editor.Host.Services.Windows;
 
 namespace Anity.Editor.Host.Services;
 
@@ -205,6 +206,7 @@ public sealed class EditorHost
     _menuItems["Window/Console"] = () => OpenWindow("Console");
     _menuItems["Window/Inspector"] = () => OpenWindow("Inspector");
     _menuItems["Window/Search"] = () => OpenWindow("Search");
+    _menuItems["Window/Anity/Agent"] = () => OpenWindow("Anity Agent");
     _menuItems["Edit/Search All..."] = () => OpenWindow("Search");
 
     _menuItems["Window/Play"] = () =>
@@ -266,13 +268,29 @@ public sealed class EditorHost
 
         foreach (var method in methods)
         {
-          var menu = method.GetCustomAttribute<MenuItem>();
+          MenuItem? menu;
+          ParameterInfo[] parameters;
+          try
+          {
+            // Plugin/test assemblies can contain attributes whose dependency cannot be
+            // loaded in this host. One bad method must not take down all editor menus.
+            menu = method.GetCustomAttribute<MenuItem>();
+            parameters = method.GetParameters();
+          }
+          catch (Exception exception) when (
+            exception is TypeLoadException
+            or FileLoadException
+            or FileNotFoundException
+            or BadImageFormatException
+            or CustomAttributeFormatException)
+          {
+            continue;
+          }
           if (menu is null || menu.isValidateFunction)
           {
             continue;
           }
 
-          var parameters = method.GetParameters();
           if (parameters.Length > 1)
           {
             continue;
@@ -326,14 +344,18 @@ public sealed class EditorHost
   private void RegisterWindowFactories()
   {
     // Register full UnityEditor windows from Anity.Core (not host stubs)
-    RegisterWindowFactory("Scene View", typeof(SceneView), () => SceneView.ShowWindow());
-    RegisterWindowFactory("Game View", typeof(GameView), () => GameView.ShowWindow());
-    RegisterWindowFactory("Hierarchy", typeof(HierarchyWindow), () => HierarchyWindow.ShowWindow());
-    RegisterWindowFactory("Project", typeof(ProjectWindow), () => ProjectWindow.ShowWindow());
-    RegisterWindowFactory("Inspector", typeof(InspectorWindow), () => InspectorWindow.ShowWindow());
-    RegisterWindowFactory("Console", typeof(ConsoleWindow), () => ConsoleWindow.ShowWindow());
+    // EditorWindow owns Show/OnEnable/focus. Factories must only construct; calling
+    // ShowWindow here would recursively enter the same registered factory.
+    RegisterWindowFactory("Scene View", typeof(SceneView), () => new SceneView());
+    RegisterWindowFactory("Game View", typeof(GameView), () => new GameView());
+    RegisterWindowFactory("Hierarchy", typeof(HierarchyWindow), () => new HierarchyWindow());
+    RegisterWindowFactory("Project", typeof(ProjectWindow), () => new ProjectWindow());
+    RegisterWindowFactory("Inspector", typeof(InspectorWindow), () => new InspectorWindow());
+    RegisterWindowFactory("Console", typeof(ConsoleWindow), () => new ConsoleWindow());
     RegisterWindowFactory("Search", typeof(UnityEditor.Search.SearchWindow),
-      () => UnityEditor.Search.SearchWindow.Show(null));
+      () => new UnityEditor.Search.SearchWindow());
+    RegisterWindowFactory("Anity Agent", typeof(AgentEditorWindow),
+      () => new AgentEditorWindow());
   }
 
   private void RegisterWindowFactory(string alias, Type windowType, Func<EditorWindow> factory)

@@ -14,6 +14,7 @@ typedef enum AnityResult {
   ANITY_ERR_DEVICE_LOST = 4,
   ANITY_ERR_IO = 5,
   ANITY_ERR_DECODE = 6,
+  ANITY_ERR_TIMEOUT = 7,
   ANITY_ERR_INTERNAL = 100
 } AnityResult;
 

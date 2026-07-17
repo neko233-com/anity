@@ -10,20 +10,19 @@ Set-Location $Root
 
 Write-Host "=== build-all ($Config) ===" -ForegroundColor Cyan
 
-if (Get-Command cmake -EA SilentlyContinue) {
-  try {
-    & "$PSScriptRoot\build-native.ps1" -Config $(if ($Config -eq "Debug") { "Debug" } else { "Release" })
-  } catch {
-    Write-Warning "Native build failed (managed still builds): $_"
-  }
-} else {
-  Write-Warning "cmake missing — skipping native"
+if (-not (Get-Command cmake -EA SilentlyContinue)) {
+  throw "cmake is required for the production build-all gate; run _scripts/install-env.ps1"
 }
+& "$PSScriptRoot\build-native.ps1" -Config $(if ($Config -eq "Debug") { "Debug" } else { "Release" })
+if ($LASTEXITCODE -ne 0) { throw "native build failed" }
 
 $projects = @(
   "anity-lib-core\src\Anity.Core\Anity.Core.csproj",
   "anity-agent\src\Anity.Agent\Anity.Agent.csproj",
+  "anity-shader-graph\src\Unity.ShaderGraph.Editor\Unity.ShaderGraph.Editor.csproj",
+  "anity-vfx-graph\src\Unity.VisualEffectGraph.Editor\Unity.VisualEffectGraph.Editor.csproj",
   "anity-cli\src\Anity.Cli\Anity.Cli.csproj",
+  "_scripts\UnityApiParity\UnityApiParity.csproj",
   "anity-webgl\src\Anity.WebGL\Anity.WebGL.csproj",
   "anity-hub\src\Anity.Hub\Anity.Hub.csproj",
   "anity-editor\src\Anity.Editor.Host\Anity.Editor.Host.csproj",

@@ -102,12 +102,19 @@ public class Rigidbody2D : Component
 
   public void AddRelativeForce(Vector2 force)
   {
-    AddForce(force);
+    AddRelativeForce(force, ForceMode2D.Force);
   }
 
   public void AddRelativeForce(Vector2 force, ForceMode2D mode)
   {
-    AddForce(force, mode);
+    if (transform is null)
+    {
+      AddForce(force, mode);
+      return;
+    }
+
+    Vector3 worldForce = transform.TransformDirection(new Vector3(force.x, force.y, 0f));
+    AddForce(new Vector2(worldForce.x, worldForce.y), mode);
   }
 
   public void AddTorque(float torque)

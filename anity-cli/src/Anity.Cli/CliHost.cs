@@ -117,15 +117,35 @@ public sealed class CliHost
 
             if (parsed.Agent || !string.IsNullOrEmpty(parsed.AgentPrompt))
             {
-                var session = AgentRuntime.Default.CreateSession(parsed.AgentSession);
-                if (!string.IsNullOrEmpty(parsed.AgentPrompt))
+                var options = AgentConnectionOptions.FromEnvironment();
+                if (parsed.AgentApiKey != null) options.ApiKey = parsed.AgentApiKey;
+                if (parsed.AgentBaseUrl != null) options.BaseUrl = parsed.AgentBaseUrl;
+                if (parsed.AgentModel != null) options.Model = parsed.AgentModel;
+                if (parsed.AgentTimeoutSeconds.HasValue)
+                    options.Timeout = TimeSpan.FromSeconds(parsed.AgentTimeoutSeconds.Value);
+
+                bool remoteRequested = !string.IsNullOrWhiteSpace(options.ApiKey)
+                    || parsed.AgentBaseUrl != null
+                    || parsed.AgentModel != null
+                    || parsed.AgentTimeoutSeconds.HasValue;
+                AgentRuntime runtime = remoteRequested ? new AgentRuntime(options) : AgentRuntime.Default;
+                bool ownsRuntime = remoteRequested;
+                try
                 {
-                    var reply = session.RunTurn(parsed.AgentPrompt!);
-                    WriteLine($"agent.session={session.Id}");
-                    WriteLine($"agent.reply={reply.Content}");
+                    var session = runtime.CreateSession(parsed.AgentSession);
+                    if (!string.IsNullOrEmpty(parsed.AgentPrompt))
+                    {
+                        var reply = session.RunTurn(parsed.AgentPrompt!);
+                        WriteLine($"agent.session={session.Id}");
+                        WriteLine($"agent.reply={reply.Content}");
+                    }
+                    else
+                        WriteLine($"agent.session={session.Id} ready");
                 }
-                else
-                    WriteLine($"agent.session={session.Id} ready");
+                finally
+                {
+                    if (ownsRuntime) runtime.Dispose();
+                }
             }
 
             if (parsed.Quit || parsed.BatchMode)

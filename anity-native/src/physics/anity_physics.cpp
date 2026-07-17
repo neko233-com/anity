@@ -6,6 +6,51 @@
 
 extern "C" {
 
+static AnityVec3 RotateVector(AnityVec3 value, AnityQuat rotation) {
+  const float lengthSq = rotation.x * rotation.x + rotation.y * rotation.y
+      + rotation.z * rotation.z + rotation.w * rotation.w;
+  if (lengthSq <= 1e-20f) return value;
+
+  const float inverseLength = 1.f / std::sqrt(lengthSq);
+  const float qx = rotation.x * inverseLength;
+  const float qy = rotation.y * inverseLength;
+  const float qz = rotation.z * inverseLength;
+  const float qw = rotation.w * inverseLength;
+
+  const float tx = 2.f * (qy * value.z - qz * value.y);
+  const float ty = 2.f * (qz * value.x - qx * value.z);
+  const float tz = 2.f * (qx * value.y - qy * value.x);
+  return {
+      value.x + qw * tx + (qy * tz - qz * ty),
+      value.y + qw * ty + (qz * tx - qx * tz),
+      value.z + qw * tz + (qx * ty - qy * tx)};
+}
+
+int32_t ANITY_CALL AnityPhysics3D_ResolveConstantForce(
+    AnityVec3 force, AnityVec3 relativeForce,
+    AnityVec3 torque, AnityVec3 relativeTorque,
+    AnityQuat rotation,
+    AnityVec3* outForce, AnityVec3* outTorque) {
+  if (!outForce || !outTorque) return 0;
+  const AnityVec3 rotatedForce = RotateVector(relativeForce, rotation);
+  const AnityVec3 rotatedTorque = RotateVector(relativeTorque, rotation);
+  *outForce = {force.x + rotatedForce.x, force.y + rotatedForce.y, force.z + rotatedForce.z};
+  *outTorque = {torque.x + rotatedTorque.x, torque.y + rotatedTorque.y, torque.z + rotatedTorque.z};
+  return 1;
+}
+
+int32_t ANITY_CALL AnityPhysics2D_ResolveConstantForce(
+    AnityVec2 force, AnityVec2 relativeForce,
+    AnityQuat rotation, float torque,
+    AnityVec2* outForce, float* outTorque) {
+  if (!outForce || !outTorque) return 0;
+  const AnityVec3 rotated = RotateVector({relativeForce.x, relativeForce.y, 0.f}, rotation);
+  outForce->x = force.x + rotated.x;
+  outForce->y = force.y + rotated.y;
+  *outTorque = torque;
+  return 1;
+}
+
 int32_t ANITY_CALL AnityPhysics3D_SphereSphereTOI(
     AnityVec3 posA, float radiusA, AnityVec3 velA,
     AnityVec3 posB, float radiusB,

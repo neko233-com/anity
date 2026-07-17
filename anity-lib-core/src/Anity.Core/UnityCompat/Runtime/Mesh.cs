@@ -24,8 +24,8 @@ public partial class Mesh : Object
     private List<Matrix4x4> _bindposes = new();
     private List<BoneWeight> _boneWeights = new();
     private List<int[]> _subMeshIndices = new();
+    private List<MeshTopology> _subMeshTopologies = new();
     private Bounds _bounds;
-    private MeshTopology _topology = MeshTopology.Triangles;
     private bool _isReadable = true;
     private IndexFormat _indexFormat = IndexFormat.UInt16;
     private bool _isDynamic;
@@ -150,9 +150,15 @@ public partial class Mesh : Object
         {
             if (value < 1) value = 1;
             while (_subMeshIndices.Count < value)
+            {
                 _subMeshIndices.Add(Array.Empty<int>());
+                _subMeshTopologies.Add(MeshTopology.Triangles);
+            }
             while (_subMeshIndices.Count > value)
+            {
                 _subMeshIndices.RemoveAt(_subMeshIndices.Count - 1);
+                _subMeshTopologies.RemoveAt(_subMeshTopologies.Count - 1);
+            }
         }
     }
 
@@ -168,11 +174,15 @@ public partial class Mesh : Object
         set => SetBoneWeights(value != null ? new List<BoneWeight>(value) : new List<BoneWeight>());
     }
 
-    public MeshTopology GetTopology(int submesh) => _topology;
+    public MeshTopology GetTopology(int submesh)
+        => submesh >= 0 && submesh < _subMeshTopologies.Count
+            ? _subMeshTopologies[submesh]
+            : MeshTopology.Triangles;
 
     public Mesh()
     {
         _subMeshIndices.Add(Array.Empty<int>());
+        _subMeshTopologies.Add(MeshTopology.Triangles);
     }
 
     public void Clear()
@@ -200,8 +210,9 @@ public partial class Mesh : Object
         _boneWeights.Clear();
         _subMeshIndices.Clear();
         _subMeshIndices.Add(Array.Empty<int>());
+        _subMeshTopologies.Clear();
+        _subMeshTopologies.Add(MeshTopology.Triangles);
         _bounds = default;
-        _topology = MeshTopology.Triangles;
         vertexBufferSize = 0;
         indexBufferSize = 0;
     }
@@ -322,16 +333,7 @@ public partial class Mesh : Object
 
     public void SetTriangles(List<int> triangles, int submesh)
     {
-        if (triangles == null) triangles = new List<int>();
-        while (_subMeshIndices.Count <= submesh)
-            _subMeshIndices.Add(Array.Empty<int>());
-        _subMeshIndices[submesh] = triangles.ToArray();
-        if (submesh == 0)
-        {
-            _triangles.Clear();
-            _triangles.AddRange(triangles);
-        }
-        UpdateBufferSizes();
+        SetIndicesCore(triangles ?? new List<int>(), MeshTopology.Triangles, submesh);
     }
 
     public int[] GetIndices(int submesh)
@@ -346,14 +348,31 @@ public partial class Mesh : Object
 
     public void SetIndices(int[] indices, MeshTopology topology, int submesh)
     {
-        _topology = topology;
-        SetTriangles(indices, submesh);
+        SetIndicesCore(indices != null ? new List<int>(indices) : new List<int>(), topology, submesh);
     }
 
     public void SetIndices(List<int> indices, MeshTopology topology, int submesh)
     {
-        _topology = topology;
-        SetTriangles(indices, submesh);
+        SetIndicesCore(indices ?? new List<int>(), topology, submesh);
+    }
+
+    private void SetIndicesCore(List<int> indices, MeshTopology topology, int submesh)
+    {
+        if (submesh < 0) throw new ArgumentOutOfRangeException(nameof(submesh));
+        while (_subMeshIndices.Count <= submesh)
+        {
+            _subMeshIndices.Add(Array.Empty<int>());
+            _subMeshTopologies.Add(MeshTopology.Triangles);
+        }
+        _subMeshIndices[submesh] = indices.ToArray();
+        _subMeshTopologies[submesh] = topology;
+        if (submesh == 0)
+        {
+            _triangles.Clear();
+            if (topology == MeshTopology.Triangles)
+                _triangles.AddRange(indices);
+        }
+        UpdateBufferSizes();
     }
 
     public void SetVertices(Vector3[] inVertices)

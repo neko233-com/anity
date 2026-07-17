@@ -90,19 +90,25 @@ internal class Physics2DWorld
   public void Simulate(float deltaTime)
   {
     CleanupDestroyed();
-    ApplyGravity(deltaTime);
+    ApplyForces(deltaTime);
     IntegrateRigidbodies(deltaTime);
     DetectAndResolveCollisions(deltaTime);
     SleepCheck();
   }
 
-  private void ApplyGravity(float deltaTime)
+  private void ApplyForces(float deltaTime)
   {
     foreach (var rb in _rigidbodies)
     {
-      if (rb is null || rb.IsDestroyed || !rb.simulated) continue;
-      if (rb.bodyType == RigidbodyType2D.Static || rb.bodyType == RigidbodyType2D.Kinematic) continue;
-      rb.AddForce(gravity * rb.gravityScale * rb.mass * deltaTime, ForceMode2D.Impulse);
+      if (!IsActive(rb) || !rb.simulated) continue;
+      foreach (ConstantForce2D constantForce in rb.GetComponents<ConstantForce2D>())
+      {
+        if (!constantForce.isActiveAndEnabled) continue;
+        constantForce.Resolve(out Vector2 force, out float torque);
+        rb.AddForce(force, ForceMode2D.Force);
+        rb.AddTorque(torque, ForceMode2D.Force);
+      }
+      rb.ApplyForces(deltaTime);
     }
   }
 
@@ -111,7 +117,7 @@ internal class Physics2DWorld
     for (var i = _colliders.Count - 1; i >= 0; i--)
     {
       var c = _colliders[i];
-      if (c is null || c.IsDestroyed || c.gameObject is null || !c.gameObject.activeInHierarchy)
+      if (c is null || c.IsDestroyed || c.gameObject is null)
       {
         _colliders.RemoveAt(i);
       }
@@ -120,7 +126,7 @@ internal class Physics2DWorld
     for (var i = _rigidbodies.Count - 1; i >= 0; i--)
     {
       var rb = _rigidbodies[i];
-      if (rb is null || rb.IsDestroyed || rb.gameObject is null || !rb.gameObject.activeInHierarchy)
+      if (rb is null || rb.IsDestroyed || rb.gameObject is null)
       {
         _rigidbodies.RemoveAt(i);
       }
@@ -163,7 +169,7 @@ internal class Physics2DWorld
   {
     foreach (var rb in _rigidbodies)
     {
-      if (rb is null || rb.IsDestroyed || !rb.simulated) continue;
+      if (!IsActive(rb) || !rb.simulated) continue;
       if (rb.bodyType == RigidbodyType2D.Static) continue;
 
       rb.Integrate(deltaTime);
@@ -177,18 +183,18 @@ internal class Physics2DWorld
 
     foreach (var c in _colliders)
     {
-      if (c != null) c.ClearContacts();
+      if (IsActive(c)) c.ClearContacts();
     }
 
     for (var i = 0; i < count; i++)
     {
       var a = _colliders[i];
-      if (a is null || a.IsDestroyed || !a.enabled) continue;
+      if (!IsActive(a) || !a.enabled) continue;
 
       for (var j = i + 1; j < count; j++)
       {
         var b = _colliders[j];
-        if (b is null || b.IsDestroyed || !b.enabled) continue;
+        if (!IsActive(b) || !b.enabled) continue;
         if (!Physics2D.IsLayerCollisionEnabled(a.gameObject?.layer ?? 0, b.gameObject?.layer ?? 0)) continue;
 
         var key = MakePair(a, b);
@@ -246,12 +252,18 @@ internal class Physics2DWorld
   {
     foreach (var rb in _rigidbodies)
     {
-      if (rb is null || rb.IsDestroyed || !rb.simulated) continue;
+      if (!IsActive(rb) || !rb.simulated) continue;
       if (rb.bodyType != RigidbodyType2D.Dynamic) continue;
       float kineticEnergy = rb.velocity.sqrMagnitude * rb.mass;
       rb.isSleeping = kineticEnergy < sleepThreshold;
     }
   }
+
+  private static bool IsActive(Component component)
+    => component is not null
+      && !component.IsDestroyed
+      && component.gameObject is not null
+      && component.gameObject.activeInHierarchy;
 
   private (Collider2D, Collider2D) MakePair(Collider2D a, Collider2D b)
   {

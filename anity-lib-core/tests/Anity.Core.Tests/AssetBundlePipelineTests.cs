@@ -8,6 +8,7 @@ using Xunit;
 namespace Anity.Core.Tests;
 
 /// <summary>AssetBundle build ↔ load full chain — ≥12 boundary cases.</summary>
+[Collection(AssetPipelineStateCollection.Name)]
 public class AssetBundlePipelineTests : IDisposable
 {
     private readonly string _dir;
@@ -176,8 +177,9 @@ public class AssetBundlePipelineTests : IDisposable
             new AssetBundleBuild { assetBundleName = "asb", assetNames = new[] { "Assets/async.txt" } }
         }, BuildAssetBundleOptions.None, BuildTarget.StandaloneWindows64);
         var req = AssetBundle.LoadFromFileAsync(Path.Combine(_dir, "asb"));
-        Assert.True(req.isDone || req.IsCompleted);
+        Assert.False(req.isDone);
         Assert.NotNull(req.assetBundle);
+        Assert.True(req.isDone);
         req.assetBundle!.Unload(true);
     }
 

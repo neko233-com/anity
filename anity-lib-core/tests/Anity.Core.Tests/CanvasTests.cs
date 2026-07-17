@@ -135,8 +135,6 @@ public class CanvasTests
         var (_, canvas, _, _) = CreateRoot(RenderMode.ScreenSpaceCamera);
         canvas.worldCamera = cam;
         canvas.planeDistance = 5f;
-        canvas.SetupRenderMode();
-
         var expected = cam.transform.position + cam.transform.forward * 5f;
         Assert.True(Vector3.Distance(canvas.transform.position, expected) < 0.01f);
     }
@@ -149,7 +147,6 @@ public class CanvasTests
         camGo.AddComponent<Camera>();
         var (_, canvas, _, _) = CreateRoot(RenderMode.ScreenSpaceCamera);
         canvas.worldCamera = null;
-        canvas.SetupRenderMode();
         Assert.NotNull(canvas.worldCamera);
     }
 
@@ -158,7 +155,6 @@ public class CanvasTests
     {
         var (_, canvas, scaler, rt) = CreateRoot(RenderMode.WorldSpace);
         rt.localScale = Vector3.one;
-        canvas.SetupRenderMode();
         Assert.Equal(RenderMode.WorldSpace, canvas.renderMode);
         // scaler world path multiplies localScale
         scaler.uiScaleMode = UnityEngine.UI.ScaleMode.ConstantPixelSize;
@@ -187,9 +183,8 @@ public class CanvasTests
         var (_, b, _, _) = CreateRoot(RenderMode.ScreenSpaceOverlay);
         a.sortingOrder = 10;
         b.sortingOrder = 1;
-        Assert.True(a.GetSortKey() != b.GetSortKey());
-        var sorted = Canvas.GetSortedCanvases().ToList();
-        Assert.Contains(a, sorted);
+        Assert.NotEqual(a.sortingOrder, b.sortingOrder);
+        Assert.Equal(10, a.renderOrder);
     }
 
     [Fact]
@@ -204,8 +199,9 @@ public class CanvasTests
     {
         var (_, canvas, _, _) = CreateRoot(RenderMode.ScreenSpaceOverlay);
         canvas.additionalShaderChannels = AdditionalCanvasShaderChannels.Normal | AdditionalCanvasShaderChannels.Tangent;
-        Assert.True(canvas.additionalShaderChannelsFlag);
-        canvas.additionalShaderChannelsFlag = false;
+        Assert.True((canvas.additionalShaderChannels & AdditionalCanvasShaderChannels.Normal) != 0);
+        Assert.True((canvas.additionalShaderChannels & AdditionalCanvasShaderChannels.Tangent) != 0);
+        canvas.additionalShaderChannels = AdditionalCanvasShaderChannels.None;
         Assert.Equal(AdditionalCanvasShaderChannels.None, canvas.additionalShaderChannels);
     }
 

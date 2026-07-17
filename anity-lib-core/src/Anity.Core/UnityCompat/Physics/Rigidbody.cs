@@ -201,12 +201,12 @@ public class Rigidbody : Component
 
     public void AddRelativeForce(Vector3 force)
     {
-        AddForce(force);
+        AddForce(transform?.TransformDirection(force) ?? force);
     }
 
     public void AddRelativeForce(Vector3 force, ForceMode mode)
     {
-        AddForce(force, mode);
+        AddForce(transform?.TransformDirection(force) ?? force, mode);
     }
 
     public void AddTorque(Vector3 torque)
@@ -251,12 +251,12 @@ public class Rigidbody : Component
 
     public void AddRelativeTorque(Vector3 torque)
     {
-        AddTorque(torque);
+        AddTorque(transform?.TransformDirection(torque) ?? torque);
     }
 
     public void AddRelativeTorque(Vector3 torque, ForceMode mode)
     {
-        AddTorque(torque, mode);
+        AddTorque(transform?.TransformDirection(torque) ?? torque, mode);
     }
 
     public void AddForceAtPosition(Vector3 force, Vector3 position)

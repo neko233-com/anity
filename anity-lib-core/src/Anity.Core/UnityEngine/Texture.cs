@@ -6,6 +6,7 @@ public class Texture : Object
 {
     private string _name = string.Empty;
     private uint _updateCount;
+    internal ulong nativeRevision => _updateCount;
 
     public new string name
     {
@@ -124,7 +125,8 @@ public class Texture : Object
 
     public IntPtr GetNativeTexturePtr()
     {
-        return IntPtr.Zero;
+        return Anity.Core.Runtime.Native.NativeGraphicsDevice.Current?.GetNativeTexturePtr(this)
+            ?? IntPtr.Zero;
     }
 }
 

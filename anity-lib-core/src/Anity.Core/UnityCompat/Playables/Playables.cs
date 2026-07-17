@@ -240,9 +240,8 @@ public class PlayableDirector : MonoBehaviour
     public event Action<PlayableDirector> paused;
     public event Action<PlayableDirector> stopped;
 
-    protected override void Awake()
+    private void Awake()
     {
-        base.Awake();
         EnsureGraph();
         if (playOnAwake) Play();
     }
@@ -385,10 +384,9 @@ public class PlayableDirector : MonoBehaviour
         }
     }
 
-    protected override void OnDestroy()
+    private void OnDestroy()
     {
         if (_graph != null && _graph.IsValid())
             _graph.Destroy();
-        base.OnDestroy();
     }
 }

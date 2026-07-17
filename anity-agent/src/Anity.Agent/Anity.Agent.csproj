@@ -8,11 +8,13 @@
     <PackageId>Anity.Agent</PackageId>
     <Authors>Anity Team</Authors>
     <Description>Official Anity Agent extension (independent, UGUI-style package). Not part of engine Core.</Description>
-    <Version>0.1.0</Version>
+    <Version>0.6.0</Version>
     <RootNamespace>Anity.Agent</RootNamespace>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../../anity-lib-core/src/Anity.Core/Anity.Core.csproj" />
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
   </ItemGroup>
 </Project>

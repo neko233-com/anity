@@ -1,5 +1,2085 @@
 # PLAN
 
+## 2026-07-17ag — Anity.Agent 0.6.0 工具审计、完整终态与usage保存
+
+### 已完成
+- 独立 `anity-agent/` 官方扩展提升到 **0.6.0**，新增 `AgentToolAuditEvent`、`IAgentToolAuditSink`、`AgentToolAuditPhase/Outcome`、`AgentAuditFailureMode` 与typed `AgentAuditException`。每次远端工具在授权/执行前写 `Requested`，完成后写 `Succeeded/Denied/InvalidArguments/Unavailable/ToolError/TimedOut/Canceled/AuthorizationError`，不再靠模糊字符串推断执行状态。
+- 审计事件严格不含原始arguments、tool result或API Key，只记录session/call/tool标识、arguments SHA-256、输入/输出UTF-8字节数、UTC时间和有界duration。工具结果新增 **64 KiB** 上限，session id限制128字符且拒绝控制字符；调用者取消仍向上抛出且Session history保持原子，超时继续以tool error回传模型恢复。
+- 审计默认 `FailClosed`：`Requested`无法落盘时工具不会执行，完成记录失败时turn不会伪装成功；显式 `Continue`仅供调用方接受审计降级时使用。成功、拒绝、坏参数、未知工具、工具异常、超大结果、超时与取消均有结构化终态。
+- `anity-editor`新增 `HashChainedAgentToolAuditLog`，写入 `Library/AnityAgent/Audit/tool-audit.jsonl`。JSONL记录使用逐条SHA-256链、严格schema/UTF-8/16 KiB单行校验、4 MiB默认轮换、8份默认archive、跨文件sequence连续性、启动时全链验证、进程独占lock、写穿透flush；Unix目录/文件/lock分别强制0700/0600/0600。保留窗口内的链被修改、删行、改hash、archive断档时均fail closed。
+- `AgentMessage`现在保留非流式与SSE（含tool-call多轮）的 `finish_reason` 和 `AgentTokenUsage`；编辑器最终transcript以Session原子提交的assistant消息为准，并显示prompt/completion/total tokens。编辑器每次连接自动启用项目审计，重连先安全释放旧runtime/audit lock。
+
+### 测试与门禁
+- `Anity.Agent.Tests`由 **76** 增至 **91/91**，新增 **15 个发现项**：digest/无原文、UTC与runtime边界、成功、拒绝、非法参数、不可用、工具异常、超大结果、超时、调用者取消、审计fail-closed/continue、非流式tool多轮metadata及普通SSE metadata。
+- `Anity.Editor.Host.Tests`由 **20** 增至 **39/39**，新增 **19 个发现项**：单条/双条链、无原文、重启续链、payload/hash篡改、64路并发、跨文件轮换、archive容量、4组非法配置、archive gap、Unix权限、dispose、独占writer、Controller真实SSE tool审计及重连lock释放。
+- `_scripts/run-tests.sh/.ps1`现在统一强制 `ANITY_REQUIRE_NATIVE=1` 与 `AnityRequireNative=true`，会把当前构建的native runtime复制到测试Host；缺失或无效native库直接失败，不再以托管回退跳过原生门禁。最终Release矩阵 **2,537/2,537**：Core native **1,664**、Agent **91**、Editor Host **39**、Shader Graph **198**、VFX Graph **490**、CLI **16**、API parity **17**、A/B compare **22**，0失败、0跳过。
+- `bash _scripts/build-all.sh Release`通过native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor与URP3DDemo，0编译错误；URP3DDemo由既有43个nullable warning降为0 warning。`Anity.Agent.0.6.0.nupkg`已生成。
+- Unity 2022.3.51f1 API审计保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`；完整Unity 2022.3.61f1对等仍是持续目标，不据此宣称全量完成。
+
+### 尚未完成
+- SHA-256链可检测保留文件的非重算修改，但没有OS vault中的HMAC/signing key或远端不可变anchor；拥有全部文件写权限的攻击者仍可重算整条链，因此当前是tamper-evident而不是不可伪造审计。
+- usage/finish reason已进入Session history与Editor transcript，但conversation/session仍未跨编辑器重启持久化；usage聚合、预算/费用策略、审计查询/导出UI和损坏文件的显式隔离恢复流程仍缺。
+- 完整JSON Schema参数求值、Responses API、真实多厂商endpoint、Windows/Linux credential实机矩阵、代理/TLS/断线恢复及长期并发压力仍未闭环。
+
+### 下一优先项
+1. 用OS vault保存项目级audit HMAC/signing key并增加外部anchor/导出验证；实现审计查询、过滤、导出、损坏隔离和管理员策略锁定。
+2. 实现有界、版本化、原子、可迁移的conversation/session/usage持久化，覆盖tool-call消息、启动恢复、并发保存、容量轮换和坏文件恢复。
+3. 引入完整JSON Schema求值和结构化验证路径，再推进Responses API、真实多厂商及代理/TLS/断线矩阵。
+
+## 2026-07-17af — Anity.Agent 0.5.0 编辑器窗口、安全凭据库与工具权限
+
+### 已完成
+- 独立 `anity-agent/` 官方扩展提升到 **0.5.0**，新增非敏感 `AgentConnectionProfile` 与 `IAgentCredentialVault`。项目配置只允许保存provider、Base URL、model、credential id、超时/重试/响应上限；API Key只在解析连接时从OS vault读取，profile与异常字符串继续输出 `***`，Bearer key统一限制为最多 **2048 UTF-8 bytes**。
+- 系统凭据后端已实现：macOS直接调用Security.framework Keychain增删改查；Windows直接调用Credential Manager `CredWriteW/CredReadW/CredDeleteW`；Linux通过Secret Service的 `secret-tool`，secret只写stdin、不进入命令行参数。未知平台或Linux缺少Secret Service工具时fail closed，**没有明文文件fallback**；native缓冲区在使用后清零。
+- `anity-editor`新增真实 `Window/Anity/Agent` 编辑器窗口和 `AgentEditorController`：可配置自定义Base URL/model/credential id、替换或删除OS凭据、连接、消费SSE增量响应、显示streaming/final transcript、断开与清空；最终消息以Session原子提交的assistant history为准。`ProjectSettings/AnityAgentSettings.json`采用64 KiB上限、严格JSON、临时文件+flush+原子replace；替换凭据后若配置落盘失败会恢复旧凭据，不留下半提交状态。
+- 新增 `AgentToolPermissionPolicy`，支持每工具 `Deny/Ask/Allow`、默认权限、调用者取消和headless Ask fail-closed。编辑器对 `Ask` 显示参数预览并只授权一次；策略在远端工具真正执行前生效，被拒绝的工具不会调用实现，只向模型返回结构化拒绝结果供其恢复。
+- 编辑器深测同时修复两个既有生产缺陷：菜单反射现在逐方法隔离第三方程序集的attribute/type加载失败；Host注册的window factory只构造实例，不再用 `ShowWindow()`递归进入自身造成栈溢出。Agent窗口已纳入Host catalog、菜单、打开和关闭生命周期。
+
+### 测试与门禁
+- `Anity.Agent.Tests`由 **60** 增至 **76/76**，新增 **16 个发现项**：profile解析/脱敏、缺失与超大凭据、4组非法credential id、未知provider、Deny/Allow/Ask/无prompt/cancel、permission snapshot、运行时拒绝不执行及允许只执行一次。
+- 新建 `Anity.Editor.Host.Tests`并达到 **20/20**：默认设置、round-trip、项目文件无密钥、坏JSON、64 KiB上限、非法工具名/Base URL、原子replace无残留、vault-only写入、非法key不改状态、落盘失败凭据rollback、自定义连接解析、SSE增量路径、transcript成功/失败原子性、删除断连、Ask fail-closed、dispose、Host菜单/catalog及窗口真实开关。已加入 `_scripts/run-tests.ps1`。
+- `Anity.Cli.Tests` **16/16**；三套Release定向工程均0 warning/0 error。`Anity.Agent.0.5.0.nupkg`已生成；`bash _scripts/build-all.sh Release`通过，产品模块0编译错误，URP3DDemo保持既有43个nullable warning；`git diff --check`通过。
+
+### 尚未完成
+- macOS/Windows/Linux后端源码和隔离测试已闭环，但本批未向用户真实Keychain写测试凭据；Windows Credential Manager与Linux Secret Service仍需各自原生机器的store/read/update/delete、锁屏/无会话/权限拒绝实机证据，不能只凭当前macOS构建宣称跨平台验证完成。
+- 编辑器当前持久化连接与权限配置，但conversation/session、usage、finish reason、工具调用审计日志和凭据轮换历史尚未持久化；Ask授权是单次决定，尚无项目/组织级policy签名与管理员锁定。
+- 完整JSON Schema求值、Responses API、真实多厂商endpoint互操作、代理/TLS/断线resume及长期并发网络压力仍未闭环。
+
+### 下一优先项
+1. 实现带脱敏参数摘要、decision、duration、result分类的append-only工具审计与session/usage持久化，加入容量、轮换、损坏恢复及并发写入深测。
+2. 引入完整JSON Schema参数求值和结构化tool error分类，覆盖nested/required/additionalProperties/enum/range/oneOf等关键字与恶意深度/组合输入。
+3. 在Windows与Linux原生环境执行credential vault契约套件，并增加Responses API、真实OpenAI-compatible多厂商、代理/TLS和断线恢复矩阵。
+
+## 2026-07-17ae — Anity.Agent OpenAI-compatible 远端 Tool Calling 生产链
+
+### 已完成
+- 独立 `anity-agent/` 官方扩展提升到 **0.4.0**，新增 `AgentToolDefinition`、`AgentToolCall`、`AgentToolCallDelta`、`AgentModelTurn` 与 `IToolCallingAgentProvider`。OpenAI-compatible provider现可把显式授权工具的JSON Schema写入Chat Completions请求，并解析非流式 `tool_calls`、流式indexed delta、`finish_reason`与usage；assistant tool-call消息及带 `tool_call_id`/name的tool result会按协议回传下一轮模型。
+- `IRemoteAgentTool`把可暴露给远端模型的能力与普通本地工具明确隔离：只有显式实现远端接口且schema有效的工具会被广告。`echo`、`systeminfo`已接入远端调用，`screenshot`保持本地专用，模型即使伪造调用也只能收到不可用错误，不能越权执行。
+- 非流式与SSE流式Session都支持多轮工具循环；流式assembler按index拼接任意分片的id/name/arguments，并保留并行调用顺序。每轮最多 **16** 个调用、每turn最多 **32** 个调用和 **8** 轮；arguments最多 **64 KiB**、JSON对象深度最多 **64**，id/name长度有界，调用id在整个turn内必须唯一。
+- 工具执行拥有独立可配置超时，普通工具异常与参数错误会转为tool error result供模型恢复，调用者取消仍原样传播。用户消息、assistant tool-call消息、tool result与最终assistant响应只有在整轮成功结束后才原子写入history；协议错误、越界、重复id、超时后的模型失败或取消都不会留下半个turn。
+
+### 测试与门禁
+- `Anity.Agent.Tests`由 **49** 增至 **60/60**，新增 **11 个发现项**：非流式schema/执行/result回传、流式碎片组装、并行index顺序、缺失index、非法参数、未授权screenshot、单轮重复id、超过16调用、工具执行时调用者取消、跨轮复用id、独立工具超时后模型恢复。
+- `Anity.Cli.Tests` **16/16**；`dotnet pack`产出 `Anity.Agent.0.4.0.nupkg`。`bash _scripts/build-all.sh`通过，产品模块0编译错误，URP3DDemo保持既有43个nullable warning；`git diff --check`通过。
+
+### 尚未完成
+- 当前只验证schema是有界、合法的JSON对象；尚未实现完整JSON Schema关键字求值与统一参数语义校验，各工具仍必须在执行入口自行校验业务参数。
+- 编辑器Agent窗口、project/session持久化、macOS Keychain/Windows Credential Manager/Linux Secret Service安全凭据存储、权限确认UX与工具调用审计日志仍缺。
+- Responses API、真实多厂商endpoint互操作、finish reason/usage持久统计、断线resume、代理/TLS证书策略及长期并发/网络压力仍未闭环。
+
+### 下一优先项
+1. 在 `anity-editor` 实现Agent窗口与跨平台credential vault抽象，项目只保存provider/Base URL/model/credential id；增加逐工具权限策略、用户确认与脱敏审计。
+2. 引入完整JSON Schema参数验证和结构化tool error分类，补充嵌套schema、组合关键字、恶意递归输入、并发工具与长时间取消/超时压力。
+3. 增加Responses API与真实OpenAI-compatible多厂商契约测试，持久化usage/finish reason/session，并闭环代理、TLS和断线恢复矩阵。
+
+## 2026-07-17ad — Anity.Agent OpenAI-compatible SSE 流式生产链
+
+### 已完成
+- 独立 `anity-agent/` 官方扩展提升到 **0.3.0**，新增 `IStreamingAgentProvider`、`AgentStreamUpdate` 与 `AgentTokenUsage`；`OpenAiCompatibleAgentProvider.StreamAsync`继续使用用户自定义API Key、Base URL与model，并向同一 `<base-url>/chat/completions`发送 `stream:true`，不引入闭源SDK或污染 `Anity.Core`。
+- SSE reader直接在response stream上增量处理，支持任意网络分片、跨byte UTF-8字符、CRLF/LF、comment/id/event/retry字段、multi-line data、字符串/多段text delta、usage chunk、`[DONE]`与无DONE的EOF收口。总传输量继续受 `MaxResponseBytes`约束，未知Content-Length也不能绕过；非法UTF-8、坏JSON、中断、HTTP错误、超时与调用者取消保持可区分。
+- transient HTTP状态与连接失败只允许在尚未建立成功stream、尚未向调用者yield任何delta前重试；stream已开始后不自动重放，避免重复token。请求超时覆盖headers与持续body read，caller cancellation原样传播，timeout转换为typed transient `AgentProviderException`。
+- `AgentSession.RunTurnStreamAsync`在整个异步枚举期间持有单session turn gate；只有收到完成事件/正常EOF后才一次提交user+聚合assistant history及`last_user` memory。部分delta后取消、超时或解析失败不留下半个turn；并发stream严格串行。原非stream `RunTurnAsync`也改为同一原子提交语义。
+- API Key现按Bearer token68字符集验证，`=`只允许尾部padding；网络/stream异常不再保留可能含密钥的原始inner exception，因此 `Exception.ToString()`也不会绕过外层脱敏重新泄漏API Key。空SSE data heartbeat被安全忽略。
+
+### 测试与门禁
+- `Anity.Agent.Tests`由 **30** 增至 **49/49**，新增 **19 个发现项**：Bearer非法字符、完整异常链脱敏、自定义endpoint/auth/model/stream flag、单byte Unicode分片、multi-line/multipart、usage、metadata/heartbeat、EOF、坏JSON、坏UTF-8、未知长度响应上限、HTTP脱敏、transient retry、body取消/超时、Session聚合提交、失败原子性及并发串行。
+- `Anity.Cli.Tests` **16/16**；Agent与CLI Release均0 warning/0 error，`dotnet pack`产出 `Anity.Agent.0.3.0.nupkg`。`bash _scripts/build-all.sh`通过，产品模块0编译错误，URP3DDemo保持既有43个nullable warning；`git diff --check`通过。
+
+### 尚未完成
+- OpenAI-compatible tool-call delta组装、tool result回传、finish reason与usage持久统计仍缺；当前本地 `tool:name args` 路由不是远端模型tool-calling协议的替代品。
+- 编辑器Agent窗口、project/session持久化、macOS Keychain/Windows Credential Manager/Linux Secret Service安全凭据存储与密钥轮换仍缺。CLI明文 `-agentApiKey`仍会出现在进程参数中，生产环境继续只推荐环境变量，不能把CLI参数当安全存储。
+- Responses API、SSE断线resume、代理/TLS证书策略、真实多厂商endpoint互操作与长时间网络抖动/内存压力尚未闭环。
+
+### 下一优先项
+1. 实现OpenAI-compatible tool-call streaming assembler、参数JSON增量校验、工具权限/超时/取消与tool result回传，并以至少10组并发和恶意输入测试闭环。
+2. 在 `anity-editor` 增加Agent窗口与跨平台安全凭据抽象；API Key只进入OS credential vault，项目配置仅保存provider/Base URL/model及credential id。
+3. 增加真实OpenAI-compatible本地/远端endpoint契约测试、usage/finish reason统计、断线与代理/TLS矩阵，再推进长期session持久化。
+
+## 2026-07-17ac — Metal VFX 同 effect 多 system Camera 与 submission 历史淘汰
+
+### 已完成
+- Planar Camera现以真实 `(effectId, particleSystemId)` resident key验证同一 effect 的多个 particle system。测试资产为每个 system建立独立 Initialize/Update context、resident generation与output context；单次 Camera提交会把同一 effect的全部有效system编码进同一个Metal command buffer与render pass，而不是只绘制第一个system或把system错误合并。
+- Planar submission继续只保留最近 **1024** 个逐fence成功/失败结果，但淘汰不再静默。Metal state记录最后淘汰的submission id，80-byte diagnostics ABI把原reserved字段正式定义为 `resultEvictionCount`；显式等待已淘汰fence返回 `INVALID_ARG`，不会因aggregate completion watermark已前移而把旧失败误报成成功。`throughSubmissionId=0`等待最新提交的既有语义保持不变。
+- history watermark、result deque和统计计数均由同一submission mutex保护；completion callback每淘汰一项精确增加计数，不增加CPU同步点，也不改变普通Camera command failure可恢复、terminal device-loss永久封锁的既有分类。
+
+### 测试与门禁
+- 新增 **20 个发现项**：10组1–10 particle system验证同一 effect单Camera提交的effect/output/draw/particle/indirect计数、单command buffer/render pass及每system独立Metal resident generation；10组1025–1034次真实空Camera render pass验证首个注入失败、后继成功、精确淘汰计数、历史容量边界及旧失败fence只能返回过期错误。历史压力合计超过 **10,000** 次Camera提交。
+- Planar Camera **121/121**、Update lifecycle + Planar Camera **338/338**、VFX宽门禁 **828/828**、Core强制native **1,664/1,664**、VFX Graph **490/490**，0测试失败。
+- `bash _scripts/build-native.sh` 与 `bash _scripts/build-all.sh` 通过；产品模块0编译错误，URP3DDemo保持既有43个nullable warning。最终产品/强制测试 `libanity_native.dylib` SHA-256同为 `9e9dab1d65ab71db27c4ea2f76d44ff4766beaac4aa7732c7b0213768693833a`；`git diff --check`通过。
+
+### 尚未完成
+- 本批闭环同effect多system与逐fence历史淘汰，但多个Camera真正同时在途、Camera与Update/Initialize交错超过ring深度、长时间snapshot/teardown内存压力仍需扩展；当前单Metal queue按提交顺序完成，不代表跨queue同步已经实现。
+- 真实物理GPU removal/reset与系统撤销访问仍缺实机日志和资源释放A/B；Vulkan/D3D尚无等价device-health、failure classification、generation rollback及submission history契约。
+- Texture/flipbook、Shader Graph material、soft particle/motion vector、Mesh/Strip/GPU Event Output、URP camera stack/XR及Unity 2022.3.61f1 Player截图/数值A/B仍未完成。
+
+### 下一优先项
+1. 增加多Camera在途与Initialize/Update/Camera交错的ring深度压力，连续运行长时间snapshot/cancel/teardown并记录内存高水位；在可控Apple硬件采集真实device removal/reset日志。
+2. 将device health、terminal error分类、generation-selected consumer与明确的submission结果契约移植到Vulkan/D3D；跨queue使用timeline semaphore/shared event/fence。
+3. 继续完整Texture/flipbook与Shader Graph material、Mesh/Strip/GPU Event Output、soft particle/motion vector、URP camera stack/XR，并建立Unity 2022.3.61f1 Player A/B证据。
+
+## 2026-07-17ab — Metal terminal device-loss 状态与 Camera submission 恢复语义
+
+### 已完成
+- Metal backend新增设备级原子 health state。Initialize、Update、Planar Camera、UI draw和Present的真实 command completion都会检查 `MTLCommandBufferErrorDeviceRemoved` / `MTLCommandBufferErrorAccessRevoked`；同步 Initialize copy与Bounds路径也在等待后分类错误。观察到 terminal错误后，状态永久转为 device-lost，不再把后续调用当成普通可恢复 command error。
+- device-lost现贯穿产品入口：VFX Initialize/Update/Camera、particle/metadata readback、Bounds、UI upload/draw、texture sync、swapchain create/acquire/present/readback均返回 `DEVICE_LOST`；取消、resident rollback、Clear与Destroy仍可执行，以保证在途资源安全退出。80-byte Planar submission diagnostics复用原 reserved字段暴露 `deviceLost`，ABI尺寸不变。
+- managed `NativeGraphicsDevice`不再把native device-lost伪装成headless成功：`CreateSwapchain`返回false、`AcquireNextImage`返回-1、`Present`不增加成功计数、readback返回false，并通过 `LastSwapchainResult`保留精确的 `DeviceLost`；其它非terminal backend fallback保持既有兼容行为。
+- 故障注入扩展为 Planar Camera command与terminal device removal两类。普通 Camera command failure在真实 command安全完成后仅标记对应 submission失败；submission结果保留最近1024项，等待失败 fence返回 device-lost，但后继成功 Camera拥有独立成功结果并可继续渲染/readback。device removal则永久封锁同一 Metal device，Initialize/Update/Camera/UI/swapchain不能继续提交。
+- Camera completion在失败时使 alive-compaction与sort cache失效，防止复用可能被失败 command部分修改的派生资源。Initialize/Update/UI/Present也在 completion callback即时观察真实 terminal错误，不依赖调用者随后 Poll才更新全局 health。
+- 修复 device-loss teardown下的UI ring死锁风险：每个UI slot现在区分“仅上传并占用”与“已经提交GPU”。Destroy只等待确有在途command的slot；completion以原子submitted标志配合semaphore释放，上传后尚未draw的slot不会无限等待。
+
+### 测试与门禁
+- 新增 **21 个发现项**：10组1–10 effect Camera command failure验证失败fence、cache失效、device仍健康及下一Camera/readback恢复；10组1–10代 resident generation chain后device removal验证中央generation回滚、永久health、后续Update/注入拒绝，以及native与managed swapchain acquire/present/readback一致暴露device-lost；另有1个Camera已提交后device removal与安全teardown用例。
+- Update lifecycle **217/217**、Planar Camera **101/101**、两套合计 **318/318**，UI/Canvas native相关 **49/49**；VFX宽门禁 **808/808**、Core强制当前 Release产品 dylib **1,644/1,644**、VFX Graph **490/490**，0 测试失败。
+- `bash _scripts/build-native.sh` 无新增编译warning，`bash _scripts/build-all.sh Release` 通过；产品模块0编译错误，URP3DDemo保持既有43个nullable warning。强制native测试输出与产品 dylib SHA-256逐字一致。
+
+### 尚未完成
+- 生产代码已消费 Metal真实 terminal error code，但当前机器尚未通过物理GPU移除、系统GPU reset、访问权限被系统撤销或驱动/进程终止做实机故障注入与崩溃日志A/B；本批 deterministic device-removal仅证明同一状态机与teardown路径，不替代硬件故障证据。
+- 同 effect多 particle-system、多个Camera同时在途、超过1024 submission历史淘汰、跨 queue shared event/fence及长时间内存压力仍需扩展。Vulkan/D3D尚无等价device-health、failure classification与generation rollback。
+- Texture/flipbook、Shader Graph material、soft particle/motion vector、Mesh/Strip/GPU Event Output、URP camera stack/XR及 Unity 2022.3.61f1 Player截图/数值A/B仍未完成。
+
+### 下一优先项
+1. 增加同 effect多 system、多Camera在途、submission历史淘汰与长时间ring/snapshot/teardown压力；在可控Apple硬件/虚拟化环境采集真实 device removal/reset日志与资源释放证据。
+2. 将device health、terminal error分类、Initialize dependency和generation-selected consumer移植到Vulkan/D3D；跨 queue使用明确 timeline semaphore/shared event/fence。
+3. 继续完整 Texture/flipbook与 Shader Graph material、Mesh/Strip/GPU Event Output、soft particle/motion vector、URP camera stack/XR，并建立 Unity 2022.3.61f1 Player A/B证据。
+
+## 2026-07-17aa — Metal VFX 确定性 command failure 与整链原子回滚
+
+### 已完成
+- 新增仅供引擎内部验证使用的 `AnityGraphics_SetVFXFailureInjection` C ABI 与 managed diagnostic 入口，支持按成功 Begin 次数精确注入 Metal Initialize/Update command failure，计数范围为 0–1024，0 可显式解除；非 Metal backend明确返回 `NOT_SUPPORTED`，不污染 Unity 公开 API 表面。
+- 注入的 Initialize/Update仍提交真实 Metal command buffer并等待 GPU 安全退出，但 Poll确定返回 failed、Complete返回 device-lost。Update rollback成功时保留已恢复的 resident resource map，只有恢复本身失败才使该 map失效，避免可恢复 command error破坏后续 generation。
+- Initialize→Update依赖链现以 Update为单一事务边界：Update失败会先取消后继，再逆序回滚 Initialize，并把中央 particle info、alive/dead、attributes、dead-list与 generation逐项恢复到链前基线；Initialize已完成 backend但中央尚未最终提交时会强制保留 source snapshot，直至整链成功才统一丢弃。
+- 修复显式 readback 后再次 Initialize 的 resident判定：central层不再仅凭 CPU attributes是否存在推断 authoritative source，而是查询 Metal resident generation是否与 source generation一致；因此 readback→Initialize→Update继续走GPU resident chain，同时首次/non-resident Initialize不会被错误标成 resident-only。
+- Clear、Reset/Dispose与 identity reuse均可安全取消被注入失败的在途 submission；failure budget只在 command成功建立并提交后消耗，不因参数或前置资源错误误减。
+
+### 测试与门禁
+- 新增 **15 个发现项**：10组 Initialize→Update整链失败位置边界，另覆盖 Initialize失败原子恢复、连续计数消耗、0解除、Clear后同 identity复用、Dispose等待与幂等清理。测试逐项比较链前后的 info/alive/dead/attributes/dead-list，并验证失败后正常 Initialize/Update可继续得到预期数值。
+- `NativeVFXUpdateLifecycleTests` **207/207**、VFX宽门禁 **787/787**、Core强制当前 Release产品 dylib **1,623/1,623**、VFX Graph **490/490**，0 测试失败。
+- `bash _scripts/build-native.sh` 与 `bash _scripts/build-all.sh Release` 通过；native导出 central/Metal failure-injection符号，产品模块 0 编译错误，URP3DDemo保持既有 43 个 nullable warning；`git diff --check` 通过。
+
+### 尚未完成
+- 本批完成的是可重复的 submitted-command failure，不等于真实 `MTLDevice` removal、系统级 GPU reset、进程/驱动终止或跨 queue故障；Camera已经提交后发生失败、多 effect/多 system长链与长时间 ring/snapshot压力仍需单独闭环。
+- Vulkan/D3D尚无同等 failure injection、Initialize dependency ticket和 resident generation resource-group恢复；跨 queue仍缺 shared event/fence。Texture/flipbook、Shader Graph material、soft particle/motion vector、Mesh/Strip/GPU Event Output、URP camera stack/XR与 Unity 2022.3.61f1 Player截图/数值 A/B仍未完成。
+
+### 下一优先项
+1. 加入真实 Metal device-loss可观测路径、Camera提交后故障与多 effect/多 system长链 teardown压力，验证所有 command/ring/snapshot/central registry资源无泄漏、无半发布。
+2. 将 Initialize dependency、generation-selected consumer、确定性 failure与整链恢复契约移植到 Vulkan/D3D；跨 queue使用显式 shared event/fence。
+3. 继续完整 Texture/flipbook与 Shader Graph material、Mesh/Strip/GPU Event Output、soft particle/motion vector、URP camera stack/XR，并建立 Unity 2022.3.61f1 Player A/B证据。
+
+## 2026-07-17z — Metal queue-visible Initialize→Update / Prepare / Bounds / Camera
+
+### 已完成
+- 已把已有 resident particle system 的 pending Initialize target generation 直接接入后继 Metal Update。Update Begin 从 Initialize staged system取得 source generation，并在同一 `MTLCommandQueue` 上编码到新的 ring slot；Initialize command、Update command与后继 Camera按提交顺序在 GPU 上串联，产品帧不再为 Update预先执行 managed CPU Complete。
+- 中央 registry仍保持事务原子性：Initialize→Update 都 pending时继续向普通 metadata查询暴露旧 committed generation，Update最终退休时先完成其 Initialize依赖，再一次发布最终 replacement。Metal backend允许 Initialize target已被后继 Update替换为当前 resident时从 snapshot完成 metadata校验；Initialize提前发布时立即推进 ring `nextSlot`，避免 Update复用尚在飞行的同一槽。
+- Update ticket新增 Initialize dependency与 central-published状态。generation CAS同时覆盖“Initialize仍 pending”和“Initialize已被显式退休”两条路径；Cancel Initialize会 newest→oldest取消全部依赖 Update，Clear/Reset/Dispose/Abort统一先取消 Update再回滚 Initialize，避免 descendant持有已删除 source。
+- Planar Camera packet优先选择最新已发布 Update target generation；当该 Update依赖 Initialize时继续启用 pending-initialize GPU alive compaction，因此 Camera可在两个 CPU ticket均未退休时直接绘制最终蓝色 target，而不是中间 Initialize generation。
+- Prepare只推进时钟与 frame transaction，不读取 particle资源，已移除自动/手动 Prepare前不必要的 Initialize CPU屏障。Automatic Bounds是显式 CPU结果依赖：native Bounds入口先一次性退休 committed Initialize→Update最终链；若没有后继 Update，才在同一 registry lock内单独退休 Initialize，不再 managed先等待 Initialize、native再等待 Update。
+- 显式 particle readback修复 metadata竞态：第一次非阻塞 Info可能仍属于 predecessor generation；attributes blocking readback退休链后会重新读取最终 Info，再按最终 alive/dead count读取 dead-list，避免前代 deadCount造成错误容量与假失败。
+
+### 测试与门禁
+- 新增 **10 组** native frame transaction Initialize→Update用例，覆盖负数、零、小数与大值；验证 Update在 Initialize ticket仍 pending时成功排队、Commit发布最终 resident target、显式 Complete同时退休两个 ticket并保持两粒子数值正确。
+- 新增 1 个真实 `VisualEffect` Event→deferred Initialize→Update→Commit→readback产品用例，以及 1 个 Initialize→Update→Planar Camera像素用例；后者在两个 ticket仍 pending时直接绘制最终蓝色 generation。读回用例同时锁定最终 metadata/dead-list刷新语义。
+- 新增 **10 组** pending Initialize先于 manual Prepare的 delta边界用例（0 到 1000）：Prepare期间 pending/completion/wait统计不变，随后同帧 Update消费该 generation。另有 1 个产品 Automatic Bounds用例验证 Bounds一次退休完整链并命中 Update随附的 pending bounds结果。
+- 新增发现项合计 **23**；Prepare/Bounds专项 **11/11**、Update/Bounds/Planar相关三套 **260/260**、VFX宽门禁 **772/772**、Core强制当前 Release产品 dylib **1,608/1,608**、VFX Graph **490/490**，0 测试失败。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor及样例产品模块 0 编译错误，URP3DDemo保持既有 43 个 nullable warning。
+
+### 尚未完成
+- 当前无 CPU屏障链限于单个 Metal command queue与已有 resident allocation；跨 queue仍缺 shared event/fence，首次 Initialize仍需 bootstrap退休后由 Update建立 resident资源。可控 command error/device removal、多 effect/多 system长链与 Camera提交后Cancel压力仍未闭环。
+- Vulkan/D3D尚未具备同等 Initialize dependency ticket与完整 resident generation resource-group链。Texture/flipbook、Shader Graph material、soft particle/motion vector、Mesh/Strip/GPU Event Output、URP camera stack/XR及 Unity 2022.3.61f1 Player截图/数值 A/B仍未完成。
+
+### 下一优先项
+1. 加入可控 Metal command error/device removal、Camera提交后Cancel、多个 effect/多个 system长 generation chain与 teardown压力，验证 ring/snapshot/central registry无泄漏、无半发布。
+2. 将 Initialize dependency ticket、queue-visible generation与 Bounds/Camera consumer contract移植到 Vulkan/D3D；跨 queue路径使用明确的 shared event/fence，而不是CPU等待。
+3. 继续完整 Texture/flipbook与 Shader Graph material、Mesh/Strip/GPU Event Output、soft particle/motion vector、URP camera stack/XR，并建立 Unity 2022.3.61f1 Player A/B证据。
+
+## 2026-07-17y — Metal queue-visible resident Initialize→Planar Camera
+
+### 已完成
+- Metal resident Initialize 在 `Begin` 提交 command buffer 后立即把目标 particle/dead/allocation 三资源组发布为 target generation，并把 source generation 保留在 ring slot 或 prepared-frame snapshot 中。Planar Camera 与 Initialize 使用同一个 `MTLCommandQueue`，因此 Camera 可直接绑定 target generation，由队列顺序保证 GPU 先 Initialize、后 render，不再要求 CPU 先 Poll/Complete，也不需要在单队列路径额外引入 `MTLEvent`。
+- 中央 registry 继续保持事务原子性：ticket pending 期间 `TryGetVFXParticleSystemInfo` 仍只返回已提交 generation；`Complete` 成功后才发布 staged metadata，`Cancel`/command failure 会等待已提交 command 安全退出并恢复 source resource group。`residentInitializeAtomicPublishCount` 仍只统计成功的中央退休，新增的 async resident publish/completion/rollback 与 pending Initialize 计数单独暴露。
+- `AnityGraphics_DrawVFXPlanarCamera` 在 registry lock 内解析 effect 所属的 pending Initialize，选择该 system 最新的 resident target generation并写入 Camera draw packet；Metal backend允许 pending packet在旧中央 alive count为 0 时进入 GPU alive compaction/indirect draw，并记录 Camera generation dependency。`VisualEffect.DrawPlanarOutputs` 不再为已有 resident 的 Initialize调用 managed Complete barrier。
+- 首次 Initialize 还没有 GPU resident allocation，无法供 Camera直接绑定。Camera入口只对 `sourceGeneration == 0` 的 bootstrap ticket使用锁内 Complete helper恢复旧产品语义：中央粒子状态被提交，本次 draw透明跳过，后续 Update负责首次 resident upload。公共 Complete与 bootstrap路径共用同一锁内事务实现，避免递归加锁与两套 commit逻辑。
+- backend diagnostics ABI 从 **496 bytes** 扩展到 **528 bytes**，新增 `asynchronousInitializeResidentPublishCount`、`asynchronousInitializeResidentCompletionCount`、`asynchronousInitializeResidentRollbackCount`、`pendingInitializeCount`；C header、Metal/non-Apple backend、managed sequential layout与静态尺寸门禁同步。
+
+### 测试与门禁
+- 既有 10 组 `MetalInitializeTicket_PollThenCompleteOrCancelIsAtomic` 现在验证 Begin 后 backend resident generation 已前移、中央 registry仍不可见、Complete后原子提交、Cancel后 source恢复，以及 publish/completion/rollback/pending四类统计。
+- 新增 **10 组** resident Initialize→Camera像素级用例，覆盖 Complete/Cancel × 红/绿/蓝/黄/品红：Camera在 ticket仍 pending 时已绘制 target粒子；Complete后继续保留，Cancel后下一 Camera恢复透明。另有 1 个首次 bootstrap用例验证 ticket退休、中央 alive/generation提交及未 resident前透明跳过。
+- 聚焦 ticket/Camera **21/21**、Initialize/Update/Planar相关全集 **330/330**、VFX宽门禁 **749/749**、Core强制当前 Release产品 dylib **1,585/1,585**、VFX Graph **490/490**，0 测试失败。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor及样例产品模块 0 编译错误，URP3DDemo保持既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批只闭环“已有 resident allocation 的 Initialize→Planar Camera”单队列依赖。下一 particle Update、Prepare、Bounds/culling和显式 CPU metadata/readback仍需要退休中央 Initialize ticket；尚未形成完整 Update→Initialize→Update/Bounds/Camera GPU generation DAG。
+- 首次 Initialize仍需要 CPU bootstrap retirement和后继 Update上传 resident resource；多 queue/跨 queue场景尚需 shared event/fence。可控 Metal command failure/device removal、Vulkan/D3D等价 ticket/resident chain、Texture/flipbook/Shader Graph material、soft particle/motion vector、Mesh/Strip/GPU Event Output、URP camera stack/XR及 Unity 2022.3.61f1 Player A/B仍未闭环。
+
+### 下一优先项
+1. 将 pending Initialize target generation接入后继 Metal Update与 Bounds/Prepare，消除这些 resident GPU消费者前的 CPU Complete，并明确 CPU metadata/readback才是真正 retirement边界。
+2. 增加可控 Metal command error/device removal、Camera提交后Cancel、多个 effect/多个 system长 generation chain与 teardown压力测试，验证 ring/snapshot/central registry无泄漏、无半发布。
+3. 将 ticket与 queue-visible resident generation contract移植到 Vulkan/D3D，再推进 Texture/flipbook、Shader Graph material、Mesh/Strip/GPU Event Output和 Unity 2022.3.61f1 Player截图/数值 A/B。
+
+## 2026-07-17x — VisualEffect 产品帧 Initialize ticket FIFO
+
+### 已完成
+- `VisualEffect` 已持有 committed Initialize ticket FIFO。产品 `VFXRuntimeServices` 的 CPU Event 与 Spawner 阶段改为调用 `BeginVFXInitializeKernels` 后立即消费输入并保留 ticket，不再通过同步 wrapper在提交点等待 Metal command；直接调用内部处理函数仍默认同步收口，以保持既有单步/测试调用语义。
+- Initialize ticket现在在真实资源依赖点收口：下一次 particle Update、自动/手动 frame Prepare、Bounds/culling 查询及 Planar Camera draw前 Complete；frame Abort会 Cancel尚未发布的 Initialize，asset change、Reinit、Release和设备 Clear沿 native teardown取消后清空 managed FIFO。Update只在 Initialize原子发布并刷新 alive metadata后才建立后继 generation。
+- FIFO retirement支持同一 `VisualEffect` 跨多个 `NativeGraphicsDevice`：完成某设备时会保持其他设备的相对顺序并跳过其 ticket，不再由异设备队首阻塞；同设备 pending ticket仍严格 FIFO。Initialize完成后按资产的全部 particle systems重算 alive总数，避免只统计本次触及 system造成多 system漏计。
+- Spawner一帧内多个 Initialize program按中央 one-pending-ticket-per-effect契约有序退休前驱，最后一个 ticket延迟到 Update依赖点；CPU Event批次保持中央 multi-dispatch原子性。
+
+### 测试与门禁
+- 新增 **11 个产品 FIFO 测试发现项**：10 组真实 Metal负数/零/小数/正数/大值属性验证 Begin后 registry不可见、Update依赖点才原子发布粒子与 metadata；另 1 组双 Null device验证异设备队首不会阻塞后继设备 retirement。
+- VFX 宽门禁由 **727** 增至 **738/738**，Core 强制当前 Release 产品 dylib由 **1,563** 增至 **1,574/1,574**，VFX Graph保持 **490/490**，0 测试失败。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor及样例产品模块 0 编译错误；URP3DDemo保持既有 43 个 nullable warning。
+
+### 尚未完成
+- Metal target generation仍在中央 Complete后才成为 Camera可见 resident；当前 FIFO消除了 Event/Spawner提交点的 CPU等待，但 Camera/Planar仍通过 managed Complete形成显式 barrier，尚未做到 queue-visible Initialize→Camera generation与 shared `MTLEvent` GPU-GPU依赖。
+- 可控 Metal command failure/device removal、Vulkan/D3D等价 Initialize ticket backend、完整 Texture/flipbook/Shader Graph material、soft particle/motion vector、Mesh/Strip/GPU Event Output、URP camera stack/XR及 Unity 2022.3.61f1 Player A/B仍未闭环，总体 Unity 2022 Ultra目标继续进行。
+
+### 下一优先项
+1. 在 Metal Begin commit时登记 queue-visible target generation与 shared-event值，让 Update/Planar/Camera直接等待 GPU generation；Complete只退休中央 metadata，Cancel/failure按 snapshot反向恢复。
+2. 增加可控 command error/device removal及多 effect、多 device、长 generation chain压力测试，验证 FIFO、中央 registry和三槽 resident资源在异常下无泄漏、无半发布。
+3. 将相同 ticket/generation contract移植到 Vulkan与D3D，再推进 Texture/flipbook、Shader Graph material、Mesh/Strip/GPU Event Output及 Unity 2022.3.61f1 Player截图/数值 A/B。
+
+## 2026-07-17w — effect-scoped multi-dispatch Initialize ticket
+
+### 已完成
+- 新增 48-byte `AnityGraphicsVFXInitializeTicketInfo` 与公开 native `Begin/Get/Complete/CancelVFXInitializeKernels` ABI。中央 pending transaction 持有完整 staged initialize-dispatch map、particle-system map、stable alive/dead/next/spawn outputs、source/target generations、effect ownership及每个 Metal command handle；原同步 `SubmitVFXInitializeKernels` 已改为中央 Begin→Complete wrapper。
+- Begin 对所有 dispatch/kernel 先做整批 validation，收口已 committed Update、保留 uncommitted Update 的 generation CAS 竞争语义，按 system 构造 staged storage。不同 particle system 的 Metal commands 可并行 pending；同 system 的连续 Initialize 会按 generation dependency 完成前驱再提交后继，但整个 registry 在最终 Complete 前仍保持旧状态。
+- Complete 依次验证所有 backend handles，只有全部成功才发布本 ticket 涉及的 effect 数据；Cancel 或任一 failure 会从 newest 到 oldest 取消未发布 target并恢复已完成 generation snapshots。prepared-frame 保留 source snapshots供 frame Abort，普通事务成功后逐代 discard。
+- 每个 effect 同时只允许一个 Initialize ticket，Update Begin 在该 effect 有 pending Initialize 时拒绝；独立 effect 可并行。Begin 立即预留全局 generation range，Complete 只合并本 ticket effect 的 entries而不交换整张 registry，避免两个独立 effect ticket互相覆盖。Cancel 允许 generation gap但保证单调唯一。
+- Clear、Reset frame state 与 graphics-device teardown 会在持有 registry lock 时收口对应 Initialize ticket并释放 GPU handles；OOM catch 也会取消已提交 handles、释放 effect ownership和 pending map。managed `AnityNative` / `NativeGraphicsDevice` 已接入 ticket layout、P/Invoke、descriptor builder、TryGet/Complete/Cancel。
+- 恢复既有并发契约：未提交 Update 与 Initialize 可以同时存在；Initialize 先发布后，旧 Update Complete 由 generation CAS 拒绝，而不是 Initialize Begin提前失败。
+
+### 测试与门禁
+- 新增 **21 个 Initialize ticket 测试发现项**：10 组 Metal Poll→Complete/Cancel 位置边界、同 effect CAS、Clear、Dispose、2 组 CPU ready ticket、双 system batch Complete/Cancel、同 system 两代 chain newest→oldest rollback、两个独立 effect 并发 Complete/Cancel+merge。另回归旧 Update/Initialize generation CAS。
+- ticket 定向 **22/22**、VFX 宽门禁 **727/727**、Core 强制当前产品 dylib **1,563/1,563**、VFX Graph **490/490**，0 测试失败；native symbol gate确认中央与 Metal 两层 Begin/Get/Poll/Complete/Cancel 均由产品 dylib 导出。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过，产品模块 0 编译错误；URP3DDemo 保持既有 43 个 nullable warning，`git diff --check` 通过。
+
+### 尚未完成
+- `NativeGraphicsDevice` 已可异步持有 ticket，但产品 `VisualEffect.ProcessInputEvents` / Spawner 仍调用同步 wrapper并立即读取 alive metadata；尚未把 ticket 队列保存到 effect instance、延迟到 Update/Bounds/readback/teardown 等真实依赖点 Complete。因此 backend/central 已异步，标准产品帧仍未获得完整 CPU/GPU overlap。
+- Metal target generation 仍在 Complete 后才成为 Camera 可见 resident；Update→Initialize→Camera 尚无 queue-visible publish/shared `MTLEvent`。可控 command failure/device removal、Vulkan/D3D ticket backend、完整 GPU Event/Mesh/Strip/Texture Output 和 Shader Graph material仍未完成。
+
+### 下一优先项
+1. 在 `VisualEffect` 增加 committed Initialize ticket FIFO：ProcessInputEvents/Spawner Begin 后消费输入但不读 particle，下一 Update、Bounds、explicit alive/readback、Clear/Reset/asset change/dispose按依赖收口；多 program spawner先合并或有序 retirement。
+2. 将 Metal target resource group在 Begin commit 后发布为 queue-visible generation，handle持有 source snapshot；Camera/Planar按 generation依赖同 queue/shared event消费，Complete只退休 metadata，Cancel/failure反向恢复。
+3. 加入可控 Metal command failure/device removal和多 effect/多 generation压力测试，再移植 Vulkan/D3D并继续完整 VFX Output、Shader Graph material、URP camera stack/XR 与 2022.3.61f1 Player A/B。
+
+## 2026-07-17v — Metal VFX Initialize command-buffer handle
+
+### 已完成
+- 将 Metal Initialize 的单体同步函数拆为真实 GPU lifecycle：`AnityGraphics_Metal_BeginVFXInitializeKernel` 只做 validation、ring ownership、buffer upload/copy、indirect preparation、kernel encode 与 `MTLCommandBuffer::commit`，不调用 `waitUntilCompleted`；所有 source/attribute/operation/prefix/counter/indirect resources 和 ring slot ownership 移入 heap handle，跨 Begin 返回保持有效。
+- 新增 `PollVFXInitializeKernel`、`CompleteVFXInitializeKernel`、`CancelVFXInitializeKernel`。Poll 只观察 command status；Complete 在明确依赖边界等待、检查 device status 与 allocation invariants，确认 source generation 仍匹配后才交换 particle/dead/allocation 三 buffer并发布 target generation；Cancel 等待 command 退出后直接释放 target 与 transient ownership，不发布、也不修改 resident source。
+- 原 `AnityGraphics_Metal_DispatchVFXInitializeKernel` 保留为同步兼容 ABI，但实现已收敛为 Begin + Complete，不再维护另一套 encode/publish 逻辑。非 Apple stub 同步新增四个 lifecycle symbol；产品 dylib 已通过 `nm` 确认 Begin/Poll/Complete/Cancel 全部导出。
+- handle cleanup 对 resident/non-resident alias 分别处理：resident target 属于 ring slot，cleanup 只释放 transient source-state/indirect buffers并归还 semaphore；non-resident handle 释放其 particle/dead/counter output。command failure、metadata failure、generation mismatch、Cancel 和成功路径均删除 handle，避免悬挂 GPU resource。
+- backend diagnostics ABI 从 **464 bytes** 扩展到 **496 bytes**，加入 async Initialize Begin/Poll/Complete/Cancel 计数；native/managed layout、静态尺寸门禁和 Metal stats initializer 同步。
+
+### 测试与门禁
+- 普通 resident Initialize 10 组与 prepared Abort/Commit 10 组均验证兼容入口实际经过 async Begin=1、Complete=1、Poll/Cancel=0，同时保持 target-copy=1、atomic publish=1、0 particle materialize、snapshot restore/discard 与后继 Update；20/20 通过。
+- native Release、`bash _scripts/build-all.sh Release`、产品 dylib symbol gate 通过；Core 强制当前 dylib **1,542/1,542**、VFX Graph **490/490**，0 测试失败。产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning，`git diff --check` 通过。
+
+### 尚未完成
+- backend handle 已能异步提交/观察/取消单个 command，但中央 `AnityGraphics_SubmitVFXInitializeKernels` 尚未建立 effect-scoped multi-dispatch ticket，因此产品帧仍由同步兼容入口立即 Complete。Poll/Cancel 的直接产品 lifecycle、批内多个 system 并行 completion、同 system generation chain 与任一失败反向恢复必须在中央 ticket 中验证，不能仅凭导出符号宣称异步 Initialize 完成。
+- Begin 当前保持 source resident 直到 Complete 后发布，尚不能让后继 Camera 在 CPU Complete 前消费 target generation；下一阶段需由中央 ticket 管理 queue-visible publish、source snapshot stack 和 shared-event dependency。Vulkan/D3D 等价 handle、可控 Metal command failure/device removal 仍缺失。
+
+### 下一优先项
+1. 新增公开的 `AnityGraphicsVFXInitializeTicketInfo` 与 Begin/Get/Complete/Cancel C ABI；ticket 持有 staged initialize/system maps、stable metadata outputs 和一组 Metal handles，全部成功才原子交换 registry。
+2. 为 ticket 增加 effect ownership、Clear/Reset/device teardown 收口、任一 backend failure newest→oldest Cancel/Restore，以及至少 10 个 Poll/Cancel/multi-system/duplicate-system/invalid-order测试。
+3. 将 resident target 改为 queue-visible publish，使用 generation snapshot/shared Metal event 串联 Update→Initialize→Camera，再移植 Vulkan/D3D 并继续完整 VFX Output/Shader Graph material/URP camera stack/XR。
+
+## 2026-07-17u — VFX Initialize ring target-copy 与原子 generation publish
+
+### 已完成
+- Metal resident Initialize 不再直接修改当前 resident particle/dead/allocation resource group。每次 dispatch 先取得三槽 ring 的目标槽并确保三类 target buffer 容量，在同一个 command buffer 内把 source generation 的完整 resource group复制到目标，再从 immutable 16-byte source allocation state 生成 indirect args 并只修改目标 generation。
+- GPU command 成功完成且 source/target allocation invariants 全部通过后，才一次性交换 particle、dead list、allocation state 三类 buffer并发布同一个 target generation；任何编码失败、command failure 或 metadata 校验失败都只留下可覆盖的 ring target，当前 resident source generation 保持未修改。prepared-frame 需要 rollback 时，交换后位于 ring 槽内的旧 source resource group 直接转移为 generation snapshot，不再额外执行 snapshot blit。
+- ring 槽的 semaphore 获取、所有 buffer allocation/encoder/command 失败出口以及成功路径均统一释放；普通 Initialize 让旧 source buffer 留在槽中复用，prepared Initialize 将其移动到 snapshot 后清空槽 ownership，避免双重释放和 source/target alias。
+- backend diagnostics ABI 从 **440 bytes** 扩展到 **464 bytes**，新增 `residentInitializeTargetCopyCount`、`residentInitializeTargetCopyBytes`、`residentInitializeAtomicPublishCount`。native header、Metal stats、managed sequential layout与静态尺寸门禁同步。
+
+### 测试与门禁
+- 普通 resident Initialize **10 组**与 prepared Abort/Commit **10 组**均新增 target-copy count/bytes 和 atomic publish 断言；20/20 通过。4-capacity、60-byte stride fixture 每次复制 particle 240 bytes + dead 16 bytes + allocation 16 bytes，共 **272 bytes**。
+- `bash _scripts/build-native.sh Release`、`bash _scripts/build-all.sh Release` 通过；Core 强制当前产品 dylib 全量 **1,542/1,542**、VFX Graph **490/490**，0 测试失败。产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning；`git diff --check` 通过。
+
+### 尚未完成
+- 本批解决的是异步 Initialize 的 source-preserving/atomic-publish 前置条件；公开 Initialize 事务仍同步等待 command completion，尚未提供 Begin/Poll/Complete/Cancel ticket。中央多 dispatch registry 仍在同步返回后交换 staged maps，Update→Initialize→Camera 尚未通过统一 ticket/shared-event scheduler 串联。
+- 还需加入可控 Metal command/device-loss failure injection，验证三类 target resource 的失败丢弃和多 dispatch newest→oldest rollback；Vulkan/D3D 尚未实现同等 generation resource-group contract。总体 Unity 2022 Ultra `/goal` 继续进行，不能标记完成。
+
+### 下一优先项
+1. 把 Metal Initialize command ownership 提取为 Begin/Poll/Complete/Cancel handle：Begin 在 queue 上提交并发布 queue-visible target generation，Complete 校验 16-byte metadata并退休 source，Cancel/失败按 generation 恢复完整 source resource group。
+2. 建立 effect-scoped multi-dispatch Initialize ticket，持有 staged dispatch/system maps 和各 backend handle；全部成功才原子发布中央 registry，任一失败反向取消整批，并补至少 10 个 lifecycle/failure/teardown 测试。
+3. 将 ticket 纳入 Update→Initialize→Camera shared event/generation dependency graph，再移植 Vulkan/D3D resident chain并继续 Texture/flipbook、Shader Graph material、URP camera stack/XR 与 Unity 2022.3.61f1 Player A/B。
+
+## 2026-07-17t — VFX explicit metadata boundary、prepared GPU snapshot 与 indirect Initialize
+
+### 已完成
+- 新增 Metal resident metadata 明确读回边界：`ReadbackVFXParticleSystem` / `ReadbackVFXParticleDeadList` 在收口 committed Update 后，从对应 generation 的 GPU allocation state 与 persistent dead list 校准中央 `aliveCount/deadCount/nextSequentialIndex/deadList`，同一 generation 只物化一次。dead index 会做范围与重复校验，allocation state 会校验 capacity、usesDeadList 与 alive+dead 不变量；无 resident buffer 的初始 CPU-authoritative system 保持原路径。
+- prepared-frame Initialize 不再为了 rollback 强制整粒子数组回读。resident Initialize 在原地 mutation 前用 Metal blit 保存 particle/allocation/dead 三 buffer source-generation snapshot；Abort 复用已有 `RestoreVFXResidentGeneration` 恢复三类资源和 generation，Commit 丢弃 snapshot，后续 Update 仍保持 particle upload=1。
+- resident Initialize 的 dispatch width 改为 GPU allocation-driven：同一 command buffer 先 blit 16-byte source allocation state，再由 `anity_vfx_initialize_indirect` compute kernel根据 capacity、usesDeadList、spawnCandidateCount 生成 indirect threadgroups，Initialize kernel 通过 buffer(8) 读取 immutable source dead/next 状态并更新 persistent target allocation state。CPU 不再参与 resident dispatch sizing；同步 API 仅在 command 完成后读取 source/target 16-byte state以更新托管镜像和验证不变量。
+- backend diagnostics ABI 扩展到 **440 bytes**：新增显式 allocation/dead metadata readback 次数/字节/generation，以及 resident Initialize indirect prepare/dispatch、source-state GPU copy 与 CPU dispatch-sizing 计数。Metal initialize indirect pipeline、snapshot buffer、临时 source/argument buffer均纳入 destroy/成功/错误释放路径，非 Apple stub 与 managed layout 同步。
+
+### 测试与门禁
+- 普通 resident Initialize **10 组**位置边界继续验证 0 particle readback、0 re-upload，并新增 allocation/dead metadata 每代仅一次读回、24-byte 最终 metadata、generation 对齐，以及 indirect prepare/dispatch/source-copy=1、CPU sizing=0。
+- prepared-frame resident Initialize 新增 **10 组** Abort/Commit 测试（各 5 组，覆盖负数、零、小数和大值）：验证 GPU snapshot、Abort alive/dead/physical particle 恢复、Commit 新粒子持久化、snapshot discard/restore、后继 Update 与 0 materialize。
+- native Release build 与 `bash _scripts/build-all.sh Release` 通过；Update 生命周期 **150/150**、VFX 宽门禁 **706/706**、VFX Graph **490/490**、Core 强制当前产品 dylib 全量 **1,542/1,542**，0 测试失败；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。
+
+### 尚未完成
+- Initialize API 仍是同步事务：indirect sizing 已完全在 GPU，但函数返回前会等待 command completion 并读取 source/target 16-byte allocation state；尚未像 Update 一样提供 Begin/Poll/Publish/Complete ticket，也未纳入 Update→Initialize→Camera shared-event dependency graph。
+- prepared snapshot 当前用独立 GPU blit command 并同步确认后再提交 Initialize；下一步需合并为同一 submission/ticket，并加入可控 command failure/device-loss 注入。Vulkan/D3D allocation contract、GPU Event/Mesh/Strip、Texture/flipbook/Shader Graph material、URP camera stack/XR 与 Unity 2022.3.61f1 Player A/B 仍未闭环，总体 Unity 2022 Ultra `/goal` 继续进行。
+
+### 下一优先项
+1. 为 Initialize 建立 Begin/Poll/Publish/Complete ticket，把 snapshot blit、indirect prepare、spawn 和 generation publish 合并进统一 async submission，并通过 shared Metal event 串联 Update→Initialize→Camera。
+2. 增加可控 Metal command failure/device removal 注入，覆盖 snapshot、indirect args、target allocation state 和三代链的 newest→oldest 恢复。
+3. 将 persistent particle/dead/allocation resource group、indirect Initialize 和显式 metadata boundary 移植到 Vulkan/D3D，再继续 URP Output 与官方 Player A/B。
+
+## 2026-07-17s — VFX persistent GPU allocation state 与 resident Initialize
+
+### 已完成
+- Metal VFX Update 的 resident resource 从单一 particle buffer 扩展为同代持久资源组：particle attributes、`{aliveCount, deadCount, nextSequentialIndex, usesDeadList}` allocation state 与 full-capacity dead list。三类资源一同经过 3-slot blit、publish、source snapshot、rollback、restore、discard、Clear 与 device destroy，后继 Update 的 entry-alive / sequential-limit 和 death commit 直接读取前驱 GPU allocation state。
+- death compaction 新增独立 commit kernel：prefix/compact 只产生本代死亡索引，commit 从 immutable source allocation state 写入 target allocation state 与 persistent dead list，消除 source/target 同 buffer 数据竞争。同步 Dispatch 在 publish 前从 ring slot 读取目标状态，异步已发布 ticket 则从 resident/snapshot 读取对应 generation，二者保持同一完成语义。
+- Metal Initialize 在非 prepared-frame 的 resident generation 上直接复用 particle/dead/allocation buffers；spawn 原地消费 dead list、更新 alive/dead/nextSequential 并推进 resident generation，不再先 materialize 整个 particle array，随后 Update 也无需 authoritative particle re-upload。prepared-frame 仍保留 CPU materialize 保守路径，以维持现有 rollback journal 的逐字节恢复语义。
+- 补齐 Metal buffer/pipeline ownership：Update slot、resident snapshot、allocation/dead buffers、Clear/destroy/failure 分支现在显式释放；Initialize 的 source/attribute/operation/prefix 与非 resident 临时 buffers 在成功及错误分支回收。backend diagnostics ABI 扩展到 **376 bytes**，新增 allocation generation/upload/copy/hit 与 resident Initialize 次数、spawn 数、避免回读字节、allocation-state 读取计数。
+
+### 测试与门禁
+- resident allocation ring 新增 **10 组** 1–10 代测试，验证首次 upload、后续 resident hit、逐代 GPU copy、generation 一致与三槽轮转；resident Initialize 新增 **10 组** 正负/零/小数/大值位置用例，验证两个 physical particle、后继 Update、0 particle readback、0 re-upload、allocation generation 与诊断计数。
+- native Release build 与 `bash _scripts/build-all.sh Release` 通过；Update 生命周期 **140/140**、VFX 宽门禁 **696/696**、VFX Graph **490/490**、Core 强制当前产品 dylib 全量 **1,532/1,532**，0 测试失败；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning，`git diff --check` 与 native ABI 符号检查通过。
+
+### 尚未完成
+- 普通 resident Initialize 已消除整粒子数组回读，但当前同步 Initialize 仍在显式依赖点退休 committed Update CPU metadata，并读取 16-byte shared allocation state 来决定 dispatch 宽度；prepared-frame Initialize 仍会 materialize 以支持旧 rollback journal。下一步需用 GPU indirect dispatch/shared event 和 Initialize generation snapshot，把这两处也改为纯 GPU 依赖。
+- persistent allocation contract 尚未移植到 Vulkan/D3D；可控 Metal command/device-loss 注入、长时间压力、GPU Event/Mesh/Strip Output、Texture/flipbook/Shader Graph material、URP camera stack/XR 与 Unity 2022.3.61f1 Player A/B 仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，不能标记完成。
+
+### 下一优先项
+1. 为 resident Initialize 增加 indirect dispatch 与 source-generation snapshot，使 committed Update→Initialize 及 prepared-frame Abort/Commit 全程不读 CPU allocation metadata。
+2. 增加 allocation/dead-list 显式 readback API 与 reset/clear 边界测试，再加入可控 Metal command failure/device removal 三代链恢复。
+3. 将同一 generation resource-group contract 移植到 Vulkan/D3D，并继续 URP Output、Shader Graph material 与 Unity 2022.3.61f1 Player A/B。
+
+## 2026-07-17r — VFX Update 三槽多帧 generation chain
+
+### 已完成
+- effect-scoped Update ownership 从单个 ticket 改为按提交顺序保存的 bounded queue；Metal backend 同步改为最多三代 `inFlightGenerations`。连续帧 Commit 可发布 source→target generation chain，下一次 Update 不再因上一帧 CPU metadata 尚未退休而强制等待；第四帧产生 ring pressure 时只同步退休最老 generation。
+- Complete later ticket 会按队首顺序先退休全部 committed predecessor；每一代的 alive/dead-list/next-allocation CPU metadata 从已完成前驱重新基线化，旧代完成不会覆盖已经发布的新 resident。每代 source snapshot 独立释放，Camera 可依赖队列中任一仍在飞的 generation。
+- managed `VisualEffect` 用 committed-ticket FIFO 取代单一 pending 标志；普通 Update/Commit 只做 nonblocking retirement，readback/Initialize/Bounds/Clear/Reset/teardown 等真实依赖点仍会有序收口。当前未提交帧 Abort 只撤销当前 ticket，保留更早 committed baseline。
+- Reset/Clear/destroy 与 generation mismatch 按 newest→oldest 回滚整条 snapshot stack。任一前驱 backend failure 会清除全部后继 ticket 并恢复最早稳定 CPU source，避免后继继续引用失效 generation；未提交 ticket 存在时，读回继续观察稳定上一代而不会隐式发布或取消当前帧。
+
+### 测试与门禁
+- 新增 **10 个连续帧测试发现项**（2–11 帧，覆盖三槽以内、第四帧 ring pressure 与多轮复用），并改写旧“下一 Update 必须完成前驱”的同步契约。逐代积分、dispatch/completion/asynchronous completion 和最终 pending=0 均验证；Update 生命周期 **128/128**。
+- native Release build 与 `bash _scripts/build-all.sh Release` 通过；VFX 宽门禁 **684/684**，Core 强制当前产品 dylib 全量 **1,520/1,520**，VFX Graph **490/490**，0 测试失败。产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning；`git diff --check` 通过。产品仍保持 `AnityGraphicsVFXUpdateBackendStats` **312-byte ABI**，未以统计结构变更冒充队列实现。
+
+### 尚未完成
+- 三槽 chain 已消除 Update→Update 的单-ticket CPU 等待，但 dead-list/alive-count/next-allocation 仍需在显式 CPU metadata 依赖处 materialize；Metal Initialize 尚未直接消费 persistent GPU allocation state。
+- shared `MTLEvent`、可控 command/device-loss 注入、Vulkan/D3D 等价 resident chain、iOS/macOS Player 长时间压力以及完整 Texture/Shader Graph/URP Output 仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，不能标记完成。
+
+### 下一优先项
+1. 建立 persistent GPU dead-index/count/alive-count/next-allocation，让 Initialize/Update 在无 callback/readback 时全程 GPU 串联。
+2. 增加可控 Metal command failure/device removal 注入和三代链失败测试，再接入 shared event completed-generation 回收。
+3. 将同一 N-slot generation contract 移植到 Vulkan/D3D，并继续 URP depth/camera stack/XR、flipbook/Texture、Shader Graph material 与 Unity 2022.3.61f1 Player A/B。
+
+## 2026-07-17q — VFX 下一帧 Prepare 非阻塞 poll 与真实 dependency overlap
+
+### 已完成
+- Metal 的 `PrepareVFXEffectFrame` / `PrepareVFXEffectManualFrame` 不再用 `wait=true` 收口上一帧 committed Update。新增专用 `AnityGraphics_Metal_PollVFXUpdateBatchForPreparation`：Prepare 只读取 command-buffer 状态；已完成则无等待退休 metadata，未完成则保留 ticket/resident/snapshot 并继续建立下一帧 rollback journal，使输入处理与 Spawner CPU 工作可以和上一帧 GPU Update 重叠。
+- managed `VisualEffect` 不再在 Prepare 前强制 `RefreshAliveParticleCountAfterUpdate(waitForCompletion:true)`。真正依赖上一帧 alive/dead metadata 的下一次 Update 仍在 `UpdateParticleSystems` 入口完成 ticket；Initialize kernel transaction 也会先完成同 effect 的 committed Update，再 materialize attributes/消费 dead-list。未提交 ticket 的并发 mutation CAS 语义保持不变。
+- 新帧在上一帧 committed Update 尚 pending 时 Abort，不再错误 Cancel/rollback 已提交的 resident generation，也不提前丢弃 failure rollback 所需 source snapshot；该 committed generation 是新帧 rollback baseline。空的新帧可以在 metadata 退休前 Commit，readback/Bounds/Clear/Reset/teardown 仍保持原有显式 completion 边界。
+- `AnityGraphicsVFXUpdateBackendStats` 从 **288 bytes** 扩展到 **312 bytes**，新增 `preparationPollCount / preparationDeferredCount / preparationRetiredCount`。这些统计对 batch 内每个 particle system 记录 Prepare 是延后还是无等待退休，并与 `completionWaitCount` 分离，防止用“GPU 恰好已完成”冒充非阻塞实现。Apple dylib 已导出新 poll ABI，非 Apple stub 与 managed layout 同步。
+
+### 测试与门禁
+- 新增 **10 个测试发现项**，并改写 1 个旧同步契约测试：覆盖 automatic/manual Prepare、poll/defer/retire 统计、Abort committed baseline、空帧 Commit、Initialize dead-list dependency、三 system batch、managed 下一 Update dependency、Prepare 零 particle readback、readback retirement、Clear 与多 effect 隔离。Update 生命周期由 **108** 增至 **118/118**；受影响的 Update/Frame/Manual/Initialize/Bounds/Planar 八套件 **387/387**。
+- VFX 宽门禁由 **664** 增至 **674/674**，Core 强制当前产品 dylib 全量由 **1,500** 增至 **1,510/1,510**，VFX Graph 保持 **490/490**。native build 与 `bash _scripts/build-all.sh Release` 通过；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning，新 ABI 符号导出及 `git diff --check` 通过。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型存在 **928/4,117**（22.541%）、精确 **404**（9.813%），成员存在 **8,645/37,164**（23.262%）、精确 **6,417**（17.267%），load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 本批扩大的是单个 pending Update 的 CPU/GPU overlap 窗口，不是完整多帧 GPU simulation chain。同一 effect 仍只允许一个 pending ticket；下一 Initialize 或下一 Update 真正需要 dead-list/alive metadata 时，若 GPU 尚未完成仍会等待。三槽 backend ring 尚未成为可同时持有三帧中央事务的 N-slot ownership。
+- dead-list、alive count 与 spawn allocation 仍由 CPU authoritative metadata 收口；Metal Initialize 仍是同步 kernel/readback 路径。只有将 persistent GPU dead-list/count/next-allocation 直接串给下一 Initialize/Update，才能在无 CPU callback/readback 时跨多帧不断链。
+- shared `MTLEvent`、多 queue completed-generation、可控 GPU failure/device-loss、Vulkan/D3D 等价 compute chain、真实 iOS/macOS Player 长时间压力、以及 Texture/Shader Graph material/完整 URP Output 仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型和大量行为。
+
+### 下一优先项
+1. 为每个 particle system 建立 persistent GPU dead-index/count/alive-count/next-allocation state，让 Metal Initialize 直接消费并更新该状态；CPU metadata只在显式 readback/callback 时 materialize。
+2. 将中央 pending transaction 改为 N-slot frame ownership，允许三帧 Update ticket 同时排队，并以 ring pressure/shared event 完成回收、Abort/Reset 回滚与 device-loss 传播。
+3. 把相同 generation/dead-list/dependency contract 移植到 Vulkan/D3D，并继续共享 URP depth、Texture2DArray/flipbook、Shader Graph material、alpha clip/soft particle/motion vector与 Unity 2022.3.61f1 Player A/B。
+
+## 2026-07-17p — VFX Update Metal 两阶段异步发布与 Update→Camera 队列依赖
+
+### 已完成
+- Metal 产品帧的 `AnityGraphics_CommitVFXEffectFrame` 不再为了 Update ticket 调用 CPU `waitUntilCompleted`。Commit 现在先把目标 generation 的 GPU resident buffer 原子发布到 effect registry，再提交 frame clock/journal；同一 Metal command queue 上随后编码的 Camera 与 Present 依赖队列顺序消费该 generation，正常帧路径形成非阻塞的 Update→Camera→Present 链。
+- Update 改为两阶段生命周期：Commit 发布 GPU resident，alive/dead compact metadata、Automatic Bounds 结果和三槽 ring 回收延后到显式 Complete、readback、culling bounds、下一次 Prepare、Clear/Reset 或 device teardown 等同步边界。下一帧的 managed `VisualEffect` 会先完成仍 pending 的上一帧 ticket；当前帧只通过 info-only particle-system metadata 更新保守的 alive count 和 active-kernel 判定，不再为了状态查询下载完整 particle records。
+- 保留 Update 源 generation/snapshot 直到 CPU metadata 完成。Cancel/Reset/GPU failure 会恢复源 resident 与中央 registry storage，Clear/Dispose/device destroy 会先收口 pending work；已 Commit 的公开 ticket 拒绝取消，避免回滚已提交的帧事务。Automatic Bounds 查询先完成 committed pending Update，因此直接发布同一 command buffer 生成的 pending bounds，而不重复派发 reduction。
+- `AnityGraphicsVFXUpdateBackendStats` ABI 从 **240 bytes** 扩展到 **288 bytes**，新增 asynchronous resident publish/completion/rollback、completion wait、camera dependency 与 pending update 统计；新增 `AnityGraphics_Metal_PublishVFXUpdateBatch` C ABI、Apple 实现、非 Apple stub、managed P/Invoke 与静态尺寸门禁。当前 `pendingUpdateCount` 明确定义为“GPU resident 已发布，但 CPU metadata/ring retirement 尚待收口”，不是 GPU 必然仍在执行。
+
+### 测试与门禁
+- 新增 **13 个测试发现项**：`NativeVFXUpdateLifecycleTests` 12 项覆盖非阻塞 Commit、显式 metadata completion、committed cancel 拒绝、下一 Prepare/readback/Clear/Reset/Dispose 边界、多 system batch、Null 同步兼容及产品 `VisualEffect` 无完整 particle readback；`NativeVFXPlanarCameraBatchTests` 1 项验证 Camera 消费 committed Update target generation、queue dependency、Planar async fence 与最终 Update completion。
+- Update 生命周期 **108/108**，Planar 两 suite **105/105**，Update + Camera + Automatic Bounds 定向集合 **238/238**，VFX 宽门禁 **664/664**，Core 强制当前产品 dylib 全量 **1,500/1,500**，VFX Graph **490/490**。`bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型存在 **928/4,117**（22.541%）、精确 **404**（9.813%），成员存在 **8,645/37,164**（23.262%）、精确 **6,417**（17.267%），load issues=0、`regressions=0`、`removed-or-changed=0`；新 C ABI 符号已从产品 dylib 导出，`git diff --check` 通过。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 同一 effect 当前只允许一个 pending Update，下一次 Prepare 在上一提交超过一帧 GPU 延迟时仍可能等待；CPU dead-list/alive metadata 仍是 ring 回收门槛，尚未形成跨多帧、N-slot ownership 的全 GPU resident death/alive chain。同步兼容入口 `AnityGraphics_DispatchVFXUpdateKernels` 仍有意等待。
+- 当前 Update→Camera 安全性依赖单一 Metal command queue；还没有 shared `MTLEvent`、多 queue completed-generation contract、统一帧调度器或可控 GPU command failure/device-loss 注入。Initialize copy/kernel 与独立 bounds reduction 仍是同步边界，Vulkan/D3D 尚未实现等价 resident compute/draw dependency。
+- 贴图/Texture2DArray/flipbook、Shader Graph material/property、alpha clip/soft particle/motion vector、共享 URP depth/camera stack/XR、Mesh/Strip/GPU Event Output、复杂 bounds、真实 iOS/macOS 长时间压力和 Unity 2022.3.61f1 Player A/B 均未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型与大量成员行为。
+
+### 下一优先项
+1. 将 dead-list/alive metadata 保持为 GPU-resident 多帧链，并把 frame/update ownership 扩展为 N 槽；除 ring pressure 外移除下一 Prepare 的 CPU wait，补长帧延迟、容量压力、Reset/teardown 与失败恢复证据。
+2. 引入 shared Metal event 与统一 Update→Camera→Present scheduler，按 completed generation 回收/发布资源并贯通 timeout/device-loss；随后建立大 capacity 分层 scan/sort 的 GPU 性能基线。
+3. 接入共享 URP depth、opaque/soft-particle/MSAA/stencil/camera stack，完成 Texture2DArray/flipbook、Shader Graph material、alpha clip/motion vector，再把相同 contract 移植到 Vulkan/D3D 并用 Unity 2022.3.61f1 Player 验收。
+
+## 2026-07-17o — VFX Planar Metal 异步提交与可观测 completion fence
+
+### 已完成
+- 移除 `AnityGraphics_Metal_DrawVFXPlanarCamera` 尾部逐相机 `waitUntilCompleted`：compaction、GPU sort、indirect args 与整台 camera Planar render 仍编码进一个 Metal command buffer，但 `commit` 后立即返回。160-byte draw-info 新增单调 `submissionId`、async submission count 与 synchronous wait count，正常 Metal 路径明确报告 `async=1 / synchronousWait=0`。
+- 新增 80-byte `AnityGraphicsVFXPlanarSubmissionStats` 与稳定 C ABI/managed wrapper：可查询提交、完成、失败、最新 ID、当前/峰值 in-flight、wait 次数与 backend kind；`AnityGraphics_WaitForVFXPlanarSubmissions` 支持精确 ID、`0=当前最新提交`、无限等待、零超时 poll 与有限 timeout，新增内部 `ANITY_ERR_TIMEOUT` 结果。Null/非 Metal 后端保持确定的零统计与参数校验语义。
+- Metal completion handler 在 GPU 成功后发布完成 ID、递减 in-flight 并唤醒 waiter；失败时额外锁定 VFX compute registry，使本次 command buffer 修改过的 alive compaction 与全部 sort-cache 槽失效，防止失败结果成为后续 cache hit，并发布 device-lost/failure 统计。
+- readback、swapchain destroy 与 graphics-device destroy 现在等待最新 VFX Planar submission 后才访问或释放资源；相机 A/B/A、后续 Present 与 Update 依赖 Metal 单一 command queue 的提交顺序，不需要每次 camera CPU 阻塞。临时 indirect-arguments buffer 在 pre-commit 失败或 commit 后显式 release，由 command buffer 保留其 GPU 生命周期。
+
+### 测试与门禁
+- `NativeVFXPlanarCameraBatchTests` 新增 **12 个测试发现项**：异步 identity/stats、ID 单调性、精确/latest fence、zero-timeout poll、非法 future ID/timeout、Null 语义、readback fence 与像素、连续 normal/reversed/normal camera queue 顺序、显式 wait/readback 计数，以及 32 个 in-flight camera 后直接 Dispose 的 teardown 压力。Planar 两 suite 由 **92** 增至 **104/104**。
+- 强制当前产品 dylib 的 VFX 宽门禁由 **652** 增至 **664/664**，Core 全量由 **1,475** 增至 **1,487/1,487**；VFX Graph 保持 **490/490**。native build 与 `bash _scripts/build-all.sh Release` 均通过；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`；`git diff --check` 通过。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 本批只把 Metal Planar camera draw 改为异步。VFX Update 产品 `Commit`、Initialize、bounds 与部分 readback 路径仍会等待 GPU；尚未形成 Update/Camera/Present 共用的帧级 submission dependency graph、共享 event 或统一错误恢复。
+- cache entry 仍在 command 编码时发布，而不是在 completion 后发布；当前所有 producer/consumer 使用同一个 Metal command queue，因此 GPU 执行顺序保证后续消费者不会越过前一提交。未来多 queue、Vulkan/D3D 或并行 encoder 必须改为 completed-generation publication，或显式等待 shared event/fence，不能沿用这一假设。
+- 失败 invalidation 路径已有实现，但测试环境没有可控的 Metal GPU command failure/device-loss 注入；timeout 恢复、失败后的资源重建、Present/device teardown 并发和长时间 iOS/macOS Player 压力仍缺真实平台证据。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 移除 VFX Update 产品 Commit 的同步等待，以帧级 async ticket/shared Metal event 统一 Update→Camera→Present 依赖、completed-generation publication、资源回收和 device-loss 传播。
+2. 用 Unity 2022.3.61f1 Metal Player fixture 锁定全部 sorting mode、自定义 key、透视/正交/reversed-Z 语义，并把 stable bitonic 优化为适合大 capacity 的分层/radix/subgroup 路径。
+3. 将 Planar 接入共享 URP camera depth、opaque/soft-particle/MSAA/stencil/camera stack，完成 Texture2DArray/flipbook、Shader Graph material、alpha clip/motion vector，再移植到 Vulkan/D3D。
+
+## 2026-07-17n — VFX Planar Metal 有界多相机 GPU 排序缓存
+
+### 已完成
+- 将每个 effect/particle-system 原先唯一一份 camera sort cache 升级为固定 **4 槽**的有界多相机工作集。每个槽独立持有 sort entry 与 sorted physical-index Metal buffer，精确键继续覆盖 resident generation、cameraId、stride/capacity/position offset、padded length、local-to-world 与 world-to-clip；Camera A → B → A、Scene/Game/Preview 多视图往返不再必然重复执行 map/bitonic/extract。
+- 缓存满时以 64-bit use serial 的模运算 age 选择最久未使用槽，近期命中的 Camera 会被保护；第 5 个不同 key 只驱逐一个槽，长期任意 Camera 数下每个 particle system 仍最多保留 4 组排序 buffer，不产生无界 GPU cache 增长。相同 system 多 output 继续只插入一次，多个 particle system 的统计按去重后的 system 汇总。
+- resident generation/alive compaction 重建会让全部槽 generation 失效但保留已分配 buffer 供后续安全复用；command 编码或 completion 失败会让本次修改过的 system 全部失效，未执行结果不会成为 cache hit。当前同步 completion 保证驱逐槽没有 in-flight consumer。
+- camera draw-info ABI 由 **128 bytes** 扩展为 **144 bytes**，新增 cache insert、eviction、active entry 与 per-system capacity 统计，managed/native 声明及 C++ static assert 同步。Metal 文件使用手动引用计数，本批缓存 entry 析构会释放两类 buffer，扩容替换也先释放旧 owned buffer，避免多相机优化放大 device teardown/resize 泄漏。
+
+### 测试与门禁
+- `NativeVFXPlanarCameraBatchTests` 新增 **11 个测试发现项**：A/B/A 独立复用、4 Camera 无驱逐、第 5 Camera 单次驱逐、LRU 热点保护、被驱逐 Camera 重建、projection/transform 变体回访、generation 清空 4 槽、多 particle-system entry 聚合、交替 projection 的真实 alpha framebuffer 顺序，以及 16 Camera 下 entry count 始终不超过 4。ABI、首插入、同 system 多 output、unsupported/Null 路径也补齐新统计断言。Planar 两 suite 强制当前产品 dylib 由 **81** 增至 **92/92**。
+- 强制产品 dylib 的 VFX 宽门禁由 **641** 增至 **652/652**，Core 全量由 **1,464** 增至 **1,475/1,475**；VFX Graph 保持 **490/490**。资源释放补丁后重新执行 native build、Planar 与 Core 全量，均通过。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。`git diff --check` 通过。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 4 槽是当前 camera stack/Scene/Game/Preview 常见工作集的有界策略，不是已由 Unity 2022.3.61f1 workload fixture 验证的最终容量；精确 matrix bit compare 会把每次有位级抖动的 projection/transform 当作新 key。仍需真实 Editor/Player 多 Camera trace、命中率/GPU memory/驱逐性能基线与可配置或 frame-aware policy。
+- 当前 camera 尾部仍同步 `waitUntilCompleted`，所以槽驱逐天然没有 GPU in-flight hazard。改为异步提交后必须把 compact/sort/indirect buffer 变成 ring-owned、由 completion fence 回收的不可覆盖资源，并让 cache entry 指向已完成 generation；现有 LRU 不能原样用于未完成 command buffer。
+- stable bitonic 仍为 O(N log² N) 且每 stage 一个 encoder；官方多 sorting mode/custom key、camera distance、正交/reversed-Z、共享 URP depth、贴图/Shader Graph material、alpha clip/soft particle、Mesh/Strip/GPU Event及 Vulkan/D3D 路径均未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 将 camera compaction/sort/indirect submission 改为 3 槽或按 swapchain image 的 ring-owned storage、completion fence 与 completed-generation cache publication，移除 camera 尾部同步等待，并补多 camera/in-flight/销毁/device-loss 压力测试。
+2. 用 Unity 2022.3.61f1 Metal Player fixture 锁定全部 VFX sorting mode、自定义 key、透视/正交/reversed-Z 语义，再把 bitonic 改为适合大 capacity 的分层/radix/subgroup 实现并建立 GPU 性能基线。
+3. 将 Planar depth 接入共享 URP camera depth、opaque/soft-particle/MSAA/stencil/camera stack，补 Texture2DArray/flipbook、Shader Graph material、alpha clip/motion vector及官方 Output Block，再移植到 Vulkan/D3D。
+
+## 2026-07-17m — VFX Planar Metal GPU 稳定粒子排序
+
+### 已完成
+- sorting-required Planar output 现进入真实 Metal GPU 路径：先从 stable compact alive physical-index 生成 projected-depth key，再执行稳定 bitonic sort，最后提取已排序 physical-index 供 indirect draw 使用。当前标准深度约定按 `clip.z / clip.w` **远到近**排列；相同深度以 compact alive ordinal 升序打破平局，因此结果确定且不需要 CPU particle readback。
+- 任意非 2 次幂 particle capacity 会扩展到下一次幂；无效 padding 固定沉底，现有限制为 padded capacity 不超过 `2^26`。sort entry、sorted index 与 compaction/indirect buffer 均持久驻留在 particle-system Metal update buffers，map、每一级 bitonic stage、extract 与最终 render 位于同一 camera command buffer 生命周期。
+- sort cache 精确绑定 resident generation、cameraId、particle stride/capacity/position offset、padded length、effect local-to-world 与 camera world-to-clip。相同 system 的多个 output 可复用一次排序；camera、矩阵、transform、layout 或 resident generation 变化会重新排序，alive compaction 重建也会使 sort generation 失效。shared-system registry 新增 position offset 一致性校验，冲突批次事务拒绝。
+- camera draw-info ABI 由 **104 bytes** 扩展为 **128 bytes**，新增 sorted output、sort cache hit、map/stage/extract dispatch 与 padded particle 数统计；managed/native 声明与静态 ABI 断言同步更新。alpha-clip 仍诚实计入 unsupported，显式 indirect 与 sorting 可以组合执行。
+
+### 测试与门禁
+- `NativeVFXPlanarCameraBatchTests` / `NativeVFXPlanarOutputTests` 新增或修正 **15 个测试发现项**，覆盖 128-byte ABI、首次排序、非 2 次幂 padding、重复 camera 缓存、cameraId/projection/resident generation 失效、同 system 多 output 复用、稀疏 physical index、sorting + indirect、unsupported/Null 真值边界、position layout 冲突，以及真实 alpha framebuffer 的远到近、同深度稳定性和投影反转顺序证据。Planar 两 suite 强制当前产品 dylib 为 **81/81**。
+- 强制产品 dylib 的 VFX 宽门禁为 **641/641**，Core 全量为 **1,464/1,464**；VFX Graph 保持 **490/490**。`bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。`git diff --check` 通过。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 当前只有 compiler 的二值 `sorting required` contract，排序 key 是投影 `clip.z / clip.w`；尚未按 Unity 2022.3.61f1 官方 Player fixture 锁定各 VFX sorting mode、自定义 sort key、camera distance 与 projected depth 的选择、正交相机和 Metal reversed-Z 语义。投影反转测试只证明 cache/key/order 会响应矩阵变化，不等价于 reversed-Z 已对齐。
+- 现有 bitonic sort 为 O(N log² N)，每个 stage 使用独立 compute encoder 保证全局阶段顺序；每个 effect/system 当前只保留一份 camera sort cache，camera 尾部仍同步等待 completion。仍需分层/radix/subgroup 优化、per-camera 多缓存、ring-owned storage、跨帧 fence、timeout/device-loss 和大 capacity/iOS Player 性能压力基线。
+- depth 仍只在 Planar pass 间共享；贴图/flipbook/Shader Graph material、alpha clip/soft particle/motion vector、完整 URP opaque/reversed-Z/MSAA/stencil、camera stack/XR、Mesh/Strip/GPU Event Output及 Vulkan/D3D resident compute/draw/depth 均未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 用 Unity 2022.3.61f1 Metal Player fixture 锁定全部 VFX sorting mode、自定义 key、正交/透视/reversed-Z 语义，并将 bitonic 改为适合大 capacity 的分层/radix/subgroup 实现。
+2. 将 Planar depth 接入共享 URP camera depth、opaque 遮挡与 soft particle，完成 MSAA/stencil/camera stack；把 compaction/sort/indirect storage 改为 ring-owned async fence 与 per-camera 多缓存，移除 camera 尾部同步等待。
+3. 实现 Texture2D/Texture2DArray/flipbook、Shader Graph material/property、alpha clip/motion vector及官方 Output Block lowering，再把 generation/compact/sort/indirect/depth contract 移植到 Vulkan 与 D3D。
+
+## 2026-07-17l — VFX Planar Metal Depth32、七种 ZTest 与 ZWrite
+
+### 已完成
+- Metal swapchain 现在创建与 color target 同尺寸的 **Depth32Float** attachment，并随 swapchain 销毁。Planar camera pass 在首次使用或 camera clear 时把 depth 清为 1.0，成功提交后标记 initialized；后续不 clear 的 camera submission 使用 load/store 保留已有深度，不再为每次 VFX draw 隐式丢弃 depth。
+- Planar render pipeline 声明 Depth32 attachment，并新增独立 depth-stencil state cache，完整映射 compiler runtime 编码：`Less / Greater / LEqual / GEqual / Equal / NotEqual / Always`，同时执行每个 output 的 `ZWrite`。同一 pass 只在状态变化时切换 depth state，原先硬编码 `Always + ZWrite off` 的 backend 限制已删除。
+- camera draw-info ABI 由 **88 bytes** 扩展为 **104 bytes**，新增 depth-tested output、depth-writing output、depth-state change 与 depth-clear 统计。compiler 实际只产出 0..6 的 runtime ZTest 编码，native 与资产验证同步拒绝未使用的 7，保持安装事务性。`flags bit3` 的显式 indirect output 现在由已实现的 GPU compact/indirect 路径执行，不再被错误归类为 unsupported。
+
+### 测试与门禁
+- `NativeVFXPlanarCameraBatchTests` 新增 **16 个测试发现项**：104-byte ABI、七种 depth compare state、ZWrite on/off、非法 runtime code 7 的事务拒绝、显式 indirect flag、近处写深度遮挡后绘远处、远处写深度后近处通过、Always 绕过已有深度、跨 camera depth 保留与 camera clear 重置。全部使用当前产品 dylib；Planar 两 suite 由 **50** 增至 **66/66**。
+- 强制产品 dylib 的 Core VFX 宽门禁由 **610** 增至 **626/626**，Core 全量由 **1,433** 增至 **1,449/1,449**；VFX Graph 保持 **490/490**。`bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。`git diff --check` 通过。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 当前证据只证明同一 Metal swapchain 上的 **Planar-to-Planar** 深度语义；depth attachment 尚未与完整 URP scene opaque/depth prepass、soft-particle depth texture 或 camera stack 共享。当前 clear=1.0 使用标准深度约定，仍缺 Unity Metal reversed-Z / `GL.GetGPUProjectionMatrix` 对照、MSAA depth resolve、stencil、动态 resize/recreate 与 native drawable 尺寸漂移处理。
+- 透明粒子仍只有 output/effect 级排序，没有 per-particle camera-distance stable sort。Metal camera 调用尾部仍同步等待 completion；缺少 ring-owned camera buffers、跨帧 fence、command queue 合并、timeout/device-loss 与 iOS Player 长时间压力。
+- 贴图/Texture2DArray/flipbook、Shader Graph material/property、alpha clip、soft particle、motion vector、官方 Output Block、Mesh/Strip/GPU Event Output，以及 Vulkan/D3D resident draw/depth 仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 为 sorting-required Planar output 实现 camera-dependent GPU depth-key generation 与 stable far-to-near compact-index sort，并补稀疏 alive、多 camera、equal-depth stability 和真实 alpha framebuffer 证据。
+2. 将 Planar depth 接入共享 URP camera depth 生命周期，完成 reversed-Z/GPU projection、opaque 遮挡、soft particle、MSAA/stencil、camera stack/resize；随后把 camera indirect/sort storage 改为 ring-owned async fence，移除调用尾部同步等待。
+3. 实现 Texture2D/Texture2DArray/flipbook、Shader Graph material/property、alpha clip/motion vector及官方 Output Block lowering，再把 generation/compact/sort/indirect/depth contract 移植到 Vulkan 与 D3D。
+
+## 2026-07-17k — VFX Planar stable alive compaction 与 GPU indirect draw
+
+### 已完成
+- camera-wide draw-info ABI 由 **64 bytes** 扩展为 **88 bytes**，新增 alive compaction、cache hit、prefix pass、indirect argument 与 capacity vertex 统计。Metal resident particle system 现在持久保存与 `generation + stride + capacity + aliveOffset` 绑定的 stable compact alive index/count；同一 resident generation 被多个 output 或后续 camera 消费时直接复用，不重复扫描或压缩。
+- 复用了 Update death-list 已验证的 GPU stable prefix/compact 核心：Planar camera command buffer 先从 resident records 生成 alive flags，再执行稳定前缀和 compact physical index，并由 GPU alive count 生成 Metal `drawPrimitivesIndirect` 参数。Planar vertex shader 通过 compact index 将逻辑粒子序号映射回真实 physical particle index；实际提交顶点数由 authoritative alive count 驱动，不再按 capacity 提交并依赖 dead discard。
+- compaction、indirect argument 构建与全部 Planar draws 仍位于同一 camera command buffer / render pass 生命周期；同一 particle system 的多个 output 只 compact 一次。registry 安装新增 shared-system layout 一致性校验：相同 effect 内同一 particle system 的 capacity、stride 或 alive offset 冲突时整批事务性拒绝，保留此前有效 registry。
+
+### 测试与门禁
+- `NativeVFXPlanarCameraBatchTests` 新增 **13 个测试发现项**，覆盖首次 compact/indirect 统计、generation cache 命中与失效、同 system 多 output 复用、capacity 与 alive vertex 区分、Triangle/Quad/Octagon indirect 参数、零 alive、unsupported/Null backend 真值边界、shared-system layout 事务拒绝，以及“physical index 0 dead、index 1 alive”的稀疏 resident framebuffer 绿色像素证据。Planar 两 suite 强制当前产品 dylib 由 **37** 增至 **50/50**。
+- 强制产品 dylib 的 Core VFX 宽门禁由 **597** 增至 **610/610**，Core 全量由 **1,420** 增至 **1,433/1,433**；VFX Graph 保持 **490/490**。`bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。`git diff --check` 通过。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 当前 Metal camera 调用尾部仍同步等待 command completion；缺少跨帧 async fence、ring-owned camera indirect/compact buffers、command queue 合并、timeout/device-loss/resize 恢复和 iOS Player 长时间压力。现有稳定 Hillis-Steele prefix 为 O(N log N)，还需针对大 capacity 做分层扫描与真实性能基线。
+- 透明粒子仍只有 output/effect 级 render queue 与 sort order，没有 Unity per-particle camera-distance sorting；尚缺 depth attachment、完整 ZTest/ZWrite、camera stack/overlay、XR multiview、Scene/Game preview。
+- 贴图/Texture2DArray/flipbook、Shader Graph material/property、alpha clip、soft particle、motion vector、官方 Output Block、Mesh/Strip/GPU Event Output，以及 Vulkan/D3D resident draw 仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 实现透明粒子 camera-distance stable sort、depth attachment 与完整 ZTest/ZWrite，并把 camera indirect/compact storage 改为 ring-owned async fence 生命周期，移除 render 调用尾部同步等待。
+2. 实现 Texture2D/Texture2DArray/flipbook、Shader Graph material/property binding、alpha clip、soft particle/depth、motion vector及官方 Output Block lowering，并完成 URP camera stack/XR/Scene/Game 与 Unity 2022.3.61f1 截图 A/B。
+3. 将相同 generation/cache/compact/indirect contract 实现到 Vulkan 与 D3D，再扩展 Mesh/Strip/GPU Event Output，并完成 Windows、Android Vulkan 与 iOS Metal Player 的 resize/device-loss/长时间压力矩阵。
+
+## 2026-07-17j — VFX Planar 相机级批处理、数值队列与单 Pass Metal 提交
+
+### 已完成
+- 新增 camera-wide native ABI：**80-byte** `AnityGraphicsVFXPlanarEffectDesc`、**88-byte** `AnityGraphicsVFXPlanarCameraBatchDesc` 与 **64-byte** `AnityGraphicsVFXPlanarCameraDrawInfo`。一次提交携带同一 camera 的全部 effect transform/layer/sort order；native 在一个 registry generation 锁区内快照 descriptor、resident generation 与 authoritative alive count，拒绝重复 effect、非法 layer/sort/matrix、缺失 registry 和 particle layout 漂移，不把半截批次交给 backend。
+- native 会先按 camera culling mask 过滤 effect，再把所有 output 展平，并以 `renderQueue -> effect sortOrder -> effectId -> contextId` 做稳定排序。Null/非 Metal backend 仍逐 output 诚实计入 skip；旧 `AnityGraphics_DrawVFXPlanarOutputs` ABI 保留并改为单 effect compatibility wrapper，现有调用方无需同时迁移。
+- 修正 managed bridge 把 render queue 字符串错误映射为 `Shader.PropertyToID` hash 的问题。现在按 Unity 数值队列解析 `Background=1000`、`Geometry=2000`、`AlphaTest=2450`、`GeometryLast=2500`、`Transparent=3000`、`Overlay=4000` 及有符号 offset，并把最终值限制在 0..5000；unknown/malformed/out-of-range 资产安装失败，不产生不可排序的伪队列。
+- `VFXRuntimeServices` 相机路径现在先完成 culling submission 与所有可见 effect 的 version-aware descriptor 注册，再执行**一次** `DrawVFXPlanarCamera`。Metal 在该入口为整台 camera 只创建 **1 个 command buffer + 1 个 render pass + 1 次 completion wait**，按已排序 packet 切换 pipeline/cull/buffer/transform；不再为每个 `VisualEffect` 单独开 pass 和同步等待。返回统计明确包含 effect/output/draw/skip/particle/vertex、registry snapshot generation、最大 resident generation 及 command-buffer/render-pass 数。
+
+### 测试与门禁
+- 新增 `NativeVFXPlanarCameraBatchTests` **22 个测试发现项**：三种 ABI size、六种 Unity render queue 数值映射、四种非法 queue、空 batch、重复 effect、非有限矩阵、非法 layer、缺失 registry、native queue range、Null backend 聚合/图层过滤，以及 Metal 两 effect 单 command/pass、跨 effect queue 像素顺序、同 queue sortOrder 像素顺序与独立 local-to-world 变换。连同旧 Planar suite 强制当前产品 dylib 为 **37/37**。
+- 强制产品 dylib 的 Core VFX 宽门禁由 **562** 增至 **597/597**，Core 全量由 **1,398** 增至 **1,420/1,420**；VFX Graph 保持 **490/490**。`bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例，产品模块 0 编译错误；URP3DDemo 保持既有 43 个 nullable warning。`git diff --check` 通过。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 本批消除了 per-effect pass/wait 和 hash queue，但每个 output 仍按 particle capacity 提交 vertex，并在 vertex shader 检查 alive；尚未让 stable compact alive index/indirect args 直接驱动 draw。透明粒子仍只有 output/effect 级队列顺序，没有 Unity per-particle camera-distance sorting。
+- Metal 相机批次目前仍在调用尾部同步等待；缺少跨帧 fence、ring-owned argument/index buffers、command queue 合并、depth attachment 与完整 ZTest/ZWrite、camera stack/overlay、XR multiview、Scene/Game preview、resize/device-loss 和 iOS Player 长时间压力。
+- 贴图/Texture2DArray/flipbook、Shader Graph material/property、alpha clip、soft particle、motion vector、官方 Output Block、Mesh/Strip/GPU Event Output，以及 Vulkan/D3D resident draw 仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 在 camera batch 内生成并缓存与 resident generation 绑定的 **stable compact alive index + indirect draw args**，改为 alive-count 顶点提交；随后加入透明粒子 camera-distance sort、depth attachment、ZTest/ZWrite 与异步 frame fence。
+2. 实现 Texture2D/Texture2DArray/flipbook、Shader Graph material/property binding、alpha clip、soft particle/depth、motion vector及官方 Output Block lowering，并完成 URP camera stack/XR/Scene/Game 与 Unity 2022.3.61f1 截图 A/B。
+3. 将相同 snapshot/order/batch/indirect contract 实现到 Vulkan 与 D3D，再扩展 Mesh/Strip/GPU Event Output，并完成 Windows、Android Vulkan 与 iOS Metal Player 的 resize/device-loss/长时间压力矩阵。
+
+## 2026-07-17i — VFX resident Planar Output Metal framebuffer 首条生产链路
+
+### 已完成
+- 新增 backend-neutral resident Planar Output C ABI：**144-byte** output descriptor、**152-byte** camera descriptor 与 **48-byte** draw info，以及 effect-scoped `Set / Count / Draw / Clear` 生命周期。native registry 对 version/flags/effect/context/system/capacity/stride、17 个必需 attribute offset、primitive/UV/blend/cull/depth state 与 reserved 字段做完整预校验；重复 context 或非法 batch 不覆盖上一个已安装 registry，`ClearVFXEffectState` 同步释放 descriptor。
+- `VisualEffectAsset` v15 Planar descriptor 现在由 `VisualEffect` 按 asset compilation version 安装到每个 live `NativeGraphicsDevice`；重新导入同一 asset 会重新安装，不继续使用旧 particle layout。managed bridge 精确映射 system capacity、packed byte offsets、compiler-executable/alpha-clip/sorting/indirect flags、render state、effect transform 与 camera world-to-clip matrix。相机 render loop 在 recorded clear/scene command 之后提交首个 transparent native pass，避免 framebuffer 被后续 camera clear 擦除；disabled/inactive/layer-mask 不匹配 effect 不提交。
+- Metal 新增运行时编译并缓存的 Planar MSL/pipeline。vertex shader **直接绑定 matching `(effectId, particleSystemId, generation)` resident `MTLBuffer`**，不物化或上传 CPU particle records；按 capacity 展开 Triangle **3**、Quad **6**、Octagon **18** 个 index vertex，dead particle 在 vertex stage 丢弃，并读取 position/color/alpha、axis、Euler angle、pivot、size/scale、local-to-world 与 world-to-clip。fragment 输出 resident color/alpha；首批实现 opaque/additive/alpha/premultiplied blend 与 front/back/none cull，离屏 BGRA8/RGBA16 target 均有 pipeline cache。
+- 本批保持严格真值边界：只有 `RuntimeExecutable=true`、UV0、无 alpha clipping/sorting/indirect、`ZTest=Always`、`ZWrite=false` 的 descriptor 才在 Metal 绘制；其余官方复杂输出保留 registry 并计入 `skippedOutputCount`，不伪装成功。无 resident generation、零 alive、unsupported backend/state 也明确跳过。Metal library/pipeline 编译失败会输出具体诊断并返回 `NotSupported`，不会产生空 draw。
+
+### 测试与门禁
+- 新增 `NativeVFXPlanarOutputTests` **15/15** 强制产品 dylib 测试：三种 ABI size、空/替换 registry、重复 context 原子拒绝、offset/effect/flag/camera 非法输入、Clear 生命周期、Null backend skip、Metal 无 resident clear/skip、真实 resident Quad 红色 framebuffer pixel、dead particle 透明、Triangle/Octagon vertex count，以及 sorting descriptor 的 truthful skip。专项测试触发并验证了运行时 MSL 编译；修正了 Metal shader 中 `radians` 与保留字 `vertex` 导致的真实编译错误。
+- Core 强制 `AnityRequireNative=true` 全量由 **1,383** 增至 **1,398/1,398**，`FullyQualifiedName~VFX` 宽门禁由 **547** 增至 **562/562**；VFX Graph 保持 **490/490**。`bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。`git diff --check` 通过。
+- Unity API 门禁仍基于本机 **Unity 2022.3.51f1**：类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 首批 Metal pass 只支持无贴图 UV0 白材质着色，不含 Texture2D/Texture2DArray、flipbook、Shader Graph property/material binding、alpha clipping、soft particle/depth、motion vector、render queue/sorting、indirect args 或 compact alive index consumption；当前仍按 capacity 提交并在 vertex shader 丢弃 dead particle。
+- 当前每个 effect 建立独立 pass、同步等待 command completion，缺少跨 effect/output 的统一 render-queue 排序、异步 frame fence、camera stack/overlay、XR multiview、Scene/Game preview、resize/device-loss 与 iOS Player 长时间压力。`ZTest=Always`/无 depth attachment 是明确的首批限制，不能描述为完整 URP 14 粒子材质/深度语义。
+- Vulkan/D3D backend 目前返回 skip，尚未实现相同 resident draw contract。官方带 Output Block、Shader Graph material、geometry/mesh/strip、GPU Event 的输出仍为 descriptor-only。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 把同一 camera 的全部 effect/output 聚合成一个按 render queue/sort key 排序的 draw list，加入 alive indirect args/compact index、depth attachment/ZTest/ZWrite、async frame fence，并完成多 camera/camera stack/XR 与 resize/device-loss。
+2. 实现 Texture2D/Texture2DArray/flipbook、Shader Graph material/property binding、alpha clip、soft particle/depth、motion vector及官方 Output Block lowering，再用 Unity 2022.3.61f1 Game/Scene/Player 截图 A/B 验收。
+3. 将 resident Planar packet/pipeline 等价实现到 Vulkan 与 D3D，随后扩展 Mesh/Strip/GPU Event Output，并完成 Windows、Android Vulkan 与 iOS Metal 生产 Player 压力矩阵。
+
+## 2026-07-17h — VFX Planar Output runtime asset v15 描述符桥接
+
+### 已完成
+- VFX runtime asset 格式升级到 **v15**，在现有 Update kernel 段之后追加 checksummed Planar Output 描述符。每个输出现在稳定保存 context/system identity、Triangle/Quad/Octagon 顶点数与精确 index pattern、五种 UV mode、blend/cull/ZWrite/ZTest/alpha clip/render queue/sort/indirect draw，以及与 Initialize/Update 共用的 packed particle attribute layout/stride；v1-v14 仍按原格式读取，v14 及更早资产导入为空 Planar Output 集合。
+- `VfxRuntimeAssetCompiler` 现在把 `VFXPlanarPrimitiveOutput` 编译结果真正写入 runtime bytes，`VisualEffectAsset.ImportRuntimeData` 原子替换并公开给内部产品运行时消费，不再让已生成的 Planar vertex/fragment pass 只停留在 editor compiler 内存中。v15 校验强制 unique non-zero context、non-strip particle target、图元拓扑、状态范围、完整 packed layout、17 个必需 output attribute 类型，以及与同 system Update kernel 的 stride 一致性。
+- 新增 `RuntimeExecutable` 真值边界：当前 childless legacy Planar Output 完整 codegen 标为 `true`；官方资产中带 Output Block、Shader Graph material 或 geometry-shader 等尚未完整执行的路径仍保存 topology/render/layout 描述符，但标为 `false`。运行时因此可以审计和继续编译官方复杂图，同时不能把 descriptor-only 路径误当成已完成 draw program。只有完整 shader codegen 入口才会标可执行。
+- 修正三条旧格式测试降版器，使其在从 v15 构造 v5/v9/v10/v11 payload 时同时移除 v14 Update 段与 v15 Planar 段；真实旧资产兼容不因新增尾段产生 trailing-data 回归。
+
+### 测试与门禁
+- 新增 `VfxPlanarRuntimeDescriptorTests` **21 个测试发现项**：v15 envelope、三种精确图元、五种 UV mode、默认/opaque clipped render state、可执行与 descriptor-only 边界、17 属性 packed ABI、`VisualEffectAsset` 导入、确定性 bytes、重复 context/错误 topology/错误 required type/stride 拒绝及 v14 backward read。VFX Graph 全量由 **469** 增至 **490/490**。
+- 强制加载刚重建产品 dylib 的 Core VFX 宽门禁保持 **547/547**，Core 全量保持 **1,383/1,383**；三条旧格式迁移定向门禁 **3/3**。未启用 `AnityRequireNative` 的诊断运行会按测试工程设计移除 dylib，不能作为原生门禁；最终结果均使用 `-p:AnityRequireNative=true` 隔离复验。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。Unity 2022.3.51f1 API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+
+### 尚未完成
+- 本批交付的是从 VFX Graph editor compiler 到 runtime `VisualEffectAsset` 的正式 draw 描述符，不是最终 framebuffer draw：Metal/Vulkan/D3D 尚未安装/缓存 Planar pipeline、绑定 resident generation particle buffer、构造 indirect args/index expansion 并提交到 URP camera target。`RuntimeExecutable=true` 表示 compiler pass 完整，不代表所有 native backend 已接线。
+- 带 Output Block、Shader Graph material、geometry shader、soft particle、gradient mapping、Texture2DArray flipbook 的复杂官方路径仍为 descriptor-only；texture/property binding、camera/XR matrices、sorting、multi-output、motion vector、depth/soft-particle 与平台 render-state A/B 尚未闭环。
+- Unity 2022.3.61f1 官方 Editor/Player 仍未安装，本机 2022.3.51f1 只能作为预备基线。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 定义 backend-neutral Planar draw packet/native ABI，把 `VisualEffectAsset` v15 descriptor 注册到 effect，并让 Metal camera render 直接绑定匹配 generation 的 resident `MTLBuffer`；先闭环 childless Triangle/Quad/Octagon、render state、camera matrices 与真实 framebuffer readback。
+2. 在同一 resident generation 上实现 alive compaction/indirect args、transparent sorting、multi-output/texture/property binding、motion vector、soft particle/depth 与 URP camera stack/XR，再把可执行边界扩展到官方 Output Blocks 与 Shader Graph passes。
+3. 将相同 draw packet/pipeline contract 实现到 Vulkan/D3D，完成 Windows、Android Vulkan 与 iOS Metal Player 的 resize/device-loss/rollback/长时间压力和 Unity 2022.3.61f1 截图 A/B。
+
+## 2026-07-17g — VFX GPU dead-list 压缩、resident-only 发布与回滚代际
+
+### 已完成
+- Metal Update kernel 现在为每个 physical particle 写入确定性的 death flag；同一 command buffer 随后执行并行 inclusive prefix scan 与稳定 compaction，把本次死亡的 physical index 按升序写入 GPU dead-index buffer，并产生单个 dead-count。Complete 不再复制完整 `slot.output`，也不再在 CPU 扫描 source/output records；只读取 4-byte count 与 `deadCount * 4` bytes 的紧凑索引，以 source alive-count 直接计算目标 alive-count 并更新 authoritative dead-list。
+- native particle registry 新增 `attributesResidentOnly` 代际状态。Metal Update 成功后直接发布 GPU resident generation，CPU records 保持延迟状态；只有显式 `TryGetVFXParticleSystem`、Initialize 的 CPU mutation，或 resident/cache 无法满足的 CPU bounds fallback 才按准确 generation 物化完整 records。连续 Update、同队列 Automatic Bounds 与 generation CAS 不再触发无条件 particle readback 或重复 upload。
+- prepared effect frame 使用 GPU copy-on-write resident snapshot 保存 Update 前代际：Complete 交换 resident/output 后把旧 buffer 从 ring slot 脱离并登记 generation；Commit 释放快照，Abort 直接恢复旧 GPU buffer/generation，再恢复 registry journal，不依赖陈旧 CPU records，也不执行补偿 upload。多 system 与同帧多代 snapshot 都按 effect 生命周期统一恢复或丢弃。
+- `AnityGraphicsVFXUpdateBackendStats` 从 176 扩展到 **240 bytes**，新增 prefix pass、dead compaction、resident-only publish、deferred readback count/bytes、snapshot/restore/discard 八项计数；Null/Vulkan/D3D stub 与 managed bridge 同步保持 ABI 布局。
+
+### 测试与门禁
+- `NativeVFXUpdateLifecycleTests` 从 **81** 增至 **96/96**，新增 **15 个测试发现项**：Complete 零完整回读、首次/重复显式物化、连续六代零回读/零重传、物化后继续命中 resident、Initialize 单次物化、零死亡、capacity=1 零 prefix pass、3/5/7 非 2 次幂稳定 physical-order compaction、Commit snapshot discard、Abort 无回读 restore、同帧多代回滚与 multi-system 独立物化。
+- Automatic Bounds 保持 **40/40**，与 Update 合并定向门禁由 **121** 增至 **136/136**；强制产品 dylib 的 `FullyQualifiedName~VFX` 宽过滤由 **532** 增至 **547/547**；Core 全量由 **1,368** 增至 **1,383/1,383**；VFX Graph 保持 **469/469**。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程；产品模块 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。`git diff --check` 通过。
+- Unity API 门禁仍基于本机可用的 **Unity 2022.3.51f1**：类型 **928/4,117**（present 22.541%，exact 404）、成员 **8,645/37,164**（present 23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 产品 Commit 仍等待 GPU command completion，并同步读取紧凑 dead count/index list；本批消除了 `capacity * stride` 的完整 particle readback 与 CPU 双缓冲扫描，但尚未把 dead count/list 也变为后续帧异步发布。当前 Hillis-Steele prefix scan 为 `O(N log N)` 工作量，尚可替换为分层 work-efficient scan/indirect dispatch。
+- Output geometry、GPU Event、Particle Strip 与真实 render draw packet 尚未直接消费 resident generation；CPU callback、显式 particle readback 与少数 fallback 仍会同步物化。Vulkan/D3D Update/dead-list/bounds 仍是 C++ CPU fallback，尚缺同等 GPU resident contract。
+- Unity 2022.3.61f1 官方 Editor/Player、Windows D3D、Android Vulkan、iOS Metal 产物 A/B、device-loss/resize/长时间压力尚未闭环。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 让 Output geometry、GPU Event、Particle Strip 与 render draw packet 直接绑定 staged/resident particle generation，并把 compact dead metadata 改为跨帧/间接 GPU 消费，只在 CPU callback 真正需要时回读。
+2. 将 Update、dead compaction、bounds 与 generation snapshot contract 实现到 Vulkan/D3D compute，补 Windows/Android/iOS Player 的 rollback、resize、device-loss 与长时间压力验证。
+3. 扩展 VFX Update typed operand 与 Block（Turbulence、Collision、Conform、Flipbook、GPU Event），并完成复杂 Output geometry、pivot/orientation/mesh/strip 精确 bounds 与 URP camera stack/XR A/B。
+
+## 2026-07-17f — VFX pending Update ring output 同队列 Automatic Bounds
+
+### 已完成
+- 新增内部 `AnityGraphics_BeginVFXUpdateKernelsWithBounds` C ABI：每个 Update kernel 可携带一个可选 Automatic Bounds descriptor，`effectId=0` 表示该 system 不需要 staged bounds。该入口只扩展 Anity native 调度器，不改变 Unity 公开托管 API。native 在创建 ticket 前统一校验 effect/system identity、position/alive/size/scale offsets、padding、world-space 与 reserved 字段，非法 batch 不产生 ticket 或 GPU 工作。
+- Metal Update 现在在写完三槽 ring 的 `slot.output` 后，于**同一个 `MTLCommandBuffer`**继续编码 bounds map/reduce。reduction 直接读取 staged output，不等待 resident swap、不上传 CPU particle records，也不另建 command buffer。ticket 持有最终 32-byte reduction buffer与 descriptor；Complete 验证 command completion、计算 dead/alive 结果并交换 resident generation 后，才原子发布 descriptor+target-generation bounds cache。Cancel、Abort、Reset、Clear 与失败释放路径只记 discard，绝不覆盖上一个 committed cache。
+- `VisualEffect.UpdateParticleSystems` 会从已编译 VFX asset 提取每个 system 的 Automatic Bounds metadata，并随 Update ticket 自动提交。PlayerLoop 继续以 Unity 式上一提交帧 bounds 做当前 culling；本帧 Update 在后台预计算下一 generation，下一帧 `TryGetWorldCullingBounds` 直接命中缓存。static bounds、无 alive layout、CPU backend 与旧内部调用继续走原路径。
+- `AnityGraphicsVFXUpdateBackendStats` 从 152 扩展到 **176 bytes**，新增 pending bounds dispatch/publish/discard 三项计数；原有 bounds dispatch/completion/cache-hit 也统计同队列工作。由此可以明确区分“ring output 已预计算并发布”和“commit 后才按需 resident reduction”，而不是依赖间接时间结果。
+
+### 测试与门禁
+- `NativeVFXAutomaticBoundsTests` 从 **28** 增至 **40/40**，新增 **12 个测试发现项**：同队列 Commit/target generation/零 resident hit、Cancel 丢弃、Abort 回滚、padding key、world-space key、NaN padding 拒绝、descriptor count、null descriptor legacy fallback、连续 generation 原子替换、invalid output 保守缓存、Initialize generation 分叉 authoritative fallback，以及真实 `VisualEffect.UpdateParticleSystems → CompleteVfxFrame → culling` 产品路径。与 Update lifecycle 合并强制 native 门禁由 **109** 增至 **121/121**。
+- 强制当前产品 dylib 的 `FullyQualifiedName~VFX` 宽过滤由 **520** 增至 **532/532**；Core 全量由 **1,356** 增至 **1,368/1,368**；VFX Graph 保持 **469/469**。`bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 均通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程 0 编译错误；URP3DDemo 保持既有 43 个 nullable warning。
+- Unity API 门禁仍基于本机可用的 **Unity 2022.3.51f1**：类型 **928/4,117**（present 22.541%，exact 404）、成员 **8,645/37,164**（present 23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- Update Commit 仍等待 GPU completion，并把完整 particle output 同步复制回 authoritative CPU records、执行 CPU dead scan；本批消除的是 Update 后另起 bounds command buffer/等待/particle upload，而不是全部 simulation readback。下一步需让 resident generation 成为渲染/Output/GPU Event 的主数据源，只在 CPU callback、显式 readback 或统计真正需要时延迟复制。
+- staged bounds 当前为每个 Update kernel/system 一个 AABB descriptor，最终 32-byte result 在 Commit 时读取；尚缺多 Output geometry/pivot/orientation/mesh/strip bounds、跨帧 delayed publication、timeout、可控 command/device failure、resize/device-loss 与 iOS Player 长时间压力证据。
+- Vulkan/D3D Update 与 bounds 仍是 C++ staged CPU fallback，尚未实现同等 compute ring/ticket contract。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 移除 Commit 的无条件完整 particle readback/CPU dead scan：在 Update kernel 内生成 dead-index/count 与 alive-count resident buffer，先发布 GPU generation；CPU readback 延迟到事件、脚本或审计真正消费时。
+2. 让 Output geometry、GPU Event、Particle Strip 与渲染 draw packet 直接消费同一 staged/resident generation，并补复杂 geometry bounds、multi-output 与 camera-stack/XR 行为。
+3. 将 Update/bounds/dead-list ring contract 实现到 Vulkan 与 D3D compute，完成 Windows、Android Vulkan 与 iOS Metal Player 产物、故障注入和长时间压力验证。
+
+## 2026-07-17e — VFX Metal resident Automatic Bounds 与 generation 结果缓存
+
+### 已完成
+- Metal Automatic Bounds 不再无条件用 authoritative CPU records 创建临时 particle buffer。`AnityGraphics_ReduceVFXParticleBounds` 现在把 committed particle generation 传入 backend；当 `(effectId, particleSystemId)` 的 Update resident generation 与 registry generation 一致时，bounds map/reduce compute 直接绑定 resident `MTLBuffer`，省略 CPU→GPU particle upload。Initialize、Abort 或其它 mutation 造成 generation 分叉时仍从 authoritative records 上传，保持事务正确性。
+- 每个 Metal particle system 增加 descriptor+generation bounds result cache。position/alive/size/scale offsets、padding、world-space flag 与 generation 全部相同时，重复 camera/culling 查询直接返回已验证结果，不再提交 command buffer或等待 readback；Update Commit 会显式失效旧结果，Cancel/Abort 不交换 resident generation，因此继续复用此前 committed cache。非有限粒子产生的 invalid/conservative 结果同样缓存，避免同一坏 generation 每个 camera 重复执行。
+- 内部 `AnityGraphicsVFXUpdateBackendStats` 从 112 扩展到 **152 bytes**，新增 bounds dispatch、resident hit、fallback upload、completion 与 result-cache hit 五项计数。VisualEffect 的实际 `TryGetWorldCullingBounds` 路径无需新增公开 Unity API 即自动使用 resident/cache；Null/Vulkan/D3D 保持 C++ authoritative reduction，不伪造 Metal 统计。
+
+### 测试与门禁
+- `NativeVFXAutomaticBoundsTests` 由 **15** 增至 **28/28**，新增 **13 个测试发现项**：committed Update resident 零上传、重复 descriptor cache、padding/world-space cache key、Initialize generation mismatch authoritative upload、Update Commit 失效、Cancel/Abort 保留、非法 descriptor 零计数、invalid result 保守缓存、Clear 释放、CPU fallback，以及真实 VisualEffect Metal culling 连续查询。与 Update lifecycle 合并定向门禁 **109/109**。
+- 强制产品 dylib 的 `FullyQualifiedName~VFX` 宽过滤由 **507** 增至 **520/520**；Core 全量由 **1,343** 增至 **1,356/1,356**；VFX Graph 保持 **469/469**。`bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 均通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。
+- Unity API 门禁仍基于本机可用的 **Unity 2022.3.51f1**：类型 **928/4,117**（present 22.541%，exact 404）、成员 **8,645/37,164**（present 23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 本批直接消费的是已经 Commit 的 resident generation。挂起 Update ticket 的 output slot 尚未附加 bounds descriptor，也未在同一 queue 中串接 map/reduce；因此本帧新 bounds 仍需等 Update Commit 后由后续 culling 查询计算，不能描述为 staged-output 同 command-buffer reduction。
+- bounds 首次 reduction 仍同步等待 Metal completion 并读取 32-byte reduction result；结果 cache 消除了同 generation 的重复等待，但尚未实现跨帧异步 bounds ticket、multi-camera delayed publish、device-loss/resize/failure 注入与 iOS Player 压力证据。
+- Output geometry、GPU Event 与 Particle Strip 尚未直接消费 resident particle buffer；Vulkan/D3D Update/bounds 仍为 C++ CPU fallback。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 给 pending Update ticket 附加 Automatic Bounds descriptors，在同一 Metal queue 上让 bounds map/reduce 直接读取 ring output，并在 Update generation CAS 成功时一起发布缓存结果；Abort/Cancel 必须丢弃 staged bounds。
+2. 让 Output geometry、GPU Event 与统计读取同一 resident/staged generation，只有 CPU callback 真正需要时才延迟 readback；补 timeout、device-loss、resize 与 command failure 注入。
+3. 将 resident Update/bounds contract 实现到 Vulkan 与 D3D compute，并完成 Windows、Android Vulkan 与 iOS Metal Player 产物和长时间压力验证。
+
+## 2026-07-17d — VFX native async Update ticket 与产品帧原子提交
+
+### 已完成
+- VFX Update 新增 48-byte native ticket ABI 与 `Begin / Poll / Complete / Cancel` 四阶段入口。Begin 对整批 kernel、operation、storage 与重复 system 完成预校验后复制 authoritative particle generation；Null/Vulkan/D3D CPU 路径先计算 staged replacement 但不发布，Metal 路径提交全部 command buffer 后立即返回 ticket。Poll 只报告 pending/ready/failed，Complete 通过 particle source generation 与 prepared-frame generation 双重 CAS 后一次性发布整批 replacement，Cancel 等待并丢弃 GPU 输出，任何路径都不会让未提交记录被 readback、bounds 或下一次 simulation 观察。
+- native effect transaction 已拥有挂起 Update 的生命周期：`CommitVFXEffectFrame` 在 clock/output journal 提交前完成 ticket 并发布，`AbortVFXEffectFrame`、Reset、Clear 与 device destroy 会取消 ticket；VisualEffect 产品路径由同步 Dispatch 改为 Update 阶段 Begin、frame Commit 阶段完成并刷新 `aliveParticleCount`。因此 Output event staging 可与 GPU Update 重叠，而 managed particle state 与 alive count 在 Commit 前保持上一个 authoritative generation，Abort 恢复准备帧快照。
+- 同步兼容入口保持原语义：显式异步 Begin 对同 effect 的第二个 pending ticket快速拒绝；`AnityGraphics_DispatchVFXUpdateKernels` 使用独立同步串行锁，继续保证并发同步调用全部按序成功。Metal backend ticket 持有 ring slot、command buffer 与 staged records，Complete/Cancel 统一释放；Begin 后的分配失败会取消 backend handle 并从 registry 移除 ticket，不遗留不可达工作。
+
+### 测试与门禁
+- `NativeVFXUpdateLifecycleTests` 由 **63** 增至 **81/81**，新增 **18 个测试发现项**：48-byte ABI、ticket identity/poll、提交前不可见、complete/cancel 单次消费、同 effect 冲突、particle generation CAS、prepared frame identity、Commit 自动发布、Abort/Reset/Clear 自动取消、multi-system 原子发布、非法 batch 零 ticket、pending device dispose、Metal poll，以及 VisualEffect 在 Null/Metal 上的 Commit/Abort 与 alive count 事务语义。
+- 强制产品 dylib 的 `FullyQualifiedName~VFX` 宽过滤 **507/507**；Core 全量由 **1,325** 增至 **1,343/1,343**；VFX Graph 保持 **469/469**。`bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 均通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning；新增四个 ticket 导出符号存在。
+- Unity API 门禁仍基于本机可用的 **Unity 2022.3.51f1**：类型 **928/4,117**（present 22.541%，exact 404）、成员 **8,645/37,164**（present 23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 产品 PlayerLoop 当前在同一 effect frame 的 Commit 阶段等待 ticket 完成；虽然 Update、Output staging 与 managed work 已拆成跨调用异步事务，但尚未把 staged GPU generation 延迟到后续 render frame，也未让 Output geometry、Automatic bounds 或 GPU Event 直接消费 resident output。Commit/Cancel 仍会等待 command completion并同步 CPU readback/dead scan。
+- pending ticket 当前受 effect registry mutex 保护，Complete/Cancel 等待 GPU 时会阻塞其他 registry 操作；尚缺 per-effect/system 细粒度 ownership、timeout、可控 command/device failure、resize/device-loss 恢复与 iOS Player 长时间压力证据。
+- Vulkan/D3D Update 仍为 C++ CPU staged fallback；Turbulence、Collision、Conform、Flipbook、GPU Event、Particle Strip、linked typed/resource operand、完整 Output geometry/shader execution与复杂 bounds 仍缺失。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 让 Output、Automatic bounds 与 GPU Event 直接引用 staged/resident generation，并把 readback 延迟到真正需要 CPU 事件或统计的后续帧；加入 timeout、device-loss、resize 与 command failure 注入。
+2. 将同一 ticket/resident/CAS contract 实现到 Vulkan 与 D3D compute，完成 Windows、Android Vulkan 与 iOS Metal Player 产物和长时间回滚压力验证。
+3. 扩展 Update typed operand 与 Block（Turbulence、Collision、Conform、Flipbook、GPU Event），再落地 Particle Strip、Output geometry/shader execution 与精确 bounds。
+
+## 2026-07-17c — VFX Metal multi-system submit/complete/publish batch
+
+### 已完成
+- `AnityGraphics_DispatchVFXUpdateKernels` 现在先对整个 batch 完成 kernel/storage/layout/operation/random/duplicate-system 校验并预分配所有 replacement/dead-list 容量；任一后续 kernel 非法时 **零 GPU submission、零 cache 创建**。同一 effect/system 在一批中重复 Update kernel 被显式拒绝，符合官方编译图的一 system 一 Update context 不变量，也消除了旧路径可能先执行前序 kernel 再发现后序无效的 speculative 工作。
+- Metal backend 从逐 kernel `commit → wait → readback` 改为真正的 **submit-all → complete-all → publish-all**：每个独立 particle system 取得自己的 resident source 与 ring slot，编码 blit + MSL compute command buffer，整批 command buffer 全部提交后才进入 completion 等待。只有全批 command 均成功完成并读回 replacement records 后，才统一交换各 system 的 resident/output generation；失败清理会等待所有已提交 command、释放 slot 并失效相关 cache，CPU authoritative registry 始终不发布半批结果。
+- ring slot 拆分 `available` 与 `completed` semaphore，避免复用信号在 submit/complete 两阶段混淆。内部 backend stats ABI 从 96 扩展到 **112 bytes**，新增 last/peak batch width 与 async batch count；单 system 仍走同一 batch contract，多 system 可由统计证明在首次 wait 前已全部提交。连续 generation 命中继续省略 particle upload，operation 资源仍按 system/slot 隔离增长。
+
+### 测试与门禁
+- `NativeVFXUpdateLifecycleTests` 由 **50** 增至 **63/63**，新增 **13 个测试发现项**：2–6 system submit-all 宽度、连续五帧全 system ring 轮转/单次 particle upload、三 system Abort 后全量重传、duplicate system 零提交、Clear 全资源释放、三 system 混合死亡隔离、单 system 大 operation program 扩容不污染同批邻居、8 路并发 multi-system batch 串行安全与 zero-delta 全 completion；原失败 batch 测试升级为 pre-submit rejection 证据。
+- 强制产品 dylib 的 VFX/VisualEffect 宽过滤由 **489** 增至 **502/502**；Core 全量由 **1,312** 增至 **1,325/1,325**；VFX Graph 保持 **469/469**。`bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 均通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning；导出符号与 `git diff --check` 通过。
+- Unity API 门禁仍基于本机可用的 **Unity 2022.3.51f1**：类型 **928/4,117**（present 22.541%，exact 404）、成员 **8,645/37,164**（present 23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- 当前已经允许同一 Update batch 内多个独立 system 的 command buffer 同时 in-flight，但 native 调用仍在本帧等待整批 completion、同步 memcpy 回 CPU，并在 CPU 扫描 dead-list 后才返回；尚未把 ticket 跨帧保存为延迟 readback/generation CAS，也没有让 Output/Automatic bounds 直接消费 staged GPU buffers。Metal 使用一个 command queue，实际硬件并行度由驱动调度。
+- Update batch 仍在 effect registry mutex 下完成 submit/readback/publish，保证安全但会阻塞其他 VFX registry 操作；尚缺细粒度 per-effect/system lifetime、timeout/cancel、可控 command/device failure 注入、resize/device-loss 恢复和 iOS Player 压力产物。
+- Vulkan/D3D Update 仍为 C++ CPU fallback；Turbulence、Collision、Conform、Flipbook、GPU Event、Particle Strip、linked typed/resource operand、完整 Output geometry/shader execution 与复杂 bounds 仍缺失。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 将 Metal batch ticket 提升为跨帧 submit/poll/publish generation queue，让 Output 与 Automatic bounds 在 GPU 直接串接，CPU 只延迟读取事件/统计；加入 timeout、cancel、device-loss/resize 注入和 generation CAS。
+2. 按相同 batch/resident contract 实现 Vulkan 与 D3D compute，完成 Windows/Android/iOS Player 产物和回滚压力验证。
+3. 扩展 Update typed operand 与 Block（Turbulence/Collision/Conform/Flipbook/GPU Event），再落地 Particle Strip、Output geometry/shader execution 与精确 bounds。
+
+## 2026-07-17b — VFX Metal generation-resident Update 与 completion ring
+
+### 已完成
+- Metal VFX Update cache 从每次同时上传 source/output 改为按 `(effectId, particleSystemId)` 保存 **resident particle buffer + resident generation**。native dispatch 现在显式传入 authoritative source generation 与 staged target generation；generation 与容量均命中时不再上传 particle records，Initialize、Abort 或失败 batch 造成 generation 分叉时会自动从 authoritative CPU store 重传，避免把 speculative GPU 结果当成已提交状态。
+- 每个 system 新增 **3-slot output/operation ring**。Update 前以 Metal blit 把 resident buffer 复制到当前 output slot，再执行既有 ordered MSL kernel；完成通过 `MTLCommandBuffer.addCompletedHandler` 唤醒 slot semaphore，读回成功后交换 resident/output buffer 并轮转 0→1→2。operation buffer 按 slot 独立增长，未来允许提交重叠时不会覆盖仍在使用的参数资源。
+- 新增 96-byte `AnityGraphicsVFXUpdateBackendStats` 内部诊断 ABI 与 managed bridge，记录 resident generation、dispatch、particle/operation upload、GPU copy、completion、ring index/capacity 与同步 readback 数。它不污染 Unity 公共 API；Null/Vulkan/D3D 不伪造 Metal 统计，Effect Clear 与 device destroy 会移除缓存和 completion slots。
+
+### 测试与门禁
+- `NativeVFXUpdateLifecycleTests` 由 **35** 增至 **50/50**，新增 **15 个测试发现项**：7 次连续 dispatch 的 ring 轮转与仅一次 particle upload、Abort 后重传、失败 batch 后重传、Initialize mutation 后重传、operation slot 扩容但不重传粒子、Clear 后 stats/cache 重置、12 路并发 dispatch 串行安全、zero-delta completion，以及 Null backend 不暴露 Metal stats；同时锁定 64/80/96-byte C ABI。
+- 强制产品 dylib 的 VFX/VisualEffect 宽过滤当前 **489/489**；Core 全量由 **1,297** 增至 **1,312/1,312**；VFX Graph 保持 **469/469**。`bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 均通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning；`git diff --check` 通过。
+- Unity API 门禁仍基于本机可用的 **Unity 2022.3.51f1**：类型 **928/4,117**（present 22.541%，exact 404）、成员 **8,645/37,164**（present 23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- particle upload 已可跨连续 Update 帧省略，GPU output allocation 也持续复用；但当前 native API 在每个 kernel 后仍等待 completion、同步 memcpy 回 authoritative CPU records，并由 CPU 扫描死亡 index。三槽 ring 已建立资源隔离与 callback completion 基础，但尚未实现跨 system/effect 的真正多 in-flight submit、延迟 readback、generation CAS 或完全 GPU-resident Output/bounds 消费。
+- device/command failure 会安全丢弃 cache，但尚缺可控故障注入、超时、resize/device-loss 恢复和 iOS Metal Player 产物压力验证。Vulkan/D3D Update 仍为 C++ CPU fallback，operation descriptors 仍需每次上传。
+- Turbulence、Collision、Conform、Flipbook、GPU Event、Particle Strip topology、linked typed/resource operand、完整 Output geometry/shader execution 与复杂 Automatic bounds 仍缺失。总体 Unity 2022 Ultra `/goal` 继续进行，API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 拆分 Metal Update 为 batch submit/complete/publish：跨独立 system 并行提交，使用延迟 readback ring 与 generation CAS，让 Output/Automatic bounds 可直接消费 staged GPU generation，并补 device-loss/resize/timeout 故障注入。
+2. 按同一 resident-generation contract 实现 Vulkan 与 D3D compute，完成 Windows/Android/iOS Player 产物和回滚压力测试。
+3. 扩展 Update typed operand 与 Block（Turbulence/Collision/Conform/Flipbook/GPU Event），再落地 Particle Strip、Output geometry/shader execution 与精确 bounds。
+
+## 2026-07-17a — VFX Metal persistent Update compute 与事务发布
+
+### 已完成
+- `anity-native` 为 VFX Update v14 ordered IR 增加真实 Metal compute pipeline：SetAttribute（constant/source snapshot，含 per-component/uniform random 与 seed 持久化）、CopyAttribute、Integrate、Reap、absolute/relative Force、Drag 与 particle-size 路径均在 MSL kernel 执行；entry-alive、zero-delta、死亡粒子仅提交 alive=false 等既有 C++ 语义保持一致。CopyAttribute 在 CPU/Metal 两条路径统一改为临时 4-word 拷贝，重叠源/目标不再依赖写入顺序。
+- Metal 后端按 `(effectId, systemId)` 复用 persistent shared source/output/operation buffers，并缓存 Update compute pipeline；每次 dispatch 从 authoritative staged CPU clone 上传，GPU 完成后同步读回，再按物理 index 升序扫描死亡变化并更新 dead-list。Effect 清理与 device destroy 会释放对应缓存，effect identity 可安全复用。
+- `AnityGraphics_DispatchVFXUpdateKernels` 在 Metal 设备选择 compute backend，Null/Vulkan/D3D 保持 C++ CPU fallback；仅当整个 kernel batch 成功才交换 staged registry。后续 kernel 失败或 Effect Abort 都不会发布部分 GPU 结果；下一次 Metal dispatch 会用 committed CPU records 完整覆盖缓存，因此失败帧的 cache 内容不可被外部状态观察。
+
+### 测试与门禁
+- `NativeVFXUpdateLifecycleTests` 由 **18** 增至 **35/35**：新增 13 组 CPU↔Metal program 等价比较，覆盖 overwrite、Add/Multiply/Blend、source snapshot、Gravity/Euler、absolute/relative Force、Drag 有无 size、Reap、zero delta、两种 random 与 CopyAttribute；另覆盖 Metal Abort、batch 失败后 cache 隔离、Clear 后 identity 复用，以及多死亡 index 的确定性顺序。
+- 强制产品 dylib 的 VFX/VisualEffect 宽过滤由 **444** 增至 **461/461**；Core 全量由 **1,280** 增至 **1,297/1,297**；VFX Graph 保持 **469/469**。`bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 均通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程 0 编译错误，URP3DDemo 保持既有 43 个 nullable warning；`git diff --check` 通过。
+- Unity API 门禁仍基于本机可用的 **Unity 2022.3.51f1**：类型 **928/4,117**（present 22.541%，exact 404）、成员 **8,645/37,164**（present 23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，不能把 51f1 结果冒充最终版本证据。
+
+### 尚未完成
+- Metal Update 已是真实 GPU 计算与持久 allocation，但当前每次仍从 authoritative CPU clone 同步上传并同步读回，不是全 GPU resident/异步 generation ring；dead-list 也由 GPU 完成后 CPU 确定性扫描生成。尚缺 async generation CAS、无阻塞 readback、resize/device-loss 故障注入与 iOS Metal Player 产物验证。
+- Vulkan/D3D Update 仍走 C++ CPU fallback；Turbulence、Collision、Conform、Flipbook、GPU Event、Particle Strip topology、linked typed/resource operand、完整 Output geometry/shader execution 与复杂 Automatic bounds 仍未实现。
+- 总体 Unity 2022 Ultra `/goal` 继续进行：API 审计仍缺 **3,189** 个官方类型，Unity 2022.3.61f1 官方编辑器/Player 与 Windows/Android/iOS 全平台 A/B 未闭环，本里程碑不代表完整 Unity/VFX 生产等价。
+
+### 下一优先项
+1. 把 Metal Update 改为 GPU-resident staged generation + async readback ring/CAS，补 resize/device-loss/Abort 压测和 iOS Player 产物；同一事务模型下实现 Vulkan 与 D3D compute。
+2. 扩展 Update typed operand 与 Block：Turbulence、Collision、Conform、Flipbook、GPU Event，并让 Rate/Burst/SetAttribute/loop/delay 复用 native evaluator。
+3. 落地 Particle Strip、Output geometry/shader execution 与 pivot/orientation/mesh 精确 bounds，再用 Unity 2022.3.61f1 官方 Player 固化 URP camera stack/XR/SceneView/Preview/occlusion 证据。
+
+## 2026-07-16ba — VFX persistent Update/Reap native 事务生命周期与 runtime asset v14
+
+### 已完成
+- VFX runtime asset 从 **v13 升级到 v14**，继续读取 v1-v13；新增按 context/system 排序的 Update kernel 与 ordered operation IR，版本化保存真实 Initialize packed-layout、alive/seed offset、dead-list、`skipZeroDeltaUpdate`、常量/Source snapshot SetAttribute、Copy、Integrate、Reap、Force、RelativeForce 与 Drag。导入会拒绝非法枚举、offset、operand、非有限常量、错误类型以及与 Initialize capacity/stride/dead-list/attribute type 不一致的布局。
+- VFX Graph 的 Basic Update 不再要求至少一个显式 Block：先收集同一 particle data 的 Initialize/Update/Output 全系统持久属性，再生成 Unity 顺序的隐式 position/angular Euler、age 与 `age > lifetime` Reap。官方无显式 Block 的 `SimpleParticleSystem.vfx` 现可产生真实运行时 Update；确实没有任何运行语义的 Update context 被安全省略，不再伪造 operation。现有 SetAttribute/Custom、Gravity、Force absolute/relative、Drag 与 UseParticleSize 已 lowering 到同一 backend-neutral IR；linked activation/dynamic input 在 evaluator 支持前显式拒绝。
+- `anity-native` 新增 **64-byte Update kernel / 80-byte operation C ABI** 与 `AnityGraphics_DispatchVFXUpdateKernels`。Null/Metal/Vulkan/D3D 当前均由 C++ authoritative particle store 的 CPU fallback 执行：每个存活粒子先保存 entry source snapshot，再按 block 顺序修改 local record；随机 seed 持久化，死亡粒子只提交 alive=false 并写入 dead-list，其他同帧字段修改丢弃，物理 index 可被下一次 Initialize 复用。
+- Update kernel batch 使用 copy-on-write staged registry：全部 kernel 校验与执行成功后才交换发布，任一后续 kernel 失败不会留下前序部分更新。Update 已插入产品帧的 Initialize 之后、Output staging 之前，并共享既有 Prepare/Commit/Abort particle snapshot；Abort 恢复 attributes/alive/dead-list/generation，Commit 后 Output、Automatic bounds 与下一帧 culling 才观察新状态。
+- 全量并行门禁另外复现并修复 native texture upload/release 的 `_textureStates` 并发破坏：纹理表与 native texture/device teardown 现在使用独立锁，避免把 Canvas 销毁路径卷入 device lifetime 锁序；ScreenCapture/native texture 定向和整个 Core 并行门禁均稳定通过。
+
+### 测试与门禁
+- 新增 `NativeVFXUpdateLifecycleTests` **18/18**：覆盖 ABI、Overwrite/Add/Multiply/Blend、entry source snapshot、Gravity→Euler 顺序、absolute/relative Force、Drag 有无 particle size、zero-delta、age/reap/physical-index recycle、Abort/Commit、batch 原子失败、v14 round-trip 与 Initialize layout 拒绝。
+- VFX Graph 全量 **469/469**；强制产品 dylib 的 VFX/VisualEffect 宽过滤由 **439** 增至 **444/444**；Core 全量由 **1,262** 增至 **1,280/1,280**。ScreenCapture/native texture 定向 **27/27**；`bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程，0 编译错误，URP3DDemo 保持既有 43 个 nullable warning。
+- Unity API 门禁仍基于本机可用的 **Unity 2022.3.51f1**：类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。本机仍未安装目标 2022.3.61f1，因此不能把 51f1 结果冒充最终 61f1 证据。
+
+### 尚未完成
+- 本批 Update 是生产 C++ authoritative store 与事务语义，但仍为 CPU fallback；尚未把 operation IR 执行到 Metal/Vulkan/D3D persistent compute buffers，也没有 async generation CAS/device-loss 恢复。因此不能描述为完整 VFX Graph GPU Update 生命周期。
+- 当前 lowering 只覆盖已有受支持 Block 和常量/source snapshot 输入；Turbulence、Collision、Conform、Flipbook、GPU Event、Particle Strip topology、linked typed DAG/native operand、资源型 input 与完整 Output geometry/shader execution 仍缺失。Automatic bounds 也尚未纳入 pivot/orientation/mesh/strip 精确几何。
+- Unity 2022.3.61f1 官方编辑器/Player、Windows D3D、Android Vulkan、iOS Metal 产物 A/B 仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行；当前 API 审计仍缺 **3,189** 个官方类型，本里程碑不代表完整 Unity 等价。
+
+### 下一优先项
+1. 把 Update IR 下沉为 Metal/Vulkan/D3D persistent compute resource transaction，加入 async generation CAS、device-loss/resize/Abort 深测与三平台 Player 产物。
+2. 扩展 VFX Update Block 与 typed linked operand：Turbulence/Collision/Conform/Flipbook/GPU Event，并让 Rate/Burst/SetAttribute/loop/delay 复用同一 native evaluator。
+3. 落地 Particle Strip、Output geometry/shader execution 与 pivot/orientation/mesh 精确 Automatic bounds，再用 2022.3.61f1 官方 Player 固化 URP camera stack/XR/SceneView/Preview/occlusion 证据。
+
+## 2026-07-16az — VFX Automatic Bounds native/Metal reduction 与事务化剔除接入
+
+### 已完成
+- VFX runtime asset 从 **v12 升级到 v13**，继续读取 v1-v12；Particle/ParticleStrip system 现在版本化保存 Automatic bounds 标志、local/world simulation space、`position/alive/size/scaleX/Y/Z` 的真实 Initialize packed-layout word offset，以及三轴 `boundsPadding`。序列化会拒绝 static/automatic 冲突、非法 offset、负数/非有限 padding、无 position、错误 attribute 类型或与 Initialize kernel 不一致的布局；v13→旧版迁移测试会真实移除新增 63-byte system metadata 并重算 checksum。
+- VFX Graph compiler 对 Automatic/`needsComputeBounds` 不再永久降级为 unbounded：从目标 Initialize 的 data-wide stored attribute compilation 生成真实 layout，校验实际 stored `position` 为 Float3，并保存可选 alive/size/scale offset；constant `boundsPadding` 被精确固化，linked padding 在 runtime expression evaluator 落地前显式拒绝，避免烘焙错误 bounds。
+- `anity-native` 新增 56-byte reduction desc/result 与 `AnityGraphics_ReduceVFXParticleBounds` 稳定 C ABI。native CPU 路径遍历 authoritative particle records，按 alive attribute 或 sequential/dead-list occupancy 过滤存活粒子，并以 `position ± abs(size*scale)/2` 加 padding 归约 AABB；alive 数不一致、非有限粒子数据、0 alive 或非法 layout 都保守返回 unbounded/错误，不发布可能漏裁的范围。
+- Metal 后端增加实际运行的并行 map + pairwise reduction compute pipeline，以 shared buffer 同步 readback 最终 min/max，并逐项核对 live count/non-finite 标志；Null/Vulkan/D3D11 当前走同一 native CPU fallback。返回值携带 particle generation 与 backend kind，managed bridge 严格核对 identity、generation、space、finite extents 和 ABI 结果。
+- Automatic bounds 已接入 `VisualEffect` world culling AABB 合并与真实 VFX PlayerLoop culling descriptor。local-space 结果使用完整 affine matrix 转换，world-space 结果不二次变换；任一 system 没有可靠结果时整个 Effect 保守 unbounded。reduction 只允许读取最后一次 Commit 的 particle storage；Effect 已 Prepare 时拒绝 readback，Abort 恢复旧粒子/generation/bounds，Commit 后下一次 culling 才观察新范围，因此保持既有的一帧可见性延迟与 effect transaction 原子性。
+
+### 测试与门禁
+- 新增 `NativeVFXAutomaticBoundsTests` **15/15**：覆盖 56-byte ABI、CPU size/scale/padding、dead-list、无 alive sequential occupancy、0 alive、NaN、非法 offset、Prepare 拒读、Abort 恢复、Commit generation、v13 round-trip/布局拒绝、local/world transform，以及真实 Metal compute backend 与 CPU contract 一致性。
+- VFX Graph bounds compiler 定向 **9/9**，新增 Automatic local/world metadata、v13 round-trip 和 linked padding 拒绝；VFX Graph 全量由 **466** 增至 **469/469**。Spawner/runtime 旧资产迁移与 callback 定向 **171/171**。
+- 强制产品 dylib 的 VFX/VisualEffect 宽过滤由 **424** 增至 **439/439**；Core 全量由 **1,247** 增至 **1,262/1,262**。`bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例工程，0 编译错误；URP3DDemo 仍为既有 43 个 nullable warning。
+- Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。官方 Unity 2022.3.51f1 / VFX Graph 14.0.11 fixture 未改动，继续保留 **582 state + 100 Output Event + 24 callback + 66 Built-In callback + 17 manual-control** 的既有精确证据。
+
+### 尚未完成
+- Metal 已是 GPU compute reduction，但目前为同步 shared-buffer readback；Vulkan/D3D11 仍是 native CPU fallback，尚缺各自 persistent GPU reduction、异步/延迟 readback ring、generation staged CAS、device-loss 恢复与 iOS/Windows/Android Player 产物验证，不能描述为 Automatic bounds 全后端 GPU 闭环。
+- 当前几何扩张覆盖 position、uniform size、scaleX/Y/Z 与 padding；尚未把 pivot、angle/axis/orientation、mesh/output geometry、Particle Strip segment topology、Update/Reap 后的持续运动和多 output 精确几何纳入 bounds，所以复杂输出仍需保守扩张/官方 A/B 后才能宣称 Unity 完全等价。
+- 遮挡裁剪、URP base/overlay camera stack、XR 多 view、SceneView/Preview 编辑器证据，以及最终 engine-native player host 仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行；API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 落地 Update/Reap/Output persistent particle lifecycle，使移动、死亡、strip/output geometry 与 Automatic bounds 共用同一 GPU generation transaction，并补 pivot/orientation/mesh/strip 官方 fixture。
+2. 为 Vulkan/D3D11/Metal 建立持久 compute resource、异步 bounds readback ring 与 staged generation CAS，完成 Windows/Android/iOS Player 的 device-loss/resize/rollback 深测。
+3. 用 Unity Player 固化 URP base/overlay、XR views、SceneView/Preview 与 occlusion 的最终剔除语义，再继续 linked typed DAG、资源型 callback、多 chain 和完整 VFX Graph 编辑器。
+
+## 2026-07-16ay — VFX Effect 全数据 rollback journal 与 Commit 后 Output Event
+
+### 已完成
+- `anity-native` 把当前已实现的 Effect 数据面统一纳入 Prepare/Commit/Abort 事务：除 frame clock 与 Spawner 外，现会按 effectId 保存并恢复 Initialize dispatch、Particle attribute records、alive count、dead-list、Output FIFO 与 sequence watermark。Spawner 恢复会先移除本事务新建的实例，再安装 committed snapshot，失败帧不再泄漏临时 context。
+- Input Event 采用消费 journal 而不是冻结整个队列：每次 `ConsumeVFXEventDispatchPlan` 在删除前记录已消费前缀；Abort 将前缀放回队首，同时保留 Prepare 后并发追加的队尾事件，Commit 才丢弃 journal。Prepare 先在局部对象完成所有 snapshot 分配，再原子安装到 frame storage，内存分配失败不会留下半安装 rollback 状态。
+- managed frame snapshot 同步覆盖 `aliveParticleCount` 与最后一次 input dispatch。内部 dispatch/callback/Output 校验失败会恢复 native 与 managed 两侧状态并允许下一帧只消费一次重试；Abort 同时清空未提交的 managed Output staging。
+- 产品帧的 Output Event 改为 Prepare 内从 native FIFO 出队并校验、Commit 成功后才进入外部 `outputEventReceived` 用户回调。用户回调异常发生时 native frame 已提交，不会触发错误回滚；同次提交中尚未开始的后续 batch 会保留到下一次 Effect update 再交付。
+- `NativeGraphicsDevice` 新增 VFX 产品帧 lifetime fence：PlayerLoop、显式 Camera 更新、culling camera submission/complete 在 native 使用期内阻止并发销毁；同线程回调内 `Dispose` 延迟到最外层 native use 退出，跨线程 `Dispose` 等待临界区。由此消除了全量并行测试曾复现的 native registry mutex use-after-dispose 崩溃。
+
+### 测试与门禁
+- 新增 `NativeVFXEffectDataTransactionTests` **19/19**：覆盖 input Abort/Commit/并发尾部、Initialize 新建/覆盖/Commit、Particle attributes/alive/dead-list 的 CPU 与 Metal Abort/Commit、Output FIFO/sequence watermark、Commit 前不可见、managed Abort、回调异常发生在 Commit 后、后续 batch 重试、真实 PlayerLoop 次帧交付，以及 managed input 单次重试。
+- 强制产品 dylib 的 VFX/VisualEffect 宽过滤由 **405** 增至 **424/424**；Core 全量由 **1,228** 增至 **1,247/1,247**，并在并行全量门禁中确认不再出现 device Dispose/native mutex 崩溃。VFX Graph 保持 **466/466**。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例产品工程，0 编译错误；URP3DDemo 仍为既有 43 个 nullable warning。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+- 官方 Unity 2022.3.51f1 / VFX Graph 14.0.11 fixture 未改动，继续由 **582 state + 100 Output Event + 24 callback + 66 Built-In callback + 17 manual-control** 精确记录门禁约束既有时序。
+
+### 尚未完成
+- 本批原子化的是当前已经存在的 CPU/native registry 数据。尚未实现的 Update/Reap/Output 完整 particle lifecycle、GPU persistent buffers、generation snapshot + staged CAS、Vulkan/D3D11 compute 与 GPU Event 未来加入后，也必须进入同一 effect transaction；因此不能把当前 journal 描述为完整 VFX Graph GPU 事务。
+- 外部 Output callback 已严格移到 Commit 后，且后续 batch 可重试；但 callback 抛异常时同 batch 剩余 record、多个订阅者与回调重入的 Unity Player 精确继续/中止规则还缺官方异常注入 A/B，当前不宣称这一边界完全等价。
+- Automatic GPU bounds、遮挡/URP camera stack/XR、最终 engine-native player host、动态 native operand、资源型 callback、多 chain、完整 VFX Graph 编辑器及跨平台产物仍未闭环。总体 Unity 2022 Ultra `/goal` 继续进行；API 审计仍缺 **3,189** 个官方类型。
+
+### 下一优先项
+1. 实现 Automatic bounds 的 native/GPU reduction、跨后端 readback 与 transaction generation，并用 URP base/overlay、XR view、SceneView/Preview 及遮挡裁剪官方 fixture 固化最终 camera stack 语义。
+2. 让 linked activation、Rate/Burst/SetAttribute/loop/delay 复用 typed DAG，增加不重置 native Spawner 状态的 operand upload/evaluator，再继续资源型 callback 与多 chain。
+3. 落地 Update/Reap/Output 完整粒子生命周期和 Vulkan/D3D11/Metal persistent compute resource transaction，并补 Output callback 异常/重入官方 Player A/B。
+
+## 2026-07-16ax — VFX 手动仿真与异常 Abort/rollback native 帧事务
+
+### 已完成
+- 扩展 Unity 2022.3.51f1 / VFX Graph 14.0.11 非 batchmode Metal Player 探针，以真实 Player 锁定 `VisualEffect.Simulate`、`AdvanceOneFrame` 与 `Reinit`：`Simulate(step,count)` 延迟到下一次 VFX update，逐 step 使用原始 `stepDeltaTime`、忽略 `playRate`，同一游戏帧内多个 step 共享 VFX FrameIndex；`stepCount=0` 不运行，负数使时间倒退，NaN 原样传播且均不抛异常。`AdvanceOneFrame` 仅在 pause 时排队，使用下一帧游戏 delta/playRate 路径；非 pause 调用无效果。`Reinit` 立即清空公开 clock/Spawner 状态和已排队手动步，并在下一次 VFX update 调度初始事件。
+- `anity-native` 新增 `AnityGraphics_PrepareVFXEffectManualFrame` 与 `AnityGraphics_AbortVFXEffectFrame`。每次 normal/manual Prepare 都保存最后一次 committed clock 与所有 native Spawner 状态；Commit 只在 callback、Initialize dispatch 和 Output 阶段全部成功后推进，Abort 恢复 committed total/accumulator/generation 与 Spawner loop/random/block clocks，首次未提交 Effect 则完整移除临时 clock。manual Prepare 保留 IEEE 负数/NaN 语义，公开普通 Spawner tick 的参数校验不被放宽。
+- `VisualEffect` 新增延迟 manual-update 队列：`Simulate` 按 step 排队、pause 下 `AdvanceOneFrame` 排队、`Reinit` 清队列并重置 native/managed 状态。`VFXManager` 在 regular update 前排空手动步，每一步都走同一 Prepare → input → Spawner/callback → output → Commit 事务；异常会清理剩余手动工作、调用 native Abort、刷新 managed Spawner snapshot 并恢复 managed frame cache，然后重新抛出原始异常。
+- PlayerLoop 异常路径同时收口：callback/dispatch 失败时会完成或清除当前 culling transaction，避免残留 active frame 和已释放 graphics device 污染下一次 update。一次性 callback 抛错后的同 Effect、同 device 下一帧可重新 Prepare 并正常推进，不再卡在 prepared 状态。
+
+### 测试与门禁
+- 新增 `NativeVFXManualFrameTransactionTests` **15** 个测试，加上 PlayerLoop callback 异常恢复 **1** 个测试，共 **16/16**：覆盖精确手动 delta、首次 Abort 删除状态、回滚 total/accumulator/Spawner、错误 frame、Abort 后禁止 Commit、同 frame 重试、延迟 Simulate、忽略 playRate、多步共享 frame、0 step、负数、NaN、pause AdvanceOneFrame、非 pause no-op、Reinit 取消队列与下一帧恢复。
+- 官方 fixture 现通过 **582 state + 100 Output Event + 24 callback + 66 Built-In callback + 17 manual-control** 精确记录门禁；脚本对 deferred 执行、frame index、delta/total、playRate、pause、0/负数/NaN 与 Reinit 初始事件逐项断言。
+- 强制加载产品 dylib 的 callback/Spawner 定向测试 **154/154**，VFX/VisualEffect 宽过滤由 **389** 增至 **405/405**，Core 全量由 **1,212** 增至 **1,228/1,228**；VFX Graph 保持 **466/466**。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例产品工程；0 编译错误，URP3DDemo 仅有既有 43 个 nullable warning。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+
+### 尚未完成
+- 本批可回滚范围是 VFX frame clock、fixed-step accumulator、managed frame cache 与 native Spawner 状态。已消费 input event queue、Initialize/Particle buffer、dead-list 以及已向外部用户代码交付的 Output Event 尚没有统一 deep snapshot/rollback；因此不能宣称 callback/dispatch 异常下整个 Effect 的全部数据都已原子化。
+- 仍需补 `Simulate`/`Reinit` 并发争用、极大 `stepCount` 的调度预算/防饿死，以及各平台 Player 的异常注入 A/B。Automatic GPU bounds、遮挡/URP camera stack/XR、最终 engine-native player host、动态 operand、资源型 callback、多 chain、Update/Reap/Output 与完整 VFX Graph 编辑器仍未闭环。
+- 总体 Unity 2022 Ultra `/goal` 继续进行；API 审计仍缺 **3,189** 个官方类型，本里程碑不代表完整 Unity/VFX 生产等价。
+
+### 下一优先项
+1. 把 input event queue、Initialize/Particle/dead-list 与 Output queue 纳入 per-effect native transaction snapshot，并延迟外部 Output Event 交付到 Commit 后，做到 Prepare 之后任意内部异常的全数据回滚。
+2. 实现 Automatic bounds 的 native/GPU reduction 与跨后端 readback，并用 URP base/overlay、XR view、SceneView/Preview 及遮挡裁剪官方 fixture 固化最终 camera stack 语义。
+3. 让 linked activation、Rate/Burst/SetAttribute/loop/delay 复用 typed DAG，增加不重置 native Spawner 状态的 operand upload/evaluator，再继续资源型 callback、多 chain 与 Update/Reap/Output。
+
+## 2026-07-16aw — VFX native bounds/frustum culling 与一帧可见性延迟
+
+### 已完成
+- `anity-native` 新增完整 VFX culling registry 与稳定 C ABI：40-byte `AnityGraphicsVFXCullingBounds`、80-byte `AnityGraphicsVFXCullingCamera`、40-byte `AnityGraphicsVFXCullingState`，以及 Begin/SubmitCamera/Complete/GetState 四个入口。Begin 与当前 native PlayerLoop token/frame 严格绑定并事务安装 Effect bounds；Camera submission 按 `GameObject.layer`/`Camera.cullingMask` 过滤，以 world AABB 八角点执行 homogeneous clip-space frustum 判定；多个 Camera 做 OR 可见性合并，重复 Camera 拒绝，Complete 才发布下一帧 `culled` 与 generation。
+- `VFXManager` 已把 culling 事务接入真实游戏帧：本帧 Effect 更新读取上一帧完成的可见性，本帧所有启用 Camera 在 render loop 中提交，`Camera.RenderAll` 结束后发布结果，因此锁定 Unity Player 已观测到的一帧延迟。一个 Effect 被任意 Game/SceneView/Preview Camera 看见即继续模拟；无 Camera、没有可靠静态 bounds、disabled Effect 都保守为不裁剪。重复渲染同一 Camera 不重复计数，多 Camera 不重复更新 Effect。
+- `VisualEffect` 可把所有 particle system 的 local/world 静态 bounds 合并成 world AABB；local bounds 使用完整 `localToWorldMatrix` 的绝对 3×3 计算旋转/非均匀缩放后的 extents，world-space bounds 不受组件 Transform 二次变换。任一 system 为 dynamic/unknown bounds 时整个 Effect 保守视为 unbounded，避免错误停算。
+- VFX runtime asset 从 **v11 升级到 v12**，继续读取 v1-v11；每个 Particle/ParticleStrip system 版本化保存静态 AABox 与 local/world simulation space。VFX Graph 编译器从 Initialize 的官方 `bounds` structured slot 读取 Recorded/Manual AABox，Recorded 模式加入 `boundsPadding * 2`；Automatic、`needsComputeBounds`、linked/非法 bounds 不伪造静态结果。`VisualEffectAsset.ImportRuntimeData` 将 v12 contract 安装到运行时 culling metadata。
+- 旧版本迁移测试已按 v12 system layout 更新：测试真正移除新增 bounds 字段并重算 checksum 后再验证 v11/v10/v9/v5 读取，不以只改版本号的无效 payload 冒充兼容。原先直接写 internal `effect.culled` 的 callback 测试改为真实 Camera/frustum 驱动，验证首帧更新、下一帧冻结、返回视锥后一帧恢复与不补算 TotalTime。
+
+### 测试与门禁
+- 新增 native ABI/事务/边界 **14** 个测试和真实 PlayerLoop/Camera/bounds **13** 个发现项，共 **27/27**：覆盖 ABI size、内外视锥、Complete 前不发布、无 Camera、无静态 bounds、layer mask、多 Camera OR、重复 Camera/Effect、NaN、陈旧 token、跨帧保留、Clear、首帧/恢复一帧延迟、disabled Camera、SceneView/Preview、local affine bounds、world runtime-v12 bounds。
+- VFX Graph 新增 **6** 个测试，覆盖 Recorded padding、Manual、world space、Automatic unbounded、v12 round-trip、非法 bounds；全量由 **460** 增至 **466/466**。Core 新增共 **27** 个测试发现项，由 **1,185** 增至强制 native **1,212/1,212**；VFX/VisualEffect 宽过滤由 **362** 增至 **389/389**。
+- `bash _scripts/capture-unity-vfx-spawner.sh` 已重新构建官方 Unity 2022.3.51f1 / VFX Graph 14.0.11 非 batchmode Metal Player 并通过 **582 state + 100 Output Event + 24 callback + 45 Built-In callback** 原有精确门禁，其中双 Effect/3 Camera 的离开/返回视锥一帧延迟继续成立。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例产品工程；0 编译错误，URP3DDemo 仅有既有 43 个 nullable warning。Unity API 门禁仍为类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+
+### 尚未完成
+- Recorded/Manual 静态 bounds 与 frustum/layer/multi-camera 已闭环；Automatic/`needsComputeBounds` 目前只做安全的 unbounded fallback，尚未实现 GPU particle reduction/readback 的动态 bounds。遮挡裁剪、URP base/overlay camera stack 的官方逐平台 A/B、XR 多 view、SceneView/Preview 编辑器截图与 Vulkan/D3D11/iOS player 产物仍未闭环。
+- PlayerLoop token、VFX clock、culling registry 都已在 native，但最终平台 player 的主循环入口仍由托管 `UnityRuntime.Tick` 驱动。`VisualEffect.Simulate` / `AdvanceOneFrame` / Reinit 与 callback/dispatch 异常 Abort/rollback 仍需统一到可回滚 native transaction。
+- linked activation、Rate/Burst/SetAttribute/loop/delay 动态 operand、资源型 callback、多 chain、Update/Reap/Output、generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、完整 VFX Graph 编辑器及其余 Unity 公开面仍未完成；API 审计仍缺 **3,189** 个官方类型，总体 Unity 2022 Ultra `/goal` 继续进行。
+
+### 下一优先项
+1. 把 `VisualEffect.Simulate`、`AdvanceOneFrame`、Reinit 与异常 Abort/rollback 纳入 native clock/culling transaction，补至少 10 个失败恢复/并发深测与官方逐相位 A/B。
+2. 实现 Automatic bounds 的 native/GPU reduction 与跨后端 readback，并用 URP base/overlay、XR view、SceneView/Preview 及遮挡裁剪官方 fixture 固化最终 camera stack 语义。
+3. 让 linked activation、Rate/Burst/SetAttribute/loop/delay 复用 typed DAG，增加不重置 native Spawner 状态的 operand upload/evaluator，再继续资源型 callback、多 chain 与 Update/Reap/Output。
+
+## 2026-07-16av — VFX native PlayerLoop、多 Camera 与 pause/culled 调度语义
+
+### 已完成
+- `anity-native` 新增 `AnityGraphics_BeginVFXPlayerLoopFrame`：device registry 持有单调 `playerLoopToken` 与对应 VFX `frameIndex`，同 token 任意重复调用只返回同一帧且 `beganFrame=0`，新 token 只推进一次，0/陈旧 token 显式拒绝。显式 `BeginVFXFrame` 会使当前 PlayerLoop token 失效，避免显式测试/工具帧被误当成 render-loop 重入；四个 frame clock export 已由产品 dylib 实际导出。
+- `UnityRuntime.Tick` 在 Canvas/Camera 渲染前调用 `VFXManager.ProcessPlayerLoopUpdate`，即使场景没有 Camera 也会推进 VFX。每个游戏帧由 native token 只创建一个 VFX frame，所有 live Effect 共享 FrameIndex、各自只执行一次 Prepare→Spawner/Callback/Output→Commit；随后 1 个或多个 `RenderPipeline.RenderSingleCamera` camera command 复用该结果，不再按 Camera 数重复累积时间或发射 OnUpdate。显式 `ProcessCameraCommand` 保持一调用一帧，方便编辑器/测试独立驱动。
+- pause 与 culled 调度按官方 Player 证据纠正：pause 的 Effect 仍执行 Spawner OnUpdate，但 `VFX Delta Time=0`、TotalTime 与 fixed-step accumulator 冻结、全局 FrameIndex 继续递增；native zero-delta tick 仅执行 ordered SetAttribute/Custom Callback，不推进 Rate/Burst/loop time。`effect.culled=true` 时整个 Effect update 跳过，FrameIndex/TotalTime/Spawner callback 均冻结，恢复可见后从旧状态继续。
+- Unity 2022.3.51f1 / VFX Graph 14.0.11 非 batchmode Metal Player fixture 新增双 Effect + 3 Camera 场景：A 使用 seed 101/playRate 1.25，B 使用 seed 202/playRate 2。精确锁定每个 `Time.frameCount` 每 Effect 仅一次 OnUpdate、共享 VFX FrameIndex；A pause 三帧仍有 3 次 zero-delta callback 且 TotalTime 不变；移到远端后有一帧可见性延迟，再连续三帧完全无 callback，返回后 TotalTime 不补算。Built-In 证据由 12 增至 **45 条**（原场景 12 + A 15 + B 18），脚本以 exact count、方法分布、Camera 数、pause/cull 分组和时间冻结逐项硬断言。
+
+### 测试与门禁
+- 新增 **22 个 Core 测试发现项**，Core 从 1,163 增至 **1,185/1,185**：覆盖 10 个 token 递增样本、同 token 重入、0/陈旧 token、显式帧冲突恢复、无 Camera、双 Camera 去重、双 Effect 共享帧/隔离 Total、pause、disabled/culled、显式 camera 独立推进，以及 pause callback zero delta 与 culled callback/clock 冻结。测试清理 live Effect，避免 PlayerLoop 将前序故障注入 fixture 当成产品 Effect 更新。
+- 主 `libanity_native.dylib` 重新编译后，以 `ANITY_REQUIRE_NATIVE=1` + `AnityRequireNative=true` 强制执行 VFX 定向回归 **349/349**；额外包含 `VisualEffect*` 命名套件的宽过滤为 **362/362**，没有托管 fallback。VFX Graph 保持 **460/460**。
+- `bash _scripts/capture-unity-vfx-spawner.sh`、`bash _scripts/build-native.sh Release`、`bash _scripts/build-all.sh Release` 全部通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例产品工程 0 编译错误，URP3DDemo 只有既有 43 个 nullable warning。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+
+### 尚未完成
+- 本批已尊重 `VisualEffect.culled` 的官方停算语义，但还没有用 Effect bounds、Camera frustum、camera stack/遮挡结果自动计算并提交 culled 状态；当前不能宣称完整 VFX culling。`VFXUpdateMode`、编辑器 preview/SceneView 以及不同 render pipeline/camera stack 的逐平台 Player A/B 也未闭环。
+- PlayerLoop 的唯一帧 token 与时钟所有权已在 native，但调度入口仍由托管 `UnityRuntime.Tick` 触发；还需接入最终 native engine loop/平台 player host。公共 `Simulate` / `AdvanceOneFrame`、Reinit 与 callback/dispatch 异常 Abort/rollback 尚未统一到可回滚 native transaction。
+- linked activation、动态 Rate/Burst/SetAttribute/loop/delay、资源型 callback input、多 callback/Spawner/custom event chain、Update/Reap/Output、generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph与完整编辑器/平台产物仍未完成；API 审计仍缺 **3,189** 个官方类型，总体 Unity 2022 Ultra `/goal` 继续进行。
+
+### 下一优先项
+1. 将 Effect bounds 与 Camera/camera stack 的可见性判定落到 native culling registry，并用官方 Player 锁定一帧延迟、SceneView/preview 和无 Camera 行为。
+2. 把 `VisualEffect.Simulate`、`AdvanceOneFrame`、Reinit 与异常 Abort/rollback 纳入 native clock transaction，补至少 10 个失败恢复/并发深测与官方逐相位 A/B。
+3. 让 linked activation、Rate/Burst/SetAttribute/loop/delay 复用 v11 typed DAG，增加不重置 native Spawner 状态的 operand upload/evaluator，再继续资源型 callback、多 chain 与 Update/Reap/Output。
+
+## 2026-07-16au — VFX native 全局帧时钟与 Effect 两阶段仿真提交
+
+### 已完成
+- 将 VFX manager frame clock 下沉 `anity-native`：设备级 registry 现唯一持有全局 `frameIndex`，每个 Effect 独立持有 fixed-step accumulator、当前 game/unscaled/scaled delta、step count 与 total time。新增稳定 **48-byte `AnityGraphicsVFXFrameState` C ABI**，以及 Begin、Prepare、Commit、Get、Reset 五组原生入口；`ClearVFXEffectState` 同步销毁 Effect clock，device teardown 继续统一释放完整 registry。
+- 原生 Prepare 按官方 Player 已锁定的规则累积 `Time.deltaTime`、使用 Unity nearest-even 的 `maxDeltaTime/fixedTimeStep` 步上限、消费整数 fixed step 后再乘 `VisualEffect.playRate`。多个 Effect 在同一次 manager process 中共享一个 FrameIndex，但 accumulator/TotalTime 完全隔离；pause 不积累 delta，`playRate=0` 仍消费 unscaled step 而 scaled time 保持零。
+- 时钟改为严格两阶段语义：Prepare 暴露 callback 当前帧 Delta 与**提交前** TotalTime，OnPlay/OnUpdate/OnStop、Spawner 和 Output 全部完成后 Commit 才推进 TotalTime。这与官方初始 OnPlay、replay OnPlay 和 Stop callback 的相位证据一致；重复 Prepare、错误 frame Commit、陈旧 FrameIndex 与非法/非有限参数均显式拒绝，不产生静默状态漂移。
+- `VFXManager.ProcessCameraCommand` 产品路径现从当前 native graphics device 获取 FrameIndex，并为每个 `VisualEffect` 执行 native Prepare → input/callback → native Spawner → output → native Commit。`VisualEffect` 只缓存原生返回值供 17 个 Dynamic Built-In 同步读取，并校验 effect/frame/prepared/generation、有限性和 playRate scaling；不再由 C# 产品调度路径自行计算 accumulator 或 TotalTime。无 native 设备的现有 internal 单元测试 helper 仍保留确定性托管回退，不冒充产品 native 路径。
+- native clock state 与 Spawner/Event/Initialize/Particle 生命周期已统一：更换 asset、`Reinit`、对象销毁和显式 Clear 都会移除同一 effectId 的全部原生状态；Reset 仅重建 Effect clock，不回退设备全局 FrameIndex。
+
+### 测试与门禁
+- 新增 **32 个 Core 测试发现项**：48-byte ABI、设备递增帧号、双 Effect 同帧、10 帧官方 **3,2,2,2,2,2,1,2,2,2** 序列、Prepare/Commit Total 相位、独立 accumulator、pause、零 playRate、重复 Prepare、错误 Commit、Reset/Clear、8 组非法参数、nearest-even 上限、托管 cache 原生来源，以及 OnPlay Dynamic Built-In 读取 native prepared delta。专项 callback + frame clock **102/102**，全部实际加载产品 dylib。
+- 强制 native 全部 VFX 从 295 增至 **327/327**；VFX Graph 保持 **460/460**；Core 全量从 1,131 增至 **1,163/1,163**。本批只新增 internal/native C ABI，不改变 Unity 公开 API 表面。
+- `bash _scripts/capture-unity-vfx-spawner.sh` 再次重建并通过官方非 batchmode Metal Player 门禁：**582 state + 100 Output Event + 24 callback + 12 Built-In callback**，证据继续保存于 `parity-evidence/unity-vfx-spawner-2022.3.51f1.json`。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例产品工程 0 编译错误，URP3DDemo 仅有既有 43 个 nullable warning。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+
+### 尚未完成
+- 设备级时钟已经 native 化，但 Anity 仍缺独立于显式 camera command 的 engine-native PlayerLoop VFX update hook；当前每次显式 `ProcessCameraCommand` 仍代表一次 VFX update。多 Camera 同游戏帧去重、camera stack、无 Camera 仿真、pause/culled 与不同 `VFXUpdateMode` 的最终官方语义尚未闭环。
+- 公共 `Simulate` / `AdvanceOneFrame` 与 internal raw `AdvanceSpawnerSystems` 尚未统一为可事务回滚的 native clock control；callback/dispatch 异常发生在 Prepare 与 Commit 之间时也缺 native Abort/rollback ABI。上述路径保持明确未完成，不能据本批宣称完整 VisualEffect runtime。
+- linked activation、Rate/Burst/SetAttribute/loop/delay 的动态 operand、资源型 callback input、多 callback/Spawner/custom event chain、极端 spawnCount，以及 Update/Reap/Output、generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph和完整编辑器/平台产物仍未完成；API 审计仍缺 **3,189** 个官方类型，总体 Unity 2022 Ultra `/goal` 继续进行。
+
+### 下一优先项
+1. 建立 engine-native VFX PlayerLoop update hook 与每游戏帧 token，扩展官方 fixture 覆盖多 Camera、多 Effect、无 Camera、pause/culled/update mode，并证明每个 Effect 每游戏帧只 Prepare/Commit 一次。
+2. 把 `VisualEffect.Simulate`、`AdvanceOneFrame`、Reinit 与异常 Abort/rollback 纳入 native clock transaction，补官方逐相位 A/B 和至少 10 个失败恢复/并发深测。
+3. 让 linked activation、Rate/Burst/SetAttribute/loop/delay 复用 v11 typed DAG，增加不重置 native Spawner 状态的 operand upload/evaluator，再继续资源型 callback、多 chain 与 Update/Reap/Output。
+
+## 2026-07-16at — VFX Dynamic Built-In 官方 Metal Player 全相位时钟语义
+
+### 已完成
+- 扩展 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 的非 batchmode Metal Player 探针，新增真实 `VFXDynamicBuiltInParameter(m_BuiltInParameters=0x1ffff) → Custom Spawner Callback` 场景。回调同时读取官方 17 个 Built-In 与 `VFXSpawnerState`、`Time`、`VFXManager`、`VisualEffect`、Transform 和 seed 参考值；场景固定 `startSeed=17`、`resetSeedOnPlay=false`、`playRate=1.75`、`Time.timeScale=0.5` 及非单位 position/rotation/scale。Matrix4x4 callback input 通过官方 Transform→Matrix slot conversion，LocalToWorld/WorldToLocal 的 16 项值均由 Player 实际编译运行，不以源码推断代替。
+- 官方证据扩展为 **582 条 Spawner state + 100 条 Output Event + 24 条既有 callback + 12 条 Built-In callback**，覆盖 3 次 OnPlay、8 次 OnUpdate、1 次 OnStop、Stop 后 Finished update 与 replay。门禁逐项比较 7 个 VFX clock/manager 值、7 个 Game Time 值、双矩阵、SystemSeed，并验证 VFX Frame Index 与 `Time.frameCount` 是同步递增但独立的计数源。
+- Player A/B 锁定了此前推断错误：Built-In VFX Delta Time 不是 `VFXSpawnerState.deltaTime` 的别名。OnUpdate 两者相等，但初始 OnPlay 的 state delta 为 0、Built-In 已是当前帧步长；replay OnPlay 可保留上一 state delta，同时 Built-In 使用新帧步长。VFX Total Time 也不随 Stop callback 的 state total 清零，而是按组件 VFX 仿真时钟继续累积。
+- `VisualEffect` 现保存独立的 VFX frame delta、total、frame index 与 fixed-step accumulator。每次 manager process 把游戏 `Time.deltaTime` 累积成 `VFXManager.fixedTimeStep` 的整数步，每次最多消费按 `maxDeltaTime/fixedTimeStep` 四舍五入得到的步数，再乘 component playRate；官方固定输入序列已精确复现 **3,2,2,2,2,2,1,2,2,2** 步。OnPlay/OnUpdate/OnStop 的 Built-In 求值统一读取该当前 VFX frame context；Game Time、Manager、矩阵和 seed 仍逐 callback 实时读取。
+- `VFXManager` 新增独立递增 frame index；显式 `ProcessCameraCommand` 现在用同一 prepared frame delta 完成输入 callback、native Spawner tick、输出交付与 total-time 提交。强制 native 回归曾发现按 `Time.frameCount` 去重会吞掉同帧第二次显式 camera process 的 Output Event，因此在尚无独立 engine VFX update hook 前保留“一次显式 process 对应一次 VFX update”的可验证语义，不留下假绿。
+
+### 测试与门禁
+- 新增 **13 个 Core 测试发现项**：10 个官方 fixed-step 累积序列、OnPlay/OnStop 当前帧 delta、VFX total 累积，并把 Frame Index 断言改为独立 VFX manager source。callback + Spawner 从 154 增至 **167/167**；强制加载产品 dylib 的全部 VFX 从 282 增至 **295/295**。
+- `bash _scripts/capture-unity-vfx-spawner.sh` 已连续重建并通过官方 Metal Player 语义门禁；脚本会先删除旧输出，拒绝 stale evidence。证据保存于 `parity-evidence/unity-vfx-spawner-2022.3.51f1.json`，Editor/Player 日志同步保留。
+- VFX Graph 全量保持 **460/460**；Core 全量从 1,118 增至 **1,131/1,131**。本批只改 internal runtime 调度语义，Unity 公开 API 表面无新增/删除。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品工程 0 编译错误，URP3DDemo 保留既有 43 个 nullable warning。Unity 2022.3.51f1 API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+
+### 尚未完成
+- 当前 Player fixture 已关闭默认可见运行、Stop/replay 与 `resetSeedOnPlay=false` 的 17 项相位语义；pause、culled、不同 `VFXUpdateMode`、`Simulate`、`AdvanceOneFrame`、`resetSeedOnPlay=true` 随机 seed、多 Camera/多 Effect 的官方逐帧矩阵仍未覆盖。Anity 也尚缺独立于 camera process 的 engine-native VFX update hook，因此多 Camera 下“每游戏帧只推进一次”的最终架构仍待闭环。
+- fixed-step accumulator 与 VFX total/frame context 目前由 C# `VisualEffect`/`VFXManager` 持有，native C++ 仍只拥有 Spawner 内部 loop/task clocks；后续必须把 manager frame preparation 与全部 VFX system 共享时钟下沉 native，避免不同 system/backend 各自累积。
+- linked activation、Rate/Burst/SetAttribute/loop/delay 的动态 operand、资源型 callback input、多 callback/Spawner/custom event chain、极端 spawnCount，以及 Update/Reap/Output、generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph和完整编辑器/平台产物仍未完成；API 审计仍缺 **3,189** 个官方类型，总体 Unity 2022 Ultra `/goal` 保持进行中。
+
+### 下一优先项
+1. 把 VFX manager frame preparation/accumulator/FrameIndex/TotalTime 下沉 `anity-native`，增加独立 PlayerLoop update hook，并用多 Camera、多 Effect、pause/culled/update mode 官方 Player fixture 验证每游戏帧只推进一次。
+2. 让 linked activation、Rate/Burst/SetAttribute/loop/delay 复用 v11 typed DAG，增加不重置 native Spawner 状态的 operand upload/evaluator。
+3. 扩展 Curve/Gradient/Texture/Mesh callback binding、多 callback/Spawner/custom event chain、`resetSeedOnPlay=true` 与极端 spawnCount 官方 fixture，再继续 Update/Reap/Output 和三后端闭环。
+
+## 2026-07-16as — VFX Graph 14 全量 dynamic built-in callback expression
+
+### 已完成
+- 对照本机 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 官方 `VFXBuiltInExpression.cs` 与 `VFXDynamicBuiltInParameter.cs`，runtime asset 从 **v10 升级为 v11**，为官方 17 个 dynamic built-in 建立独立 typed opcode：VFX Delta/Unscaled Delta/Total Time/Frame Index/Play Rate/Manager Fixed Time Step/Manager Max Delta Time、7 个 Game Time、LocalToWorld、WorldToLocal 与 SystemSeed。v1-v10 继续读取；built-in instruction 必须无 operand/常量/属性名，并严格匹配 Float、UInt32 或 Matrix4x4 类型。
+- VFX Graph 编译器按官方 `BuiltInFlag` 的 bit0→bit16 顺序映射 `VFXDynamicBuiltInParameter.m_BuiltInParameters` 与 output slot，而不是依赖易变的显示名。单项/组合 flag、输出数、未知位和类型均验证；17 项都可作为 Custom Spawner Callback 输入，也可继续参与既有 Add/Subtract/Multiply/OneMinus SSA。Transform callback input 同步进入 Matrix4x4 runtime type，并把 VFX Transform 默认 position/Euler/scale 编码为 16-word TRS。
+- callback 求值现在接收本次 native callback 的 `VFXSpawnerState` 与当前系统 seed：VFX delta 取 native 调度 delta，unscaled delta 去除 component playRate，total time 取组件可见运行时钟，Frame Index 取全局 VFX 更新源，PlayRate/Manager/Game Time 每次调用实时读取；LocalToWorld/WorldToLocal 取组件 Transform 仿射矩阵。每个 native Spawner instance 保存当前 system seed，Play control 在同步 OnPlay callback **之前**切换到实际 seed，失败时回滚，确保 `resetSeedOnPlay=false` 的 `startSeed` 与自动重播 seed 都不晚一帧。
+- 用官方 `SimpleParticleSystem.vfx` 的真实 graph/spawner 结构注入 `VFXDynamicBuiltInParameter(PlayRate) → Custom Callback`，已闭环官方 YAML → typed graph → v11 opcode → runtime asset；合成图同时覆盖全部 17 flag 与组合输出顺序。
+
+### 测试与门禁
+- 新增 **22 个 Core 测试发现项**：10 类 live VFXManager/Game Time、VFX delta/unscaled/total、FrameIndex、同步 OnPlay SystemSeed、双矩阵、错误类型/operand、v10 读取；callback + Spawner 从 132 增至 **154/154**，强制 native VFX 从 260 增至 **282/282**，全部实际加载本批 arm64 dylib。
+- VFX Graph 新增 **22 个测试发现项**，从 438 增至 **460/460**；Core 全量从 1,096 增至 **1,118/1,118**。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例均 0 编译错误。URP3DDemo 仍只有既有 43 个 nullable warning。
+
+### 尚未完成
+- 17 个 built-in 已按官方源码定义、真实 native callback 和官方 `.vfx` 拓扑闭环，但 VFX Total Time/Frame Index、不同 update mode、pause/culled、fixed delta、`resetSeedOnPlay=true` 随机 seed 的**官方非 batchmode Metal Player 逐相位 A/B 记录尚未扩展**；因此本批不宣称完整 VFX Graph 完成。
+- typed DAG 尚未覆盖更多官方 operator、linked activation，以及 Rate/Burst/SetAttribute/loop/delay 的动态 operand；CPU expression 求值仍在托管 callback 边界，尚未成为可由 native task chain 复用的 operand evaluator。
+- Curve/Gradient/Texture/Mesh 等资源型 callback input、多 callback/Spawner/custom event chain、负数/非有限/极大 spawnCount，以及 Update/Reap/Output、generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整编辑器/平台产物仍未完成；API 审计仍缺 **3,189** 个官方类型，总体 Unity 2022 Ultra `/goal` 保持进行中。
+
+### 下一优先项
+1. 扩展官方 Unity Metal Player probe，把 17 个 built-in 在 OnPlay/OnUpdate/OnStop、pause/culled/fixed/update mode/replay 下逐帧记录并与 Anity native callback 对照，先消除 VFX Total Time/Frame Index/seed 相位推断。
+2. 让 linked activation、Rate/Burst/SetAttribute/loop/delay 复用 v11 typed DAG，并增加不重置 Spawner 状态的 native operand upload/evaluator。
+3. 扩展常用 VFX operator 与 Curve/Gradient/Texture/Mesh 资源 binding/lifetime，再补多 callback/Spawner/custom event chain 和极端 spawnCount 官方 fixture。
+
+## 2026-07-16ar — VFX v10 typed runtime expression DAG
+
+### 已完成
+- runtime asset 从 **v9 升级为 v10**，新增 checksummed typed expression program：有序 SSA instruction 可表达 Constant、ExposedProperty、Add、Subtract、Multiply 与 OneMinus，且 callback input 只能在常量、direct source property、expression 三种来源中选择一种。反序列化会在安装前验证 result/type、常量 word 数与有限性、暴露属性引用、逐指令同型 operand、前向/越界引用和运算类型；保留 v1-v9 读取，并新增真实删去 v10 expression 字段的 v9 callback payload 迁移证据。
+- VFX Graph 编译器已把 callback input 的 reciprocal slot link 降级为上述 SSA：支持 Float/Float2/Float3/Float4 以及 UInt32/Int32 的 Add/Subtract/Multiply，OneMinus 限制为浮点标量/向量；direct exposed property 继续走 v9 快速引用。共享上游只发射一次，嵌套 operator 保持依赖顺序，未知 operator、错误 arity、类型变化与非法 root 均显式拒绝。
+- Custom Spawner Callback 每次 OnPlay/OnUpdate/OnStop 调用前都会针对当前 `VisualEffect` 实例求值 expression。Constant 与组件级 exposed-property override 可混合计算，Set/ResetOverride 在下一次 callback 立即生效；UInt/Int 使用确定性 unchecked 运算，Float1-4 使用逐分量运算，同一 Asset 的组件仍保持 override/求值隔离。
+- 用 Unity VFX Graph 14.0.11 官方 `SimpleParticleSystem.vfx` 的真实 Graph/Spawner 结构注入 `VFXParameter → Add → Custom Callback`，已闭环 YAML → typed graph → v10 SSA → runtime asset；另有合成图覆盖四种 operator、嵌套和共享依赖，不用 HLSL 文本测试代替 CPU runtime program 证据。
+
+### 测试与门禁
+- 新增 **12 个 Core 深测**，覆盖 v10 round-trip、真实 v9 payload 读取、空 program/前向引用/result mismatch/missing property/多来源拒绝，以及 Add/Subtract/Multiply/OneMinus、帧间属性刷新与嵌套 SSA 运行结果；callback + Spawner 专项从 120 增至 **132/132**，强制 native VFX 从 248 增至 **260/260**。
+- VFX Graph 新增 **13 个**编译深测，全量从 425 增至 **438/438**；Core 全量从 1,084 增至 **1,096/1,096**。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+- 全量复跑暴露并修复了测试基础设施中的 AssetDatabase/AssetBundle 全局状态竞态：Addressables、AssetBundle pipeline 与 LZ4 compression 现进入独占 collection，与既有异步 AssetBundle 全局状态不再并行。相关 **65/65** 定向测试及最终 Core **1,096/1,096** 均通过，避免一次绿、一次集合损坏的假稳定门禁。
+- `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例均 0 编译错误。现存 Core warning 债务与 URP3DDemo 43 个 nullable warning 未因本批扩大。
+
+### 尚未完成
+- 本批 expression subset 只进入 Custom Callback input；VFX/Game time 等 dynamic built-in、spaceable Position/Direction/Vector 的坐标变换、更多 operator、linked activation，以及 Rate/Burst/SetAttribute/loop/delay 的动态 operand 尚未共享该 program。CPU 求值也仍在托管层，尚未下沉 native operand upload/evaluator。
+- Texture/Mesh/AnimationCurve/Gradient/Transform callback input 仍缺资源 GUID/import binding、实例生命周期和官方 Player A/B；多 callback、多 Spawner/custom event chain、负数/非有限/极大 spawnCount 边界证据也未闭环。
+- Update/Reap/Output、generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整 VFX/Shader Graph、编辑器与平台产物仍未完成；API 审计仍缺 **3,189** 个官方类型，因此总体 Unity 2022 Ultra `/goal` 保持进行中。
+
+### 下一优先项
+1. 给 v10 expression program 增加 VFX/Game time built-in、spaceable 坐标变换与常用 operator，并让 linked activation 复用同一 typed DAG。
+2. 把 Rate/Burst/SetAttribute/loop/delay 的动态 operand 接入 native Spawner ordered task chain，增加不重置状态的 native operand upload/evaluator，并用官方 Player 做逐帧 A/B。
+3. 为 Texture/Mesh/AnimationCurve/Gradient/Transform 建立资源引用、导入绑定、实例生命周期与 callback 资源型 getter；随后补多 callback/Spawner/custom event chain 和极端 spawnCount fixture。
+
+## 2026-07-16aq — VFX v9 暴露属性与 Custom Callback 动态直连
+
+### 已完成
+- 对照 Unity VFX Graph 14.0.11 官方 `VFXParameter` 序列化结构，支持 `m_Exposed=1`、`m_ExposedName`、root output slot 与 callback input 的双向 `m_LinkedSlots` 直连。编译器现在收集 Boolean/Int32/UInt32/Float/Float2/Float3/Float4 暴露属性及默认原始 word，不再把 direct exposed-property callback link 错误拒绝或烘焙成 callback input 常量。
+- runtime asset 从 **v8 升级为 v9**，保持 v1-v8 读取；新增 checksummed exposed-property 表和 callback input source-property 引用。反序列化严格验证名称唯一性、类型/word 数、浮点有限性、引用存在性与类型一致性，并保持 Asset 原子替换；v5 迁移 fixture 已从真实 v9 payload 删除 v7-v9 扩展后继续通过。
+- `VisualEffectAsset.ImportRuntimeData` 现在导入 Graph 暴露属性的公开 surface、类型与默认值；`VisualEffect.Has*/Get*/Set*/ResetOverride` 因此直接作用于编译资产。每个 Custom Spawner Callback 调用前都会从当前组件刷新其 `VFXExpressionValues`，同一 Asset 的不同组件 override 互不污染，帧间 Set 与 ResetOverride 立即生效。
+- 用官方 `SimpleParticleSystem.vfx` 的真实 graph/spawner 结构注入 `VFXParameter → Custom Callback` reciprocal slot link，已证明 YAML → typed graph → exposed-property table → v9 callback source reference 全链路保真；非 direct-property operator graph 继续显式拒绝，不静默改变效果。
+
+### 测试与门禁
+- 新增 **10 个** Core 深测，覆盖 v9 round-trip、missing/type mismatch/duplicate/non-finite 拒绝、公开 surface/default、组件 override、帧间刷新、ResetOverride 与共享 Asset 组件隔离；callback + Spawner 专项从 110 增至 **120/120**，强制 native VFX 从 238 增至 **248/248**。
+- VFX Graph 全量从 424 增至 **425/425**；Core 全量从 1,074 增至 **1,084/1,084**。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+- `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例均 0 编译错误，URP3DDemo 仅有既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批只支持 callback input **直接连接单个暴露属性**。Add/Subtract/Multiply/OneMinus 等 operator DAG、dynamic built-in、linked activation，以及 Rate/Burst/SetAttribute/loop/delay 的动态 operand 尚未进入统一 runtime expression program；这些路径仍明确拒绝。
+- Texture/Mesh/AnimationCurve/Gradient/Transform 暴露属性与 callback input 尚缺资源 GUID/import binding、对象生命周期和官方 Player A/B；本批 direct property 的帧间刷新也仍需官方 Player fixture 固化调用相位。
+- Update/Reap/Output、generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph 与完整 VFX/编辑器/平台闭环仍未完成；项目仍缺 **3,189** 个官方类型，总体 Unity 2022 Ultra `/goal` 继续进行。
+
+### 下一优先项
+1. 将 direct property 扩展为版本化 typed runtime expression DAG，先覆盖 Add/Subtract/Multiply/OneMinus 与 VFX/Game time built-in，并让 callback inputs 每次调用求值。
+2. 把 linked activation 与 Rate/Burst/SetAttribute/loop/delay 动态 operand 接入 native Spawner task chain，增加不会重置状态的 native operand upload ABI，并做官方 Player 逐帧 A/B。
+3. 为 Texture/Mesh/AnimationCurve/Gradient/Transform 建立资源引用、导入绑定、实例生命周期与 callback `VFXExpressionValues` 资源型 getter 证据。
+
+## 2026-07-16ap — VFX Custom Spawner Callback 官方 Player 证据与有序 native/managed 执行链
+
+### 已完成
+- 将 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 的可重复 Metal Player 探针扩展到 `VFXSpawnerCallbacks`：覆盖 callback 位于 Constant Rate 前后、后续 Set SpawnEvent Attribute 覆盖、OnPlay/OnStop、Finished 后 OnUpdate、replay 与两个组件共享 Asset 的实例隔离。证据现有 **573 条**逐帧 `VFXSpawnerState`、**100 条** Output Event record 和 **24 条** callback lifecycle record；脚本会拒绝记录数以及 callback 输入/输出、顺序、默认 Event record 或生命周期语义漂移。
+- 官方 Player 已固定关键语义：Rate→callback 时 callback 收到 `spawnCount=0.8` 并可改成 2.8；callback→Rate 时 callback 先收到 0、返回 2，再由 Rate 累加为 2.8；后续 Set block 可覆盖 callback 写入的 Event Attribute。OnPlay/OnStop 收到 sentinel `spawnCount=1`，但不直接产生 dispatch；Finished Spawner 仍执行一次 OnUpdate 与后续 Set，跳过 Rate/Burst；Stop 保留上一帧 `deltaTime`、将 `totalTime` 清零；Play/Stop Event record 从官方默认值重建，replay 会创建新的 callback 实例并重置实例字段。
+- native Spawner Program ABI 升级为 **v5 / 96 bytes**，Block/State 保持 **80/80 bytes**。新增同步 callback C ABI、callback-aware Play/Stop/tick 和 Event record 默认值安装；C++ 继续唯一拥有时钟、随机流、Rate/Burst/Set 与 event accumulator，并在同一 ordered task chain 中按 block 位置调用托管 callback。callback 可修改完整 `VFXSpawnerState` 与 packed Event record，native 会校验 identity、枚举与全部有限数值；托管异常跨 ABI 转为 native error 后以原始异常重新抛出。
+- runtime asset 升级为 **v8** 并保持 v1-v7 读取；VFX Graph registry 加入官方 custom wrapper GUID，编译器按图顺序导出 callback assembly-qualified type 与 Bool/Int/UInt/Float/Vector2/3/4/Matrix4x4 常量输入。每个 `VisualEffect`、每个 callback block 都创建独立 `ScriptableObject` 实例，生命周期结束时销毁；`VFXExpressionValues`、`VFXSpawnerState` 和 `VFXEventAttribute` 全部用当前 Asset schema 构造并双向同步。Event record 同时恢复 Unity 的非零内置默认值，例如 `size=0.1`、`alpha=1`、`lifetime=1`、`scale=1`、`alive=true`。
+
+### 测试与门禁
+- 新增 callback 专项 **13 个**深测，覆盖 v8 round-trip、非法/重复输入、Rate 前后顺序、Set 覆盖、Play/Stop sentinel 与状态、Event 默认值、Finished OnUpdate、replay、共享 Asset 隔离、异常重抛，以及全部 blittable expression 类型；callback + Spawner 专项 **110/110**，强制 native VFX **238/238**。
+- VFX Graph 全量从 422 增至 **424/424**；Core 全量从 1,061 增至 **1,074/1,074**。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+- `bash _scripts/capture-unity-vfx-spawner.sh`、`bash _scripts/build-all.sh Release` 与上述测试全部通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例均 0 编译错误，URP3DDemo 仅有既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批只闭环 callback 的常量 blittable 输入。linked runtime expression/activation、AnimationCurve/Gradient/Mesh/Texture callback 输入仍被编译器显式拒绝；多 custom callback、多 Spawner、custom event chain 也缺官方 Player 证据，不能把 VFX Spawner 或 Visual Effect Graph 总行标为完成。
+- 负数、NaN/Infinity、极大 `spawnCount` 的官方 Player 边界仍待 fixture；Update/Reap/Output 尚未共享完整 native particle/dead-list storage。generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整 VFX Block/Operator/Output 与编辑器/截图/产物 A/B 均未闭环。
+- 最终 Unity 2022.3.61f1 fixture 尚未安装，项目仍缺 **3,189** 个官方类型以及大量成员、行为、编辑器和平台证据；总体 Unity 2022 Ultra `/goal` 继续进行，不能标记完成。
+
+### 下一优先项
+1. 把 linked activation/runtime expression 编译为版本化 operand graph，并为 callback 的 AnimationCurve/Gradient/Mesh/Texture 输入建立资源绑定与生命周期所有权。
+2. 用官方 Player 补多 custom callback、多 Spawner/custom event chain，以及负数/非有限/极大 `spawnCount` 的顺序与边界 fixture，再扩展统一 native Program/control routing。
+3. 让 Update/Reap/Output 共享 native particle/dead-list storage，完成 generation snapshot + staged CAS，以及 Vulkan/D3D11 compute、GPU Event、Particle Strip和 URP frame graph。
+
+## 2026-07-16ao — VFX Set SpawnEvent Attribute 官方 Player A/B、spawnCount 顺序与 Output Event
+
+### 已完成
+- 把 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 的可重复 Metal Player 探针扩展到 Set SpawnEvent Attribute：scalar 多块覆盖、Float3 Off、PerComponent/Uniform Random、`spawnCount` 位于 Rate 前后，以及 Spawner→Output Event。证据现有 **555 条**逐帧 `VFXSpawnerState` 和 **84 条** `outputEventReceived` record；脚本逐项验证 size=7.25 最终覆盖、UInt/Bool/spawnTime 原始值、固定 vector、两类随机 record 数、Rate→Set=3、Set→Rate 首两次事件 3.8/4.6，并拒绝记录数或关键语义漂移。
+- 官方 Player 证明并已在 native C++ 对齐：公共 `spawnCount` 是每帧按 block 顺序计算的 raw float（Constant Rate 16、0.05s 时恒为约 0.8），Initialize/Output Event 使用独立跨帧 accumulator（依次 1.6、1.4、1.2、1.0）；事件后仅减去 floor 并保留余数。Set `spawnCount` 是 offset 0 的普通有序任务：Rate 后 Set 覆盖为 3，Rate 前 Set 与 Rate 相加为 3.8；Stop 会清除旧余数后继续执行 SetAttribute，Play/Reinit 重建 accumulator。随机 SetAttribute 即使当帧不足 1 个事件也会消费随机值，PerComponent 每分量消费、Uniform 每帧一次消费均与 Player record 对齐。
+- native Spawner Program ABI 升级为 **v4 / 96 bytes**，Block 保持 80 bytes，State 扩展为 **80 bytes**并分离 raw `spawnCount` 与 `eventSpawnCount`。删除错误的 per-Rate floor/debt，把 Constant/Variable Rate、Burst 与 SetAttribute 全部归入同一 ordered raw task chain，再由统一 event accumulator 决定 dispatch record word 0；Stop 的单次 pending control event、restart reset、event record readback 和非有限值防护均在 native 所有权内。
+- VFX Graph 编译器与 runtime asset v7 现在接受 Set `spawnCount` 的保留 offset 0，保持 serialized block 顺序，并把有真实 operand 的 SetAttribute-only Spawner 编译为 native Program。Spawner 可同时或单独驱动 Initialize 与映射 Output Event；`VisualEffect` 将全局 Event record 按目标 Output Event 的独立紧凑 layout 重排并入 native FIFO，只有 Output Event、没有 Initialize 的 SetAttribute-only Program 也可运行。公共 `VFXSpawnerState.vfxEventAttribute.spawnCount` 同步暴露 raw 值，与官方 Player snapshot 一致。
+
+### 测试与门禁
+- 官方 probe 语义门禁：**555 state + 84 Output Event**；Spawner 专项从 87 增至 **97/97**，覆盖 raw/event 双计数、跨帧余数、offset 0 前后顺序、Stop pending、restart、event record word 0、last setter wins、无 dispatch 帧随机消费、公共 state 与 Initialize/Output Event/Output-only 端到端。
+- VFX Graph 全量从 420 增至 **422/422**；强制加载本批 dylib 的 Core VFX 从 215 增至 **225/225**；Core 全量从 1,051 增至 **1,061/1,061**。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例均 0 编译错误，URP3DDemo 仅有既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批已关闭常量/随机 SetAttribute、`spawnCount` target、SetAttribute-only、Initialize 与直接 Output Event routing，但 custom callback、linked expression/activation、多个 Spawner/事件 chain 的任务和 callback 顺序仍未进入统一 native Program。负数、NaN/Infinity、极大 `spawnCount` 的官方 Player 行为还缺独立 fixture，不能臆测其 clamp/丢弃/异常语义。
+- Update/Reap/Output 仍未共享完整 native particle/dead-list storage；generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整 VFX Block/Operator/Output 和编辑器/截图/产物 A/B 均未闭环。最终 Unity 2022.3.61f1 fixture 尚未安装，项目仍缺 **3,189** 个官方类型，总体 `/goal` 继续进行。
+
+### 下一优先项
+1. 用官方 Player 补 custom spawner callback、linked expression/activation、多 Spawner/custom event chain，以及负数/非有限/极大 spawnCount 的顺序与边界 fixture，再扩展 typed native opcode/control routing。
+2. 让 Update/Reap/Output 共享 native particle/dead-list storage，完成 generation snapshot + staged CAS，以及 Vulkan/D3D11 compute、GPU Event、Particle Strip和 URP frame graph。
+3. 安装并固定 Unity 2022.3.61f1 Editor/包 fixture，迁移 API、Shader Graph、VFX Graph 与 Player 行为基线，继续关闭缺失的 3,189 个类型和完整编辑器/平台产物矩阵。
+
+## 2026-07-16an — VFX Set SpawnEvent Attribute native typed opcode
+
+### 已完成
+- 对照 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 官方 `VFXSpawnerSetAttribute` 源码，把 Spawner runtime asset 升级为 **v7**：Program 新增全局 Event record stride，Block 新增目标 word offset、值类型、Random mode 以及两组最多 4-word 的原始 operand；v1-v6 继续读取，checksum、长度、枚举、字段范围、连续 variadic channel、有限 float 与 operand word 数在安装前严格验证。
+- native C++ Spawner Program ABI 升级为 **v3 / 96 bytes**，Block 从 32 扩展为 **80 bytes**，State 保持 72 bytes。新增按 block 序执行的 `SetAttribute` opcode 与 event-record readback：Bool/UInt32/Int32/Float/Float2/Float3/Float4 的 Off 常量按原始 word 写入；Float1-4 的 PerComponent/Uniform Random 分别消费逐分量/单次 Unity xorshift128 值，float lerp 显式限制中间舍入，避免 FMA 改变位级结果。调度器执行完 task 后再把实际 spawnCount 写入 event record word 0。
+- VFX Graph 编译器现在收集 `VFXSpawnerSetAttribute` 写入的内置属性并纳入全局 Event schema，解析未 linked 的常量槽位、Color→Float3、连续 variadic float channel 与 Off/PerComponent/Uniform Random，导出 v7 typed opcode。官方 `SimpleParticleSystem.vfx` 注入 size=-4.5、随机 Color Min/Max 后已证明 graph→schema→runtime asset→native descriptor 全链路保真，负有限 float 不再被误拒绝。
+- `VisualEffect` 在存在 typed Set Attribute Program 时读取 native event record 并提交现有 Initialize dispatch；无该 opcode 的旧 Program 仍走原有 spawnCount 快速路径。共享 Asset 的 effect/context 隔离、block 顺序和旧版本迁移保持不变。
+
+### 测试与门禁
+- Spawner 专项从 72 增至 **87/87**：新增 15 个发现用例，覆盖四种标量原始 word、Float2/3/4 宽度、PerComponent/Uniform 精确随机序列、v7 round-trip、四类非法契约，以及 native event record→Initialize 端到端提交。
+- VFX Graph 全量从 417 增至 **420/420**；强制加载本批 dylib 的 Core VFX **215/215**；Core 全量 **1,051/1,051**。Unity API 门禁保持类型 **928/4,117**（exact 404）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例均 0 编译错误，URP3DDemo 仅保留既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批尚未建立 Set Attribute 最终值的官方 Player A/B fixture；当前证据是官方源码语义、官方图结构注入以及 Anity native 端到端测试，不能替代官方 Player 的标量/向量/随机/多 block 顺序对照。
+- `spawnCount` 是 Event record word 0，且调度器会在 block 执行后写入实际生成数；为避免静默错误，编译器和 runtime 当前明确拒绝 Set SpawnEvent `spawnCount`。只含 Set Attribute、没有 Rate/Burst 的 Spawner，以及 custom callback、linked expression/activation 和多 Spawner chain 也尚未生成统一 native Program。
+- Update/Reap/Output 仍未共享完整 native particle/dead-list storage；generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整 VFX Block/Operator/Output 和编辑器/截图/产物 A/B 均未闭环。最终 2022.3.61f1 fixture 尚未安装，项目仍缺 **3,189** 个官方类型，总体 `/goal` 继续进行。
+
+### 下一优先项
+1. 建立官方 Player Set SpawnEvent Attribute fixture，覆盖标量/向量、Off/PerComponent/Uniform、负数、多 block 顺序和 `spawnCount`，据实实现 word 0 的覆盖/调度语义。
+2. 为 SetAttribute-only、custom callback、linked expression/activation 与多 Spawner chain 增加统一 typed native Program/control/event routing。
+3. 让 Update/Reap/Output 共享 native particle/dead-list storage，完成 generation snapshot + staged CAS，以及 Vulkan/D3D11 compute、GPU Event、Particle Strip 和 URP frame graph。
+
+## 2026-07-16am — Unity Player Spawner A/B、xorshift128 与边界帧保真
+
+### 已完成
+- 新增可重复构建的 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 / URP 14.0.11 **macOS Metal Player** 探针：`_scripts/capture-unity-vfx-spawner.sh` 在非 batchmode 的 64×64 Player 中执行 Infinite、Constant finite、0 count、Random count 与全 Random 五类场景，输出 `parity-evidence/unity-vfx-spawner-2022.3.51f1.json`。421 条逐帧记录包含 public `VFXSpawnerState`、spawnCount、粒子数、sleeping/capacity、`VFXManager.fixedTimeStep/maxDeltaTime`、start/reset seed，以及 5 个 seed 的 `UnityEngine.Random.State` 初始四字与连续 12 次 value 后状态；脚本验证 Editor/包/Metal/记录数和关键 Finished 语义。生成 VFX 资产使用固定 GUID，ignored Build/Generated 目录可由脚本完整重建。
+- 官方 Player 证据固化了状态机边界：`VFXManager.maxDeltaTime=0.05` 且输入 delta 会钳制；未播放/`Reinit` 的 public state 为 duration/count 0，Infinite 播放后为 -1/-1；`totalTime` 是 phase-local 时钟，切 phase 清零且不携带 overshoot，Finished 后仍随 tick 增长；0 LoopCount 仍完整执行 **1 轮** 后以 `loopIndex=1` Finished；loop completion 帧先增加 index，下一 tick 才采样新一轮并令 `newLoop=true`；`playing` 只在 Looping 为 true，最终 after-delay 完成后才 Finished。native C++ Spawner 已逐项改为这些边界语义。
+- 从 Player 暴露的四字状态与 5×12 连续采样反推并验证 Unity 2022.3 `Random`：InitState 以 `s0=uint(seed)`、`s[n]=1812433253*s[n-1]+1` 展开，step 为标准 xorshift128，`value=(next & 0x007fffff)/8388607.0f`（含 1.0）。native Spawner 与 `UnityEngine.Random` 托管 API 都改用同一精确算法；`Random.State` 恢复为四个 private serialized int，删除错误公开字段、公开构造器和额外 `InitSeed`，state snapshot/restore 可逐值续播。
+- 官方固定 seed 证明首轮 Spawner 随机采样顺序为 **Count → Duration → Before → After**，后续轮次为 Duration → Before → After；native 不再混入 effect/context ID。Random 全参数 5 个 seed 的 count/duration/before/after 已逐 float 对齐 Player。`resetSeedOnPlay=false` 使用 startSeed 并保留 native stream；`true` 在每次 Play 生成新 seed、忽略 startSeed，并在同次 control dispatch 的所有 Spawner 间共享该 seed。
+
+### 测试与门禁
+- Spawner 专项 **72/72**：包含官方 Constant finite 第 0–24 帧的逐字段表驱动断言、0 count 一轮、phase boundary/no overshoot、Finished clock、next-loop 延迟采样和 5 组官方 fixed-seed Random 全参数。新增 `RandomParityTests` **19/19**，覆盖 seed 1 的 12 个 value、5 个官方初始 State、state restore 与公开面约束。
+- 强制加载本批 dylib 的 Core VFX **200/200**；VFX Graph **417/417**；Core 全量 **1,036/1,036**。Unity API 门禁仍为类型 **928/4,117**，其中 exact 从 403 提升为 **404**；成员 **8,645/37,164**（exact 6,417），load issues=0。经逐项审查，旧基线的 6 个 removed-or-changed 全是本批删除的错误 Random 额外公开面；重建后复跑 `regressions=0`、`removed-or-changed=0`。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例均 0 编译错误，URP3DDemo 只有既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批只证明 `Random.InitState/state/value` 与 Spawner 所消费的 float stream；`Random.Range(int,int)` 的官方无偏整数映射、Range/几何/rotation/ColorHSV 的完整分布与极值仍缺 Player A/B，因此 Random 总行不能标为全完成。
+- Spawner Set Attribute、custom callback、linked expression/activation、Spawner chain 与完整 event routing 仍缺 typed native opcode。Update/Reap/Output 尚未共享完整 particle/dead-list storage；generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整 VFX Block/Operator/Output 和编辑器/截图/产物 A/B 均未闭环。
+- 最终 Unity 2022.3.61f1 fixture 尚未安装；项目仍缺 **3,189** 个官方类型与大量成员、行为、编辑器和平台证据，总体 Unity 2022 Ultra `/goal` 继续进行，不能标记完成。
+
+### 下一优先项
+1. 为 Spawner Set Attribute、custom callback、linked expression/activation 与 Spawner chain 增加 typed native opcode，并用官方多 Spawner/自定义事件 Player fixture 对照 control、attribute 与 callback 顺序。
+2. 让 Update/Reap/Output 共享 native particle/dead-list storage，完成 generation snapshot + staged CAS，以及 Vulkan/D3D11 compute、GPU Event、Particle Strip 与 URP frame graph。
+3. 安装并固定 Unity 2022.3.61f1 Editor/包 fixture，迁移 API、Shader Graph、VFX Graph 和 Player 行为基线；同时扩展 `Random.Range` 与分布类 API 的官方 A/B。
+
+## 2026-07-16al — VFX runtime asset v6 与 Random LoopCount Float2 保真
+
+### 已完成
+- 对照 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 官方 `VFXBasicSpawner.GetExpressionMapper`：Random `LoopCount` 先以 `Vector2` 执行 float `lerp(min,max,random)`，再经 `VFXExpressionCastFloatToInt` 截断为 Int32。runtime asset 从 **v5 升级为 v6**，将 loop-count 两个 operand 改为 Double：Random 精确保留从官方 Float2 提升的 float32 端点，Constant 同时能无损保存完整非负 Int32（含 `int.MaxValue`），不再把 `1.25–3.75` 之类官方合法范围错误整数化或拒绝。
+- v6 serializer 写入两个 Double；deserializer 对 v1-v4 继续迁移为空 Spawner Program，对 v5 的两个 Int32 显式提升为 Double。checksum、payload length、collection、mode/range 和 system/context 验证保持原子边界；Infinite 强制 0/0，Constant 强制相等整数，Random 强制有限、非负、有序并限制到最大的安全 Int32 float `2147483520`，避免 native float-to-int 溢出或未定义转换。
+- Spawner Program C ABI 升级为 **v2 / 96 bytes**，Block 仍为 32 bytes、State 仍为 72 bytes；C++ `static_assert` 与 C# `Marshal.SizeOf` 同时锁定布局。native Random LoopCount 将 Double 端点恢复为原始 float32，执行与官方表达式相同的 float lerp 后截断；Constant 直接从精确 Double 转 Int32，0 次循环立即进入 Finished，非法/非有限/越界 operand 在安装 Program 前拒绝。
+- VFX Graph 编译器现在接受官方 Random `VFXSlotFloat2` 的非整数端点并保真导出；Constant 继续读取官方 `VFXSlotInt32`。官方 `SimpleParticleSystem.vfx` 注入测试已改为 Random `1.25–3.75`，证明 typed graph → v6 → runtime Program 全链路没有整数化。
+
+### 测试与门禁
+- Spawner 专项从 25 增至 **41/41**：新增 16 个发现用例，覆盖 5 组 seed 的 float lerp→Int32 cast 精确结果、fractional v6 round-trip、真实 v5 二进制迁移、Constant `int.MaxValue`、0 loop count、6 类非法 operand，以及 native unsafe random range 拒绝；测试以 `ANITY_REQUIRE_NATIVE=1` + `AnityRequireNative=true` 强制加载本批 96-byte ABI dylib。
+- VFX Graph 全量 **417/417**；强制 native 的 Core VFX **169/169**；Core 全量 **986/986**。Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**（exact 403）、成员 **8,645/37,164**（exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`，`UnityEngine.VFXModule` 公开面没有回归。
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 和样例均 0 编译错误，URP3DDemo 仍只有既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批闭环的是 Random LoopCount 的**数值表示与 lerp/cast 算术**，不是 Unity 官方随机流等价证明。Anity 当前仍使用 effect/context 级 xorshift stream；Unity 官方 Duration/Count/Before/After 分别使用 `RandId` 0/1/2/3，其随机 seed、采样顺序、重启行为以及边界帧 `newLoop/totalTime/playing` 仍缺官方 Player 逐帧 A/B，不能宣称随机序列或逐帧状态已经完全一致。
+- 0 LoopCount 的 Finished 边界也仍需官方 Player fixture 固化。Spawner Set Attribute、custom callback、linked expression/activation、Spawner chain、Update/Reap/Output、staged CAS、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整 VFX Block/Operator/Output 与编辑器/截图/产物 A/B 尚未闭环。
+- 最终 Unity 2022.3.61f1 fixture 尚未安装；全项目仍缺 **3,189** 个官方类型和大量成员/行为/编辑器/平台证据，总体 Unity 2022 Ultra `/goal` 继续进行，不能标记完成。
+
+### 下一优先项
+1. 在 Unity 2022.3 官方 Player 记录 Duration/Count/Before/After 四个 `RandId` 的 seed、采样顺序、重启及 0/有限 loop 边界帧，形成逐帧 `VFXSpawnerState`、spawnCount、粒子数 A/B fixture，并据此替换当前临时 xorshift 顺序。
+2. 为 Spawner Set Attribute、custom callback、linked expression/activation 与 Spawner chain 增加 typed native opcode，使全部 CPU Spawner task 在同一版本化 Program 中组合执行。
+3. 让 Update/Reap/Output 共享 native particle/dead-list storage，完成 generation snapshot + staged CAS、Vulkan/D3D11 compute、GPU Event/Particle Strip 与 URP frame graph。
+
+## 2026-07-16ak — VFX Spawner native 调度、有限/随机 Loop 与前后 Delay
+
+### 已完成
+- 将 v5 Spawner Program evaluator 从 C# 迁入 `anity-native` C++。新增 88-byte Program、32-byte Block 与 72-byte State C ABI，以及 program 原子安装、Play/Stop control、effect 级批量 tick、state readback 四个 export；device registry 以 effect + context 隔离不可变 Program 和 clock、phase、xorshift random、rate debt、interval、burst 状态，并在 effect teardown 一并释放。三份 ABI 由 C++ `static_assert` 与 C# `Marshal.SizeOf` 双侧锁定。
+- native 状态机执行 Infinite/Constant/Random loop duration、Infinite/Constant/Random loop count、None/Constant/Random before/after delay。一个 tick 可跨越 delay→loop→delay→下一 loop 乃至最终 Finished，并只把真正 Looping 的时间送入 Constant/Variable Rate 与 Single/Periodic Burst；每轮重置 task state，有限生命周期结束时保留本帧已生成的 spawnCount，外部 Stop/Play 则正确清零或重建实例状态。
+- `VisualEffect` 不再拥有 Spawner evaluator：每个 native device 只安装一次 Asset Program，输入事件直接调用 native control，每帧一次 native effect tick 后同步 `VFXSpawnerState` snapshot，再将 native `spawnCount` 打包给现有 Initialize/prefix/dead-list transaction。共享 Asset 的组件仍按 effect ID 隔离；换 Asset、Reinit、销毁和显式 clear 同步清掉 native/managed state。
+- VFX Graph 编译器开始读取 Unity 官方 `VFXBasicSpawner` 动态槽位：Constant/Random `LoopDuration`、Constant/Random `LoopCount`、Constant/Random `DelayBeforeLoop` / `DelayAfterLoop`，并导出到既有 v5 operand。linked runtime expression 继续显式拒绝；由于 v5 的 LoopCount operand 仍是 Int32 min/max，Random LoopCount 的非整数 Vector2 端点当前也明确拒绝，避免静默产生错误分布。
+
+### 测试与门禁
+- native Spawner 专项 **25/25**：覆盖三份 ABI、初始/Play/Stop/restart、fractional rate、single/periodic/zero-period burst、Variable Rate seed 确定性、随机 loop/delay 有界与同 seed 一致、有限 duration/count、before/after delay、跨多阶段大 delta、每轮 burst reset、非法 delta、clear，以及事件不直穿/Initialize record/共享 Asset 端到端。
+- 基于 Unity 2022.3.51f1 / VFX Graph 14.0.11 官方 `Editor/Templates/SimpleParticleSystem.vfx` 的真实图结构注入四种官方动态槽位后，v5 round-trip 精确保留 Random Duration、Constant Count、Constant Before 与 Random After operand。VFX Graph 全量 **417/417**；主 dylib + `ANITY_REQUIRE_NATIVE=1` 的 VFX 组 **153/153**、Core 全量 **970/970**。
+- Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**（22.541%，exact 403）、成员 **8,645/37,164**（23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`；本批只增加 Anity internal/native ABI，`UnityEngine.VFXModule` 公开面没有回归。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品工程 0 编译错误，URP3DDemo 保留既有 43 个 nullable warning。
+
+### 尚未完成
+- native random stream、边界帧 `newLoop/totalTime/playing`、随机值采样顺序与 Random LoopCount float→int 分布仍缺 Unity 官方 Player 逐帧 A/B；v5 Int32 range 不能表达非整数 Random LoopCount 端点，后续 ABI 必须保真 float range。当前实现是可执行生产路径，但不能据此宣称逐边界已与 Unity 完全一致。
+- Spawner Set Attribute、custom callback、linked expression/activation 与 Spawner chain 仍缺 typed runtime opcode；Update/Reap/Output 尚未共享完整 native particle lifecycle。Metal transaction 长锁、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整 VFX Block/Operator/Output、编辑器/截图/产物 A/B 均未闭环。
+- 最终 Unity 2022.3.61f1 fixture 尚未安装，项目仍缺 **3,189** 个官方类型与大量成员/行为/编辑器/平台证据；总体 Unity 2022 Ultra `/goal` 继续进行，不能标记完成。
+
+### 下一优先项
+1. 用 Unity 2022.3 官方 Player 记录 Constant/Random loop/delay 的逐帧 `VFXSpawnerState`、spawnCount 与粒子数 A/B；将 LoopCount operand 升级为保真 float range并对齐官方 cast/random sampling order。
+2. 为 Spawner Set Attribute、custom callback、linked expression/activation 与 Spawner chain 增加 typed native opcode，使所有 CPU Spawner task 在统一 Program 中组合执行。
+3. 让 Update/Reap/Output 共享 native particle/dead-list storage，完成 staged CAS submit、Vulkan/D3D11 compute、GPU Event/Particle Strip 与 URP frame graph。
+
+## 2026-07-16aj — VFX Spawner v5 IR、实例级 Rate/Burst 状态机与逐帧 Initialize
+
+### 已完成
+- 对照本机 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 官方 `VFXBasicSpawner`、`VFXSpawnerConstantRate`、`VFXSpawnerVariableRate` 与 `VFXSpawnerBurst` 源码，将 runtime asset 升级为 **v5**：每个可执行 Spawner Program 保存 context/system identity、OnPlay/OnStop 或自定义输入 control、Initialize output/kernel、按序 Block opcode，以及 loop duration/count、before/after delay 的 mode 与 operand ABI。v1-v4 继续读取并迁移为空 Spawner Program；checksum、collection、enum、system/context、range、kernel 与重复键仍在 Asset 原子替换前严格验证。
+- VFX Graph registry 加入官方 `VFXSpawnerVariableRate` GUID，累计 **71** 个 typed script type。编译器现在读取未 linked 的 Float/Float2 slot 常量、activation 与 `m_Disabled`，导出 Constant Rate、Variable Rate、Single/Periodic Burst 的 min/max rate/count/period/delay；反向 range、NaN/Infinity、负数、未知 mode、linked expression/activation 和混入无 runtime opcode 的 active task 都明确拒绝，不静默改变图效果。没有 Rate/Burst task 的旧 Spawner 保留既有 event path，多级旧 Spawner 图不被误升级。
+- `VisualEffectAsset` 持有不可变 Program 索引，`VisualEffect` 持有独立的 clock、fractional spawn accumulator、variable-rate interval/random stream、burst delay/repeat 与 `VFXSpawnerState`。这修复了旧实现把动态 Spawn 状态放在共享 Asset 上的问题；两个组件共享同一 Asset 时 Play/Stop、totalTime、spawnCount 与随机进度互不污染，换 Asset、Reinit 和销毁会释放实例状态。
+- 输入事件到达已编译 Spawner 时不再用默认 `spawnCount=1` 直接穿透 Initialize，而是按输入 slot 驱动 Start/Stop。`VFXManager` 每帧在 input 后执行 Spawner：Constant/Variable Rate 保留跨帧小数债务，Burst 支持 delay boundary、single/periodic、大 delta catch-up 与零 period 每帧一次保护；结果打包成真实 `spawnCount` Event record，继续走已验证的 native Initialize kernel/prefix/dead-list transaction。`GetSpawnSystemInfo` 现在返回组件实例 snapshot，而非 Asset 静态模板。
+
+### 测试与门禁
+- 新增 Spawner runtime/ABI/端到端深测 **21/21**，覆盖初始/Play/Stop/new loop、分数累积、delta/public state、restart reset、single/immediate/periodic/zero-period Burst、大步长 catch-up、Variable Rate seed 确定性与 constant-range 对照、非法 delta、实例隔离、v5 round-trip、事件不直穿 Initialize、逐帧 native spawnCount record 和共享 Asset 隔离。
+- 本机官方 `Editor/Templates/SimpleParticleSystem.vfx` 已实际编译出 Constant Rate=16 的 v5 Program、默认 OnPlay control 与 Initialize output；VFX Graph 全量 **416/416**，Core 全量 **966/966**。主 dylib 复制进测试产物并设置 `ANITY_REQUIRE_NATIVE=1` 后，全部 VFX 定向回归 **149/149**。
+- Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**（22.541%，exact 403）、成员 **8,645/37,164**（23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`；当前机器仍未安装最终目标 2022.3.61f1 fixture。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品工程 0 编译错误，URP3DDemo 保留既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批 loop/delay mode 与 operand 已进入 v5 ABI，但编译器仍明确拒绝非 Infinite/None 配置，尚未执行有限/随机 loop duration、loop count、before/after delay 和跨状态大 delta。Spawner Set Attribute、custom callback、Spawner chain 的新状态机组合、linked expression/activation runtime opcode 也未闭环。
+- Rate/Burst 调度器当前是组件实例级托管执行器，已经产生真实效果但仍须按项目强制分层迁入 `anity-native` C++；Variable/Burst 的随机采样顺序、边界帧和 `VFXSpawnerState.newLoop/totalTime` 还需 Unity 官方播放器黑盒 A/B 后才能宣称逐边界一致。
+- Update/Reap/Output 仍未共享完整 native particle lifecycle；Metal transaction 长锁、Vulkan/D3D11 compute、GPU Event、Particle Strip、URP frame graph、完整 VFX Block/Operator/Output、编辑器与截图/产物 A/B，以及 Unity 2022.3.61f1 最终 fixture 和剩余 **3,189** 个官方类型缺口均未完成，因此总体 Unity 2022 Ultra 目标继续进行。
+
+### 下一优先项
+1. 把 Spawner Program evaluator 迁入 `anity-native` C++，实现有限/随机 loop duration/count、before/after delay 与大 delta 状态跨越，并用 Unity 2022.3 官方 Player 做逐帧 `VFXSpawnerState`/粒子数 A/B。
+2. 为 Spawner Set Attribute、custom callback、linked expression/activation 与 Spawner chain 增加 typed runtime opcode，使所有 CPU Spawner task 在同一 v5+ IR 中组合执行。
+3. 让 Update/Reap/Output 共享 native particle/dead-list storage，完成 CAS staged submit、Vulkan/D3D11 compute、GPU Event/Particle Strip 与 URP frame graph。
+
+## 2026-07-16ai — VFX Spawner spawnCount 多生成与 Initialize inclusive-prefix 执行
+
+### 已完成
+- 对照本机 Unity 2022.3.51f1 / Visual Effect Graph 14.0.11 官方 `VFXExpressionGraph`、`VFXAttribute.SpawnCount` 与 `VFXInit.template` 收口 CPU Event 多生成语义：`spawnCount` 现在始终作为 Event record 的第一个隐式 Float 字段，运行时导入的默认值为 **1.0f**；手工 `DefineEventAttribute` 仍保持普通 Float 的 0 默认，避免把编译资产规则错误扩散到动态 schema。
+- VFX runtime asset ABI 升级为 **v4**，Initialize kernel 新增严格验证的 `SpawnCountSourceOffsetWords`；v1-v3 继续读取并迁移为 legacy 一条 source record 对应一个 candidate。编译器只有在首字段确为 Float scalar `spawnCount` 且 offset/stride 精确匹配时才导出 prefix binding，损坏或错类型资产在原子替换前拒绝。
+- native Initialize kernel ABI 升级为 **v2 / 44 bytes**，CPU reference 为选中 source records 构建容量饱和的 inclusive prefix sum，并用与官方模板一致的 upper-bound 二分把每个 spawn thread 映射回 source record。正有限值向零截断，负数、零与 NaN 不生成，正无穷及超大值按剩余 capacity 饱和；`startEventIndex`、dead-list、alive source gate、连续追加、事务回滚、sequence/idempotency 均作用于扩展后的真实粒子集合。
+- Metal 通用 MSL interpreter 新增 prefix buffer、source-event count 与 candidate count binding，真实 compute thread grid 按展开后的粒子数发射，并在 shader 内二分定位 source record；macOS 已验证多 source 的 bit-exact 粒子属性映射及 `backendKind=2`。`VisualEffect.SendEvent` 无显式 attribute 时会打包 runtime schema 默认值，因此默认 Spawn 事件真实生成一个粒子。
+- 修复 Apple 产品构建关闭 Vulkan 后 native software/headless fallback 仍冒充 `backendKind=Vulkan` 的问题：只有真实 backend storage 存在才报告 Vulkan/Metal/D3D，Vulkan UI 实测门禁也统一要求真实 backend kind，不再把 not-supported readback 记为产品回归。
+
+### 测试与门禁
+- Initialize kernel 专项 **32/32**，新增多生成深测覆盖单 record 展开、多 record inclusive-prefix、batched offset、fraction/negative/NaN/+Infinity、全零、capacity 续写、dead-list、alive source gate、幂等重试、v4 round-trip/非法 binding、真实 v3 二进制迁移、无参数 `SendEvent` 默认 1、双 Event 单事务以及真实 Metal bit-exact 映射。强制主 dylib 的全部 VFX 回归 **128/128**。
+- VFX Graph 全量 **415/415**；Core 全量 **945/945**。Apple 无 Vulkan 产品后端时，原先误入 fallback 的 Vulkan UI 两类 **21/21** 现在按真实 backend 能力正确判定；native 构建和四个 particle-state export 检查通过。
+- Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**（22.541%，exact 403）、成员 **8,645/37,164**（23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`；当前机器仍未安装最终目标 2022.3.61f1 fixture。
+- `bash _scripts/build-all.sh` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；所有产品工程 0 编译错误，现有 warning 债务不属于本批新增回归。
+
+### 尚未完成
+- 本批执行的是已经物化到 CPU Event record 的 `spawnCount`；Constant/Variable Rate、Burst/Periodic Burst、loop/delay 与 deltaTime accumulation 等 Spawner block 状态机尚未在 native/runtime 逐帧执行。linked expression/activation 也仍缺 typed runtime opcode。
+- Update kernel、死亡/reap、dead-list recycling 与 Output draw 还未共享同一份 native particle storage；Metal transaction 在 GPU completion 期间仍持有 registry lock，Vulkan/D3D11 compute、GPU Event header/instancing、Particle Strip、URP frame graph 与完整 Block/Operator/Output 尚未闭环。
+- Unity 2022.3.61f1 最终 fixture、剩余 **3,189** 个官方类型缺口、完整 Shader Graph/VFX Graph 包、编辑器交互及截图/产物 A/B 仍未完成，因此总体 Unity 2022 Ultra 目标继续进行，不能标记完成。
+
+### 下一优先项
+1. 将官方 Spawner Constant/Variable Rate、Burst/Periodic Burst、loop/delay 与 deltaTime 状态机编译为版本化 runtime IR，并把每帧结果直接物化为当前已验证的 spawnCount prefix 输入。
+2. 让 Update/Reap/Output 共享 native particle/dead-list storage，完成生成、更新、死亡回收与 URP draw 生命周期；同时把长锁 GPU 提交改为 generation snapshot + staged resource + CAS commit。
+3. 将同一 IR/存储路径接入 Vulkan/D3D11 compute，继续 linked expression/activation、GPU Event、Particle Strip、完整 VFX Block/Operator/Output 与 Unity 2022.3.61f1 官方 A/B。
+
+## 2026-07-16ah — VFX runtime asset v3、可执行 Initialize IR 与真实粒子状态
+
+### 已完成
+- VFX runtime asset ABI 升级为 **v3**，并继续读取 v1/v2。每个 Initialize target 现在可携带 backend-neutral kernel IR：Particle capacity、stored/source stride、catalog-order attribute layout/default words、dead-list contract，以及 Constant/Source/particleId/seed/spawnIndex operand、Overwrite/Add/Multiply/Blend composition、PerComponent/Uniform deterministic random。序列化边界严格校验 system/context/capacity、紧凑 attribute offset、alive/dead-list、source/target 精确绑定、operand arity/type 与 system value 约束；坏资产仍在原子替换前拒绝。
+- `VfxInitializeRuntimeKernelCompiler` 将已支持的 Initialize Block/attribute 语义降级为该 IR，并复用全局 Event record layout 的 source offset。编译器保留 stored/source attribute metadata，常量、source、random range、composition/blend 与 system value 不再只存在于生成的 HLSL 文本中。尚无 opcode 的 linked expression/activation 会明确拒绝导入，不静默改变效果。
+- native 新增版本化 Initialize kernel、attribute、operation 与 particle-system C ABI；device registry 以 effect + particle system 保存完整 capacity attribute buffer、alive/dead count、dead list、顺序 spawn index、backend 与 generation。bulk submit 对整个事务预校验并 staged publish，CPU reference interpreter 已执行默认值、source/constant/system operand、全部 composition/random、alive gate、dead-list consume、capacity clamp 与连续追加；effect teardown 同时释放粒子状态和死亡列表。
+- Metal 后端运行时编译通用 MSL IR interpreter，使用真实 `MTLComputeCommandEncoder` 和 source/particle/dead-list/descriptor/counter buffers 执行同一语义并回读 staged 状态；macOS 实测 `backendKind=2` 且结果 bit-exact。空 schema CPU Event 现在仍上传一个内部 transport word/record，能够真实触发一次 Initialize，而不会因公开 stride 为零丢事件。
+- kernel 幂等指纹已排除 transaction-local `attributeStart`/`operationStart` 打包偏移；同一批 dispatch 交换顺序重试仍被识别为相同语义，既不拒绝也不重复生成粒子。四个新增 C ABI 已由主 `libanity_native.dylib` 导出并通过双侧 size/static ABI gate。
+
+### 测试与门禁
+- Initialize runtime kernel 专项 **17/17**：覆盖四个 ABI size、defaults/constant/source batch offset、Add/Multiply/Blend 顺序、particleId/seed/spawnIndex、dead-list physical slot、alive=false、capacity clamp、相同 kernel 重试、交换 transaction 顺序重试、新 sequence 追加、effect clear、v3 round-trip/非法 capacity/零 source stride、真实 Metal compute/readback 与空 schema Event。
+- VFX Graph 新增 runtime IR 编译测试 **5/5**，全量 **414/414**；Core 托管全量 **929/929**；主 dylib + `ANITY_REQUIRE_NATIVE=1` 的 VFX 组合回归 **112/112**。
+- Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**（22.541%，exact 403）、成员 **8,645/37,164**（23.262%，exact 6,417）、load issues=0、`regressions=0`、`removed-or-changed=0`；当前机器尚未安装最终目标 2022.3.61f1 fixture。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与样例；产品工程 0 编译错误，URP3DDemo 保留既有 43 个 nullable warning。`bash _scripts/build-native.sh` 与四个新 export 的 `nm` 检查通过。
+
+### 尚未完成
+- linked expression/activation 尚缺 typed opcode lowering；CPU Event 当前仍是一条 record 对应一个 Initialize candidate，Spawner prefix-sum/multi-spawn 语义尚未闭环。Update kernel、粒子死亡/reap 后 dead-list recycling 与 Output draw 还未消费本批同一份 native particle storage，因此本批不能描述为完整 VFX 粒子生命周期。
+- Metal 事务在 GPU completion 期间仍持有 registry lock；需要 generation snapshot + staged GPU resources + compare-and-swap commit。Vulkan/D3D11 尚无同 IR compute interpreter，GPU Event header/instance、Particle Strip、URP frame graph、完整 VFX Block/Operator/Output、编辑器与截图/产物 A/B 仍未完成。
+- 最终 Unity 2022.3.61f1 官方 fixture、全项目剩余 **3,189** 个官方类型缺口，以及 Shader Graph/VFX Graph 官方包的全功能生产级对齐仍未收口，不能宣称总体 Unity 2022 Ultra 已完成。
+
+### 下一优先项
+1. 将 Spawner spawnCount/prefix-sum/multi-spawn 编译进 runtime IR，并让 Update/Reap/Output draw 共享 native particle/dead-list storage，闭环生成、更新、死亡回收和渲染。
+2. 把 bulk transaction 改为 generation snapshot + staged GPU CAS commit，并将同一 IR interpreter 接入 Vulkan/D3D11 compute 与对应平台强制 native 门禁。
+3. 扩展 linked expression/activation opcode、GPU Event/Particle Strip/其余 Block/Operator/Output 与 URP frame graph，并迁移到 Unity 2022.3.61f1 官方 fixture 和编辑器/截图 A/B。
+
+## 2026-07-16ag — VFX Initialize bulk transaction 与 effect 全状态 teardown
+
+### 已完成
+- 新增 `AnityGraphics_SubmitVFXInitializeDispatches`：一次提交最多 4,096 个 target descriptor，先对整组 ID、sequence、offset/count/stride、source range 与 byte overflow 做全量预校验，再在 registry lock 下复制 shared-state map、按调用顺序执行 CPU/Metal target、校验同 target sequence/幂等内容，最后仅在全部成功后通过 map swap 与 generation commit 一次性发布。任一后续 descriptor、Metal dispatch 或分配失败都会销毁 staged state，原 registry 完全不变，关闭了多 target 帧失败时的部分可见窗口。
+- 单 descriptor ABI 现在复用 bulk 实现，只有一套 sequence、idempotency 与 backend 逻辑。相同 descriptor/record slice 的整组重试不会重复 GPU dispatch或推进 generation；同一 target 的多个递增 batch 在 transaction 内顺序执行并只发布最新可观察结果，倒序或同序列异内容整组拒绝。
+- `VisualEffect.ProcessInputEvents` 不再逐 target 修改 native registry，而是先完成全部 compiled target descriptor 绑定，再执行单次 bulk transaction；仅 transaction 成功后才消费 native prefix plan 和 managed attribute snapshots。因此 Event→Spawner→Initialize 的每帧提交、输入队列消费与结果可见边界现在一致。
+- 新增 `AnityGraphics_ClearVFXEffectState`，在同一 device lock 下清除指定 effect 的 latest upload、input FIFO、output FIFO、output sequence 与全部 Initialize target。`VisualEffect.visualEffectAsset` 切换和 `Object.DestroyImmediate` 销毁组件/物体均接入所有 live graphics device 的 teardown；managed cached attribute、pending attribute snapshot 与 last bound plan 同步释放，避免 effect ID 长期占用 native registry 或旧 Asset 的事件泄漏到新 Asset。
+
+### 测试与门禁
+- bulk/teardown 新增 **12/12**，Initialize 专项累计 **26/26**：覆盖多 target 同时发布、后置非法 descriptor 全回滚、已存在 target 冲突回滚无关新 target、同 target 递增/倒序、整组幂等 generation、input/latest 清理、output FIFO/sequence 重置、全 target 清理与跨 effect 隔离、Asset 切换、`DestroyImmediate` 及未知 effect 幂等清理。
+- 主 `libanity_native.dylib` + `ANITY_REQUIRE_NATIVE=1` 的 Input/Initialize/Output/EventAttribute 组合回归 **79/79**；Core 托管全量 **912/912**，VFX Graph 全量 **409/409**。
+- Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**、成员 **8,645/37,164**、`regressions=0`、`removed-or-changed=0`、load issues=0；`UnityEngine.VFXModule` 公开差异仍为 **0**。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、WebGL、Hub、Editor 与样例；产品工程 0 错误/警告，URP3DDemo 保留既有 43 个 nullable warning。
+
+### 尚未完成
+- bulk transaction 当前原子发布的是 selected source record 结果；Metal generated Initialize block→particle attribute/dead-list buffer 仍未执行。transaction 在 GPU completion 期间持有 VFX registry lock，语义正确但后续应改为 generation snapshot + staged GPU resources + compare-and-swap commit，避免长 kernel 阻塞同 device 的事件查询/输出队列。
+- Vulkan/D3D11 compute、GPU Event、Particle Strip、Update/Output draw、URP frame graph、完整 VFX Block/Operator/Output 与编辑器/截图 A/B 仍未完成；Unity 2022.3.61f1 最终 fixture 和全项目 **3,189** 个缺失官方类型也仍未收口，不能宣称总体 Unity 2022 Ultra 已完成。
+
+### 下一优先项
+1. 将 Initialize compilation 的 stored/source attribute layout、capacity、default/SetAttribute 表达式与 dead-list contract 序列化进 runtime asset，建立 backend-neutral kernel IR；Metal 先用真实 particle/dead-list buffers 执行并回读 bit-exact 粒子状态。
+2. 将 transaction 改为 generation snapshot + staged GPU resources + CAS commit，并把同一 kernel IR 接入 Vulkan/D3D11 compute 与各平台强制 native 门禁。
+3. 继续 GPU Event/Particle Strip/Update/Planar draw/URP frame graph、完整 VFX/Shader Graph 与 Unity 2022.3.61f1 官方验证。
+
+## 2026-07-16af — VFX CPU Event bound target 到 backend Initialize dispatch 与首个真实 Metal compute
+
+### 已完成
+- `anity-native` 新增 backend-neutral VFX Initialize dispatch C ABI。descriptor 完整携带 effect/sequence、Initialize 与 source Spawner context ID、event/Particle/Spawn system property ID、`startEventIndex`、record count 与 stride；native 在 effect + Initialize context 维度保存最新结果、generation、source/output byte count 与真实 backend kind，并提供严格 info/readback。C++/C# ABI 固定为 56/80 bytes，双侧测试与 native `static_assert` 同时守护。
+- native 边界现在拒绝零 ID/sequence、负 offset、空 record、非 4-byte stride、整数溢出、source 越界、旧 sequence 与同 sequence 异内容。完全相同的 sequence/descriptor/目标 record slice 支持幂等重试，即使重试时 source plan 后缀增长也不会重复 dispatch 或推进 generation；这使多 target 提交中途失败后可以安全重试未完成 target，成功前不会消费 CPU Event prefix plan。
+- `NativeGraphicsDevice` 已接入 submit/info/readback P/Invoke，并再次验证 identity、record/stride/byte count 与 backend kind。`VisualEffect.ProcessInputEvents` 现在把已编译的 Event→Spawner→Initialize target 映射逐 batch 转成 native descriptor，在成功提交全部有 record 的 target 后才消费 native/managed input queue；未知 event、无 target event 与零 record event 不伪造 GPU 工作。
+- Metal 后端新增缓存并加锁创建的 `MTLComputePipelineState`，运行时编译 `anity_vfx_initialize_copy` MSL kernel；每次 dispatch 使用真实 shared source/output `MTLBuffer`、`MTLCommandBuffer`、`MTLComputeCommandEncoder`、thread grid、GPU completion wait 与 output buffer readback。Metal 成功结果明确标记 `backendKind=2`；Vulkan/D3D11 在尚无 compute pipeline 时只走并明确标记为 `backendKind=0` 的 CPU reference，绝不冒充 GPU 完成。非 Metal 构建提供显式 not-supported backend hook，跨平台可链接。
+
+### 测试与门禁
+- 新增 Initialize dispatch 深测 **14/14**：C ABI size、CPU selected slice/metadata、target 隔离、newer replace、older reject、相同重试幂等、同序列异内容拒绝、source 越界、stride 对齐、readback 容量、单/分叉 compiled target、unknown event，以及 macOS 真实 Metal compute/readback。主 `libanity_native.dylib` + `ANITY_REQUIRE_NATIVE=1` 的 Input/Initialize/Output/EventAttribute 组合回归 **67/67**，Metal 用例强制要求实际 device、`backendKind=2` 与 bit-exact bytes。
+- Core 托管全量 **900/900**，VFX Graph 全量 **409/409**。诊断性“全部 Core 强制 native”在 Apple 产品 dylib 上为 **879/900**：21 个失败全部来自现有 Vulkan-only UI/texture 用例仍强制要求 Vulkan readback，而 Apple 产品构建按平台规范显式关闭 Vulkan；本批 Metal/VFX native 测试没有失败。后续须把三后端实测拆成对应平台矩阵，不能把未编入当前 dylib 的 Vulkan 用例算作 Apple 产品失败或假绿。
+- Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**、成员 **8,645/37,164**、`regressions=0`、`removed-or-changed=0`、load issues=0。`UnityEngine.VFXModule` 公开差异仍为 **0**。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、WebGL、Hub、Editor 与样例；产品工程 0 错误/警告，URP3DDemo 保留既有 43 个 nullable warning。主 dylib 导出三个 Initialize C ABI，并经 `otool -L` 确认只有 Metal/Foundation/QuartzCore 等 Apple 系统依赖、不含 Vulkan runtime。
+
+### 尚未完成
+- 当前 Metal kernel 已真实执行 source record range 的 GPU 搬运和 readback，但尚未把 VFX Graph 生成的 Initialize block 计算编译成 MSL/平台 shader，也未写入 Particle attribute/dead-list buffer，因此不能把本批描述为完整粒子生成结果或完整 VFX GPU runtime。
+- Vulkan/D3D11 仍是明确的 CPU reference；需要实现各自 compute pipeline、device-local source/particle/dead-list buffer、fence/readback 与对应 Windows/Android/Linux 实机门禁。多 target 当前依靠幂等重试保证可恢复，但尚缺一个 native bulk transaction 来消除失败时已提交 target 的短暂部分可见状态；effect/asset 销毁时的 device registry 清理 ABI 也仍需补齐。
+- GPU Event header/instance index、Particle Strip 生命周期、Update/Output draw、URP frame graph、完整 VFX Block/Operator/Output、编辑器和官方截图/产物 A/B，以及 Unity 2022.3.61f1 最终 fixture 与全项目 **3,189** 个缺失官方类型仍未完成，不能宣称总体 Unity 2022 Ultra 已完成。
+
+### 下一优先项
+1. 将编译后的 Initialize kernel contract 接入 Metal particle/dead-list buffers，生成并执行真实 block 计算；同时增加 bulk transaction 与 effect registry teardown，关闭部分可见和长期资源生命周期缺口。
+2. 以同一 ABI 实现 Vulkan/D3D11 compute、GPU Event header/batch/instance、Particle Strip 初始化/回收，并建立 Apple Metal、Windows D3D11、Android/Linux Vulkan 分平台强制 native 测试矩阵。
+3. 接入 Update/Planar draw 与 URP frame graph，继续扩展 VFX Block/Operator/Output、Shader Graph material integration，并迁移到 Unity 2022.3.61f1 官方 fixture、编辑器与截图 A/B。
+
+## 2026-07-16ae — VFX CPU Event→Spawner→Initialize runtime target 映射
+
+### 已完成
+- VFX runtime asset ABI 升级为 **v2**：每个 CPU input event 除公开事件名外，保存全部稳定 dispatch target；每个 target 明确记录 Initialize context ID、Particle/Particle Strip system name，以及从 Event 到 Initialize 的完整 Spawner context ID/system name 有序路径。v1 资产继续可读，并迁移为同名事件 + 空 target，不破坏旧产物加载。
+- `VfxRuntimeAssetCompiler` 现在沿 typed flow DAG 从每个 `VFXBasicEvent` 递归到 Spawner 链与 `VFXBasicInitialize`，支持 Event 直连 Init、多级 Spawner、分叉到多个 Particle system、多个同名 Event context 合并与无目标事件；顺序保持 graph/flow 序列化顺序，重复路径去重，无法解析或到达不支持 context 时明确拒绝编译。
+- runtime data 验证新增 input-event 顺序精确一致、Initialize/context 非零、Particle system 类型、Spawner path 长度/context 唯一性、Spawn system 类型及重复 target 检查；所有验证都发生在 `VisualEffectAsset` 原子替换前。
+- `VisualEffectAsset` 按 Unity property ID 导入 input dispatch lookup。`VisualEffect.ProcessInputEvents` 在 native prefix-sum plan 消费前将每个 batch 绑定到编译后的 event target，并保存包含原始 records、batch prefix 和 target path 的帧 dispatch plan，供下一阶段 Metal/Vulkan/D3D11 source-buffer/Initialize compute 直接消费；未知 event 保留 batch 但不伪造 target。切换 Asset 会清理旧 plan 与待处理 attribute snapshot。
+
+### 测试与门禁
+- 新增 mapping/compiler/runtime 深测 **16 个**：编译器 **12/12** 覆盖直连、单/多级 Spawner、分叉、同名合并、不同事件隔离、无目标、round-trip、Asset lookup、bit deterministic、未知 Particle 与错误 Spawner path；Core 新增 **4/4** 覆盖 native batch target 绑定、未知事件、Asset 切换与 v1 兼容。CPU Input 强制 native 组现为 **19/19**。
+- VFX Graph 全量 **409/409**；Core 全量 **886/886**；本机 Unity 2022.3.51f1 API 门禁仍为类型 **928/4,117**、成员 **8,645/37,164**、`regressions=0`、`removed-or-changed=0`、load issues=0，`UnityEngine.VFXModule` 公开差异 **0**。
+- `bash _scripts/build-all.sh Release` 通过 native 与全部产品程序集/样例；产品工程 0 错误/警告，URP3DDemo 保留既有 43 个 nullable warning。
+
+### 尚未完成
+- CPU Event 的 graph→asset→native batch→runtime target 数据链已经闭环，但 Metal/Vulkan/D3D11 尚未按 target 上传 source records、创建/复用 GPU buffers、设置 `startEventIndex` 并发出 Initialize compute；当前不能声称粒子生成的 GPU 运行结果已完成。
+- GPU Event header/instance index、Particle Strip 初始化/回收、三后端 Update/Planar draw、URP frame graph、VFX 其余 Block/Operator/Output、编辑器和官方截图/产物 A/B 仍未完成。
+- Unity 2022.3.61f1 最终基线与全项目 **3,189** 个缺失官方类型仍需持续收口，不能宣称总体 Unity 2022 Ultra 已完成。
+
+### 下一优先项
+1. 定义 backend-neutral VFX Initialize dispatch ABI，将 bound plan 的 records/target/context/`startEventIndex` 交给 native，并先落地 Metal compute buffer + dispatch/readback 证据。
+2. 将同一 ABI 扩展到 Vulkan/D3D11，补 GPU Event header/batch/instance 与 Particle Strip 生命周期，再接入 URP frame graph。
+3. 扩展 VFX Block/Operator/Output、Shader Graph material integration，并迁移到 Unity 2022.3.61f1 官方 fixture、编辑器与截图 A/B。
+
+## 2026-07-16ad — VFX CPU Event native FIFO、prefix-sum dispatch plan 与帧消费
+
+### 已完成
+- `AnityGraphics_UploadVFXEventRecords` 从“每个 effect 只保留最后一次上传”升级为每 effect 有界 FIFO，同时继续保留 latest descriptor/record readback 兼容面。相同 effect 的 sequence 必须严格递增，重复/倒序提交、跨批次不一致的编译 stride、非法 record bytes 与超过 4,096 个待处理批次都会在 native 边界拒绝。
+- 新增 native CPU Event dispatch plan ABI：快照 first/last sequence、batch/record/byte count、共享 stride 与 upload generation；每个 batch 输出 eventNameId、sequence、recordCount、stride 和真实 `startEventIndex` 前缀。record copy 按批次稳定拼接，可按已存在 sequence 截取并原子消费，容量不足或未知 sequence 不会修改队列。
+- Managed `NativeGraphicsDevice` 对 plan info、batch array 与 record bytes 做二次结构校验，包括 effect identity、sequence 单调性、prefix 连续性、统一 stride 与精确 byte count。`VisualEffect.ProcessInputEvents` 在成功快照后按 last sequence 消费 native/managed 两侧队列并释放 attribute snapshot；`VFXManager.ProcessCamera` 在 Output Event 与 timestep 前执行该路径。
+- `VisualEffect.SendEvent` 的 sequence 分配、managed enqueue 与 native upload 现在处于同一 per-effect 锁内，关闭了并发调用中较大 sequence 先到 native、较小 sequence 被拒绝而丢事件的竞态；`Reinit` 也会释放被清理事件的 attribute snapshot。
+
+### 测试与门禁
+- 新增 CPU Input dispatch 深测 **15/15**，并用主 `libanity_native.dylib` + `ANITY_REQUIRE_NATIVE=1` 强制执行：单/多 batch、完整 plan、prefix sum、零 record、跨 eventName 顺序、legacy latest readback、重复/倒序、stride 冲突、部分消费、未知 sequence、容量不足、managed/native 联合消费、空队列、32 路并发及 `VFXManager.ProcessCamera` 集成。Input + Output + EventAttribute 强制 native 定向回归 **49/49**。
+- Core 全量 **882/882**；VFX Graph **397/397**；本机 Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**、成员 **8,645/37,164**、`regressions=0`、`removed-or-changed=0`、load issues=0，`UnityEngine.VFXModule` 公开差异仍为 **0**。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、WebGL、Hub、Editor 与样例；产品工程 0 错误/警告，URP3DDemo 保留既有 43 个 nullable warning。
+
+### 尚未完成
+- 本批已经生成可直接驱动 HLSL `startEventIndex` 的 native dispatch plan，但 Metal/Vulkan/D3D11 后端尚未把 plan records 上传为真实 source buffer，也未据 batch descriptor 发出 Initialize compute dispatch；当前帧消费是 runtime staging 完成标志，不代表粒子已经在 GPU 上生成。
+- CPU/GPU Event 到具体 Spawner/Initialize system 的编译映射、GPU Event header/instance index、Particle Strip 初始化/回收、三后端 compute + Planar draw、URP frame graph，以及 VFX 其余 Block/Operator/Output、编辑器和截图 A/B 仍未完成。
+- Unity 2022.3.61f1 最终基线与全项目剩余 **3,189** 个官方类型缺口不变，不能宣称总体 Unity 2022 Ultra 已完成。
+
+### 下一优先项
+1. 将 CPU Event context→Spawner→Initialize system 映射写入 runtime asset，并让 Metal/Vulkan/D3D11 后端消费 dispatch plan、上传 source buffer、发出真实 Initialize compute。
+2. 实现 GPU Event header/batch/instance ABI、Particle Strip 初始化/回收和 Planar draw，挂入 URP 真实 frame graph。
+3. 扩展 VFX Block/Operator/Output 与 Shader Graph material integration，并迁移到 Unity 2022.3.61f1 官方 fixture、编辑器交互和截图 A/B。
+
+## 2026-07-16ac — VFX Output Event native 队列、readback 与托管帧内回调
+
+### 已完成
+- `anity-native` 新增 device-owned Output Event FIFO C ABI：按 effect 隔离批次，严格校验 record count/stride/byte count，以单调 sequence 拒绝重复或倒序提交，并提供 count、peek 与带 expected-sequence 的原子 dequeue；每个 effect 的未消费批次有明确上限，避免无界增长。
+- `NativeGraphicsDevice` 完成 P/Invoke 包装与强类型 enqueue/peek/dequeue；`VisualEffect.ProcessOutputEvents` 按 runtime asset 的 Output Event context/record layout 解码 Bool、Int、UInt、Float、Vector2/3/4、Matrix4x4 的 bit-exact record，按 FIFO/record 顺序触发 `outputEventReceived`。未知 event 与已移除 asset 的陈旧批次会被安全消费，不会永久阻塞队列；非法 stride/byte layout 会在消费后明确失败。
+- `VFXManager.ProcessCamera` 已在 effect timestep 前从当前 native graphics device 抽取并分发 Output Event，因此 callback 进入实际相机帧调度路径，而不是仅测试调用的旁路。
+- Apple native 产品构建现在默认且由 `_scripts/build-native.sh` 显式关闭宿主 Vulkan，使用 Metal 主路径；这清除了旧 CMake cache 将主 dylib 绑定到 Android Emulator `libvulkan` 的风险。MoltenVK 验证仍可显式开启，Android/Windows/Linux 的 Vulkan 默认不变。
+
+### 测试与门禁
+- 新增 native/managed Output Event 深测 **15/15**：覆盖 native handle、descriptor/count、精确 bytes、FIFO、重复/倒序 sequence、错误 expected sequence、单/多 record、多 batch、全部 scalar/vector 位型、unknown event、坏 stride、空队列、asset 移除与 `VFXManager.ProcessCamera` 集成。用主 `libanity_native.dylib` 和 `ANITY_REQUIRE_NATIVE=1` 强制验证，未走托管 fallback。
+- Core 全量 **867/867**；VFX Graph **397/397**。本机 Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**、成员 **8,645/37,164**、`regressions=0`、`removed-or-changed=0`、load issues=0，`UnityEngine.VFXModule` 公开差异仍为 **0**。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、WebGL、Hub、Editor 与样例；产品工程 0 错误/警告，URP3DDemo 保留既有 43 个 nullable warning。主 macOS dylib 经 `otool -L` 确认不再含 Vulkan runtime dependency。
+
+### 尚未完成
+- 当前 native Output Event 是后端无关的生产级队列/readback ABI；Metal/Vulkan/D3D11 compute kernel 尚未在 GPU dispatch 完成后自动产出这些 records，因此不能把本批描述为完整 GPU VFX Output Event 闭环。
+- CPU Event 的 native batched prefix-sum/source dispatch、GPU Event header/instance index、Particle Strip 回收、三后端 compute/Planar draw、URP frame integration，以及 VFX 其余 Block/Operator/Output、编辑器 Graph UI/preview、官方截图/产物 A/B 仍未完成。
+- 全项目仍缺 **3,189** 个官方类型；最终 API、包与行为基准仍须迁移到 Unity 2022.3.61f1，当前 2022.3.51f1 证据不能用于宣称 Anity 已总体完成 Unity 2022 Ultra。
+
+### 下一优先项
+1. 将 CPU Event runtime data 接入 native batched prefix-sum/source dispatch，并由 Metal/Vulkan/D3D11 VFX compute 结束路径直接生产本批 Output Event records。
+2. 实现 GPU Event header/batch/instance ABI、Particle Strip 初始化/回收及三后端 compute + Planar draw，挂入 URP 真实帧调度。
+3. 扩展 VFX Block/Operator/Output 与 Shader Graph material integration，并持续补 Unity 2022.3.61f1 官方 fixture、编辑器交互和截图 A/B。
+
+## 2026-07-16ab — VFX Graph 编译描述符到 VisualEffectAsset 生产运行时桥接
+
+### 已完成
+- `Unity.VisualEffectGraph.Editor` 现在按正确依赖方向引用 `Anity.Core`，由编辑器编译器生成 Core 内部 runtime contract；Core 不反向依赖编辑器，新增类型与导入入口全部保持 `internal`，没有扩大或污染 Unity 公开 API。
+- 新增 `VfxRuntimeAssetCompiler`：按序列化 Graph 顺序提取 CPU Event 名称、Initialize source attribute、Particle/Particle Strip/Spawner/Mesh 系统、容量、Output Event 同名上下文合并、`spawner_input` 映射及 spawnCount-first record layout。系统命名按 Unity `VFXSystemNames` 规则去除自动编号后缀并稳定生成 `(1)`、`(2)`。
+- 新增版本化二进制 runtime data ABI：固定 magic/version、显式长度、UTF-8/集合上限、SHA-256 checksum、无 trailing data；属性类型/offset/size/stride、重复名称、跨系统名称、Output Event 与全局 event schema、Property ID 碰撞均在提交 Asset 前验证。相同 Graph 编译结果 bit-exact 稳定。
+- `VisualEffectAsset.ImportRuntimeData` 先完整反序列化和预构建，再原子替换 event schema、CPU Event、全部系统清单、Particle capacity/初始 sleeping state、Spawner state 与 Output Event context/mapping/record 元数据；失败不会修改 compilation version 或旧运行时状态，旧 Spawner state 在成功替换后释放。
+- `VisualEffect` 的 `GetSystemNames` / `GetParticleSystemNames` / `GetSpawnSystemNames` / `GetOutputEventNames`、`GetParticleSystemInfo`、`GetSpawnSystemInfo`、`HasSystem` 与 `CreateVFXEventAttribute` 现在可直接消费 VFX Graph 编译资产，不再要求测试或调用方手工维护一套平行 schema。
+
+### 测试与门禁
+- 新增跨程序集 runtime bridge 深测 **16 个**；Output Event compiler/runtime 组 **32/32**，覆盖确定性、CPU Event 顺序/去重、Initialize source schema、Spawner/Particle 容量与 Unity 命名、Output context/mapping/stride、event attribute 类型、替换、checksum/truncate/trailing、冲突 schema 与非法 stride。
+- VFX Graph 全量 **397/397**；Core 全量 **852/852**；本机 Unity 2022.3.51f1 的 84 程序集 API 门禁保持类型 **928/4,117**、成员 **8,645/37,164**、`regressions=0`、`removed-or-changed=0`、load issues=0，`UnityEngine.VFXModule` 公开差异仍为 **0**。
+- `bash _scripts/build-all.sh Release` 通过 native、Core、Agent、Shader Graph、VFX Graph、CLI、WebGL、Hub、Editor 与样例；产品工程 0 错误/警告，URP3DDemo 保留既有 43 个 nullable warning。`git diff --check` 作为最终文本门禁执行。
+
+### 尚未完成
+- 本批完成的是编译资产 contract 与托管运行时状态桥接；CPU Event 多 record 的 native prefix-sum/dispatch 消费、Output Event native readback→managed callback、GPU Event header/instance index、Particle Strip 回收、Metal/Vulkan/D3D11 compute/Planar draw 与 URP frame integration 仍未贯通。
+- 仍缺 VFX 其余 Block/Operator/Output、Planar Lit/Gradient/soft particle/Texture2DArray/Shader Graph material、编辑器 Graph UI/preview、官方运行截图/产物 A/B；最终基准仍必须迁移到 Unity 2022.3.61f1，当前 2022.3.51f1 仅是预备证据。
+- 全项目仍有 **3,189** 个官方类型缺失及大量行为、编辑器和平台差距，不能宣称 Anity 已总体完成 Unity 2022 Ultra。
+
+### 下一优先项
+1. 将 CPU Event runtime data 接入 native batched event prefix-sum/source dispatch，并实现 Output Event record readback、schema decode 与 `outputEventReceived` 帧内回调。
+2. 实现 GPU Event header/batch/instance ABI、Particle Strip 初始化/回收，以及 Metal/Vulkan/D3D11 compute + Planar draw，接入 URP 真实帧调度。
+3. 扩展 VFX Block/Operator/Output 与 Shader Graph material integration，并在 Unity 2022.3.61f1 官方 fixture、编辑器交互和截图 A/B 上持续收口。
+
+## 2026-07-16aa — UnityEngine.VFXModule 公开面闭环与可运行 Manager/System/Property 状态
+
+### 已完成
+- 以本机 Unity 2022.3.51f1 `UnityEngine.VFXModule.dll` 为预备反射基线，将该程序集全部公开类型与公开成员差异收口为 **0**。`VisualEffect` 已补齐 Bool/Int/UInt/Float/Vector2/3/4/Matrix4x4/Texture/AnimationCurve/Gradient/Mesh/SkinnedMeshRenderer/GraphicsBuffer 的 int-ID/string `Has/Get/Set`、`ResetOverride`、纹理维度、系统清单/存在性/awake 查询、Particle/Spawner info 与官方 metadata；`aliveParticleCount` 修正为官方 `int`。
+- `VisualEffectAsset` 新增 compiled exposed-property definition、默认值、类型与 texture dimension；组件 override 与 asset default 分离，换 Asset 清理 override，未知/错类型写入不会污染状态。Particle/Spawner/Output Event system 使用同一编译资产数据源，查询返回 snapshot，缺失系统明确抛错。
+- 新增并按官方表面精确实现 `VFXSpawnerLoopState`、`VFXSpawnerState`、`VFXParticleSystemInfo`、`VFXExpressionValues`、`VFXCameraBufferTypes`、`VFXCameraXRSettings`、`VFXBatchedEffectInfo`、`VFXSpawnerCallbacks` 与 `VFXManager`。ExpressionValues 提供强类型读取、错误类型拒绝及 Curve/Gradient 独立复制；SpawnerState 具备 loop/play/time/count/event attribute 生命周期与复制语义。
+- `VFXManager` 现在从 live `VisualEffect` 注册表聚合组件与 batch info，维护有限正数 timestep、XR camera preparation、camera buffer requirement/binding、per-camera process 与空 camera state 清理；camera process 会推进未暂停 effect，而不是空方法。该托管调度层仍需接入 VFX Graph runtime descriptor、native batch/compute/draw 与 URP frame graph，不能据此宣称完整 VFX 运行时完成。
+- API evidence baseline 已审查并重建：84 个官方程序集、类型存在 **928/4117**、精确 **403**；成员存在 **8,645/37,164**、精确 **6,417**；`regressions=0`、`removed-or-changed=0`、load issues=0。最终验收仍必须在目标 Unity 2022.3.61f1 重建，当前 2022.3.51f1 只作为预备基线。
+
+### 测试与门禁
+- 新增 `VisualEffectPropertyAndSystemTests` **14/14** 与 `VFXRuntimeServicesTests` **15/15**；连同事件属性组，VFX runtime 定向测试 **48/48**，覆盖默认值/override/reset、全部值族、对象与 null 约束、Asset 更换、系统分类、Particle/Spawner snapshot/Dispose、ExpressionValues、callback、batch、XR camera、buffer binding 与 process。
+- Core 全量 **852/852**；VFX Graph **381/381**；Shader Graph **198/198**；强制实际加载 `libanity_native` 的 VFX descriptor/record byte readback **1/1**。
+- `bash _scripts/build-all.sh Release` 通过 native 与全部托管产品/样例，0 编译错误；URP 示例保留既有 43 个 nullable warning。`git diff --check` 通过。
+
+### 尚未完成
+- VFX Graph compiler descriptor 尚未序列化/导入 runtime `VisualEffectAsset`；CPU Event 多 record/batched source 尚未贯通 native runtime；Output Event native callback/readback、GPU Event header/instancing、Particle Strip、Metal/Vulkan/D3D11 compute/draw dispatch、URP frame integration 与 editor/preview/截图 A/B 仍未完成。
+- Unity 2022.3.61f1 官方 editor、程序集与包尚未安装，本批 API 精确结论必须迁移重验；全项目仍有 3,189 个官方类型缺失和大量行为/编辑器/平台差距，不能宣称总体 Unity 2022 Pro 已完成。
+
+### 下一优先项
+1. 定义 VFX Graph compiler descriptor→runtime asset 的稳定序列化 ABI，贯通 CPU Event source/record/batch 与 Output Event callback/readback。
+2. 实现 GPU Event header、batch/instance index、Particle Strip 初始化/回收及 Metal/Vulkan/D3D11 compute + Planar draw，并挂入 URP 真实帧。
+3. 安装 Unity 2022.3.61f1 后重建 API/package fixture baseline，并继续 Shader Graph 全 value/node/pass 与 VFX 其余 Block/Output/editor A/B。
+
+## 2026-07-16z — UnityEngine.VFXModule 事件属性、运行时队列与 native record upload
+
+### 已完成
+- 以本机 Unity 2022.3.51f1 `UnityEngine.VFXModule.dll` 为预备反射基线，新增 `UnityEngine.VFX.VisualEffectObject`、`VisualEffectAsset`、`VFXExposedProperty`、`VFXEventAttribute`、`VFXOutputEventArgs` 与首批 `VisualEffect` 运行时公开面；`VFXEventAttribute` 的 public copy constructor、Dispose，以及 Bool/Int/Uint/Float/Vector2/3/4/Matrix4x4 的 int-ID/string `Has/Set/Get` 和 `CopyValuesFrom` 已按官方命名与重载落地。该证据仍需在 2022.3.61f1 重建，且不代表完整 VFXModule 公开面已关闭。
+- `VisualEffectAsset` 现在保存编译后 event-attribute schema、稳定字段顺序/offset/stride、event 与 exposed-property 元数据；`Has*` 反映 Asset 声明类型而不是“是否 Set 过”。未知字段或错误类型不会污染编译布局，copy 会按目标 schema 过滤。
+- `VFXEventAttribute` 可把 Bool/Int/UInt/Float/Float2/3/4/Matrix4x4 按稳定 32-bit word offset 打包为 bit-exact little-endian record，保留 `-0`、有符号整数位型和 column-major matrix component 顺序。
+- `VisualEffect.SendEvent` / `Play` / `Stop` / `Reinit` 已实现 Asset 归属校验、调用时不可变 attribute snapshot、单 effect 单调 sequence 与线程安全有序队列；`CreateVFXEventAttribute` 在无 Asset 时按官方返回 null。Output callback 使用复用的缓存属性对象，避免把调用方对象直接暴露给回调。
+- `anity-native` 新增设备级 `AnityGraphics_UploadVFXEventRecords` / info / readback C ABI：严格验证 effect/sequence、recordCount、4-byte 对齐 stride 与精确 byte count，原生复制后按 effect 保留最新单调事件记录，并可字节级回读。Managed `NativeGraphicsDevice` 会把事件上传到所有 live native device；这只是后端无关的 native staging ABI，尚未冒充 Metal/Vulkan/D3D11 GPU dispatch。
+- 补充官方命名空间 `UnityEngine.Rendering.TextureDimension`，供 `VisualEffectAsset.GetTextureDimension` 返回精确类型；旧根命名空间兼容面暂未在本批迁移，避免扩大无关变更。
+
+### 测试与门禁
+- 新增 `VFXEventAttributeTests` **19/19**：覆盖公开方法/构造器形状、schema-before-set、string/ID 同址、全部标量/向量/矩阵、位型打包、未知/错类型、copy/null/dispose、跨 Asset 拒绝、不可变队列快照、32 路并发顺序、Play/Stop/Reinit、Output callback、Asset metadata 与 native descriptor/record 回读。
+- Core 全量 **823/823**；既有 `UnityWebRequest` AssetBundle 用例暴露 `AssetDatabase` 全局状态并行冲突，纳入已有非并行 collection 后全量稳定通过。VFX Graph **381/381**、Shader Graph **198/198**；强制实际加载 `libanity_native` 的 VFX byte readback **1/1**。
+- `bash _scripts/build-all.sh Release` 通过 native、全部产品程序集与样例；0 编译错误，URP 示例仍为既有 43 个 nullable warning。`git diff --check` 作为本批最后门禁执行。
+
+### 尚未完成
+- `UnityEngine.VFXModule` 仍缺 `VFXManager`、Spawner、ExpressionValues、particle/system info、完整 `VisualEffect` exposed property/system 查询面与精确官方行为；本批只关闭事件属性/队列/native staging 子集。
+- VFX Graph compiler 的 CPU Event layout 尚未自动导入 `VisualEffectAsset` runtime schema；Output Event descriptor 尚未连接 native callback/readback；GPU Event header/instancing、batched offsets、Particle Strip、Metal/Vulkan/D3D11 compute/draw dispatch 与 URP frame integration 仍未完成。
+
+### 下一优先项
+1. 将 VFX Graph compiler event/source descriptor 序列化为 `VisualEffectAsset` runtime data，接通 CPU Event batched upload、Output Event native callback/readback，并补 `VFXManager` / `VisualEffect` 剩余公开 API 与官方反射门禁。
+2. 实现 GPU Event header、batch/instance 索引、Particle Strip 初始化/回收与 Metal/Vulkan/D3D11 compute dispatch，再把 Planar Output 接入 URP 真实 draw frame。
+3. 继续 Shader Graph vector/texture/matrix/gradient、Custom Function 多输入输出与 URP Decal/Fullscreen pass，并迁移到 Unity 2022.3.61f1 官方 fixture/A-B。
+
+## 2026-07-16y — Unity 2022.3.61f1/官方包目标固化与三后端真实 mip chain
+
+### 目标口径更新
+- 唯一最终基准明确为 **Unity 2022.3.61f1 Pro**，不再以泛化的 2022.3.x 或当前安装的 2022.3.51f1 代替最终证据。
+- 对等范围新增 Unity 官方包全链路，至少包含 Shader Graph、Visual Effect Graph、URP、Timeline、UGUI、Test Framework、Collections、Burst、Mathematics、Input System、Addressables。package manifest/依赖、公开 API、资产 importer、编辑器、代码生成、运行时、样例和平台矩阵都属于验收内容。
+- 当前机器只有 Unity 2022.3.51f1；其内置 Shader Graph/VFX Graph manifest 均为 14.0.11，只作为审计工具与 fixture 的预备基线，不得冒充 2022.3.61f1 最终版本证据。
+
+### 已完成
+- `Texture2D` 不再把 `mipmapCount` 当占位数字：按 Unity floor-halving 规则拥有每级 Color/Color32 storage，`Get/SetPixel(s)` 与 `GetPixelBilinear` 的 mipLevel 真正寻址独立层级；显式 mipCount 会按物理链上限裁剪。
+- `Apply(updateMipmaps:true)` 由 mip0 递归生成 2×2 box-filter 链；`Apply(false)` 保留手工 mip。`GetRawTextureData` / `LoadRawTextureData` 与 native upload 统一使用 largest-first 紧密打包的完整 RGBA8 mip chain，non-readable gate 在完整上传后关闭。
+- native registry 按 width/height/mipCount 计算并严格验证全链 byte count，拒绝 mip descriptor + mip0-only 数据。operation mutex 继续保证同 device replace/destroy 原子性。
+- Metal 创建精确 `mipmapLevelCount` 的 `MTLTexture` 并逐级 `replaceRegion`，Point/Bilinear 使用 nearest mip、Trilinear 使用 linear mip；Vulkan image/view/barrier/copy regions/sampler LOD 覆盖全部 mip；D3D11 immutable texture 使用完整 subresource array 与 mip-aware sampler。
+- D3D11 真实 Windows 分支再次用 Zig `x86_64-windows-gnu` 编译；macOS native 与 Android NDK arm64-v8a/API26 全库重新编译链接通过。
+
+### 测试与门禁
+- 新增 `Texture2DMipmapTests` **14/14**：完整/显式/NPoT chain、独立 mip read/write/bilinear、自动递归生成、手工 mip 保留、raw pack/load、native byte count/非法 base-only ABI、non-readable upload。
+- Metal texture tests **12/12**、Vulkan texture tests **11/11**；新增 minification fixture 将 64×64 七级纹理压缩到 8×8 quad，通过隐式导数真实采到 mip3 黄色。Vulkan 在 MoltenVK 与 SwiftShader 两套 ICD 均通过，证明非零 mip 已实际上传和采样。
+- Core 强制 native + SwiftShader 全量 **804/804**。D3D11 同一 minification 用例已加入 Windows/WARP 门禁，当前非 Windows 主机只完成真实分支交叉编译，不能声称运行验收。
+- `Texture2D.GetPixel/GetPixelBilinear/SetPixel(..., mipLevel)` 已补齐官方 `DefaultValue("0")` 参数 metadata；2022.3.51f1 临时 API baseline 经审查更新后复跑为 `regressions=0` / `removed-or-changed=0`，成员存在 **8,364**、精确 **6,136**。`bash _scripts/build-all.sh Release` 已通过；产品工程 0 错误/警告，样例仍是既有 43 个 nullable 警告。
+
+### Shader Graph 14.x 独立包首批实现
+- 新增独立 `anity-shader-graph/src/Unity.ShaderGraph.Editor` 工程，程序集名精确为 `Unity.ShaderGraph.Editor`，没有把官方包逻辑塞入 `Anity.Core`。构建与 PowerShell 全测试入口已纳入该工程。
+- 实现 Shader Graph 14.x multi-json stream parser：保留原始源文本，解析连续 JSON objects，校验 `m_Type` / `m_ObjectId`、重复对象与本地 `m_Id` 引用，并建立稳定 object registry；同时读取 Unity 包内仍存在的 legacy 单 JSON `ShaderSubGraph`。
+- 实现确定性的 legacy→14 multi-json upgrader：迁移 GraphData、properties、groups、nodes、nested slots、edges、PropertyNode property reference 与 default category，生成稳定 object ID，并在升级后重新执行引用、拓扑、无环与 Blackboard 校验。本机官方包的 **14/14** 个 legacy subgraph 已全部升级闭环。
+- 实现现代 `GraphData.m_Nodes/m_Edges` 拓扑：节点 registry、output/input slot（含 Unity 14 使用的负数 hashed slot id）、单输入连接约束、稳定拓扑排序与 cycle detection，为节点编辑器和 HLSL 代码生成建立真实结构底座。
+- 实现强类型 Blackboard：按源顺序建模 property/keyword/dropdown/category，覆盖 Unity 14 定义的 **16** 种 property type，解析 reference name、precision、value、float/range 与 HLSL declaration override，并严格拒绝 duplicate/missing/type mismatch。官方 356 个 modern 资产中实际出现的 948 properties、57 keywords、25 dropdowns 与 432 categories 均已进入 gate。
+- 实现 Unity 14 ShaderKeyword pragma 语义：Boolean/Enum、ShaderFeature/MultiCompile/Predefined、Local/Global 与 vertex/fragment/geometry/hull/domain/raytracing stage suffix，Predefined 不生成 pragma。
+- 实现首批确定性 scalar HLSL generation：`Vector1Node`、Add/Subtract/Multiply/Divide 与真实 `PropertyNode` 使用 slot/edge/default value 生成依赖有序函数；Vector1/Boolean property 支持 Global、UnityPerMaterial、HybridPerInstance、DoNotDeclare 声明路径，Hybrid 生成 DOTS/classic instancing 宏并通过 access macro 读值。共享依赖/属性只生成一次；cycle、非标量 property、缺 slot/节点/引用及未支持 node type 会明确拒绝，不生成占位 shader。
+- 实现 Target/SubTarget 强类型层与严格 target-pairing：覆盖 URP Lit/Unlit/Decal/Fullscreen、Built-in Lit/Unlit、HDRP Lit/Unlit/Decal/Fabric；Built-in/HDRP 可无损读取但明确为非产品支持，唯一产品路径仍为 URP。官方 modern fixture gate 已覆盖 220 Universal、189 Built-in、212 HD targets 及全部实际 subtarget 分布。
+- 实现 URP 14 Lit/Unlit pass planner：按 Unity 的 surface、alpha clip、z-write、clear coat/complex-lit 条件生成 Forward/ForwardOnly、GBuffer、ShadowCaster、DepthOnly、DepthNormals/Only、Meta、SceneSelection/Picking 与 2D 的精确顺序、LightMode、template/pragmas/includes；Decal/Fullscreen 已识别但在 pass 生成阶段明确拒绝，尚未冒充完成。
+- 实现 Custom Function 强类型模型与首条可执行 scalar HLSL 链：File=0/String=1、6 类官方样例 slot、输入后输出签名顺序、`_$precision`/`_float` 命名；String 模式生成函数定义，File 模式通过 GUID resolver 生成受限 `.hlsl/.cginc/.cg` include。默认占位节点可无损读取但不可生成；冲突定义、非法标识符/路径、错误输出槽、非单 Vector1 输出和向量输入均明确拒绝。向量/纹理资源与多输出代码生成仍未完成。
+- 新增 **198/198** Shader Graph 测试；官方 fixture gate 已遍历本机 Shader Graph 14.0.11 的 **370** 个 `Samples~` / `ShaderGraphLibrary` `.shadergraph/.shadersubgraph` 资产（356 modern + 14 legacy），全部通过解析与对象引用完整性；modern 图通过拓扑、无环、Blackboard、keyword、Target/SubTarget 与 Custom Function typed gate，legacy 图升级后通过引用、拓扑、无环与 Blackboard gate。该证据仍属于 Unity 2022.3.51f1 预备基线。
+
+### Visual Effect Graph 14.x 独立包首批实现
+- 新增独立 `anity-vfx-graph/src/Unity.VisualEffectGraph.Editor` 工程，程序集名精确为 `Unity.VisualEffectGraph.Editor`，并进入正式 build-all 与 PowerShell 全测试入口；VFX 包逻辑没有污染 `Anity.Core`。
+- 实现 `.vfx` Unity YAML 1.1 multi-document lossless index：解析 `!u!classID`、64-bit signed `fileID`、serialized root type、原始 document text 与 object registry，识别 `VisualEffectResource` 根对象，区分本地 `{fileID: ...}` 和带 guid 的外部资源引用，报告重复/悬空引用。
+- 建立 **70** 个 script GUID 类型 registry：69 个 VFX Graph 14 内置 Graph/UI/Data/Context/Block/Operator/Parameter/Slot 类型（含 CPU/GPU Event、Output Event、`VFXSpawnerSetAttribute` 与官方 `VFXSlotFloat4`），以及 1 个 HDRP `VFXHDRPSubOutput` 外部类型。外部类型可无损读取并明确标为 unsupported，不把 HDRP 变成 Anity 产品管线。
+- 实现 typed graph：解析并分类 context/block/operator/parameter/slot/data，验证严格 parent/children 层级、master slot owner/direction、linked slot、context↔data owner、output↔external sub-output，以及双向 input/output flow slot；生成去重 flow edge 与稳定 context topological sort，cycle、越界、非 context endpoint、非双向引用和 malformed YAML list 均明确拒绝。Data 使用 `m_Data/m_Owners` 关系而非错误套用通用 `m_Children` 树。
+- typed slot value 层解析 `m_Property`、property/value serializable type、direction 与精确 `VFXCoordinateSpace`（Local=0/World=1/None=int.MaxValue）；强类型覆盖 Float/Int/Uint/Bool/Float2/Float3/Color/Position/Direction/Vector/Transform、Texture2D/Mesh object reference、AnimationCurve、Gradient 与 generic structured JSON。类型错配、非法数值/JSON/component/object GUID/space 均明确拒绝，child slot 的空 master value 保持为空而不伪造默认值。
+- 实现首批真实 typed GPU expression/HLSL compiler：沿 reciprocal linked slot DAG 编译 Float/Float2/Float3/Position/Direction/Vector 默认值与 Add/Subtract/Multiply/OneMinus operator，按依赖稳定排序，共享输出只生成一次，使用 invariant finite HLSL literal 与合法 signed-fileID 变量名。Local↔World 转换逐式对齐 VFX Graph 14 官方 `VFXExpressionTransform`：Position 使用 `mul(matrix,float4(value,1)).xyz`、Vector 使用 3×3、Direction 使用 3×3 后 normalize，None/same-space 不插转换；旧 scalar 入口复用同一 typed compiler。cycle、错误 direction/owner/arity、类型/space mismatch、未支持 operator/value type、NaN/Infinity 均拒绝，不输出占位代码。
+- 实现 VFX Graph 14 attribute schema：精确建模 Boolean/UInt32/Int32/Float/Float2/Float3/Float4、Read/Write/ReadSource、Overwrite/Add/Multiply/Blend、Off/PerComponent/Uniform、Slot/Source 与 variadic channel；catalog 覆盖 **40 个 stored attribute + 4 个 variadic aggregate**，含默认值、space/read-only/write-only/local/internal 约束与 7 类 custom attribute signature。SetAttribute/SetCustomAttribute 可生成确定性 typed HLSL，随机路径自动注入 seed；`VFXSpawnerSetAttribute` 已按官方 lowercase `randomMode`、全 variadic channel 以及 Spawn Context 可写 `spawnTime/spawnCount` 特例建模。本机 12 个官方 fixture 的 **80 个 attribute-bearing model** 全部通过 schema/statement gate。
+- 实现 Context/Event/Data 强类型层：按 VFX Graph 14 精确值建模 9 类 Context flag、SpawnEvent/OutputEvent/Particle/Mesh/ParticleStrip data、Spawner/Initialize/Update/Output task；解析 CPU Event/Output Event 默认名、Particle/Strip capacity、simulation space、bounds mode、compute bounds、Planar primitive task 与 context flow slot profile，并严格验证 context↔data ownership、Particle/Strip 容量乘积及 flow data type。
+- 实现首个可执行 Update Context GPU kernel 子集：按 context child 顺序编译 SetAttribute/SetCustomAttribute，生成 data-wide `VFXAttributes` 工作结构与 `RWByteAddressBuffer` 显式 typed 读写、`[numthreads(64,1,1)]` bounds gate、typed 常量槽局部变量、四种 composition 与 deterministic random hash/state/seed writeback。Float/Int/UInt/Bool/Float2/Float3/Float4/Position/Direction/Vector linked input 会复用 typed expression compiler 内联 operator/Attribute Parameter DAG，并把 Local↔World 矩阵加入 dispatch contract；可达 `VFXAttributeParameter` 会按 Current/Source 与 variadic mask 推导结构体字段，避免不可达参数污染布局。
+- Update Source 语义已按官方 `VFXCodeGenerator.GenerateLoadAttribute` 对齐：进入 Update 时建立 `VFXSourceAttributes` 快照；同属性在当前布局存在时复制初值，否则使用 catalog 默认值，不错误绑定 Init/GPU Event 专用 `sourceAttributeBuffer/sourceIndex`。Source SetAttribute 的 `Value`、variadic channel packing 及历史 Source+Blend 资产均可生成。
+- Block activation 已按官方 `_vfx_enabled` expression mapper 对齐：无 activation slot 时迁移 deprecated `m_Disabled`，常量 false 编译期裁剪，serialized activation slot 优先于旧字段，linked Bool/Current/Source Attribute Parameter 生成运行时 `if` 并合并 attribute dependency；非 Bool link 明确拒绝。其余未支持 Block 与非 Init/Update context 仍在生成前拒绝，不输出占位内核。
+- 对照官方 VFX Graph 14 `Gravity.cs`、`Force.cs`、`ForceHelper.cs` 与 `Drag.cs` 落地首批非 Set Block：Gravity 精确执行 `velocity += Force * deltaTime`；Force Absolute/Relative 分别复现 mass 除法与 Drag clamp；Linear Drag 复现 mass 衰减、零下限以及可选 `size * scaleX/Y` 面积影响。常量/linked input、activation、执行顺序与 attribute dependency 共用现有 typed kernel 路径；错误 Mode、设置、slot 名与 slot 类型在 HLSL 生成前拒绝。
+- 对照官方 `VFXBasicUpdate` 与 implicit Block 源码实现 Update 上下文隐式语义：按实际 Read/Write dependency 在显式块前备份 `oldPosition`，在显式块后插入 Euler position、逐通道 angular Euler、Age、Reap；`integration/angularIntegration/ageParticles/reapParticles/skipZeroDeltaUpdate` 的默认值、枚举/布尔验证和开关行为已落地。使用 alive 时先过滤初始死亡粒子，Reap 按官方严格 `age > lifetime` 置死；dispatch contract 正式加入 `deltaTime`。
+- 对齐官方 `VFXUpdate.template` 的普通 Particle alive/dead-list 分支：alive 被使用时只让初始存活粒子进入 block；仍存活时提交全部属性，新死亡时从原始 buffer snapshot 仅持久化 `alive=false`，随后以 `InterlockedAdd` 将 particle index 追加到 `deadListOut`。单实例 dispatch contract 提供 `deadListCount`/capacity；越界追加会原子回滚 count，避免损坏后续 Init 消费状态。Particle Strip 明确不绑定普通粒子 dead-list，保留后续 strip 专用回收路径。
+- 对照官方 `VFXInit.template` 与 `VFXBasicInitialize` 新增独立 Initialize kernel：当前 attribute 从 catalog 默认值开始，Source Attribute 从 `sourceAttributesBuffer[sourceIndex]` 读取；CPU source 用带零事件保护的 prefix-sum 二分定位，GPU Event 由真实 `VFXBasicGPUEvent -> Init` flow 选择 `eventList` sourceIndex。`particleId`、`seed=WangHash(particleIndex ^ systemSeed)`、`spawnIndex` 在 block 前初始化，WangHash 五步整数公式与官方 `VFXCommon.hlsl` 一致并回写 random state；GPU Event 自动插入官方 implicit `alive=true`，即使没有显式 block 仍可编译。普通 Particle 在 block/alive gate 后以 snapshot 限制 spawn 数并原子消费 `deadListIn/deadListCount`，死亡结果不会占用槽位。
+- 同一 `VFXDataParticle` 的 Init/Update 已改为 data-wide stored attribute 分析：所有支持 context 的 block、Current Attribute Parameter、random seed 与 Basic Update implicit dependency 合并为唯一稳定 catalog-order ABI；Init 会按 Unity 语义默认初始化只在 Update 使用的字段，Update 也保留只由 Init 写入的字段。编译结果公开字段 type/offset/size 与 stride 元数据；跨 context custom attribute 类型/space 冲突在生成前拒绝，disabled block 不污染 ABI，Update Reap 的隐式 alive 会自动驱动 Init dead-list 消费。
+- 当前粒子 attribute storage 已从平台相关的 `RWStructuredBuffer<VFXAttributes>` 迁移为官方同类 `RWByteAddressBuffer`，按显式 offset/stride 生成 Bool/UInt/Int/Float/Float2/Float3/Float4 的 typed Load/Store；Bool 明确编码为 0/1 uint，本机官方 VFX 源码中的 `Load3`/`StoreN` 路径用于语法对照。local-only event/strip attribute 在专用 event/strip storage 未实现前明确拒绝，禁止错误进入 particle ABI。官方 `VFXSlotFloat4` GUID、Vector4 typed value/expression/HLSL declaration 同步补齐。
+- Init 外部 Source event attribute 已从 `StructuredBuffer<VFXSourceAttributes>` 迁移为只读 `ByteAddressBuffer`，独立输出 source 字段 type/offset/size/stride 与 `UsesExternalSourceBuffer` binding 元数据，按 sourceIndex 生成 Bool/UInt/Float/Float3 `LoadN`。CPU prefix-sum 与 GPU Event event-list 都在 raw load 前确定 sourceIndex；Update Source 继续保持官方 entry snapshot 语义且不会误绑外部 buffer。
+- 外部 Source raw layout 已继续对齐官方 `StructureOfArrayProvider` 的单 ReadSource bucket：attribute 按组件宽度稳定降序装入 4-word block，逐字段按 1/2/4-word alignment 排列，bucket stride 按最大 alignment 补齐；Float3+Float2、Float4+scalar 等组合不再使用错误的简单紧密串接。Initialize dispatch 正式加入 `startEventIndex`，所有 CPU/GPU Event raw load 使用 `(startEventIndex + sourceIndex) * stride`，并公开 batched source offset binding 元数据。
+- `VFXPlanarPrimitiveOutput` 已参与同一 Particle Data 的 stored layout：逐项对齐官方 17 个 Read attribute（position/color/alpha/alive、axis/angle/pivot XYZ、size/scale XYZ），Init 会为只被 Output 使用的字段写入官方默认值，alive 自动启用 dead-list。`uvMode` 0–4 严格验证，Flipbook/Blend/MotionBlend 才加入 `texIndex`；存在 Shader Graph 时按官方 `supportsUV=false` 抑制 legacy flipbook attribute。默认 Planar profile 的稳定 stride 为 108 bytes，并在 Init/Update 完全一致。
+- `VFXPlanarPrimitiveOutput` 已从 layout 推进到完整 Unlit graphics pass HLSL：只读 `ByteAddressBuffer` 先独立读取 alive，再对越界/死亡粒子写 NaN clip position；Triangle/Quad/Octagon 按官方 3/4/8 顶点偏移和 UV 展开，Octagon 默认 cropFactor=0.293；`size * scaleXYZ`、axis basis、度制 Euler、pivot、position 逐式组合 `elementToVFX`，随后执行 VFX→World→Clip 并输出 positionWS/UV/color/particleIndex。Fragment entry 实际采样主纹理；Flipbook 在 vertex 将 texIndex 转成帧 UV，Blend 双帧插值，MotionBlend 采样 motion vector map 后偏移双帧，ScaleAndBias 读取对应参数。Alpha clip 阈值进入 varying 并执行 `clip`；Additive/Alpha/Premultiplied/Opaque、ZWrite Default/Off/On、7 种 ZTest、Cull Default/Front/Back/Off、render queue/priority 与 Auto/Off/On sorting 按官方枚举生成强类型 render state。编译产物同时提供 vertex/fragment entry、每粒子顶点数、Triangle/Quad/Octagon 的 3/6/18 triangle index pattern、checked draw count 和多粒子 expanded index buffer，供后续 native/URP dispatch 直接消费。未实现的 Gradient Mapped、soft particle、Texture2DArray、geometry shader、Shader Graph material pass、Particle Strip 与 output block 在 HLSL 前拒绝。
+- `VFXOutputEvent` 已按官方 `VFXDataOutputEvent` 落为 CPU compilation target，而非伪造 GPU kernel：无 HLSL、无 GPU attribute layout；只编译存在输入的 context，同名 event 合并为一个 system contract，所有直接 Spawner 去重输出 `spawner_input` binding，并设置 OutputEvent 实例化禁用原因。祖先 context 按 flow 递归收集 `VFXSpawnerSetAttribute`，以稳定 catalog 顺序导出独立的 ReadSource attribute contract；直接 CPU Event 等非 Spawner 输入在 descriptor 生成前拒绝。
+- 对齐官方 `VFXExpressionGraph.ComputeEventAttributeDescs` 新增 CPU Event record ABI：`spawnCount` 无条件位于第一个 field，其余 ReadSource attribute 按首次出现顺序去重；每个 field 输出 32-bit word `element/structure` 信息。typed record packer 支持 Bool/Int/UInt/Float/Float2/3/4 的 bit-exact little-endian 写入、多个 record 与 `startEventIndex` 前缀，严格拒绝未知字段、类型/宽度冲突和非法批次偏移；Output Event descriptor 可直接生成对应 record layout。
+- 新增 **381/381** VFX YAML/typed graph/slot value/expression/attribute/context/kernel/pass/event ABI 测试：除既有 Init、data-wide ABI 与 current/source raw buffer 深测外，覆盖 Planar Output layout、完整 vertex/fragment pass、外部 binding、typed load、官方 source bucket packing/alignment/stride、CPU/GPU sourceIndex 与 batched `startEventIndex`、CPU Event field/record binary packing、Attribute Parameter、Update snapshot、只读约束、官方 output 字段/default、alive/dead-list、bounds/dead cull、三种 primitive、官方 transform、五种 uvMode、主纹理/双帧/motion sampling、alpha clip、四种 blend、ZWrite/ZTest/Cull/queue/sort、native index expansion，以及 Output Event CPU/no-layout、同名合并、多 Spawner mapping、实例化禁用、递归 ReadSource attribute contract、spawn-only attribute 和非法输入分支。官方 fixture gate 已遍历本机 Visual Effect Graph 14.0.11 的 **12** 个 `Editor/Templates` 与 `Samples~` `.vfx` 资产，全部通过多文档解析、resource/本地 fileID 完整性、已知 script GUID、typed hierarchy/slot value/data/flow、attribute/context schema 与无环排序检查；其中 **6 个官方 VFXAttributeParameter** 已实际通过 typed expression codegen。Shader Graph 仍为 **198/198**。本机仅有内部协议的 `UnityShaderCompiler`，无可直接调用的 dxc/glslang，因此官方源码与 codegen 深测不冒充真实 GPU shader 编译或运行 A/B。该证据仍属于 Unity 2022.3.51f1 预备基线；Init/Update/Planar graphics pass codegen、CPU record packer 与 Output Event descriptor 仍不等于完整 VFX native/URP runtime。
+
+### 仍未完成
+- Unity 2022.3.61f1 官方 editor/assemblies/packages 尚未安装到当前机器；现有 2022.3.51f1 API、Shader Graph 与 VFX fixture baseline 必须迁移重建。Shader Graph 尚缺完整 node/property runtime value、Custom Function 向量/纹理/多输出、URP Decal/Fullscreen pass、编辑器、预览、全节点/全 variant HLSL 与运行 A/B；VFX Graph 尚缺完整包 registry/settings、更多 operator/cast 与其余 Block、Planar 之外的完整 Output、compiler descriptor→runtime asset bridge、Output Event native callback/readback/runtime 分发、Source upstream packing/runtime、CPU batched/instanced event offsets、GPU Event header/instancing 索引、Particle Strip 初始化/回收及真实 native/URP dispatch runtime、event/property/output 编辑器与运行 A/B。
+- mip streaming（requested/minimum/loaded level）、mip bias、anisotropy、compressed ASTC/ETC/BC/PVRTC native resources、Texture2DArray/Cubemap/RenderTexture、external texture、async upload/device-loss rebuild 尚未完成。
+- Windows MSVC/WARP mip readback、WebGL texture LOD、移动端实机 mip/压缩格式矩阵及 Unity 2022.3.61f1 数值 A/B 尚未完成。
+
+### 下一优先项
+1. 在已闭环 Target/SubTarget、Lit/Unlit pass 与 scalar Custom Function 的底座上扩展 Shader Graph texture/vector/matrix/gradient property、Custom Function 向量/纹理/多输出、URP Decal/Fullscreen pass 与 variant generation；在 VFX current/source raw ABI、Init/Update、Planar Output、GPU Event、dead-list 与 Output Event CPU descriptor 底座上继续补 native/URP draw dispatch、Output Event runtime callback/readback、Source upstream packing、Turbulence、Collision、Spawn/Output Block，并建立 batched/instanced offsets、Particle Strip 与真实 GPU dispatch runtime。
+2. 实现 mip bias/aniso 与 requested/minimum/loaded mip streaming，再接 ASTC/ETC/BC/PVRTC native resource paths。
+3. 继续 uGUI soft clip、mask/pop stencil，并执行 Windows WARP 与 Unity 2022.3.61f1 官方截图/行为 A/B。
+
+## 2026-07-16x — D3D11 Texture2D/SRV/Sampler 与三后端纹理契约闭环
+
+### 已完成
+- D3D11 backend 新增 device-owned `ID3D11Texture2D`、`ID3D11ShaderResourceView`、`ID3D11SamplerState` cache，RGBA8 linear/sRGB format、Point/Bilinear/Trilinear filter、Repeat/Clamp/Mirror/MirrorOnce address mode 与 1×1 white fallback 均由同一 native texture descriptor 驱动。
+- D3D11 UI HLSL 与 input layout 现在读取 packed vertex UV0，pixel shader执行 vertex color × main texture，并用独立 alpha texture red channel调制 coverage；每个 draw packet 分别绑定 main/alpha SRV 与 sampler，不再只输出顶点色。
+- generic texture registry 已把 D3D11/D3D12 纳入 upload/destroy backend dispatch；`Apply` 同 ID 替换 GPU resource，`DestroyImmediate(Texture)` 释放 SRV/sampler/texture，`GetNativeTexturePtr()` 在 D3D11 返回真实 `ID3D11Texture2D*`。device teardown 释放全部 cache 与 white fallback。
+- registry 增加独立 operation mutex，将同 device 的 upload/replace/destroy 串行化；descriptor/info 查询继续用短 data mutex，避免并发 Apply/Destroy 令 backend handle 与 registry entry 交叉失配。
+- D3D11 ABI 增加 packed vertex color/UV0/stride 静态断言；资源替换先完整创建 replacement，再原子切换 map entry，分配失败保持旧资源有效并清理新资源。
+
+### 测试与门禁
+- 新增 `NativeD3D11UITextureTests` **12 个** Windows/WARP 门禁用例：solid sample、vertex tint、main alpha、独立 alpha、alpha-only fallback、Apply replacement、native handle/backend kind、Point、Repeat、多 texture SRV、Destroy stale-SRV 与非零 mip minification。
+- D3D11 真实 `_WIN32 + ANITY_HAS_D3D11` 分支已用 Zig `x86_64-windows-gnu` 目标编译通过；macOS native Release 重新编译链接通过，Android NDK arm64-v8a/API26 全库重新编译链接通过。
+- Core 纯托管 **787/787**；强制 native + `ANITY_REQUIRE_VULKAN=1` + SwiftShader **787/787**。D3D 契约组在当前非 Windows 主机计入编译/发现门禁，但测试主体会按平台返回；真实像素断言仍必须在 Windows/WARP runner 执行后才可标记平台验收完成。
+- `bash _scripts/build-all.sh Release` 通过：native/Core/Agent/CLI/parity/WebGL/Hub/Editor 均 0 编译错误且产品工程 0 警告；URP3DDemo 保留既有 43 个 nullable 警告、0 错误。
+
+### 仍未完成（不得宣称 Unity uGUI/跨平台纹理完成）
+- 缺 Windows 机器上的 MSVC/CMake 全库构建、WARP/hardware 真实 framebuffer readback 11/11 证据；Zig 交叉编译只能证明 Windows 源分支可编译，不能代替运行时验收。
+- mip generation 与三后端完整 RGBA8 mip resource 已于 2026-07-16y 完成；mip streaming、ASTC/ETC/BC/PVRTC、aniso/mip bias、Texture2DArray/Cubemap/RenderTexture、external native texture、async upload 与 device-loss rebuild仍未完成。
+- uGUI soft clip、Mask/RectMask2D stencil stack、URP material/shader variants、字体/ETC1 alpha split 官方 fixture 与 Unity 2022.3 截图 A/B 尚未完成。
+
+### 下一优先项
+1. 在 Windows runner 执行 MSVC build + `ANITY_REQUIRE_D3D11=1` WARP 12 个真实像素用例，并补 hardware adapter evidence。
+2. 实现 mip、compressed formats、aniso/mip bias、async upload 与 device-loss rebuild。
+3. 实现 soft clip 与 mask/pop stencil，建立 Unity 2022.3 Image/RawImage/Text/Font/Mask 官方场景截图 A/B。
+
+## 2026-07-16w — Texture2D native registry、Metal/Vulkan 真实 UV/alpha 采样与资源释放
+
+### 已完成
+- graphics device 新增 device-owned RGBA8 texture registry C ABI：`UploadTextureRGBA8`、`DestroyTexture`、`GetTextureInfo`、`GetTextureNativeHandle`。registry 用 mutex + unique ownership 深拷贝像素，按 texture ID 原子替换，记录 revision、尺寸、mip、linear、filter、wrap、byte count、upload generation 与实际 backend kind；无效尺寸/采样枚举/byte count 会在 native 边界拒绝。
+- 托管 `Texture2D.Apply` 现在推进 revision 并同步当前 graphics device；`NativeGraphicsDevice` 按 revision + dimensions/format/filter/wrap/linear 计算状态 key，未变化帧不重复上传。Canvas bridge 在生成每个 submesh command 时确保 main/material texture 与 alpha texture 已注册，`Apply(makeNoLongerReadable:true)` 在释放公开 CPU readability 前完成 native upload。
+- 建立 live graphics-device 集合；`Object.DestroyImmediate(Texture)` 会从所有活跃 device 原子移除 CPU/GPU texture entry，device teardown 统一销毁整个 registry。Null backend 不把 CPU vector 冒充 native GPU pointer。
+- Metal backend 增加真实 `MTLTexture`/`MTLSamplerState` cache：RGBA8 linear/sRGB format、Point/Bilinear/Trilinear filter、Repeat/Clamp/Mirror address mode，上传后 `Texture.GetNativeTexturePtr()` 返回真实 backend handle。UI vertex shader传递 UV0，fragment shader执行 vertex color × main texture，并用独立 alpha texture red channel调制 coverage；每个 draw packet 按 texture/alpha ID 绑定，缺失纹理使用 owned 1×1 white fallback。
+- Vulkan backend 增加 device-local sampled `VkImage`/memory、host-visible staging upload、`UNDEFINED → TRANSFER_DST → SHADER_READ_ONLY` barriers、image view、sampler、freeable descriptor pool 与每 texture descriptor set；pipeline layout 使用 main/alpha 两个 combined-image-sampler set，SPIR-V 输入 UV0 并执行与 Metal 相同的 main/alpha 公式。Apply replacement 与 Destroy 在 device idle 后安全切换/释放 image、view、sampler、descriptor，`GetNativeTexturePtr()` 返回真实 `VkImage` handle。
+- Texture Apply replacement 会创建并切换新 GPU resource；Destroy 清除 Metal/Vulkan cache 和 registry handle，旧 command 不再悬挂引用。Android/non-Apple 通过明确 Metal sync/destroy stub 保持同一链接契约。
+- 新增 `_scripts/compile-ui-shaders.sh`，从受版本控制的 GLSL 用 `glslc -O` 可重复生成嵌入式 SPIR-V header，避免手工修改二进制数组。
+
+### 测试与门禁
+- 新增 `NativeTextureRegistryTests` **14/14**：descriptor、byte count、revision/generation、unchanged cache、Apply gate、sampling-state invalidation、non-readable、Canvas main+alpha 自动注册、显式/DestroyImmediate 释放、多 device 隔离、非法 ABI、32 路并发替换、Null pointer 语义。
+- 新增 `NativeMetalUITextureTests` **11/11** 真实 GPU/readback：solid sample、vertex tint、main alpha、separate alpha red、alpha-only white fallback、dynamic Apply、native handle/backend kind、Point、Repeat、多 texture draw、Destroy 后 white fallback。
+- 新增 `NativeVulkanUITextureTests` **10/10**：solid/tint/main alpha/separate alpha、dynamic Apply、VkImage handle、Point/Repeat、per-draw descriptor 与 Destroy stale-descriptor 防护；**SwiftShader 10/10、MoltenVK 10/10** 双 ICD 均为真实 framebuffer readback。
+- macOS native Release 编译链接通过；Android NDK arm64-v8a/API26 全库重新编译链接通过并包含四个 texture C ABI export。该里程碑 Core 纯托管 **776/776**、强制 native/SwiftShader **776/776**；Agent **30/30**、CLI **16/16**、Unity API parity **17/17**，`bash _scripts/build-all.sh Release` 通过。
+
+### 仍未完成（不得宣称跨平台纹理完成）
+- D3D11 texture2D/SRV/sampler cache 已于 2026-07-16x 落地并通过真实 Windows 分支交叉编译；仍缺 Windows WARP 运行证据，因此跨三后端平台验收尚未完成。
+- 完整 RGBA8 mip generation/upload/sampling 已于 2026-07-16y 完成；mip streaming、ASTC/ETC/BC/PVRTC GPU compressed resources、aniso/mip bias、Texture2DArray/Cubemap/RenderTexture、external native texture、async upload 与 device-loss rebuild 尚未接通。
+- sRGB/linear 已选择 backend format，但尚缺 Unity Color Space/URP shader 的官方 A/B 数值矩阵；alpha split texture channel语义也需要官方 ETC1/Font fixture 扩充。
+
+### 下一优先项
+1. ~~为 D3D11 实现 Texture2D/SRV/SamplerState 与 `GetNativeTexturePtr` 绑定。~~（源码已于 2026-07-16x 完成；Windows WARP 运行证据仍待补）
+2. 实现 mip、compressed formats、aniso/mip bias、device-loss rebuild 与 async upload。
+3. 实现 soft clip 与 mask/pop stencil，再做 Unity 2022.3 Image/RawImage/Font/Mask 官方场景截图 A/B。
+
+## 2026-07-16v — CanvasRenderer 多 submesh 独立 command 与材质槽语义
+
+### 已完成
+- `CanvasNativeRenderBridge` 不再把一个 Mesh 的所有 submesh 索引合并后错误套用 material slot 0；每个非空 triangle submesh 现在生成独立持久 command，共享一次 packed vertex 转换，但保持自己的 index stream、原始 submesh material slot、material main texture 与稳定 renderer-command ID。
+- 单 submesh 保留原 renderer object ID；多 submesh ID 由 renderer ID + 原始 submesh index 确定，跨帧稳定且互不覆盖。空 submesh 会跳过但不会压缩后续 material slot；缺失 slot 按 CanvasRenderer slot 0 回退，显式 `SetTexture` 优先于各 material 的 `mainTexture`，alpha texture、clip、softness、mask/pop、透明度与 sort depth 逐 command 继承。
+- `Mesh` 从单个全局 topology 修正为 per-submesh topology 存储；`subMeshCount`、`Clear`、`SetTriangles`、`SetIndices` 同步维护索引与 topology，UI bridge 会在进入 native queue 前拒绝 Lines/Points/Quads 和非三角 index count，避免后端按 triangle list 误解释。
+- 清理 Vulkan swapchain 中未实际拥有资源、只残留在销毁路径的 readback buffer 字段；真实 Vulkan readback 继续使用函数内 staging buffer/memory 并在同一次调用中释放。
+
+### 测试与门禁
+- 新增 `CanvasNativeSubMeshCommandTests` **13/13**：单/双 submesh、独立稳定 ID、material slot、slot 0 fallback、显式 texture 优先、material texture、alpha texture、空 slot 保序、非 triangle topology、后续非法 index、共享 render state，以及自动 frame flush 后 native 2 command/2 batch/6 index 集成。
+- 与自动 bridge 合并定向强制 native **24/24**；native Release（含当前 Vulkan real branch）重新编译、链接成功。Core 全量纯托管 **741/741**，显式 `VK_ICD_FILENAMES=.../vk_swiftshader_icd.json` + `ANITY_REQUIRE_NATIVE=1` + `ANITY_REQUIRE_VULKAN=1` 强制 native/Vulkan **741/741**。
+
+### 仍未完成（不得宣称完整 uGUI）
+- command 已按 material/texture ID 正确拆分；Metal 已接通真实 texture ownership、upload、sampler 与 shader binding，但 Vulkan/D3D11 尚未完成同一资源链。
+- alpha texture 尚未进入 shader coverage，material shader/blend/stencil variants、texture wrap/filter/mipmap/sRGB、动态 Apply 更新、non-readable CPU data release、RenderTexture/native external texture 生命周期仍待实现。
+- soft clip、mask/pop stencil、Vulkan window/HDR/resize、D3D Windows runner 与官方 Unity uGUI 截图 A/B 仍是明确缺口。
+
+### 下一优先项
+1. 建立 Texture2D RGBA8 native resource registry、创建/更新/销毁 C ABI 与托管 dirty/version 同步，并让 `GetNativeTexturePtr` 返回 backend resource handle。
+2. 为 Metal/Vulkan/D3D11 增加 UV0 texture + alpha texture sampling、filter/wrap sampler、descriptor/argument binding 与跨材质像素门禁。
+3. 实现 rect softness 与 mask/pop stencil stack；再补官方 Unity 2022.3 多材质 Image/RawImage/Mask 场景截图 A/B。
+
+## 2026-07-16u — Vulkan UI render pass、per-slot fence 与真实双 ICD 像素门禁
+
+### 已完成
+- Vulkan backend 从 upload-only 补齐为真实 GPU 路径：版本化 GLSL 450 vertex/fragment source、NDK `glslc -O` 生成的嵌入式 SPIR-V、108-byte `AnityUIPackedVertex` position/Color32 layout、viewport push constant、source-alpha blend、dynamic viewport/scissor 与 `vkCmdDrawIndexed`。
+- headless swapchain 不再是 software image counter：为每个 image 创建 device-local optimal-tiling RGBA8 `VkImage`、memory、image view、framebuffer、render pass；每帧透明 clear，render pass 结束转 `TRANSFER_SRC_OPTIMAL`，staging buffer + `vkCmdCopyImageToBuffer` 输出 top-to-bottom tightly packed RGBA8。
+- 建立三槽 primary command buffer + signaled fence：upload 覆盖 ring slot 前 `vkWaitForFences`，draw submit 前 reset，对应 GPU 完成后才允许复用；device/swapchain teardown `vkDeviceWaitIdle` 后按 Vulkan ownership 顺序释放 pipeline/framebuffer/view/image/memory/fence/pool/layout。
+- windowed swapchain 补齐 `imageAvailable`/`renderFinished` semaphore：`vkAcquireNextImageKHR` 使用有效 semaphore 与无限 timeout，draw submit 等待 acquire 并 signal render-finished，present 等待 render-finished；不再使用 Vulkan 规范禁止的 semaphore/fence 都为空 acquire。
+- `AnityGraphics_ReadbackSwapchainRGBA8` 现在 dispatch Vulkan readback；mask/pop 继续明确跳过且不计 draw，clip packet 用动态 scissor，多个 material batch 编码为多个 indexed draw。
+
+### 测试与门禁
+- 新增 `NativeVulkanUIDrawTests` **10/10**：红/蓝像素、geometry 外透明、source alpha、scissor、空帧清除、两 material draws、六帧 triple-ring fence、RGBA8 行序、mask 不误报。
+- macOS 通过 Android Emulator Vulkan loader 分别在 **SwiftShader 10/10** 与 **MoltenVK 10/10** 真实执行 framebuffer tests；`ANITY_REQUIRE_VULKAN=1` 确保 Vulkan device/pipeline/swapchain 缺失即硬失败，不是 skip。
+- Android NDK 23 arm64-v8a / API 26 完成全库 CMake build 与 shared-library link；`compile_commands.json` 明确 `ANITY_HAS_VULKAN=1`，ELF 依赖 `libvulkan.so`/`libandroid.so`，`AnityGraphics_Vulkan_UploadUI/DrawUI/ReadbackSwapchainRGBA8` 导出存在。
+- Core 纯托管 **728/728**；`ANITY_REQUIRE_NATIVE=1` + `ANITY_REQUIRE_VULKAN=1` + SwiftShader 强制 native **728/728**。上一批 Agent **30/30**、CLI **16/16**、反射审计器 **17/17** 与官方 baseline 仍有效。
+
+### 仍未完成（不得宣称完整 URP/uGUI）
+- Vulkan/Metal/D3D 当前 shader 仍只消费 vertex color；`materialId`、`textureId`、`alphaTextureId` 已按 submesh/material slot 正确进入独立 draw packet，但尚未映射为 GPU resource、descriptor/sampler 与 shader variant。
+- softness 未做 shader edge fade，mask/pop 未实现 stencil increment/decrement/test；HDR Vulkan render target/readback、MSAA resolve、resize/out-of-date swapchain rebuild、device-lost recovery 与真实 Android ANativeWindow present 像素证据仍待补。
+- D3D11 真实 Windows/WARP 编译执行仍缺 runner；官方 Unity uGUI 场景截图 A/B 尚未建立，不能以三个 backend 的纯色 quad 代替完整 uGUI 对等。
+
+### 下一优先项
+1. 将 CanvasRenderer submesh/material slots 拆成独立 command，并为 Metal/Vulkan/D3D11 建立 texture/alpha texture resource registry、sampler/descriptor 与 UV shader。
+2. 实现 rect softness 与 mask/pop stencil stack，覆盖 nested RectMask2D/Mask、多层透明与 batch break。
+3. 补齐 Vulkan resize/out-of-date/device-loss、HDR/MSAA 与 Android ANativeWindow present；建立 Unity 2022.3 官方场景截图 A/B。
+
+## 2026-07-16t — CanvasRenderer 自动 native queue、场景排序与 Metal 端到端像素闭环
+
+### 已完成
+- 新增 internal `CanvasNativeRenderBridge`：每帧自动发现有效 `UnityEngine.CanvasRenderer`，按 display、Canvas sorting key 与 Transform sibling hierarchy 稳定排序，将 Mesh、material/texture IDs、alpha texture、clip/softness、mask/pop、renderer tint 与 CanvasGroup inherited alpha 转换为持久 `NativeUICanvas` command；Unity 公开 API 面不增加 Anity-only 成员。
+- Overlay mesh 顶点经完整 Transform 链转换到 framebuffer pixel space，并把 Unity bottom-left screen 坐标翻转为 backend top-left 坐标；ScreenSpaceCamera/WorldSpace 在存在 `worldCamera` 时走 `Camera.WorldToScreenPoint`。UV0–UV3、normal、tangent、Color32 与全部 submesh indices 均进入 packed command，非法 index、空 geometry 与非有限坐标在 native submission 前拒绝。
+- `NativeGraphicsDevice.BeginFrame` 自动 flush/attach bridge-owned queue，`Canvas.ForceUpdateCanvases` 在 layout/graphic/clip 完成后同步 queue，`UnityRuntime.Tick` 改走官方 Canvas render event phase；device dispose 会释放 bridge queue。显式调用 `AttachUICanvas` 的 caller-owned queue 始终优先，避免自动场景扫描覆盖工具/测试自管队列。
+- 自动队列已经接通现有 Metal pipeline：业务侧只创建 `Canvas` + `CanvasRenderer` + `Mesh`，无需实例化或提交 `NativeUICanvas`，即可完成 native batch、triple-buffer upload、indexed GPU draw 与 framebuffer RGBA8 readback。
+
+### 测试与门禁
+- 新增 `CanvasNativeRenderBridgeTests` **11/11**：Overlay 坐标/Y 翻转、renderer tint、CanvasGroup alpha、clip/scissor 坐标与 softness、cull、mask/pop、material/main/alpha texture ID、multi-submesh index 合并、非法 index、empty geometry、UV/normal/tangent，以及无手工 queue 的 Metal 中心像素实证。
+- 自动桥接 + 原 Metal draw 定向强制 native **21/21**；Core 纯托管 **718/718**、`ANITY_REQUIRE_NATIVE=1` 强制 dylib **718/718**。全量回归曾捕获自动 queue 覆盖显式 attachment，修正 ownership 优先级后全部通过。
+- Agent **30/30**、CLI **16/16**、反射审计器 **17/17**；`bash _scripts/build-all.sh Release` 通过，native/Core/Agent/CLI/parity/WebGL/Hub/Editor/URP3DDemo 均 0 编译错误。官方 84 程序集 baseline 保持 `regressions=0`、`removed-or-changed=0`、加载问题 0。
+
+### 仍未完成（不得宣称完整 uGUI/平台渲染）
+- 当前一个 CanvasRenderer command 合并全部 submesh 但只选择 material slot 0；尚需按 submesh/material slot 拆 command。texture/alphaTexture IDs 已传到底层，但 Metal/D3D11/Vulkan 尚未创建真实 texture resource/descriptor 与采样 shader。
+- rect scissor 已可用，但 softness 仍未在 shader 做渐变；mask/pop 仍缺 stencil nesting。Camera/WorldSpace 已完成投影入口，仍需官方 camera viewport、target display、透视背面剔除、nested overrideSorting/pixelPerfect 的场景 A/B。
+- Vulkan indexed draw/fence/readback 和 D3D11 Windows 编译/WARP 像素 fixture 仍是跨平台阻塞；本机无 Vulkan SDK/Windows runner，不能把源码存在当作平台验收。
+
+### 下一优先项
+1. 完成 Vulkan UI render pass、pipeline、descriptor、indexed draw、per-slot fence 与 headless image readback，在 Android/Linux runner 建立像素门禁。
+2. 将 CanvasRenderer submesh/material slots 拆成独立 command，并为三后端实现 texture/alpha texture、UV shader、blend/material variants。
+3. 实现 rect softness 与 mask/pop stencil stack，使用 Unity 2022.3 官方 uGUI 多层场景做截图 A/B。
+
+## 2026-07-16s — Metal UI indexed draw、GPU completion fence 与 framebuffer 像素门禁
+
+### 已完成
+- 将 Canvas batch snapshot 从只有 `AnityUIBatchInfo` 扩展为内部 `AnityUIDrawPacket`：携带全局 index-buffer `firstIndex`、index count、material/texture IDs、flags 与 clip/softness，graphics upload state 现在区分 batch count 与真正成功编码的 draw count；CPU/headless upload 不再把计划批次数误报成已绘制次数。
+- Metal 后端新增真实 UI render pipeline：按 108-byte packed vertex ABI读取 position/Color32，pixel-space→NDC vertex transform、标准 source-alpha blend、indexed triangle draw、per-packet scissor、透明 clear 与 BGRA8/RGBA16 render-pipeline variant。
+- headless Metal swapchain 新增 shared offscreen render target；导出 `AnityGraphics_ReadbackSwapchainRGBA8` 并接入 `NativeGraphicsDevice.TryReadbackSwapchainRGBA8`，输出 top-to-bottom tightly packed RGBA8，使 GPU 结果可做确定性像素验收。
+- Metal 三槽 upload ring 使用每槽 dispatch semaphore 作为 command-buffer completion fence：覆盖 vertex/index buffer 前等待对应 slot，draw completion signal；无 swapchain、失败和 device teardown 路径均释放/等待 slot，六帧连续复用已验证。
+- D3D11 同一契约已实现到源码：HLSL VS/PS、108-byte input stride、dynamic VB/IB、alpha blend、scissor、indexed draw、headless RTV、`D3D11_QUERY_EVENT` per-slot fence 与 staging texture RGBA8 readback；CMake 增加 `d3dcompiler`。当前 macOS 只能编译 D3D stub 分支，因此真实 Windows 分支仍等待 Windows runner 编译与像素实证。
+
+### 测试与门禁
+- 新增 `NativeMetalUIDrawTests` **10/10**：红/蓝颜色、geometry 外透明、source alpha blend、GPU scissor、空帧清除、两 material 两 indexed draws、六帧 triple-ring completion、RGBA8 行序与 unsupported mask 不误报 draw。
+- UI upload + Metal draw 定向强制 native **26/26**；Core 纯托管 **707/707**、`ANITY_REQUIRE_NATIVE=1` **707/707**；Agent **30/30**、CLI **16/16**、反射审计器 **17/17**。
+- `bash _scripts/build-all.sh Release` 通过；本机 Metal shader compile、pipeline creation、command encoding、GPU completion 与 framebuffer readback 均被真实执行。官方 84 程序集 baseline 保持 `regressions=0`、`removed-or-changed=0`、加载问题 0。
+
+### 仍未完成（不得宣称完整 uGUI/平台渲染）
+- 当前 Metal shader 只消费 vertex color，尚未解析/bind `materialId`、`textureId`、`alphaTextureId`、UV 与 URP shader variants；mask/pop packet 明确跳过且不计 draw，stencil nesting/soft clip 尚未实现。
+- Vulkan 仍只有 buffer upload，没有 render pass/pipeline/descriptor/command-buffer draw 与 semaphore fence；D3D11 实分支尚缺 Windows 编译、WARP/硬件像素 fixture。Metal runtime source compilation 后续需替换为版本化 metallib/离线 shader 产物。
+- `CanvasRenderer` 仍未自动同步到 root Canvas queue，ScreenSpaceCamera/WorldSpace 投影、nested Canvas sorting、HDR RGBA16 readback 与 device-loss/resize 重建矩阵仍未闭环。
+
+### 下一优先项
+1. 完成 Vulkan UI render pass、pipeline、descriptor、indexed draw、per-slot fence 与 headless image readback，并在 Android/Linux Vulkan runner 做像素门禁。
+2. 为 Metal/D3D11/Vulkan 绑定 texture/alpha texture、UV、material/blend variant、rect softness 与 mask/stencil stack，建立 Unity uGUI 官方场景截图 A/B。
+3. 将 `CanvasRenderer` dirty geometry/material/texture/clip 自动 upsert/remove 到 root `AnityUICanvas`，让 Canvas rebuild phase 无需手动 queue 管理。
+
+## 2026-07-16r — Native Canvas 三缓冲 GPU upload 与 graphics-device 帧接线
+
+### 已完成
+- 新增 `anity_graphics_ui.cpp` 并纳入唯一 CMake 生产构建；graphics device 现在可非 owning 绑定 `AnityUICanvas`，`BeginFrame` 推进 Canvas frame，`EndFrame` 自动构建并提交 UI，亦支持显式立即提交与 56-byte upload stats 查询。
+- 建立三槽 CPU upload ring：每帧持有扁平化 `AnityUIPackedVertex`、重定位后的 `uint32` indices 与 batch draw metadata，记录 frame/generation、batch/draw/vertex/index 数量、字节数、ring index 与实际 backend kind。
+- 把 batch build、统计、vertex/index rebasing 与 draw metadata copy 合并为一次 C++-only 原子快照；整个快照持有 Canvas mutex，消除了 command 更新线程与 render submit 线程跨 generation 混读的窗口。
+- Metal 后端已创建/扩容三组 shared `MTLBuffer` 并执行真实 CPU→GPU vertex/index copy；D3D11 使用三组 dynamic buffer + `Map(WRITE_DISCARD)`；Vulkan 使用三组 host-visible/coherent `VkBuffer`/memory + map/copy/unmap，并在 device teardown 释放资源。空批次合法，backend 不可用时保留明确的 CPU/headless ring。
+- `NativeGraphicsDevice` 增加 Canvas attach/detach、立即 submit、强引用生命周期保护、失效 Canvas 帧前安全解绑与 `LastUIUploadStats`；dispose 先解绑再销毁 device，不取得 Canvas ownership。
+
+### 测试与门禁
+- 新增 `NativeGraphicsUIUploadTests` **16/16**：ABI、初始状态、EndFrame 自动提交、精确 byte/count、三帧 ring、generation、显式提交、detach、空批次、材质拆批、replacement、invisible cull、失效 Canvas、CPU fallback、真实 macOS Metal upload 与 100×并发更新/提交原子快照。
+- Core 纯托管 **697/697**；`ANITY_REQUIRE_NATIVE=1` 强制 dylib **697/697**；Agent **30/30**；CLI **16/16**；反射审计器 **17/17**。
+- `bash _scripts/build-all.sh Release` 通过：native/Core/Agent/CLI/parity/WebGL/Hub/Editor/URP3DDemo 均 0 编译错误；当前 macOS 实际编译并执行 Metal upload。本机无 Vulkan SDK，因此 Vulkan 真实分支本轮为源码落地但仅 stub 分支编译，D3D11 也仍需 Windows runner 编译/执行证明。
+- 本批只新增 Anity internal/native API，Unity 官方公开面不变；Unity 2022.3.51f1 复审保持类型 **912/4,117**、成员 **8,361/37,164**，baseline `regressions=0`、`removed-or-changed=0`、加载问题 0。
+
+### 仍未完成（不得把 buffer upload 误报为 UI 渲染完成）
+- 当前完成到 CPU batch → backend vertex/index buffer；尚未编码/提交 Metal render encoder、Vulkan command buffer 或 D3D11 draw calls，也未绑定 URP UI shader/material/texture、clip/scissor、mask/stencil pipeline。
+- 三槽 ring 尚无 GPU completion fence/semaphore 保护；高 GPU 延迟下仍可能覆盖 in-flight slot。`CanvasRenderer` dirty state 也尚未自动 upsert/remove 到所属 root Canvas，当前由 `NativeUICanvas` 显式组织。
+- 全局仍缺 **3,205** 个官方类型与 **28,803** 个官方成员，编辑器、平台构建和运行时大量模块仍距离 Unity 2022 Pro 生产级对等很远。
+
+### 下一优先项
+1. 为 Metal/Vulkan/D3D11 增加 UI pipeline state、vertex layout、material/texture/clip/mask/stencil bind 与 indexed draw encoding，并用平台可见 framebuffer/readback fixture 验证像素结果。
+2. 接入 per-slot GPU fence/semaphore/command-buffer completion，处理 resize、device loss、buffer growth 与多帧 in-flight 生命周期，并在 Windows/Vulkan runner 强制构建执行。
+3. 将 `CanvasRenderer` geometry/material/texture/clip/dirty 自动同步到 root `AnityUICanvas`，接入 Canvas rebuild phase 与 nested Canvas sorting。
+
+## 2026-07-16q — Native Canvas 持久 command queue 与稳定 UI batching
+
+### 已完成
+- 在 `anity-native` UI 模块新增持久 `AnityUICanvas` 所有权模型及 11 个 C ABI：frame、clear、renderer command upsert/remove、batch build、stats、batch metadata 与合并后 vertex/index buffer copy。
+- renderer command 由 native 深拷贝持有，按 sort depth + insertion order 稳定排序；相邻 material/texture/alpha-texture/clip state 相同的命令合批并重定位 indices，mask/pop 强制隔离，透明或 invisible command 不进入 upload batch。
+- `NativeUICanvas` 提供托管 RAII/finalizer、严格 native 模式、persistent frame lifecycle 与 batch buffer 读取；native mutex 已覆盖 command mutation、batch build 与查询。
+- 新增 `NativeUICanvasBatchTests` **15/15**，覆盖 ABI、持久帧、replacement/remove/clear、排序、合批、索引重定位、state break、mask/pop、透明剔除、非法索引、32 路并发与 dispose。
+
+### 测试与门禁
+- 定向纯托管/强制 native 均 **15/15**；Core 纯托管 **681/681**、`ANITY_REQUIRE_NATIVE=1` **681/681**；native Release 构建通过。
+- 本批只新增 Anity native/interop API，UnityEngine/UnityEditor 公开面未改变；上一批官方 baseline 指标保持有效。
+
+### 仍未完成
+- 已拥有 production-oriented CPU command/batch ownership，但 D3D11/Vulkan/Metal 的真实 GPU buffer 创建、上传、draw encoding、fence/ring-buffer 与 `NativeGraphicsDevice.EndFrame` 消费接线尚未完成，不能把 Canvas GPU dispatch 标为完成。
+
+### 下一优先项
+1. 将 `AnityUICanvas` batch 接入 graphics device，完成动态 vertex/index ring buffer、frame fence 与 backend draw submission。
+2. 将各 `CanvasRenderer` 的 mesh/material/texture/clip dirty state 自动 upsert/remove 到所属 root Canvas queue。
+3. 继续 RectTransform dimensions-change 与 Canvas rebuild phase 官方 A/B。
+
+## 2026-07-16p — CanvasRenderer native vertex staging、quad index 与裁剪可见性内核
+
+### 已完成
+- 新增 `anity-native/include/anity/ui/anity_ui_renderer.h` 与 `src/ui/anity_ui_renderer.cpp`，并纳入唯一 CMake 生产构建；导出 `AnityUIRenderer_PackVertices`、`AnityUIRenderer_BuildQuadIndices`、`AnityUIRenderer_EvaluateVisibility` 三个 C ABI，macOS dylib 符号已用 `nm` 实证存在。
+- 定义与托管层逐字段对应的 108-byte `AnityUIVertex` / `AnityUIPackedVertex` ABI：完整保留 position、normal、tangent、Color32 与 uv0–uv3，native staging 同时计算三维 min/max bounds；空 geometry 合法，越界容量、非有限 position 与非法参数返回 `ANITY_ERR_INVALID_ARG`。
+- 将 Unity legacy quad 路径的 `0,1,2,2,3,0` 索引生成迁入 native，支持任意多 quad 与空 geometry，拒绝非 4 倍数顶点；`CanvasRenderer.SetVertices` 现在优先经过 native pack/bounds/index，再创建 Mesh，动态库缺失时保持原托管等价回退。
+- 增加 native UI render-state evaluator：合并 renderer color alpha 与 CanvasGroup inherited alpha，计算 rect overlap、partial clip、alpha/clip cull、softness inner clip；`SetMesh`、颜色/alpha、裁剪/softness与 transparent-cull 变更均刷新 native state，不改变 Unity 公开 `cull` 契约。
+- `AnityNative` 增加严格顺序布局的 UI C ABI structs 与三个 Try 入口；`ANITY_REQUIRE_NATIVE=1` 下缺失动态库或 export 会硬失败，普通运行时只在入口不可用时降级，不吞掉 native 参数错误。
+- `CanvasRenderer` 官方公开面未变；84 个 Unity 2022.3.51f1 程序集复审保持 type/member 指标不变，baseline `regressions=0`、`removed-or-changed=0`。
+
+### 测试与门禁
+- 新增 `CanvasRendererNativeTests` **15/15**：8 个 ABI size、position/color/normal/tangent、4 UV streams、3D bounds、empty、越界/NaN、单/多 quad winding、partial quad、alpha inheritance、clip outside/partial、softness与真实 CanvasRenderer mesh/bounds 集成。
+- CanvasRenderer 定向套件纯托管与强制 native 均 **31/31**；Core 纯托管 **666/666**、`ANITY_REQUIRE_NATIVE=1` 强制 dylib **666/666**。
+- Agent **30/30**、CLI **16/16**、反射审计器 **17/17**；`bash _scripts/build-all.sh Release` 通过，native/Core/Agent/CLI/parity/WebGL/Hub/Editor/URP3DDemo 均 0 编译错误。
+- 官方反射指标保持：类型存在 **912/4,117**、精确 **387**、missing **3,205**、mismatch **525**、extra **627**；成员存在 **8,361/37,164**、精确 **6,133**、missing **28,803**、mismatch **2,228**、extra **3,558**；加载问题 0。
+
+### 仍未完成（不得误报“Unity 全量完成”）
+- 本批关闭的是 CPU vertex staging、bounds、quad index 与裁剪/透明度判定内核；真实 GPU buffer upload、Canvas batch 合并、material/texture command stream、render-thread ownership、mask/stencil dispatch 仍未迁入 native，因此 `CanvasRenderer` 底层总项继续保持 🟡。
+- 全局仍缺 **3,205** 个官方类型与 **28,803** 个官方成员；编辑器 Canvas/Rect Tool、平台渲染与全引擎 native 所有权仍距离 Unity 2022 Pro 生产级对等很远。
+
+### 下一优先项
+1. 在 `anity-native` 实现持久 Canvas render command/batch、GPU vertex/index upload 与 material/texture/clip state 合并，接入现有 graphics backend 与 render-thread 生命周期。
+2. 实现 RectTransform 尺寸 dirty propagation、`OnRectTransformDimensionsChange` 层级消息与 Canvas layout→graphic→pre-render phase 顺序，建立官方多层 UI 树 A/B。
+3. 补齐 ScreenSpaceCamera/perspective/display rect projection、pixel adjustment、raycast 与 nested Canvas sorting/culling 边界。
+
+## 2026-07-16o — CanvasRenderer / CanvasGroup / UIVertex 根命名空间与运行时语义闭环
+
+### 已完成
+- 将 `CanvasGroup`、`UIVertex`、`ICanvasRaycastFilter` 从错误 `UnityEngine.UI` 迁移到官方 `UnityEngine`，移除重复 `UnityEngine.UI.CanvasRenderer`，让 uGUI `Graphic` 统一使用唯一的官方 `UnityEngine.CanvasRenderer`。
+- `CanvasRenderer` 修正为 sealed `Component`，补齐 `NativeHeader("Modules/UI/CanvasRenderer.h")`、`NativeClass("UI::CanvasRenderer")`、nested `OnRequestRebuild` 与静态 event；清理 19 个 Anity-only 公开方法/属性，补齐 23 个官方缺失成员与 4 个 metadata/accessor mismatch。
+- 完整实现 material/pop-material slots、texture/alpha texture、mesh、color/alpha、rect clipping/softness、cull/mask flags、Clear、legacy SetVertices、Split/Create/Add UIVertex streams；`UIVertex` 改用官方 Vector4 uv0–uv3 与 `UsedByNativeCode` metadata。
+- 以 Unity **2022.3.51f1** batchmode 实测默认状态：`materialCount/popMaterialCount=0`、depth=-1、`hasMoved=true`、`cullTransparentMesh=true`、white/alpha=1；`SetAlpha` 同步 `GetColor().a`。
+- `GetInheritedAlpha` 对齐官方：只乘当前/父级 CanvasGroup alpha，不重复乘 Renderer 自身 alpha；遇到 `ignoreParentGroups` 在该组后截断。CanvasGroup 默认 alpha/interactable/blocks/ignore 与 raycast filter 行为已固化。
+- vertex stream 语义经官方探针闭环：Split 生成 sequential indices，Create 按 indices 重排，Add 虽名为 Add 但会重建/清空输出 streams；legacy SetVertices 以每 4 顶点构建 0-1-2/2-3-0 quad mesh；Clear 同时释放 mesh 与 material slots。
+- `CanvasRenderer`、nested delegate、`CanvasGroup`、`UIVertex`、`ICanvasRaycastFilter` 及旧错误命名空间目标当前官方反射差异合计 **0**。
+
+### 测试与门禁
+- 新增 `CanvasRendererCanvasGroupTests` **16/16**：公开面、defaults、group raycast、alpha/inheritance/ignore、materials/pop、clipping、三类 stream、legacy mesh、Clear、UIVertex、event。
+- Core 纯托管 **651/651**；native 配置整套 **651/651**；Agent **30/30**；CLI **16/16**；反射审计器 **17/17**。
+- `_scripts/build-all.sh Release` 通过；native/Core/Agent/CLI/parity/WebGL/Hub/Editor/URP3DDemo 均 0 编译错误。
+
+### 官方反射面增量（相对 2026-07-16n 基线）
+- 类型存在 **908 → 912**、类型精确 **382 → 387**、missing **3,209 → 3,205**、mismatch **526 → 525**、extra **631 → 627**；成员存在 **8,318 → 8,361**、成员精确 **6,086 → 6,133**、missing **28,846 → 28,803**、mismatch **2,232 → 2,228**、extra **3,577 → 3,558**。
+- 当前覆盖率：类型存在 **22.152%**、类型精确 **9.400%**；成员存在 **22.498%**、成员精确 **16.503%**。重建 baseline 后复跑 `regressions=0`、`removed-or-changed=0`，84 个官方程序集加载问题 0。
+
+### 仍未完成（不得误报“Unity 全量完成”）
+- CanvasRenderer 状态与 UIVertex 转换当前仍主要在 C#；Unity native 所承担的 UI mesh upload、batching、clip/cull dispatch 与多线程渲染同步尚未迁入 `anity-native`，因此底层 Canvas 渲染总项保持 🟡。
+- 全局仍缺 **3,205** 个官方类型与 **28,803** 个官方成员；编辑器 Canvas/Rect Tool、display/camera 边界、完整输入与平台渲染仍需继续闭环。
+
+### 下一优先项
+1. 新增 `anity-native` UI renderer 模块，迁移 UIVertex stream packing、mesh upload command、rect clipping/cull 与 material slot state，经 C ABI/强制 native 测试验证。
+2. 实现 RectTransform 尺寸 dirty propagation、`OnRectTransformDimensionsChange` 层级消息和 Canvas layout→graphic rebuild phase 顺序，建立官方多层 UI 树 A/B。
+3. 补齐 ScreenSpaceCamera/perspective/display rect 的 projection、pixel adjustment、raycast 与 nested Canvas sorting/culling 边界。
+
+## 2026-07-16n — RectTransformUtility / Canvas 官方命名空间、坐标行为与像素对齐闭环
+
+### 已完成
+- 修正 UIModule 的根命名空间错误：`RectTransformUtility`、`Canvas`、`RenderMode`、`AdditionalCanvasShaderChannels` 从错误的 `UnityEngine.UI` 迁移到官方 `UnityEngine`；补齐 `StandaloneRenderResize`、`Canvas.WillRenderCanvases` 及 Canvas native headers/NativeClass/RequireComponent metadata，并删除错误 `UnityEngine.UI.SortOrder`。
+- `RectTransformUtility` 公开面完全对齐：补齐 `PixelAdjustPoint/Rect`、无 Camera overload、Vector4 inset overload、公开 `ScreenPointToRay` / `WorldToScreenPoint`，移除错误 out-Vector4 overload与公开构造器；该类型当前官方反射差异 **0**。
+- 以 Unity **2022.3.51f1** batchmode 探针闭环无 Camera ray/world/local、orthographic camera round-trip、inclusive contains、Vector4 正 inset/负 expand、axis/axes flip、递归 RectTransform bounds、pixelPerfect overlay 与 world-space bypass。
+- 完整实现 `FlipLayoutOnAxis/Axes` 与递归子树、`CalculateRelativeRectTransformBounds` 的 world-corners→root-local 聚合，替换原空实现；平面不相交返回 false，不再猜测伪 world point。
+- PixelAdjust 改为 element local→world/screen→整数 pixel→inverse element 的真实路径；`PixelAdjustRect` 对 min/max 两角分别量化。官方探针的 point `(1.2,2.3)→(1.3,2.2)`、rect `(-2.26,-16.56,11.3,20.7)→(-2.2,-16.8,11,21)` 已固化。
+- Canvas overlay 根布局改为官方 `size=screen/scaleFactor`、`localScale=(scaleFactor,scaleFactor,1)`、world position=display center；清理全部错误 public helper API为 internal，实现官方 default/ETC1 material、cached sorting、standalone resize、gamma vertex color与 obsolete sorting grid成员，事件 delegate/metadata 精确一致。
+- `Canvas`、nested delegate、`RenderMode`、`AdditionalCanvasShaderChannels`、`StandaloneRenderResize`、`RectTransformUtility` 以及旧错误命名空间目标当前官方反射差异合计 **0**。
+
+### 测试与门禁
+- 新增 `RectTransformUtilityParityTests` **16/16**；与 Canvas/GraphicRaycaster 定向套件合计 **43/43**。
+- Core 纯托管 **635/635**；native 配置整套 **635/635**；Agent **30/30**；CLI **16/16**；反射审计器 **17/17**。
+- `_scripts/build-all.sh Release` 通过；native/Core/Agent/CLI/parity/WebGL/Hub/Editor/URP3DDemo 均 0 编译错误。
+
+### 官方反射面增量（相对 2026-07-16m 基线）
+- 类型存在 **902 → 908**、类型精确 **376 → 382**、missing **3,215 → 3,209**、extra **636 → 631**；成员存在 **8,257 → 8,318**、成员精确 **6,025 → 6,086**、missing **28,907 → 28,846**。
+- 当前覆盖率：类型存在 **22.055%**、类型精确 **9.279%**；成员存在 **22.382%**、成员精确 **16.376%**。重建 baseline 后复跑 `regressions=0`、`removed-or-changed=0`，84 个官方程序集加载问题 0。
+
+### 仍未完成（不得误报“Unity 全量完成”）
+- `CanvasRenderer`、`CanvasGroup` 仍错误公开在 `UnityEngine.UI`，Canvas native batching/render dispatch 仍主要为托管模拟；编辑器 Canvas/Rect Tool、跨 display、ScreenSpaceCamera 投影边界仍需继续闭环。
+- 全局仍缺 **3,209** 个官方类型与 **28,846** 个官方成员；本批只关闭 UIModule 的 Canvas/RectTransformUtility 子集，不能宣称 Unity 2022 Pro 全引擎已完成。
+
+### 下一优先项
+1. 把 `CanvasRenderer` / `CanvasGroup` 迁移到官方 `UnityEngine`，关闭公开面、材质/mesh/alpha/culling与 group 继承阻断行为，补官方探针与 ≥10 测试。
+2. 实现 Canvas rebuild native dispatch、RectTransform 尺寸 dirty/消息传播和 layout→graphic phase 顺序，验证深层 UI 树与多 Canvas。
+3. 补齐 ScreenSpaceCamera/perspective/display rect 的 projection、pixel adjustment 与 raycast A/B，并将批处理/裁剪关键路径迁入 `anity-native`。
+
+## 2026-07-16m — DrivenRectTransformTracker 公开面、共享登记语义与布局驱动生命周期闭环
+
+### 已完成
+- 以官方 Unity **2022.3.51f1** batchmode 探针逐项固化 `DrivenTransformProperties` 的 25 个名称/位值，以及 `DrivenRectTransformTracker.Add`、`Clear()`、obsolete `Clear(bool)`、`StartRecordingUndo`、`StopRecordingUndo` 的公开面；两个类型当前官方反射差异均为 **0**。
+- 实现 tracker 的真实登记与释放：`Add` 写入 `RectTransform.drivenByObject` 及内部 driven property mask，`Clear` 释放全部已登记 RectTransform；tracker 保持 Unity 值类型复制后共享登记列表的语义，副本 `Clear` 会释放原 tracker 登记。
+- 对齐官方边界：null driver 合法，null RectTransform 抛 `NullReferenceException`；默认 tracker 可直接 Clear；obsolete overload 的 attribute 构造参数与官方 metadata 一致；Add/Clear/ForceUpdate 不错误触发 `reapplyDrivenProperties`。
+- 将 ownership 接入 uGUI 布局主路径：`LayoutGroup` 在水平输入重建前清理旧登记，并按 anchors/anchored position/size delta 掩码驱动子 RectTransform；`ContentSizeFitter` 横向重建前 Clear、两轴分别登记，禁用时释放；`AspectRatioFitter` 按 Width/Height/Fit/Envelope 模式登记精确属性并在禁用时释放。
+- 同步校正布局行为为 Unity 2022.3 uGUI 源码语义：LayoutGroup 子项固定 `anchorMin/anchorMax=Vector2.up`，纵轴 anchored position 使用 top-origin；AspectRatioFitter 的 layout controller 方法保持 no-op，实际 dirty/update 路径直接刷新，Fit/Envelope 拉伸 anchors 后只调整对应 sizeDelta 轴。
+
+### 测试与门禁
+- 新增 `DrivenRectTransformTrackerTests` **14/14**：枚举、公开方法、默认值、Add/Clear/null、值类型副本共享、obsolete overload、多 Rect、undo 入口及三类布局组件 ownership/disable 清理。
+- Core 纯托管 **619/619**；强制 native 配置整套 **619/619**；Agent **30/30**；CLI **16/16**；反射审计器 **17/17**。
+- `_scripts/build-all.sh Release` 通过；native/Core/Agent/CLI/parity/WebGL/Hub/Editor/URP3DDemo 均 0 编译错误。
+
+### 官方反射面增量（相对 2026-07-16l 基线）
+- 类型存在 **900 → 902**、类型精确 **374 → 376**、missing **3,217 → 3,215**；成员存在 **8,226 → 8,257**、成员精确 **5,994 → 6,025**、missing **28,938 → 28,907**、extra 保持 **3,577**。
+- 当前覆盖率：类型存在 **21.909%**、类型精确 **9.133%**；成员存在 **22.218%**、成员精确 **16.212%**。重建 baseline 后复跑 `regressions=0`、`removed-or-changed=0`，84 个官方程序集加载问题 0。
+
+### 仍未完成（不得误报“Unity 全量完成”）
+- `RectTransform`/tracker/layout ownership 的本批目标已闭环，但 Canvas rebuild native dispatch、尺寸变更消息传播、编辑器 Rect Tool/anchor handles、undo 实际编辑器栈仍未达到 Unity 2022 Pro 产品级全行为，因此 RectTransform 总项继续保持 🟡。
+- 全局仍缺 **3,215** 个官方类型与 **28,907** 个官方成员；Anity 距离 Unity 2022 Pro 全量生产级对等仍有大量编辑器、渲染、资源、平台与 native 所有权工作。
+
+### 下一优先项
+1. 将 `RectTransformUtility` 从错误的 `UnityEngine.UI` 公开位置迁移到官方 `UnityEngine`，关闭完整反射差异并用 overlay/camera/world-space Canvas 做坐标 A/B 与 ≥10 测试。
+2. 实现 Canvas/RectTransform 尺寸 dirty dispatch、`OnRectTransformDimensionsChange` 层级传播与布局 rebuild 阶段顺序，接入 native transform 状态并验证深层 UI 树。
+3. 补齐编辑器 Rect Tool、anchor/pivot handles、driven property 禁用显示及 undo/reapply 生命周期，保持每批官方反射 baseline 零回退。
+
+## 2026-07-16l — RectTransform 公开面、布局数学与 GameObject Transform 替换语义闭环
+
+### 已完成
+- 以官方 Unity **2022.3.51f1** 编辑器探针闭环 `RectTransform` 默认值与核心布局行为：默认 `sizeDelta=(100,100)`、anchor/pivot reference、`anchoredPosition` ↔ `localPosition`、`anchoredPosition3D` z 同步、stretch rect、`offsetMin/offsetMax` 双向修改、`SetSizeWithCurrentAnchors`、四种 `SetInsetAndSizeFromParentEdge`、local/world corner 顺序以及 null/短数组静默返回。
+- 公开面 14 条差异归零：`Axis` / `Edge` 改为官方 nested enum，新增 nested `ReapplyDrivenProperties` delegate、静态 `reapplyDrivenProperties` event、`drivenByObject`、`ForceUpdateRectTransforms` 与 `NativeMethod("UpdateIfTransformDispatchIsDirty")`；修正 corner 参数名并移除错误的顶层 `UnityEngine.Axis/Edge` 和两个 `ForceUpdateRects` 额外 API。`RectTransform` 及三个 nested type 当前官方反射差异均为 **0**。
+- 重写布局状态模型：anchored position 由真实 Transform localPosition 与父 Rect anchor reference 双向换算；rect 尺寸统一为 `parentSize * anchorSpan + sizeDelta`；offset setter 同时调整 size/position；父 pivot/rect origin 被纳入 reference，不再使用错误的 20,000×20,000 虚拟父矩形。
+- `GetLocalCorners` / `GetWorldCorners` 顺序修正为官方 bottom-left → top-left → top-right → bottom-right；world corners 经过完整 Transform/native matrix 链。
+- `GameObject(..., typeof(RectTransform))` 与 `AddComponent<RectTransform>()` 现在真正以 RectTransform 替换基础 Transform，保留 local pose、parent/children、sibling 位置与 GameObject 单一 Transform 约束；`gameObject.transform`、`GetComponent<Transform>()`、UI 组件看到同一实例。
+
+### 测试与门禁
+- 新增 `RectTransformParityTests` **18/18**：公开 nested type/metadata、Transform 替换及状态迁移、默认/伸展布局、3D anchored/local 同步、offset、size、四边 inset、corner、event/driver 边界。
+- Core 纯托管 **605/605**；`ANITY_REQUIRE_NATIVE=1` 强制真实 dylib 整套复跑 **605/605**。第一次 native 整套中的既有 AssetBundle 并行用例瞬时失败，单测立即通过且第二次完整整套通过，未掩盖为成功。
+- `_scripts/build-all.sh Release` 通过；native/Core/Agent/CLI/parity/WebGL/Hub/Editor/URP3DDemo 均 0 编译错误。
+
+### 官方反射面增量（相对 2026-07-16k 基线）
+- 类型存在 **897 → 900**、类型精确 **371 → 374**、missing **3,220 → 3,217**、extra **638 → 636**；成员存在 **8,209 → 8,226**、成员精确 **5,975 → 5,994**、missing **28,955 → 28,938**、mismatch **2,234 → 2,232**、extra **3,581 → 3,577**。
+- 当前覆盖率：类型存在 **21.861%**、类型精确 **9.084%**；成员存在 **22.134%**、成员精确 **16.129%**。重建 baseline 后复跑 `regressions=0`、`removed-or-changed=0`，84 个官方程序集加载问题 0。
+
+### 仍未完成（不得误报“Unity 全量完成”）
+- `drivenByObject` / reapply event 的公开契约已对齐，但官方 `DrivenRectTransformTracker` / `DrivenTransformProperties` 类型、布局控制器驱动所有权与清理/重应用生命周期尚未实现，RectTransform 仍保持 🟡。
+- 全局仍缺 **3,217** 个官方类型与 **28,938** 个官方成员；编辑器 Rect Tool/anchor handles、Canvas rebuild native dispatch 与跨平台 UI 渲染仍需继续闭环。
+
+### 下一优先项
+1. 实现 `DrivenRectTransformTracker`、`DrivenTransformProperties` 与 LayoutGroup/ContentSizeFitter/AspectRatioFitter 的 driver ownership、Clear/重应用事件和销毁清理，配官方 A/B 与 ≥10 测试。
+2. 将 `RectTransformUtility` 从错误 `UnityEngine.UI` 公开位置迁移到官方 `UnityEngine`，关闭其完整反射面并验证 camera/overlay/world-space 坐标变换。
+3. 继续把 Transform/RectTransform hierarchy state、dirty dispatch 与批量布局更新迁入 `anity-native`，覆盖深层 UI 树与并发读门禁。
+
+## 2026-07-16k — Matrix4x4 / FrustumPlanes 公开面、官方行为与 native C++ 数学模块闭环
+
+### 已完成
+- 以本机官方 Unity **2022.3.51f1** 的运行时探针补齐 `Matrix4x4`：`rotation`（含负/零 scale、shear、projection 与 zero matrix）、`decomposeProjection`、`GetPosition`、`TransformPlane`、`Inverse3DAffine`、`Determinant/Inverse/Transpose` 静态入口、`Frustum(FrustumPlanes)`、`ToString` overload、精确/近似 equality、异常文本及齐次 `w=0` 除法语义。`LookAt` 已确认是 object pose，不是 view matrix；零方向、平行 up、零 up 均按官方返回带 `from` 平移的 identity rotation。
+- `FrustumPlanes` 从错误 enum 改为官方 `[Serializable] struct` 六字段；`Matrix4x4` 的类型接口、native attributes、16 个字段 `NativeName`、`FreeFunction` / `ThreadSafe` metadata、参数名与公开 overload 已逐项对齐。当前 `Matrix4x4` 与 `FrustumPlanes` 在 84 个官方程序集反射审计中均为 **0 差异**。
+- 新增 `anity-native` C++ `math/anity_matrix` 模块及 12 组 C ABI：determinant、通用/3D affine inverse、transpose、TRS、Ortho/Perspective/Frustum/LookAt、closest rotation、ValidTRS、projection decomposition。C# 以 native 为主路径，无动态库时保留已验证的托管等价回退；强制 native 模式会在入口缺失时硬失败。
+- closest proper rotation 使用 Davenport 4x4 对称特征问题与 Jacobi 求解，覆盖 signed scale、singular axis、shear 和投影矩阵；逆矩阵奇异路径写回 zero，`Inverse3DAffine` 对 projection 保持 Unity 只处理上 3x3+translation 的语义。
+- 修复两个官方 A/B 才暴露的托管细节：无效 `SetRow` 必须抛 `Invalid matrix index!`；固定点格式改用 away-from-zero midpoint rounding，使 `ToString("F1")` 的 `-2.25` 与 Unity/Mono 一致输出 `-2.3`。
+
+### 测试与门禁
+- 新增 `Matrix4x4ParityTests` **22/22**：公开 metadata、构造/投影、普通与退化 LookAt、rotation polar extraction、ValidTRS、inverse、decompose、plane、字符串、equality、异常与 3 组直接 native export 验证。
+- Core 纯托管回退 **587/587**；`ANITY_REQUIRE_NATIVE=1` 强制真实 dylib **587/587**；Agent **30/30**；CLI **16/16**；反射审计器 **17/17**。
+- `_scripts/build-native.sh Release` 与 `_scripts/build-all.sh Release` 通过；Core/Agent/CLI/WebGL/Hub/Editor/URP3DDemo 均 0 编译错误。
+
+### 官方反射面增量（相对 2026-07-16j 基线）
+- 类型精确 **369 → 371**，type mismatch **528 → 526**；成员存在 **8,192 → 8,209**，成员精确 **5,930 → 5,975**，missing **28,972 → 28,955**，mismatch **2,262 → 2,234**，extra **3,589 → 3,581**。
+- 当前覆盖率：类型存在 **21.788%**、类型精确 **9.011%**；成员存在 **22.089%**、成员精确 **16.077%**。重建 SHA-256 baseline 后复跑 `regressions=0`、`removed-or-changed=0`，84 个官方程序集加载问题 0。
+
+### 仍未完成（不得误报“Unity 全量完成”）
+- 全局仍缺 **3,220** 个官方类型与 **28,955** 个官方成员；本批只闭环 `Matrix4x4` / `FrustumPlanes`，不代表 Unity 2022.3 Pro 全引擎已经完成。
+- Matrix native 模块仍是无状态数学内核；Transform 层级存储/dirty propagation/批量 Jobs 所有权、物理世界、渲染器及资源导入等 Unity C++ 职责仍需继续迁入 `anity-native`。
+
+### 下一优先项
+1. 关闭 `RectTransform` 剩余公开反射差异，并用官方 Unity 建立 anchor/pivot/offset/SetSizeWithCurrentAnchors/驱动属性的场景 A/B 与 ≥10 测试。
+2. 将 Transform 层级状态、dirty propagation、矩阵缓存和批量 Jobs 访问迁入 `anity-native`，补深层树、销毁/reparent 与并发读写门禁。
+3. 按反射审计的高频迁移阻塞排序继续关闭 Core 类型公开面，同时保持每批 baseline 零回退与官方行为探针证据。
+
+## 2026-07-16j — Transform 完整层级仿射链、native 热路径与 IL2CPP 构建死锁修复
+
+### 已完成
+- 用 Unity 2022.3.51f1 官方 batchmode fixture 对非均匀/负/零 scale、两级 shear、world/local 矩阵、`lossyScale`、奇异逆矩阵及 `SetParent(true)` 做逐元素 A/B；确认 `localToWorldMatrix = parent * local TRS`，而奇异 `worldToLocalMatrix` 必须沿层级使用“零轴倒数为 0”的逆 TRS 链，不能直接取整体矩阵逆。
+- `Transform.localToWorldMatrix` / `worldToLocalMatrix` 已改为保留全部 shear 的真实父子仿射矩阵链；`TransformPoint/Vector` 及逆变换随之使用完整矩阵，不再由 world position/rotation/lossyScale 重新拼接而丢失 shear。
+- `Transform.lossyScale` 按官方行为把世界矩阵三列投影到 world rotation 三轴，而非使用列长度；负 scale 父链的 world/local rotation 使用官方轴反射 quaternion 规则，`SetParent(true)` 在可表达范围内保持 position、rotation 与投影 scale，并精确处理奇异父矩阵投影。
+- 新增 `anity-native` C++ transform 模块及 `AnityTransform_ComposeLocalToWorld`、`AnityTransform_ComposeWorldToLocal`、`AnityTransform_ProjectLossyScale` 三个 C ABI；C# 走 native 主路径并保留无动态库时的确定性托管回退。测试项目仅在 `AnityRequireNative=true` 时把对应平台动态库部署到程序集旁，避免依赖脆弱的环境搜索路径。
+- `Matrix4x4.lossyScale` 已按官方 determinant 符号规则补齐；精确奇异矩阵的 `inverse` 由错误 identity 改为官方 zero matrix，近奇异非零 determinant 仍计算真实大系数逆矩阵。
+- 新增 `TransformAffineParityTests` **18/18**，覆盖两级 shear、点/向量/方向、投影 scale、负轴、零轴、奇异 inverse、reparent/unparent，以及 3 个强制实际加载 dylib 的 native 入口；与既有 Transform/Scene 28 例合计 **46/46**。
+- 完整 native Core 门禁暴露并修复既有 IL2CPP 构建挂死：`TryNativeCompile` / `LinkPlayer` / `CompileAllUnits` 现并行排空 stdout/stderr、超时终止子进程，`CompileAllUnits` 按 CPU 并行编译 2,080+ C++ 单元，不再因管道填满或串行耗时失控而卡死。
+- Core 在托管回退与实际加载 `libanity_native` 两种配置均为 **565/565**；Agent **30/30**、CLI **16/16**、API 审计器 **17/17**。`build-all Release` 通过 native + 全部托管项目；URP 示例仍为既有 43 个 nullable warning、0 error。
+
+### 官方反射面增量（相对 2026-07-16i 基线）
+- 类型指标不变：存在 **897/4,117**、精确 **369**、缺失 **3,220**、不一致 **528**、扩展 **638**。
+- 成员同签名存在 **8,191→8,192**；契约精确 **5,929→5,930**；真实缺失 **28,973→28,972**（已有类型内 **6,991→6,990**）；不一致 **2,262**、错误扩展 **3,589** 不变。
+- 当前覆盖率：类型存在 **21.788%**、类型精确 **8.963%**；成员存在 **22.043%**、成员精确 **15.956%**。`Transform` 公开反射差异保持 0；审查 `Matrix4x4.lossyScale` 增量后重建 baseline，复跑 `regressions=0`、`removed-or-changed=0`，84 个官方程序集加载问题 0。
+
+### 尚未完成
+- Transform 的仿射数学热路径已进入 C++，但 Transform 对象/层级存储、dirty propagation、矩阵缓存、线程与 Jobs 访问所有权仍主要在 C#；在这部分迁入 `anity-native` 并完成并发/生命周期 A/B 前，Transform 保持 🟡，不宣称 native 引擎级完成。
+- `Matrix4x4` 当前仍有 1 个 type mismatch、11 个 missing member、29 个 member mismatch、1 个 extra member；本批只关闭 `lossyScale` 与奇异 inverse 行为，不能把整个类型标成官方反射精确。
+- Scene 异步加载、平台资源生命周期、编辑器多 Scene/Prefab Stage，以及 `SceneManagerAPI` / `SceneUtility` / `PhysicsSceneExtensions` / `EditorSceneManager` 的剩余公开面和行为仍未闭环。
+
+### 下一次优先项
+1. 关闭 `Matrix4x4` 剩余 42 个公开反射差异，并为 `decomposeProjection`、`rotation`、`GetPosition`、`Frustum`、异常/索引边界建立官方 A/B 与 ≥10 测试。
+2. 将 Transform 层级存储、dirty propagation、矩阵缓存及批量 Jobs 访问迁入 `anity-native`，覆盖销毁/reparent/并发读写和深层树性能，不让 C++ 仅停留在无状态数学函数。
+3. 补齐 `SceneManagerAPI`、`SceneUtility`、`PhysicsSceneExtensions` 与 `EditorSceneManager` 的剩余官方公开面和异步/编辑器多 Scene 生命周期。
+
+## 2026-07-16i — Transform / Scene / 同步实例化层级语义闭环
+
+### 已完成
+- `Transform` 的类型、继承、接口、构造器、全部公开成员、参数名/默认值及 native metadata 已与 Unity 2022.3.51f1 官方反射指纹完全一致；补齐 `forward/up/right` setter、`hierarchyCapacity/hierarchyCount`、12 个 span 批量变换重载与精确参数异常。
+- 以官方 Unity batchmode fixture 实测并固化层级语义：`Find` 的直接/路径/空串行为，`IsChildOf(self/null)`，循环/自父节点 no-op，reparent 消息顺序，`SetParent(true/false)` 的世界/局部姿态，以及 inactive、跨 Scene 父子树传播。
+- 修正 `Quaternion.LookRotation` 的矩阵基向量布局与 `Quaternion.Angle` 的 Unity epsilon 快速归零，保证 Transform 方向 setter 与 reparent 旋转结果对齐官方。
+- 将 `Scene` 从错误的可变 class 重构为官方 `[Serializable] struct`，以 `m_Handle` 连接 `SceneManager` 内部状态注册表；value copy 共享场景状态，根对象、active scene、合并、卸载与跨 Scene 整树迁移不再依赖对象引用身份。
+- `SceneManager`、`Scene`、`CreateSceneParameters`、`LoadSceneParameters`、`LocalPhysicsMode` 的公开反射差异全部归零；补齐全部官方 overload、事件、legacy unload、`MoveGameObjectToScene` / `MoveGameObjectsToScene`，并精确处理仅 root 可迁移等验证。
+- 修复同步 `Object.Instantiate`：parent 默认重载采用局部空间，`worldPositionStays=true` 保持世界姿态，显式 position/rotation + parent 使用指定世界姿态，Scene overload 递归迁移 clone 整树。
+- 官方 `GameObject.InstantiateGameObjects(..., Scene destinationScene = null)` 的“值类型参数 + optional null constant”无法由 C# 源码表达；新增构建期 `_scripts/Anity.MetadataFixups`，使用 Mono.Cecil 精确修补最终程序集 metadata，并改为进程/调用唯一临时文件以支持并行 MSBuild。Release NuGet 包内 DLL 已复验该默认值。
+- `RectTransform` 的 sealed/type/native metadata 已纠正为官方类型指纹；其剩余成员/布局语义仍按差距清单继续推进，不以类型指纹归零代替完整行为验收。
+- 新增 `TransformSceneParityTests` **28/28**，覆盖公开面、层级、span/重叠内存、异常、方向、Scene value copy/root、跨场景迁移、同步 clone 与 merge；Core 全量 **547/547**，Agent **30/30**，CLI **16/16**，API 审计器 **17/17**。
+- `build-all Release` 通过 native + 全部托管项目；当前 macOS 未安装 Vulkan SDK，因此按既有规则编译 Vulkan stub，URP 示例保留既有 43 个 nullable warning、0 error。
+
+### 官方反射面增量（相对 2026-07-16h 基线）
+- 类型存在 **896→897/4,117**；类型契约精确 **362→369**；缺失 **3,221→3,220**；不一致 **534→528**；扩展保持 **638**。
+- 成员同签名存在 **8,157→8,191**；契约精确 **5,856→5,929**；真实缺失 **29,007→28,973**（已有类型内 **7,023→6,991**，缺失类型内 **21,984→21,982**）；不一致 **2,301→2,262**；错误扩展 **3,595→3,589**。
+- 当前覆盖率：类型存在 **21.788%**、类型精确 **8.963%**；成员存在 **22.040%**、成员精确 **15.954%**。8 个目标类型公开反射差异为 0，84 个官方程序集加载问题 0；重建 evidence baseline 后复跑 `regressions=0`、`removed-or-changed=0`。
+
+### 尚未完成
+- 层级旋转 + 非均匀缩放可产生 shear；当前 `localToWorldMatrix` 仍由 `TRS(position, rotation, lossyScale)` 重建，尚不能逐元素复现 Unity 的完整层级仿射矩阵。Transform 因此保持 🟡，不能仅凭本批公开面与行为矩阵宣称全语义完成。
+- Scene 异步加载、平台资源生命周期、编辑器多 Scene 工作流，以及 `SceneManagerAPI` / `SceneUtility` / `PhysicsSceneExtensions` 的剩余公开面与行为仍未闭环。
+
+### 下一次优先项
+1. 把 Transform 层级矩阵改为真实父子仿射矩阵链，并用官方 fixture 覆盖旋转 + 非均匀/负/零 scale、shear、逆矩阵及 world/local round-trip。
+2. 补齐 `SceneManagerAPI`、`SceneUtility`、`PhysicsSceneExtensions` 与 `EditorSceneManager` 的剩余官方公开面和异步/编辑器多 Scene 生命周期，每批保持反射差距单调下降并补 ≥10 A/B 测试。
+3. 扩展 native 物理世界所有权，把 3D/2D broadphase、solver 与刚体步进继续迁入 `anity-native`，以官方 PhysX/Box2D fixture 验证结果与性能。
+
+## 2026-07-16h — Resource / AssetBundle 异步请求公开面与 PlayerLoop 时序闭环
+
+### 已完成
+- `ResourceRequest`、`AssetBundleRequest`、`AssetBundleCreateRequest`、`AssetBundleUnloadOperation` 四个类型的继承、构造器、public/protected 成员、virtual override 及 `RequiredByNativeCode` / `NativeHeader` / `NativeMethod` 元数据已与 Unity 2022.3.51f1 官方反射指纹逐项完全一致。
+- 纠正 `AssetBundleRequest` 从错误的 `AsyncOperation` 直系继承为官方 `ResourceRequest`；移除 `GetAwaiter`、`IsCompleted`、`assetAsTyped<T>`、公开 `GetResult` 等 9 个 Anity-only 错误公开成员，并补回官方 `AssetBundleUnloadOperation.WaitForCompletion()`。
+- `AsyncOperation` 增加不扩张公开 API 的内部 PlayerLoop 调度器：资源、AssetBundle 创建/加载/卸载请求创建后保持 `isDone=false` / `progress=0`，自动完成在帧首集成，等待它的协程在完成帧先恢复，原订阅 completion 回调在帧末派发，完成后的晚订阅同步回调。
+- `ResourceRequest.asset` 依照官方语义同步解析资源但不强制请求完成；`AssetBundleRequest.asset/allAssets`、`AssetBundleCreateRequest.assetBundle` 与 unload `WaitForCompletion` 会同步执行尚未运行的工作并立即触发原 completion 回调。
+- 建立真实 Unity 2022.3.51f1 batchmode + Play Mode AssetBundle fixture：实际构建 macOS bundle，验证 Resource/Create/Load/Unload 的初始 pending、yield 恢复与 callback 跨帧次序、晚订阅、missing asset、blocking getter、blocking unload。补充探针确认三种阻塞完成路径的原 completion callback 均在 getter/Wait 返回前触发，且 `allAssets` 每次读取返回不共享的数组快照。
+- AssetBundle 的 File/Memory/Stream 创建、单资源/全资源/子资源加载及异步卸载均改为延迟执行，不再在返回 request 前偷偷同步完成。
+- 新增 `AssetBundleAsyncRequestTests` **15/15**，覆盖公开面、native 元数据、资源 getter、PlayerLoop、协程/回调相位、blocking getter、独立 allAssets 快照、空结果、stream 延迟读取及卸载；Core 全量 **519/519**，Agent **30/30**，CLI **16/16**，API 审计器 **17/17**。
+- `build-all Release` 通过 native + 全部托管项目；当前 macOS 未安装 Vulkan SDK，因此按既有规则编译 Vulkan stub，URP 示例保留既有 43 个 nullable warning、0 error。
+
+### 官方反射面增量（相对 2026-07-16g 基线）
+- 类型存在保持 **896/4,117**；类型契约精确 **358→362**；不一致 **538→534**；缺失 **3,221**、扩展 **638** 不变。
+- 成员同签名存在 **8,155→8,157**；契约精确 **5,852→5,856**；真实缺失 **29,009→29,007**（已有类型内 **7,025→7,023**）；不一致 **2,303→2,301**；错误扩展 **3,604→3,595**。
+- 四个目标类型当前公开反射差异均为 0；84 个官方程序集加载问题 0。审查后重建 evidence baseline，复跑门禁 `regressions=0`、`removed-or-changed=0`。
+
+### 下一次优先项
+1. 审计并补齐 `Transform.SetParent` / `SceneManager.MoveGameObjectToScene` 的非法 child/root、inactive 重挂载、跨 Scene 生命周期及同步 `Object.Instantiate` 全重载官方 A/B。
+2. 继续处理 `UnityEngine.CoreModule` 高频 mismatch/missing，优先 Scene、Transform、Resources 与 AssetBundle 公开面的剩余差异，每批保持官方反射差异单调下降并补 ≥10 行为测试。
+3. 扩展 native 物理世界所有权，把 3D/2D broadphase、solver 与刚体步进继续迁入 `anity-native`，以官方 PhysX/Box2D fixture 验证结果与性能。
+
+## 2026-07-16g — `GameObject` 全公开面与批量生命周期闭环
+
+### 已完成
+- 补齐 `GameObject` 剩余 **21/21** 官方公开成员：`GetScene`、两组 `SetGameObjectsActive`、`InstantiateGameObjects`、`SetActiveRecursively`、3 个 removed animation 方法及 13 个 legacy Component 属性；`GameObject` 当前对 Unity 2022.3.51f1 的公开反射差异为 **0**。
+- 直接反汇编官方 `UnityEngine.CoreModule.dll`，精确复现 `NativeArray` 未初始化、count/容量不匹配、无效 source InstanceID、removed API 的异常类型/参数名/文本，以及 optional `destinationScene=null` 元数据。
+- 建立官方 Unity batchmode + Play Mode A/B：验证空/重复/无效 ID、批量激活父子状态、递归 activeSelf 覆盖、GameObject/Transform ID 回填、目标 Scene 整树迁移、inactive clone 延迟 `Awake`、字段在 `Awake` 前完成复制，以及禁用子→父/启用父→子的回调顺序。
+- 重写层级激活派发为变更前快照 + 原子状态更新：重复或父子重叠 ID 不会重复回调；禁用按逆层级、启用按正层级派发。
+- `MonoBehaviour` 增加内部一次性 Awake 状态；inactive GameObject 上新增/克隆的脚本延迟到首次激活才 `Awake`，后续重复激活只重发 `OnEnable`。
+- 修复同步克隆路径的两个既有生产错误：组件曾在字段复制前且可能重复 `Awake`，以及通用字段复制会把 clone Component 的 `gameObject` 所有权覆盖回 source；现在克隆整树构建完成后才派发生命周期，并过滤运行时所有权/协程状态。
+- `SceneManager.MoveGameObjectToScene` 通过 `SetSceneInternal` 把目标 Scene 递归传播到全部后代；批量实例化返回的 root/child 场景归属与官方一致。
+- 新增 `GameObjectBulkApiTests` **31/31** 深测；受影响既有生命周期/异步实例化测试 **101/101**，Core 全量 **504/504**。
+
+### 官方反射面增量（相对 2026-07-16f 基线）
+- 类型指标不变：同名存在 **896/4,117**，类型指纹精确 **358**，缺失 **3,221**，不一致 **538**，扩展 **638**。
+- 成员：同签名存在 **8,134→8,155**；契约精确 **5,831→5,852**；真实缺失 **29,030→29,009**（已有类型内 **7,046→7,025**）；不一致保持 **2,303**，扩展保持 **3,604**。
+- `GameObject` 的 21 个旧差异全部消失；84 个官方程序集加载问题 0，旧基线门禁 `regressions=0`、`removed-or-changed=21`。
+
+### 下一次优先项
+1. ~~纠正 `AssetBundleRequest : ResourceRequest` 官方继承、native 元数据和 asset/allAssets 完成语义，并清理 AsyncOperation 派生类型上的错误 awaiter 扩展；建立官方 coroutine/batchmode A/B。~~（已于 2026-07-16h 完成）
+2. 审计并补齐 `Transform.SetParent` / `SceneManager.MoveGameObjectToScene` 的非法 child/root、inactive 重挂载与跨 Scene 生命周期边界，扩展同步 `Object.Instantiate` 全重载 A/B。
+3. 扩展 native 物理世界所有权，把 3D/2D broadphase、solver 与刚体步进继续迁入 `anity-native`，以官方 PhysX/Box2D fixture 验证结果与性能。
+
+## 2026-07-16f — `ConstantForce` native 物理语义与 legacy API 收口
+
+### 已完成
+- 新增 `PhysicsUpdateBehaviour2D`、`ConstantForce`、`ConstantForce2D`，三者的继承、sealed、构造器、属性、`RequireComponent` 与 `NativeHeader` 已和 Unity 2022.3.51f1 官方反射面逐项精确一致。
+- 在 `anity-native` C++ 物理模块新增 3D/2D 恒力解析 C ABI：组合 world/local force 与 torque，并使用刚体 quaternion 将局部向量变换到世界空间；C# 通过 P/Invoke 使用 native 主路径并保留确定性的托管回退。
+- 以官方 Unity 2022.3.51f1 play-mode A/B 实测闭环：恒力按 `F / mass * fixedDeltaTime` 每步累加、relative force/torque 随刚体旋转、disabled/kinematic 不生效、睡眠刚体被唤醒；3D/2D 数值结果均已固化为测试断言。
+- 修正既有 `Rigidbody.AddRelativeForce` / `AddRelativeTorque` 与 `Rigidbody2D.AddRelativeForce` 未执行局部到世界坐标变换的错误；2D `Physics.Simulate` 现会真正消费累积力且重力只积分一次。
+- 物理世界在每次步进前回收已销毁 rigidbody/collider/joint/wheel 与碰撞状态，并对 inactive 对象暂停而不注销；修复长进程中碰撞双循环随历史对象持续膨胀及 2D 对象重新激活后丢失注册的问题。
+- 补齐 `Component` 剩余 **13/13** legacy 属性：公开类型、`EditorBrowsable(Never)`、`Obsolete(error: true)` 文本与运行时 `NotSupportedException` 均和官方一致；`Component` 当前官方公开成员差异为 0。
+- 新增 `NetworkView`、`NetworkPlayer`、`NetworkViewID`、`NetworkMessageInfo`、`NetworkStateSynchronization`、`RPCMode` 的 Unity 2022 removed compatibility surface。官方 2022.3 本身已移除 legacy networking，Anity 精确复现编译期禁用与运行时统一 `NotSupportedException`，不伪造已不存在的网络传输。
+- 新增 **72/72** 深测（恒力/native/RequireComponent/坐标变换/睡眠/inactive/kinematic/多组件/legacy metadata/异常），Core 全量由 **401/401→473/473**；native dylib 已实际加载验证两个新增 C ABI，而非只验证托管回退。
+
+### 官方反射面增量（相对 2026-07-16e 基线）
+- 精确审查的 10 个类型：`Component`、`PhysicsUpdateBehaviour2D`、`ConstantForce`、`ConstantForce2D` 与 6 个 legacy networking 类型，当前差异全部为 0。
+- 类型：同名存在 **887→896**；契约完全一致 **349→358**；缺失 **3,230→3,221**；不一致保持 **538**；错误扩展保持 **638**。
+- 成员：同签名存在 **8,088→8,134**；契约完全一致 **5,785→5,831**；真实缺失 **29,076→29,030**（缺失类型内 **22,017→21,984**，已有类型内 **7,059→7,046**）；不一致保持 **2,303**；错误扩展保持 **3,604**。
+- 审查后重建 evidence baseline；84 个官方程序集加载问题为 0，复跑回归门禁要求 `regressions=0`、`removed-or-changed=0`。
+
+### 下一次优先项
+1. ~~补齐 `GameObject` 剩余 21 个 legacy/bulk API，优先 `SetGameObjectsActive` / `InstantiateGameObjects` 与 scene/bulk 生命周期路径，并同步官方 batchmode A/B。~~（已于 2026-07-16g 完成）
+2. ~~纠正 `AssetBundleRequest : ResourceRequest` 继承和 AsyncOperation 派生类 native 元数据，移除错误公开 awaiter 扩展。~~（已于 2026-07-16h 完成）
+3. 扩展 native 物理世界所有权，把当前仍在 C# 的 3D/2D broadphase、solver 与刚体步进继续迁入 `anity-native`，以官方 PhysX/Box2D fixture 验证结果与性能。
+
+## 2026-07-16e — 官方 `InstantiateAsync` 完整公开面与异步集成语义
+
+### 已完成
+- 新增 `AsyncInstantiateOperation` / `AsyncInstantiateOperation<T>`，并把 `AsyncOperation` 从错误的 `CustomYieldInstruction` 修正为官方 `YieldInstruction` 继承；三个类型的类型、成员、泛型约束、事件、构造器可见性及 native 元数据均与 Unity 2022.3.51f1 反射精确一致。
+- 补齐 `Object.InstantiateAsync<T>` 官方 **10/10** 重载；`Object` 当前全部官方公开成员均已存在且契约精确。
+- 以官方 Unity 2022.3.51f1 batchmode 实测闭环：初始 `isDone=false` / `progress=0.9` / `Result=null`、完成后 typed array、晚订阅即时回调、取消完成后 `Result=null`、span 短于 count 时循环复用、父节点参数使用世界位置、非法 count/null/ScriptableObject 异常文本及 integration time 边界。
+- 异步实例化接入 `UnityRuntime` PlayerLoop，按 `SetIntegrationTimeMS` 预算分片集成；支持 `allowSceneActivation` 门、同步 `WaitForCompletion`、线程可见取消、部分集成对象回收、完成事件仅一次及底层 `AsyncOperation` 协程等待。
+- 新增 **20/20** 深测；Core 全量由 **381/381→401/401**。`AsyncOperation` 继承修复影响的 Resource/AssetBundle/UnityWebRequest 派生类型已逐项反射审查，没有行为测试回归。
+
+### 官方反射面增量（相对 2026-07-16d 基线）
+- 类型：同名存在 **885→887**；契约完全一致 **346→349**；缺失 **3,232→3,230**；不一致 **539→538**；错误扩展保持 **638**。
+- 成员：同签名存在 **8,059→8,088**；契约完全一致 **5,756→5,785**；真实缺失 **29,105→29,076**（缺失类型内 **22,035→22,017**，已有类型内 **7,070→7,059**）；不一致保持 **2,303**；错误扩展 **3,607→3,604**。
+- 审查后重建 evidence baseline 并复跑：`regressions=0`、`removed-or-changed=0`、84 个官方程序集加载问题 0。
+
+### 下一次优先项
+1. ~~落地 `ConstantForce` 与 legacy `NetworkView` 兼容层，关闭 `Component` 剩余 13 个官方 legacy 属性，并为每个模块补 ≥10 测试。~~（已于 2026-07-16f 完成）
+2. 补 `GameObject` 剩余 21 个 legacy/bulk API，优先 `SetGameObjectsActive` / `InstantiateGameObjects` 与 scene/bulk 路径。
+3. ~~纠正 `AssetBundleRequest : ResourceRequest` 继承和 AsyncOperation 派生类 native 元数据，移除错误公开 awaiter 扩展，同时建立可重复运行的官方 batchmode async/coroutine fixture。~~（已于 2026-07-16h 完成）
+
+## 2026-07-16d — Core 基类链精确公开面与 Unity 消息调度
+
+### 已完成
+- `UnityEngine.Object` 移除错误的公开 `IDisposable` / `Dispose` 与 Anity-only helper 表面；该错误此前会把 `System.IDisposable` 继承到大量 Unity 对象类型，现已从根上消除。
+- `Object`、`Component`、`Behaviour`、`MonoBehaviour`、`GameObject` 五个类型的种类、sealed、继承、接口与 native 元数据指纹已全部和官方 Unity 2022.3.51f1 精确一致。
+- `Component` / `GameObject` 补齐官方无约束泛型查询、Type/List/children/parent/index/TryGetComponent/消息重载；默认 `includeInactive=false`，inactive subtree、inactive root 与 interface 查询行为落地。
+- `MonoBehaviour` 不再伪造 61 个 protected virtual 生命周期 API；改为 Unity 式按名称查找消息，支持 private/protected `Awake` / `Start` / `Update` 等，并支持 `IEnumerator Start()` 自动协程。
+- `Object.Destroy` 改为帧末销毁；`DestroyImmediate` 同步销毁 GameObject 的全部 Component，按 `OnDisable`→`OnDestroy` 顺序清理并触发 `destroyCancellationToken`。
+- 补 `FindFirstObjectByType` / `FindAnyObjectByType` / inactive 过滤、隐式 bool、`Instantiate(Object, Scene)` 与场景归属更新；`GameObject()` 默认名对齐 `New Game Object`。
+- 新增官方兼容元数据：`ExcludeFromPresetAttribute`、`ExcludeFromDocsAttribute`、`DefaultValueAttribute` 及内部 native binding 特性，用于真实反射签名而非审计白名单。
+- 新增 **21/21** 深测；Core 全量 **381/381**。并修复 Vulkan/PlatformGraphics 测试对同一进程全局状态的并行隔离。
+- `build-all` 的 native 阶段改为强制门禁：缺 CMake 或 C++ 构建失败时 Unix/PowerShell 均立即失败，不再静默跳过 native 后产生假绿。
+
+### 官方反射面增量（相对 2026-07-16c 基线）
+- 类型：同名存在 **882→885**；契约完全一致 **338→346**；缺失 **3,235→3,232**；不一致 **544→539**；错误扩展 **639→638**。
+- 成员：同签名存在 **7,977→8,059**；契约完全一致 **5,609→5,756**；真实缺失 **29,187→29,105**；不一致 **2,368→2,303**；错误扩展 **3,697→3,607**。
+- 五个核心类型在本批结束时剩余：`Behaviour` **0**、`MonoBehaviour` **0**；`Object` 的 10 个 `InstantiateAsync` 已于 2026-07-16e 补齐；`Component` 仍缺 13 个 legacy 属性；`GameObject` 仍缺 21 个 legacy/bulk API。
+- 新 evidence baseline 复跑：`regressions=0`、`removed-or-changed=0`、84 个官方程序集加载问题 0。
+
+### 下一次优先项
+1. ~~实现 `AsyncInstantiateOperation<T>` 与 10 个 `Object.InstantiateAsync`，覆盖批量实例化、父节点、位置/旋转 span、取消和完成事件。~~（已于 2026-07-16e 完成）
+2. 落地生产级 `ConstantForce` / legacy `NetworkView` 兼容层并补齐 Component/GameObject 旧属性，每模块 ≥10 测试。
+3. 补 `GameObject.SetGameObjectsActive`、`InstantiateGameObjects`、scene/bulk API，并建立官方 Unity batchmode 生命周期 A/B fixture。
+
+## 2026-07-16c — CoreModule 官方组件特性签名与运行时语义
+
+### 已完成
+- 纠正 7 个错误公开类型名：`RequireComponent`、`AddComponentMenu`、`ContextMenu`、`DisallowMultipleComponent`、`ExecuteInEditMode`、`ExecuteAlways`、`HideInInspector`；删除错误的公开 `*Attribute` 表面。
+- 补齐 `ContextMenuItemAttribute`、`DefaultExecutionOrder`、`HelpURLAttribute`，并逐项对齐官方构造器、字段/属性、sealed/继承关系、`AttributeUsage` 与 native-code 元数据。
+- `GameObject.AddComponent` 实现 `RequireComponent` 的 1–3 依赖、继承/多特性/递归图、依赖先注册及非法依赖校验；实现基类上的 `DisallowMultipleComponent` 对派生类型互斥。
+- `UnityRuntime` 按继承的 `DefaultExecutionOrder` 排序 Update/FixedUpdate/LateUpdate，同优先级按 InstanceID 保持确定顺序。
+- `_scripts/UnityApiParity` 增加 `--inspect-type`，可同时输出官方与 Anity 的精确类型/成员指纹，供后续逐类型修复使用。
+- 新增组件特性行为测试 **15/15**，覆盖官方类型名、构造器默认值、1/3 个依赖、继承、循环依赖、Awake 顺序、非法依赖、基类互斥及执行顺序。
+
+### 官方反射面增量（Unity 2022.3.51f1）
+- 类型：同名存在 **872→882**，契约完全一致 **328→338**，缺失 **3,245→3,235**，错误扩展类型 **646→639**。
+- 成员：同签名存在 **7,950→7,977**，契约完全一致 **5,582→5,609**，真实缺失 **29,214→29,187**。
+- 更新后的 evidence baseline 已复跑：`regressions=0`、`removed-or-changed=0`、程序集加载问题 0。
+
+### 尚未完成
+- `ExecuteAlways` / `ExecuteInEditMode` 的编辑模式 PlayerLoop、Prefab Stage 与 Domain Reload 行为尚未形成官方 A/B 闭环，本批只完成其公开 API 精确签名，不标记该行为完成。
+
+### 下一次优先项
+1. 用 `--inspect-type` 继续处理 `UnityEngine.CoreModule` 高频 TypeMismatch，优先 `Object` / `Component` / `Behaviour` / `MonoBehaviour` / `GameObject` 的公开契约与继承元数据。
+2. 建立官方 batchmode 组件生命周期 fixture，验证 Awake/OnEnable/Start、RequireComponent、Destroy 与 execution order 的同输入/同输出。
+3. 补 `ExecuteAlways` / `ExecuteInEditMode` 编辑模式调度，并覆盖 Prefab Stage、进入/退出 Play Mode 与脚本重载边界。
+
+## 2026-07-16b — 官方 Unity 2022.3 API 反射门禁与真实差距基线
+
+### 已完成
+- 新增跨平台 `_scripts/UnityApiParity` 审计器，直接读取官方 UnityEngine/UnityEditor 程序集与 `Anity.Core.dll`，不再用 Checklist 文本或类型名搜索代替兼容性证据。
+- 审计公开及 protected 契约：类型种类/继承/接口/泛型约束、构造器、方法与转换操作符、字段/枚举值、属性/索引器、事件、参数名与默认值、`ref/out/in/params`、可见性、静态/虚方法语义及特性。
+- Unix/Windows 入口：`_scripts/unity-api-parity.sh` / `.ps1`；自动探测 Unity 2022.3，输出完整当前 JSON，并以紧凑 SHA-256 evidence baseline 阻止新缺口或未审查的签名变化。
+- 修复审计边界：转换操作符按返回目标区分；官方 Editor 依赖从 Managed 父目录解析；缺失类型下的全部成员计入真实缺失数；当前官方程序集加载问题为 0。
+- 审计器 xUnit **17/17**，覆盖 public/protected 过滤、类型/枚举/泛型、重载、转换操作符、参数、ref/out/in、属性、事件/特性以及所有差异分类。
+
+### 官方基线（本机 Unity 2022.3.51f1，84 个程序集）
+- 类型：官方 **4,117**；Anity 同名存在 **872（21.180%）**；契约完全一致 **328（7.967%）**；缺失 **3,245**；不一致 **544**；Anity 扩展 **646**。
+- 成员：官方 **37,164**；同签名身份存在 **7,950（21.392%）**；契约完全一致 **5,582（15.020%）**；真实缺失 **29,214**（缺失类型内 22,068 + 已有类型内 7,146）；不一致 **2,368**；扩展 **3,697**。
+- 最大缺口：`UnityEditor.CoreModule` 缺类型 1,358；`UnityEngine.CoreModule` 缺类型 690、已有类型内缺成员 2,582；`UnityEngine.UIElementsModule` 缺类型 396。
+- 证据：`parity-evidence/unity-api-parity-baseline.json`；重复运行门禁结果 `regressions=0`、`removed-or-changed=0`。
+
+### 结论
+- 历史“全部 Unity API 落地”结论被官方证据否定；全局仍为 🟡，不得以现有单元测试绿灯宣称 Unity 2022 Pro 完全对等。
+- 基线只用于防止倒退，不降低最终验收线；完成条件仍是 missing/mismatch/load issue 全部归零，并叠加官方行为、编辑器交互与平台产物门禁。
+
+### 下一次优先项
+1. 先处理 `UnityEngine.CoreModule`：按官方反射表分批补齐高频迁移阻塞类型/成员，每批同步 ≥10 行为与签名测试，并要求基线差异单调下降。
+2. 随后处理 `UnityEditor.CoreModule` 与 UIElements，优先 Build/PlayerSettings/AssetDatabase/EditorWindow/Inspector/SceneView 的签名和行为闭环。
+3. 增加官方 Unity batchmode 行为 fixture runner，把 API 一致门禁扩展为同输入/同输出 A/B 门禁。
+
+## 2026-07-16 — Unity 2022 Ultra 目标续跑：可控 Agent 自定义接入
+
+### 目标口径
+- 总目标保持为：所有 Unity 2022.3 Pro 公开 API、行为、编辑器交互、构建与平台效果一致；Anity 实现源码自主可控。
+- Agent 是独立 `anity-agent/` 官方扩展，不进入 `Anity.Core`；本批只关闭自定义模型接入纵向链路，不宣称 Unity 全局对等完成。
+
+### 已完成
+- 新增源码可控的 `OpenAiCompatibleAgentProvider`，直接请求 `<base-url>/chat/completions`，无闭源厂商 SDK 绑定。
+- `AgentConnectionOptions` 支持自定义 API Key、Base URL、模型、超时、重试和最大响应体；支持 `ANITY_AGENT_API_KEY`、`ANITY_AGENT_BASE_URL`、`ANITY_AGENT_MODEL`。
+- `anity` CLI 新增 `-agentApiKey/-agentBaseUrl/-agentModel/-agentTimeoutSeconds`；推荐密钥走环境变量，日志与异常均脱敏。
+- 生产防护：HTTP(S) URL 校验、Bearer 鉴权、取消与请求超时、408/429/5xx 重试、Retry-After、响应体上限、结构化 HTTP 错误、字符串及多段文本响应解析。
+- Session 异步调用改为真正 async，单 Session 并发 turn 串行化，历史返回快照；Memory/ToolRegistry 改为并发容器；本地工具不误发到模型端点。
+- `System.Text.Json` 从存在高危告警的 8.0.0 升级到 8.0.6；Agent/Core 生成带 content hash 的 `packages.lock.json`；漏洞扫描无已知漏洞。
+- Unix `_scripts/build-all.sh` 补回 `anity-agent` 与 `anity-cli`，与 PowerShell 构建入口一致。
+
+### 验收证据
+- `Anity.Agent.Tests`：30/30 通过，其中自定义接入覆盖配置、URL、鉴权、模型/历史 JSON、错误脱敏、重试、取消、超时、响应上限、并发和本地工具隔离。
+- `Anity.Cli.Tests`：16/16 通过，覆盖新增 CLI 参数与帮助面。
+- `dotnet list ... package --vulnerable --include-transitive`：无易受攻击包。
+
+### 下一次优先项
+1. Agent 工具调用协议、SSE 流式输出、用量统计与编辑器安全凭据存储，形成编辑器内生产交互闭环。
+2. ~~建立 Unity 2022.3 官方程序集反射面自动门禁~~（API 门禁已完成；行为 fixture 继续见 07-16b）。
+3. 从 WebGL/Windows 的 PlayerLoop、渲染帧与资源导入开始补生产级端到端互操作测试。
+
 ## 2026-07-13q — CI 根因修复：Public 仓库 + Object 枚举竞态
 
 ### 根因
@@ -850,4 +2930,3 @@
 1. 完善 URP Shader 和材质系统（URP/Lit、URP/Unlit 等）
 2. 实现编辑器主窗口框架（菜单栏、工具栏、状态栏、Dock 布局）
 3. 实现 SceneView 场景绘制与 Gizmos 系统
-

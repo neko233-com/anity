@@ -1,15 +1,12 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace UnityEngine;
 
 public static class Resources
 {
   private static readonly Dictionary<string, object> _resources = new(StringComparer.Ordinal);
-  private static readonly List<ResourceRequest> _loadingRequests = new();
 
   public static void RegisterResource(string path, object asset)
   {
@@ -153,22 +150,14 @@ public static class Resources
   public static ResourceRequest LoadAsync<T>(string path) where T : Object
   {
     var request = new ResourceRequest();
-    var asset = Load<T>(path);
-    request.asset = asset;
-    request.isDone = true;
-    request.progress = 1f;
-    request.operationName = $"LoadAsync({path})";
+    request.Configure(path, typeof(T));
     return request;
   }
 
   public static ResourceRequest LoadAsync(string path, Type type)
   {
     var request = new ResourceRequest();
-    var asset = Load(path, type);
-    request.asset = asset;
-    request.isDone = true;
-    request.progress = 1f;
-    request.operationName = $"LoadAsync({path})";
+    request.Configure(path, type);
     return request;
   }
 
@@ -187,12 +176,29 @@ public static class Resources
   public static IReadOnlyDictionary<string, object> AllLoaded => _resources;
 }
 
+[Scripting.RequiredByNativeCode]
 public class ResourceRequest : AsyncOperation
 {
-  public Object? asset { get; set; }
+  internal string m_Path = string.Empty;
+  internal Type m_Type = typeof(Object);
 
-  public ResourceRequest()
+  public Object? asset => GetResult();
+
+  public ResourceRequest() : base(false)
   {
     operationName = "ResourceRequest";
+  }
+
+  protected virtual Object? GetResult()
+  {
+    return Resources.Load(m_Path, m_Type);
+  }
+
+  internal void Configure(string path, Type type)
+  {
+    m_Path = path;
+    m_Type = type;
+    operationName = $"LoadAsync({path})";
+    Schedule(static () => { });
   }
 }

@@ -90,7 +90,7 @@ public class VertexHelper : IDisposable
 
     public void AddVert(UIVertex v)
     {
-        AddVert(v.position, v.color, v.uv0, v.normal, v.tangent);
+        AddVert(v.position, v.color, new Vector2(v.uv0.x, v.uv0.y), v.normal, v.tangent);
     }
 
     public void AddVert(Vector3 position, Color32 color, Vector2 uv0)
@@ -180,7 +180,7 @@ public class VertexHelper : IDisposable
         if (index < 0 || index >= m_Positions.Count) return;
         m_Positions[index] = vertex.position;
         m_Colors[index] = vertex.color;
-        m_Uvs[index] = vertex.uv0;
+        m_Uvs[index] = new Vector2(vertex.uv0.x, vertex.uv0.y);
         if (m_Normals.Count > index) m_Normals[index] = vertex.normal;
         if (m_Tangents.Count > index) m_Tangents[index] = vertex.tangent;
     }

@@ -46,22 +46,19 @@ public class WindZone : MonoBehaviour
     set => _windPulseFrequency = value;
   }
 
-  protected override void OnEnable()
+  private void OnEnable()
   {
-    base.OnEnable();
     Wind.Register(this);
   }
 
-  protected override void OnDisable()
+  private void OnDisable()
   {
     Wind.Unregister(this);
-    base.OnDisable();
   }
 
-  protected override void OnDestroy()
+  private void OnDestroy()
   {
     Wind.Unregister(this);
-    base.OnDestroy();
   }
 }
 

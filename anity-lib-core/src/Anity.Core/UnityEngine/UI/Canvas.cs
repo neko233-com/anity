@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Anity.Core.Runtime.Native;
+using UnityEngine.UI;
 
-namespace UnityEngine.UI;
+namespace UnityEngine;
 
 /// <summary>
-/// UnityEngine.UI.Canvas — Screen Space Overlay / Camera / World Space (Unity 2022.3 Pro).
+/// UnityEngine.Canvas — Screen Space Overlay / Camera / World Space (Unity 2022.3 Pro).
 /// </summary>
 public enum RenderMode
 {
@@ -25,15 +27,24 @@ public enum AdditionalCanvasShaderChannels
   Tangent = 16
 }
 
-public enum SortOrder
+public enum StandaloneRenderResize
 {
-  Normal = 0,
-  TopLeft = 1
+  Enabled = 0,
+  Disabled = 1
 }
 
-public class Canvas : Behaviour
+[Bindings.NativeHeader("Modules/UI/Canvas.h")]
+[Bindings.NativeHeader("Modules/UI/CanvasManager.h")]
+[Bindings.NativeHeader("Modules/UI/UIStructs.h")]
+[NativeClass("UI::Canvas")]
+[RequireComponent(typeof(RectTransform))]
+public sealed class Canvas : Behaviour
 {
+  public delegate void WillRenderCanvases();
+
   internal static readonly List<Canvas> _canvases = new();
+  private static readonly Material _defaultCanvasMaterial = new(Shader.Find("UI/Default"));
+  private static readonly Material _etc1CanvasMaterial = new(Shader.Find("UI/DefaultETC1"));
 
   private RenderMode _renderMode = RenderMode.ScreenSpaceOverlay;
   private Camera? _worldCamera;
@@ -50,10 +61,12 @@ public class Canvas : Behaviour
   private AdditionalCanvasShaderChannels _additionalShaderChannels;
   private float _normalizedSortingGridSize = 0.1f;
   private bool _updateRectTransformForOverlay = true;
+  private StandaloneRenderResize _updateRectTransformForStandalone;
+  private bool _vertexColorAlwaysGammaSpace;
 
-  public static List<Canvas> canvases => _canvases;
-  public static event Action<bool>? preWillRenderCanvases;
-  public static event Action? willRenderCanvases;
+  internal static List<Canvas> canvases => _canvases;
+  public static event WillRenderCanvases? preWillRenderCanvases;
+  public static event WillRenderCanvases? willRenderCanvases;
 
   public RenderMode renderMode
   {
@@ -66,6 +79,7 @@ public class Canvas : Behaviour
     }
   }
 
+  [Bindings.NativeProperty("Camera", false, Bindings.TargetType.Function)]
   public Camera? worldCamera
   {
     get => _worldCamera;
@@ -94,7 +108,7 @@ public class Canvas : Behaviour
     set => _sortingOrder = value;
   }
 
-  public int sortOrder
+  internal int sortOrder
   {
     get => _sortingOrder;
     set => _sortingOrder = value;
@@ -161,7 +175,7 @@ public class Canvas : Behaviour
   }
 
   /// <summary>Unity API alias used by some packages.</summary>
-  public bool additionalShaderChannelsFlag
+  internal bool additionalShaderChannelsFlag
   {
     get => _additionalShaderChannels != AdditionalCanvasShaderChannels.None;
     set
@@ -173,10 +187,31 @@ public class Canvas : Behaviour
     }
   }
 
+  [Bindings.NativeProperty("SortingBucketNormalizedSize", false, Bindings.TargetType.Function)]
   public float normalizedSortingGridSize
   {
     get => _normalizedSortingGridSize;
     set => _normalizedSortingGridSize = Mathf.Clamp(value, 0.01f, 10f);
+  }
+
+  [Obsolete("Setting normalizedSize via a int is not supported. Please use normalizedSortingGridSize", false)]
+  [Bindings.NativeProperty("SortingBucketNormalizedSize", false, Bindings.TargetType.Function)]
+  public int sortingGridNormalizedSize
+  {
+    get => (int)_normalizedSortingGridSize;
+    set => normalizedSortingGridSize = value;
+  }
+
+  public StandaloneRenderResize updateRectTransformForStandalone
+  {
+    get => _updateRectTransformForStandalone;
+    set => _updateRectTransformForStandalone = value;
+  }
+
+  public bool vertexColorAlwaysGammaSpace
+  {
+    get => _vertexColorAlwaysGammaSpace;
+    set => _vertexColorAlwaysGammaSpace = value;
   }
 
   public bool isRootCanvas
@@ -193,7 +228,6 @@ public class Canvas : Behaviour
       }
       return true;
     }
-    set { /* Unity computes this; setter kept for legacy callers */ _ = value; }
   }
 
   public Canvas? rootCanvas
@@ -212,7 +246,7 @@ public class Canvas : Behaviour
     }
   }
 
-  public RectTransform? renderTransform
+  internal RectTransform? renderTransform
   {
     get => transform as RectTransform ?? GetComponent<RectTransform>();
     set { /* Unity binds to own RT */ _ = value; }
@@ -246,7 +280,8 @@ public class Canvas : Behaviour
     }
   }
 
-  public bool cachedSortingLayerValueExists => true;
+  internal bool cachedSortingLayerValueExists => true;
+  public int cachedSortingLayerValue => _sortingLayerID;
 
   static Canvas()
   {
@@ -266,12 +301,20 @@ public class Canvas : Behaviour
 
   public static void ForceUpdateCanvases()
   {
-    preWillRenderCanvases?.Invoke(false);
+    preWillRenderCanvases?.Invoke();
     willRenderCanvases?.Invoke();
+    CanvasNativeRenderBridge.Flush();
   }
 
-  /// <summary>Static alias used by some Unity packages.</summary>
-  public static void ForceUpdateCanvasesStatic() => ForceUpdateCanvases();
+  [Bindings.FreeFunction("UI::GetDefaultUIMaterial")]
+  public static Material GetDefaultCanvasMaterial() => _defaultCanvasMaterial;
+
+  [Obsolete("Shared default material now used for text and general UI elements, call Canvas.GetDefaultCanvasMaterial()", false)]
+  [Bindings.FreeFunction("UI::GetDefaultUIMaterial")]
+  public static Material GetDefaultCanvasTextMaterial() => _defaultCanvasMaterial;
+
+  [Bindings.FreeFunction("UI::GetETC1SupportedCanvasMaterial")]
+  public static Material GetETC1SupportedCanvasMaterial() => _etc1CanvasMaterial;
 
   public Canvas()
   {
@@ -279,7 +322,7 @@ public class Canvas : Behaviour
       _canvases.Add(this);
   }
 
-  public void UnregisterCanvas()
+  internal void UnregisterCanvas()
   {
     _canvases.Remove(this);
   }
@@ -290,7 +333,7 @@ public class Canvas : Behaviour
   /// Camera: positioned at planeDistance along camera forward.
   /// World: free world transform, event camera optional via worldCamera.
   /// </summary>
-  public void SetupRenderMode()
+  internal void SetupRenderMode()
   {
     switch (_renderMode)
     {
@@ -311,7 +354,7 @@ public class Canvas : Behaviour
     }
   }
 
-  public void PlaceInFrontOfCamera()
+  internal void PlaceInFrontOfCamera()
   {
     if (_worldCamera == null || transform == null) return;
     var camT = _worldCamera.transform;
@@ -323,7 +366,7 @@ public class Canvas : Behaviour
   /// <summary>
   /// Root canvas layout: Unity sets sizeDelta to (screen / scaleFactor) for Overlay/Camera.
   /// </summary>
-  public void ApplyRootLayoutFromScale()
+  internal void ApplyRootLayoutFromScale()
   {
     if (!isRootCanvas || !_updateRectTransformForOverlay) return;
     if (_renderMode == RenderMode.WorldSpace) return;
@@ -342,10 +385,11 @@ public class Canvas : Behaviour
     rt.pivot = new Vector2(0.5f, 0.5f);
     rt.sizeDelta = new Vector2(w, h);
     // scaleFactor is applied via Canvas.scaleFactor / graphic scale, not localScale blow-up
-    rt.localScale = Vector3.one;
+    rt.localScale = new Vector3(sf, sf, 1f);
+    rt.position = new Vector3(display.x * 0.5f, display.y * 0.5f, 0f);
   }
 
-  public RectTransform EnsureRectTransform()
+  internal RectTransform EnsureRectTransform()
   {
     var rt = GetComponent<RectTransform>();
     if (rt == null && gameObject != null)
@@ -354,7 +398,7 @@ public class Canvas : Behaviour
   }
 
   /// <summary>Screen point → local point in this canvas (for raycasters / EventSystem).</summary>
-  public bool ScreenPointToLocalPointInRectangle(Vector2 screenPoint, out Vector2 localPoint)
+  internal bool ScreenPointToLocalPointInRectangle(Vector2 screenPoint, out Vector2 localPoint)
   {
     localPoint = Vector2.zero;
     var rt = renderTransform;
@@ -368,12 +412,12 @@ public class Canvas : Behaviour
   }
 
   /// <summary>Effective sorting key for painter's algorithm (layer + order).</summary>
-  public int GetSortKey()
+  internal int GetSortKey()
   {
     return (_sortingLayerID << 16) ^ (_sortingOrder & 0xFFFF);
   }
 
-  public static IEnumerable<Canvas> GetSortedCanvases()
+  internal static IEnumerable<Canvas> GetSortedCanvases()
   {
     return _canvases
       .Where(c => c != null && c.enabled)
