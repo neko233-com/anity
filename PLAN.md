@@ -1,5 +1,22 @@
 # PLAN
 
+## 2026-07-19 — Unity CLI `-logFile -` stdout 与日志终结语义
+
+### 已完成
+- 依据 Unity 2022.3 官方 Editor command-line 文档复核：`-logFile <pathname>` 指定日志文件，pathname 为单个 `-` 时必须把日志送到 stdout，不能创建名为 `-` 的文件。
+- `CliHost` 现把 stdout 作为可注入 `TextWriter`，所有实时日志统一写入该 stream；`FlushLog("-")` 只 flush stdout sentinel，不再触碰文件系统。普通相对/绝对日志路径仍会创建父目录并覆盖本次 session 文件。
+- 日志终结移动到 `finally`，因此 `-version`、`-help`、无效 `-projectPath` 与异常路径也会完成 stdout flush 或文件落盘，不再因早退丢失日志。
+- 新增 parser、大小写/双连字符、stdout/no-dash-file、flush、相对/嵌套/覆盖文件、help 与失败早退专项 **11 个用例**；CLI suite **27/27**。`_scripts/build-all.sh Release` 全部 0 编译错误；统一 native-required 八工程矩阵 **4069/4069**（Core **3060/3060**），均 0 失败、0 跳过。
+
+### 尚未完成
+- Unity Editor/Player 的默认日志位置、`-nolog`、`-upmLogFile`、`-stackTraceLogType`、Windows 无控制台 stdout handle、崩溃/许可/Package Manager 分日志及编码/换行/并发写入尚未完全对齐。
+- CLI 仍缺 Unity 2022.3 的大量 Editor/Player 参数、参数冲突/缺值诊断、官方退出码、真实 platform player 产物与 2022.3.61f1 Pro 跨平台进程级 A/B，因此 `anity.exe` 保持 🟡。
+
+### 下一优先项
+1. 实现 quaternion 四 component 同步 angular reduction，完成 Transform rotation error 四档 key/tangent 精确对齐。
+2. 补 CLI 默认日志/`-nolog`/`-upmLogFile`/参数缺值与退出码，并用子进程覆盖 macOS/Windows/Linux stdout/file 行为。
+3. 完成 importer loop/root motion/additive/mask 与 stable sub-asset fileID/type-tree/artifact cache，在 Unity 2022.3.61f1 Pro 执行 Editor/Player A/B。
+
 ## 2026-07-19 — Unity FBX Transform raw Euler / resampled quaternion 语义
 
 ### 已完成

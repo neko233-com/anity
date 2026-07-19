@@ -6,7 +6,7 @@
 > - 🟡 部分实现 / API 壳 / 尚缺 Unity 官方 A/B 行为证据
 > - ❌ 未实现
 >
-> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **4,058/4,058**（Core **3,060/3,060**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
+> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **4,069/4,069**（Core **3,060/3,060**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
 
 ---
 
@@ -534,7 +534,7 @@
 | `ColorSpacePipeline` | ✅ | Linear/Gamma 转换、ConfigureURPLinearHDR |
 | `ScreenCapture` | ✅ | CaptureScreenshot/AsTexture/IntoRenderTexture、superSize、StereoMode、真 PNG；测试≥12 |
 | `Il2CppBuilder` / IL2CPP 管线 | ✅ | CodeGeneration/CompilerConfig/stripping、.cpp stub、link.xml、AOT 注册；测试≥14 |
-| `anity.exe` CLI | 🟡 | batchmode/quit/projectPath/executeMethod/build*/runTests + il2cpp/screenshot/agent 主路径与 CLI **16/16** 已通过；实测 `-logFile -` 尚错误创建名为 `-` 的文件而非输出到 stdout，完整 Unity 2022 Editor/Player 参数、退出码、日志与平台产物语义仍需 A/B，故不能标完整 |
+| `anity.exe` CLI | 🟡 | batchmode/quit/projectPath/executeMethod/build*/runTests + il2cpp/screenshot/agent 主路径已具备；`-logFile -` 已按 Unity 2022.3 官方语义写入并 flush stdout，不创建 dash 文件，普通路径及 version/help/error 早退均会最终落盘；日志专项 11 例、CLI **27/27** 已通过。默认日志、`-nolog`/`-upmLogFile`、完整 Unity 2022 Editor/Player 参数、退出码、崩溃/许可/UPM 日志与平台产物进程级 A/B 仍缺，故保持 🟡 |
 | `Anity.Agent` 官方扩展 | 🟡 | 独立包 Session/Memory/Tools；自定义API Key/Base URL/model、SSE、tool calling、Editor窗口与OS vault已实现。0.6.0新增工具Requested/8类终态审计、默认fail-closed、无原文digest、64 KiB结果上限、跨轮finish reason/usage保存，以及Editor项目级有界SHA-256链/轮换/启动验证/独占lock/Unix私有权限。Agent **91/91**、Editor Host **39/39**、CLI **16/16**；统一Release矩阵强制native并达到 **2,548/2,548**、0失败、0跳过。审计HMAC/外部anchor、持久session、完整JSON Schema、Windows/Linux vault实机、Responses API、真实多厂商及网络矩阵仍缺，故不能标全完成 |
 | `Canvas` Overlay/Camera/World | ✅ | 官方根命名空间与公开面差异 0；pixelRect、planeDistance、worldCamera、rootCanvas、排序、根布局 size/scale/position；Canvas/utility/raycaster 定向 43 测试 |
 | `CanvasScaler` 三模式 | ✅ | ConstantPixel/ScaleWithScreen(Match/Expand/Shrink)/Physical；UIBehaviour override 修复 |

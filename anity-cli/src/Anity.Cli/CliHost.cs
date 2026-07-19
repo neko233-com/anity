@@ -14,7 +14,15 @@ namespace Anity.Cli;
 public sealed class CliHost
 {
     private readonly StringBuilder _log = new();
+    private readonly TextWriter _standardOutput;
     private int _exitCode;
+
+    public CliHost() : this(Console.Out) { }
+
+    public CliHost(TextWriter standardOutput)
+    {
+        _standardOutput = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+    }
 
     public int ExitCode => _exitCode;
     public string LogText => _log.ToString();
@@ -155,14 +163,16 @@ public sealed class CliHost
                 WriteLine("quit=1");
             }
 
-            FlushLog(parsed.LogFile);
             return _exitCode;
         }
         catch (Exception ex)
         {
             Fail(ex.ToString());
-            FlushLog(parsed.LogFile);
             return _exitCode == 0 ? 1 : _exitCode;
+        }
+        finally
+        {
+            FlushLog(parsed.LogFile);
         }
     }
 
@@ -277,7 +287,7 @@ public sealed class CliHost
     private void WriteLine(string msg)
     {
         _log.AppendLine(msg);
-        Console.WriteLine(msg);
+        _standardOutput.WriteLine(msg);
     }
 
     private void Fail(string msg)
@@ -289,6 +299,11 @@ public sealed class CliHost
     private void FlushLog(string? logFile)
     {
         if (string.IsNullOrEmpty(logFile)) return;
+        if (string.Equals(logFile, "-", StringComparison.Ordinal))
+        {
+            _standardOutput.Flush();
+            return;
+        }
         try
         {
             var dir = Path.GetDirectoryName(logFile);
