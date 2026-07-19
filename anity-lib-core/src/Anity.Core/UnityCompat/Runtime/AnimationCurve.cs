@@ -159,6 +159,11 @@ public class AnimationCurve
     float dx = b.time - a.time;
     if (MathF.Abs(dx) < 1e-8f)
       return a.value;
+    // Unity encodes constant/stepped curve segments with an infinite tangent.
+    // Hold the left value until the right key time instead of allowing the
+    // Hermite products to become NaN.
+    if (!float.IsFinite(a.outTangent) || !float.IsFinite(b.inTangent))
+      return time < b.time ? a.value : b.value;
 
     float t = (time - a.time) / dx;
     t = t < 0f ? 0f : (t > 1f ? 1f : t);

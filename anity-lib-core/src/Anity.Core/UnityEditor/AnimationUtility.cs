@@ -137,7 +137,13 @@ public class AnimationUtility
     [Obsolete("This overload is deprecated. Use the one with EditorCurveBinding instead.")]
     public static AnimationCurve? GetEditorCurve(AnimationClip clip, string relativePath, Type type, string propertyName) => clip?.GetCurve(relativePath, type, propertyName);
     public static AnimationCurve? GetEditorCurve([Bindings.NotNull("ArgumentNullException")] AnimationClip clip, EditorCurveBinding binding) => GetEditorCurve(clip, binding.path, binding.type!, binding.propertyName);
-    public static Type? GetEditorCurveValueType(GameObject root, EditorCurveBinding binding) => GetMemberType(GetAnimatedObject(root, binding), binding.propertyName);
+    public static Type? GetEditorCurveValueType(GameObject root, EditorCurveBinding binding)
+    {
+        var target = GetAnimatedObject(root, binding);
+        if (target is Renderer && string.Equals(binding.propertyName, "m_Enabled", StringComparison.Ordinal))
+            return typeof(bool);
+        return GetMemberType(target, binding.propertyName);
+    }
     [Obsolete("This overload is deprecated. Use the one with EditorCurveBinding instead.")]
     public static bool GetFloatValue(GameObject root, string relativePath, Type type, string propertyName, out float data)
         => GetFloatValue(root, EditorCurveBinding.FloatCurve(relativePath, type, propertyName), out data);
@@ -146,6 +152,11 @@ public class AnimationUtility
         data = default;
         var target = GetAnimatedObject(root, binding);
         if (target is Transform transform && TryGetTransformFloat(transform, binding.propertyName, out data)) return true;
+        if (target is Renderer renderer && string.Equals(binding.propertyName, "m_Enabled", StringComparison.Ordinal))
+        {
+            data = renderer.enabled ? 1f : 0f;
+            return true;
+        }
         object? value = GetMember(target, binding.propertyName);
         if (value is float single) { data = single; return true; }
         if (value is int integer) { data = integer; return true; }

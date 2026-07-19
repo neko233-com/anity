@@ -11,6 +11,12 @@ public struct AnimationCurveBinding
     public AnimationCurve curve;
 }
 
+internal enum AnimationFloatPropertyKind
+{
+    BlendShape,
+    RendererEnabled,
+}
+
 internal readonly struct AnimationFloatPropertyKey : IEquatable<AnimationFloatPropertyKey>
 {
     internal AnimationFloatPropertyKey(SkinnedMeshRenderer renderer, int blendShapeIndex, string path)
@@ -18,15 +24,39 @@ internal readonly struct AnimationFloatPropertyKey : IEquatable<AnimationFloatPr
         Renderer = renderer;
         BlendShapeIndex = blendShapeIndex;
         Path = path;
+        Kind = AnimationFloatPropertyKind.BlendShape;
     }
 
-    internal SkinnedMeshRenderer Renderer { get; }
+    internal AnimationFloatPropertyKey(Renderer renderer, string path)
+    {
+        Renderer = renderer;
+        BlendShapeIndex = -1;
+        Path = path;
+        Kind = AnimationFloatPropertyKind.RendererEnabled;
+    }
+
+    internal Renderer Renderer { get; }
     internal int BlendShapeIndex { get; }
     internal string Path { get; }
+    internal AnimationFloatPropertyKind Kind { get; }
+    internal float CurrentValue => Kind switch
+    {
+        AnimationFloatPropertyKind.BlendShape when Renderer is SkinnedMeshRenderer skinned
+            => skinned.GetBlendShapeWeight(BlendShapeIndex),
+        AnimationFloatPropertyKind.RendererEnabled => Renderer.enabled ? 1f : 0f,
+        _ => 0f,
+    };
+    internal void Apply(float value)
+    {
+        if (Kind == AnimationFloatPropertyKind.BlendShape && Renderer is SkinnedMeshRenderer skinned)
+            skinned.SetBlendShapeWeight(BlendShapeIndex, value);
+        else if (Kind == AnimationFloatPropertyKind.RendererEnabled)
+            Renderer.enabled = value != 0f;
+    }
     public bool Equals(AnimationFloatPropertyKey other)
-        => ReferenceEquals(Renderer, other.Renderer) && BlendShapeIndex == other.BlendShapeIndex;
+        => ReferenceEquals(Renderer, other.Renderer) && BlendShapeIndex == other.BlendShapeIndex && Kind == other.Kind;
     public override bool Equals(object? obj) => obj is AnimationFloatPropertyKey other && Equals(other);
-    public override int GetHashCode() => HashCode.Combine(Renderer?.GetInstanceID() ?? 0, BlendShapeIndex);
+    public override int GetHashCode() => HashCode.Combine(Renderer?.GetInstanceID() ?? 0, BlendShapeIndex, Kind);
 }
 
 internal sealed class AnimationFloatPose
@@ -45,7 +75,7 @@ internal sealed class AnimationFloatPose
     internal void Apply()
     {
         foreach (var pair in _values)
-            if (pair.Key.Renderer is not null) pair.Key.Renderer.SetBlendShapeWeight(pair.Key.BlendShapeIndex, pair.Value);
+            if (pair.Key.Renderer is not null) pair.Key.Apply(pair.Value);
     }
     internal static AnimationFloatPose Blend(AnimationFloatPose lower, AnimationFloatPose upper, float weight,
         bool additive = false, AnimationFloatPose? reference = null, Func<string, bool>? pathActive = null)
@@ -56,7 +86,7 @@ internal sealed class AnimationFloatPose
         {
             if (pathActive is not null && !pathActive(pair.Key.Path)) continue;
             var baseValue = result._values.TryGetValue(pair.Key, out var existing)
-                ? existing : pair.Key.Renderer.GetBlendShapeWeight(pair.Key.BlendShapeIndex);
+                ? existing : pair.Key.CurrentValue;
             if (additive)
             {
                 var referenceValue = reference is not null && reference._values.TryGetValue(pair.Key, out var found)
@@ -147,15 +177,26 @@ public class AnimationClip : Motion
         float wrappedTime = WrapTime(time, length, wrapMode);
         foreach (AnimationCurveBinding binding in _bindings)
         {
-            if (binding.type != typeof(SkinnedMeshRenderer) || binding.curve is null ||
-                !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
+            if (binding.curve is null) continue;
             Transform target = string.IsNullOrEmpty(binding.path) ? go.transform : go.transform.Find(binding.path);
-            var renderer = target?.gameObject?.GetComponent<SkinnedMeshRenderer>();
-            var mesh = renderer?.sharedMesh;
-            if (renderer is null || mesh is null) continue;
+            if (target?.gameObject is null) continue;
+            if (binding.type is not null && typeof(Renderer).IsAssignableFrom(binding.type) &&
+                string.Equals(binding.propertyName, "m_Enabled", StringComparison.Ordinal))
+            {
+                if (target.gameObject.GetComponent(binding.type) is Renderer renderer)
+                    pose.Set(new AnimationFloatPropertyKey(renderer, binding.path ?? string.Empty),
+                        binding.curve.Evaluate(wrappedTime));
+                continue;
+            }
+            if (binding.type != typeof(SkinnedMeshRenderer) ||
+                !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
+            var skinned = target.gameObject.GetComponent<SkinnedMeshRenderer>();
+            var mesh = skinned?.sharedMesh;
+            if (skinned is null || mesh is null) continue;
             var shapeIndex = mesh.GetBlendShapeIndex(binding.propertyName[11..]);
             if (shapeIndex < 0) continue;
-            pose.Set(new AnimationFloatPropertyKey(renderer, shapeIndex, binding.path ?? string.Empty), binding.curve.Evaluate(wrappedTime));
+            pose.Set(new AnimationFloatPropertyKey(skinned, shapeIndex, binding.path ?? string.Empty),
+                binding.curve.Evaluate(wrappedTime));
         }
         return pose;
     }

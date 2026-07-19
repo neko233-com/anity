@@ -20,6 +20,7 @@ internal static class NativeModelDecoder
         internal string Name = string.Empty;
         internal int ParentIndex;
         internal int MeshIndex;
+        internal bool Visible = true;
         internal float PositionX, PositionY, PositionZ;
         internal float RotationX, RotationY, RotationZ, RotationW;
         internal float ScaleX, ScaleY, ScaleZ;
@@ -65,12 +66,19 @@ internal static class NativeModelDecoder
         internal float LastFrame;
         internal Track[] Tracks = Array.Empty<Track>();
         internal BlendShapeTrack[] BlendShapeTracks = Array.Empty<BlendShapeTrack>();
+        internal VisibilityTrack[] VisibilityTracks = Array.Empty<VisibilityTrack>();
     }
 
     internal sealed class BlendShapeTrack
     {
         internal int NodeIndex;
         internal string Name = string.Empty;
+        internal ScalarKey[] Keys = Array.Empty<ScalarKey>();
+    }
+
+    internal sealed class VisibilityTrack
+    {
+        internal int NodeIndex;
         internal ScalarKey[] Keys = Array.Empty<ScalarKey>();
     }
 
@@ -121,6 +129,7 @@ internal static class NativeModelDecoder
     {
         internal IntPtr name;
         internal int parentIndex, meshIndex;
+        internal int visible;
         internal float positionX, positionY, positionZ;
         internal float rotationX, rotationY, rotationZ, rotationW;
         internal float scaleX, scaleY, scaleZ;
@@ -181,7 +190,7 @@ internal static class NativeModelDecoder
     {
         internal IntPtr name;
         internal float duration, frameRate;
-        internal int trackCount, blendShapeTrackCount;
+        internal int trackCount, blendShapeTrackCount, visibilityTrackCount;
         internal float firstFrame, lastFrame;
     }
 
@@ -216,6 +225,12 @@ internal static class NativeModelDecoder
         internal int nodeIndex;
         internal IntPtr name;
         internal int keyCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct VisibilityTrackInfo
+    {
+        internal int nodeIndex, keyCount;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -255,6 +270,7 @@ internal static class NativeModelDecoder
                 decoded.Nodes[nodeIndex] = new Node
                 {
                     Name = Utf8(native.name), ParentIndex = native.parentIndex, MeshIndex = native.meshIndex,
+                    Visible = native.visible != 0,
                     PositionX = native.positionX, PositionY = native.positionY, PositionZ = native.positionZ,
                     RotationX = native.rotationX, RotationY = native.rotationY, RotationZ = native.rotationZ, RotationW = native.rotationW,
                     ScaleX = native.scaleX, ScaleY = native.scaleY, ScaleZ = native.scaleZ,
@@ -320,11 +336,14 @@ internal static class NativeModelDecoder
                 Require(GetClipInfo(handle, clipIndex, out var native), "clip information");
                 ValidateCount(native.trackCount, "animation track");
                 ValidateCount(native.blendShapeTrackCount, "blend shape animation track");
+                ValidateCount(native.visibilityTrackCount, "visibility animation track");
                 var clip = new Clip
                 {
                     Name = Utf8(native.name), Duration = native.duration, FrameRate = native.frameRate,
                     FirstFrame = native.firstFrame, LastFrame = native.lastFrame,
-                    Tracks = new Track[native.trackCount], BlendShapeTracks = new BlendShapeTrack[native.blendShapeTrackCount],
+                    Tracks = new Track[native.trackCount],
+                    BlendShapeTracks = new BlendShapeTrack[native.blendShapeTrackCount],
+                    VisibilityTracks = new VisibilityTrack[native.visibilityTrackCount],
                 };
                 for (var trackIndex = 0; trackIndex < clip.Tracks.Length; trackIndex++)
                 {
@@ -370,6 +389,18 @@ internal static class NativeModelDecoder
                     };
                     Require(CopyBlendShapeKeys(handle, clipIndex, trackIndex, track.Keys, track.Keys.Length), "blend shape animation keys");
                     clip.BlendShapeTracks[trackIndex] = track;
+                }
+                for (var trackIndex = 0; trackIndex < clip.VisibilityTracks.Length; trackIndex++)
+                {
+                    Require(GetVisibilityTrackInfo(handle, clipIndex, trackIndex, out var trackInfo), "visibility animation track information");
+                    ValidateCount(trackInfo.keyCount, "visibility animation key");
+                    var track = new VisibilityTrack
+                    {
+                        NodeIndex = trackInfo.nodeIndex,
+                        Keys = new ScalarKey[trackInfo.keyCount],
+                    };
+                    Require(CopyVisibilityKeys(handle, clipIndex, trackIndex, track.Keys, track.Keys.Length), "visibility animation keys");
+                    clip.VisibilityTracks[trackIndex] = track;
                 }
                 decoded.Clips[clipIndex] = clip;
             }
@@ -449,4 +480,8 @@ internal static class NativeModelDecoder
     private static extern AnityNative.Result GetBlendShapeTrackInfo(IntPtr scene, int clipIndex, int trackIndex, out BlendShapeTrackInfo info);
     [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_CopyBlendShapeKeys")]
     private static extern AnityNative.Result CopyBlendShapeKeys(IntPtr scene, int clipIndex, int trackIndex, [Out] ScalarKey[] keys, int capacity);
+    [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_GetVisibilityTrackInfo")]
+    private static extern AnityNative.Result GetVisibilityTrackInfo(IntPtr scene, int clipIndex, int trackIndex, out VisibilityTrackInfo info);
+    [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_CopyVisibilityKeys")]
+    private static extern AnityNative.Result CopyVisibilityKeys(IntPtr scene, int clipIndex, int trackIndex, [Out] ScalarKey[] keys, int capacity);
 }

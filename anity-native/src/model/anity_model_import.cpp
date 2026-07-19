@@ -18,6 +18,7 @@ struct Node {
   std::string name;
   int32_t parentIndex = -1;
   int32_t meshIndex = -1;
+  int32_t visible = 1;
   ufbx_transform transform{};
 };
 
@@ -72,6 +73,11 @@ struct BlendShapeTrack {
   std::vector<AnityModelScalarKey> keys;
 };
 
+struct VisibilityTrack {
+  int32_t nodeIndex = -1;
+  std::vector<AnityModelScalarKey> keys;
+};
+
 struct Clip {
   std::string name;
   float duration = 0.0f;
@@ -80,6 +86,7 @@ struct Clip {
   float lastFrame = 0.0f;
   std::vector<Track> tracks;
   std::vector<BlendShapeTrack> blendShapeTracks;
+  std::vector<VisibilityTrack> visibilityTracks;
 };
 
 static float Real(float value) { return std::isfinite(value) ? value : 0.0f; }
@@ -1598,6 +1605,106 @@ static void BuildCentralScalarTangents(std::vector<AnityModelScalarKey>& keys) {
   }
 }
 
+static float ScalarSlope(
+    const AnityModelScalarKey& left, const AnityModelScalarKey& right) {
+  const float delta = right.time - left.time;
+  return std::abs(delta) > 1e-8f
+    ? (right.value - left.value) / delta : 0.0f;
+}
+
+static void BuildLinearScalarTangents(std::vector<AnityModelScalarKey>& keys) {
+  if (keys.empty()) return;
+  for (size_t index = 0; index < keys.size(); ++index) {
+    const float inTangent = index > 0
+      ? ScalarSlope(keys[index - 1], keys[index])
+      : (keys.size() > 1 ? ScalarSlope(keys[0], keys[1]) : 0.0f);
+    const float outTangent = index + 1 < keys.size()
+      ? ScalarSlope(keys[index], keys[index + 1]) : inTangent;
+    keys[index].inTangent = inTangent;
+    keys[index].outTangent = outTangent;
+  }
+}
+
+static float EvaluateUnityVisibilityStep(
+    const ufbx_anim_curve* curve, double time, double defaultValue) {
+  if (!curve || curve->keyframes.count == 0) return Real(defaultValue);
+  constexpr double ticksPerSecond = 141120000.0;
+  const int64_t sampleTicks = static_cast<int64_t>(
+    std::llround(time * ticksPerSecond));
+  double value = defaultValue;
+  for (size_t index = 0; index < curve->keyframes.count; ++index) {
+    const ufbx_keyframe& key = curve->keyframes.data[index];
+    const int64_t keyTicks = static_cast<int64_t>(
+      std::llround(key.time * ticksPerSecond));
+    if (keyTicks > sampleTicks) break;
+    value = key.value;
+  }
+  return Real(value);
+}
+
+static bool BuildUnityVisibilityKeys(
+    const ufbx_anim_stack* stack, const ufbx_node* node,
+    double trimStart, double playbackDuration, float frameRate,
+    bool resampleCurves, std::vector<AnityModelScalarKey>& destination) {
+  const ufbx_anim_value* value = FindSingleRawValue(
+    stack, &node->element, UFBX_Visibility);
+  const ufbx_anim_curve* curve = value ? value->curves[0] : nullptr;
+  if (!value || !curve || curve->keyframes.count == 0) return false;
+
+  if (resampleCurves) {
+    if (!(frameRate > 0.0f) || !(playbackDuration >= 0.0)) return false;
+    const double visibilityDuration = std::max(
+      0.0, curve->keyframes.data[curve->keyframes.count - 1].time - trimStart);
+    playbackDuration = std::max(playbackDuration, visibilityDuration);
+    const int64_t lastFrame = static_cast<int64_t>(
+      std::floor(playbackDuration * static_cast<double>(frameRate) + 0.5));
+    destination.reserve(static_cast<size_t>(lastFrame + 1));
+    for (int64_t frame = 0; frame <= lastFrame; ++frame) {
+      const double absoluteTime = UnityFbxSampleTime(
+        trimStart, frameRate, static_cast<size_t>(frame));
+      float relativeTime = Real(absoluteTime) - Real(trimStart);
+      if (std::abs(relativeTime) < 1e-7f) relativeTime = 0.0f;
+      destination.push_back({
+        relativeTime,
+        EvaluateUnityVisibilityStep(curve, absoluteTime, value->default_value.x),
+        0.0f, 0.0f,
+      });
+    }
+    BuildLinearScalarTangents(destination);
+    return !destination.empty();
+  }
+
+  constexpr float stepEpsilon = 1e-5f;
+  constexpr float stepTangent = -std::numeric_limits<float>::infinity();
+  destination.reserve(curve->keyframes.count * 2);
+  float previousValue = Real(curve->keyframes.data[0].value);
+  for (size_t index = 0; index < curve->keyframes.count; ++index) {
+    const ufbx_keyframe& source = curve->keyframes.data[index];
+    float relativeTime = Real(source.time) - Real(trimStart);
+    if (std::abs(relativeTime) < 1e-7f) relativeTime = 0.0f;
+    const float currentValue = Real(source.value);
+    if (index > 0 && currentValue != previousValue) {
+      const float beforeTime = relativeTime - stepEpsilon;
+      if (destination.empty() || beforeTime > destination.back().time) {
+        destination.push_back({
+          beforeTime, previousValue, 0.0f, stepTangent,
+        });
+      } else if (!destination.empty()) {
+        destination.back().outTangent = stepTangent;
+      }
+      destination.push_back({
+        relativeTime, currentValue, stepTangent, 0.0f,
+      });
+    } else {
+      destination.push_back({relativeTime, currentValue, 0.0f, 0.0f});
+    }
+    previousValue = currentValue;
+  }
+  if (!destination.empty() && !std::isfinite(destination.back().inTangent))
+    destination.back().outTangent = destination.back().inTangent;
+  return !destination.empty();
+}
+
 template <typename T>
 static AnityResult CopyVector(const std::vector<T>& source, T* destination, int32_t capacity) {
   if (capacity < 0 || capacity < static_cast<int32_t>(source.size()) || (!destination && !source.empty()))
@@ -1704,6 +1811,10 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
       Node destination;
       destination.name = String(node->name);
       destination.meshIndex = node->mesh ? static_cast<int32_t>(node->mesh->typed_id) : -1;
+      const ufbx_prop* visibility = ufbx_find_prop(&node->props, "Visibility");
+      destination.visible = visibility
+        ? (visibility->value_real != 0.0 ? 1 : 0)
+        : (node->visible ? 1 : 0);
       destination.transform = node->local_transform;
       destination.transform.rotation = RemoveRootAxisRotation(destination.transform.rotation, node);
       destination.transform.translation.x *= options->globalScale;
@@ -1875,6 +1986,22 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           if (!track.scaleKeys.empty()) clip.duration = std::max(clip.duration, track.scaleKeys.back().time);
           clip.tracks.push_back(std::move(track));
         }
+        for (size_t nodeIndex = 0; nodeIndex < source->nodes.count; ++nodeIndex) {
+          const ufbx_node* animatedNode = source->nodes.data[nodeIndex];
+          if (!animatedNode || animatedNode == source->root_node || !animatedNode->mesh)
+            continue;
+          const auto found = nodeMap.find(animatedNode->typed_id);
+          if (found == nodeMap.end()) continue;
+          VisibilityTrack track;
+          track.nodeIndex = found->second;
+          if (!BuildUnityVisibilityKeys(
+                stack, animatedNode, baked->playback_time_begin,
+                clip.duration, scene->frameRate,
+                options->resampleCurves != 0, track.keys))
+            continue;
+          clip.duration = std::max(clip.duration, track.keys.back().time);
+          clip.visibilityTracks.push_back(std::move(track));
+        }
         if (options->importBlendShapes != 0) {
           for (size_t elementIndex = 0; elementIndex < baked->elements.count; ++elementIndex) {
             const ufbx_baked_element& bakedElement = baked->elements.data[elementIndex];
@@ -1954,7 +2081,7 @@ AnityResult ANITY_CALL AnityModel_GetSceneInfo(const AnityModelScene* scene, Ani
 AnityResult ANITY_CALL AnityModel_GetNodeInfo(const AnityModelScene* scene, int32_t nodeIndex, AnityModelNodeInfo* outInfo) {
   if (!scene || !outInfo || nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(scene->nodes.size())) return ANITY_ERR_INVALID_ARG;
   const Node& node = scene->nodes[nodeIndex];
-  *outInfo = { node.name.c_str(), node.parentIndex, node.meshIndex,
+  *outInfo = { node.name.c_str(), node.parentIndex, node.meshIndex, node.visible,
     Real(node.transform.translation.x), Real(node.transform.translation.y), Real(node.transform.translation.z),
     Real(node.transform.rotation.x), Real(node.transform.rotation.y), Real(node.transform.rotation.z), Real(node.transform.rotation.w),
     Real(node.transform.scale.x), Real(node.transform.scale.y), Real(node.transform.scale.z) };
@@ -2045,7 +2172,8 @@ AnityResult ANITY_CALL AnityModel_GetClipInfo(const AnityModelScene* scene, int3
   if (!scene || !outInfo || clipIndex < 0 || clipIndex >= static_cast<int32_t>(scene->clips.size())) return ANITY_ERR_INVALID_ARG;
   const Clip& clip = scene->clips[clipIndex];
   *outInfo = { clip.name.c_str(), clip.duration, clip.frameRate, static_cast<int32_t>(clip.tracks.size()),
-    static_cast<int32_t>(clip.blendShapeTracks.size()), clip.firstFrame, clip.lastFrame };
+    static_cast<int32_t>(clip.blendShapeTracks.size()),
+    static_cast<int32_t>(clip.visibilityTracks.size()), clip.firstFrame, clip.lastFrame };
   return ANITY_OK;
 }
 
@@ -2117,6 +2245,33 @@ AnityResult ANITY_CALL AnityModel_CopyBlendShapeKeys(const AnityModelScene* scen
   const Clip& clip = scene->clips[clipIndex];
   if (trackIndex < 0 || trackIndex >= static_cast<int32_t>(clip.blendShapeTracks.size())) return ANITY_ERR_INVALID_ARG;
   return CopyVector(clip.blendShapeTracks[trackIndex].keys, keys, capacity);
+}
+
+AnityResult ANITY_CALL AnityModel_GetVisibilityTrackInfo(const AnityModelScene* scene,
+    int32_t clipIndex, int32_t trackIndex, AnityModelVisibilityTrackInfo* outInfo) {
+  if (!scene || !outInfo || clipIndex < 0 ||
+      clipIndex >= static_cast<int32_t>(scene->clips.size()))
+    return ANITY_ERR_INVALID_ARG;
+  const Clip& clip = scene->clips[clipIndex];
+  if (trackIndex < 0 ||
+      trackIndex >= static_cast<int32_t>(clip.visibilityTracks.size()))
+    return ANITY_ERR_INVALID_ARG;
+  const VisibilityTrack& track = clip.visibilityTracks[trackIndex];
+  *outInfo = {track.nodeIndex, static_cast<int32_t>(track.keys.size())};
+  return ANITY_OK;
+}
+
+AnityResult ANITY_CALL AnityModel_CopyVisibilityKeys(const AnityModelScene* scene,
+    int32_t clipIndex, int32_t trackIndex, AnityModelScalarKey* keys,
+    int32_t capacity) {
+  if (!scene || clipIndex < 0 ||
+      clipIndex >= static_cast<int32_t>(scene->clips.size()))
+    return ANITY_ERR_INVALID_ARG;
+  const Clip& clip = scene->clips[clipIndex];
+  if (trackIndex < 0 ||
+      trackIndex >= static_cast<int32_t>(clip.visibilityTracks.size()))
+    return ANITY_ERR_INVALID_ARG;
+  return CopyVector(clip.visibilityTracks[trackIndex].keys, keys, capacity);
 }
 
 } // extern "C"

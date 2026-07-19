@@ -299,6 +299,7 @@ public sealed class NativeModelImportTests : IDisposable
     {
         var imported = ReimportTransformStack(caseName, propertyOverrides, false);
         var bindings = imported.Clip.bindings
+            .Where(binding => binding.type == typeof(Transform))
             .OrderBy(binding => binding.propertyName, StringComparer.Ordinal)
             .ToArray();
         Assert.Equal(expectedLayout, string.Join(",", bindings.Select(binding =>
@@ -555,12 +556,161 @@ public sealed class NativeModelImportTests : IDisposable
     public void NonResampledTransformUsesNineRawEulerBindings()
     {
         var clip = ImportNonResampledAnimation().Clip;
-        var properties = clip.bindings.Select(binding => binding.propertyName).ToArray();
+        var properties = clip.bindings
+            .Where(binding => binding.type == typeof(Transform))
+            .Select(binding => binding.propertyName)
+            .ToArray();
         Assert.Equal(9, properties.Length);
         Assert.Contains("localEulerAnglesRaw.x", properties);
         Assert.Contains("localEulerAnglesRaw.y", properties);
         Assert.Contains("localEulerAnglesRaw.z", properties);
         Assert.DoesNotContain(properties, property => property.StartsWith("m_LocalRotation.", StringComparison.Ordinal));
+    }
+
+    public static TheoryData<string, float, float, float, float, bool, bool> VisibilityUnitySamples => new()
+    {
+        { "visible", 1f, 1f, 1f, 1f, false, true },
+        { "hidden", 0f, 0f, 0f, 0f, false, false },
+        { "visible-hidden-visible", 1f, 1f, 0f, 1f, false, true },
+        { "hidden-visible-hidden", 0f, 0f, 1f, 0f, false, false },
+        { "negative-zero-positive", -1f, -1f, 0f, 1f, false, true },
+        { "positive-fractions", 0.01f, 0.01f, 0.5f, 2f, false, true },
+        { "mixed-signs", -0.25f, -0.25f, 0.25f, -2f, false, true },
+        { "smooth-source-is-stepped", 1f, 1f, 0f, 1f, true, true },
+        { "default-hidden-animated-visible", 0f, 1f, 1f, 1f, false, false },
+        { "import-visibility-off", 0f, 0f, 1f, 0f, false, false },
+    };
+
+    [Theory]
+    [MemberData(nameof(VisibilityUnitySamples))]
+    public void VisibilityImportMatchesUnity2022BindingValuesAndRuntime(
+        string caseName, float defaultValue, float first, float middle, float last,
+        bool smoothSource, bool expectedInitialEnabled)
+    {
+        var importVisibility = caseName != "import-visibility-off";
+        var imported = ReimportVisibility(defaultValue, first, middle, last, importer =>
+        {
+            importer.importVisibility = importVisibility;
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        }, smoothSource);
+        var renderer = Assert.IsAssignableFrom<Renderer>(imported.Root.GetComponent<Renderer>());
+        Assert.Equal(importVisibility ? expectedInitialEnabled : true, renderer.enabled);
+
+        var bindings = AnimationUtility.GetCurveBindings(imported.Clip)
+            .Where(binding => binding.type == typeof(Renderer) &&
+                binding.propertyName == "m_Enabled")
+            .ToArray();
+        if (!importVisibility)
+        {
+            Assert.Empty(bindings);
+            imported.Clip.SampleAnimation(imported.Root, 13f / 24f);
+            Assert.True(renderer.enabled);
+            return;
+        }
+
+        var binding = Assert.Single(bindings);
+        Assert.Equal(string.Empty, binding.path);
+        Assert.False(binding.isDiscreteCurve);
+        Assert.Equal(typeof(bool), AnimationUtility.GetEditorCurveValueType(imported.Root, binding));
+        Assert.True(AnimationUtility.GetFloatValue(imported.Root, binding, out var currentValue));
+        Assert.Equal(renderer.enabled ? 1f : 0f, currentValue);
+        var curve = Assert.IsType<AnimationCurve>(AnimationUtility.GetEditorCurve(imported.Clip, binding));
+        Assert.Equal(24, curve.length);
+        Assert.Equal(Enumerable.Range(0, 24), Frames(curve, imported.Clip.frameRate));
+        Assert.Equal(Enumerable.Range(0, 24).Select(frame =>
+            frame <= 12 ? first : frame <= 22 ? middle : last),
+            curve.keys.Select(key => key.value));
+        var keys = curve.keys;
+        for (var index = 0; index < keys.Length; ++index)
+        {
+            static float Slope(Keyframe left, Keyframe right) =>
+                (right.value - left.value) / (right.time - left.time);
+            var expectedIn = index > 0 ? Slope(keys[index - 1], keys[index])
+                : Slope(keys[0], keys[1]);
+            var expectedOut = index + 1 < keys.Length ? Slope(keys[index], keys[index + 1])
+                : expectedIn;
+            Assert.InRange(MathF.Abs(keys[index].inTangent - expectedIn), 0f, 0.0001f);
+            Assert.InRange(MathF.Abs(keys[index].outTangent - expectedOut), 0f, 0.0001f);
+        }
+
+        imported.Clip.SampleAnimation(imported.Root, 0f);
+        Assert.Equal(first != 0f, renderer.enabled);
+        imported.Clip.SampleAnimation(imported.Root, 13f / 24f);
+        Assert.Equal(middle != 0f, renderer.enabled);
+        imported.Clip.SampleAnimation(imported.Root, 23f / 24f);
+        Assert.Equal(last != 0f, renderer.enabled);
+    }
+
+    [Fact]
+    public void NonResampledVisibilityMatchesUnity2022SteppedFiveKeyLayout()
+    {
+        var imported = ReimportVisibility(1f, 1f, 0f, 1f, importer =>
+        {
+            importer.resampleCurves = false;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        });
+        var curve = Curve(imported.Clip, "m_Enabled");
+        var keys = curve.keys;
+        Assert.Equal(5, keys.Length);
+        var expectedTimes = new[]
+        {
+            0f, 13f / 24f - 0.00001f, 13f / 24f,
+            23f / 24f - 0.00001f, 23f / 24f,
+        };
+        for (var index = 0; index < keys.Length; ++index)
+            Assert.InRange(MathF.Abs(keys[index].time - expectedTimes[index]), 0f, 0.000002f);
+        Assert.Equal(new[] { 1f, 1f, 0f, 0f, 1f }, keys.Select(key => key.value));
+        Assert.True(float.IsNegativeInfinity(keys[1].outTangent));
+        Assert.True(float.IsNegativeInfinity(keys[2].inTangent));
+        Assert.True(float.IsNegativeInfinity(keys[3].outTangent));
+        Assert.True(float.IsNegativeInfinity(keys[4].inTangent));
+        Assert.True(float.IsNegativeInfinity(keys[4].outTangent));
+
+        var renderer = Assert.IsAssignableFrom<Renderer>(imported.Root.GetComponent<Renderer>());
+        imported.Clip.SampleAnimation(imported.Root, 13f / 24f - 0.000005f);
+        Assert.True(renderer.enabled);
+        imported.Clip.SampleAnimation(imported.Root, 13f / 24f);
+        Assert.False(renderer.enabled);
+    }
+
+    [Theory]
+    [InlineData(ModelImporterAnimationCompression.KeyframeReduction)]
+    [InlineData(ModelImporterAnimationCompression.KeyframeReductionAndCompression)]
+    [InlineData(ModelImporterAnimationCompression.Optimal)]
+    public void ResampledVisibilityCompressionMatchesUnity2022FiveRetainedFrames(
+        ModelImporterAnimationCompression compression)
+    {
+        var imported = ReimportVisibility(1f, 1f, 0f, 1f, importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = compression;
+        });
+        var curve = Curve(imported.Clip, "m_Enabled");
+        Assert.Equal(new[] { 0, 12, 13, 22, 23 }, Frames(curve, imported.Clip.frameRate));
+        Assert.Equal(new[] { 1f, 1f, 0f, 0f, 1f }, curve.keys.Select(key => key.value));
+    }
+
+    [Fact]
+    public void AnimatorAppliesImportedRendererVisibilityCurve()
+    {
+        var imported = ReimportVisibility(1f, 1f, 0f, 1f, importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        });
+        var controller = new AnimatorController();
+        var state = controller.layers[0].stateMachine.AddState("Visibility");
+        state.motion = imported.Clip;
+        controller.layers[0].stateMachine.defaultState = state;
+        var renderer = Assert.IsAssignableFrom<Renderer>(imported.Root.GetComponent<Renderer>());
+        var animator = imported.Root.AddComponent<Animator>();
+        animator.runtimeAnimatorController = controller;
+        animator.Play("Visibility");
+        animator.Update(13f / 24f);
+        Assert.False(renderer.enabled);
+        animator.Update(10f / 24f);
+        Assert.True(renderer.enabled);
     }
 
     [Fact]
@@ -763,6 +913,49 @@ public sealed class NativeModelImportTests : IDisposable
     private (GameObject Root, AnimationClip Clip) ReimportAnimated(Action<ModelImporter> configure)
     {
         var path = ImportAnimatedFbx();
+        var importer = ModelImporter.GetAtPath(path);
+        configure(importer);
+        importer.SaveAndReimport();
+        return (
+            AssetDatabase.LoadAssetAtPath<GameObject>(path)!,
+            AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single());
+    }
+
+    private (GameObject Root, AnimationClip Clip) ReimportVisibility(
+        float defaultValue, float first, float middle, float last,
+        Action<ModelImporter> configure, bool smoothSource = false)
+    {
+        var path = CopyAnimatedFixture();
+        var fullPath = FullPath(path);
+        var fixture = File.ReadAllText(fullPath);
+        static string Number(float value) => value.ToString("R", CultureInfo.InvariantCulture);
+        fixture = fixture.Replace(
+            "Property: \"Visibility\", \"Visibility\", \"A+\",1",
+            "Property: \"Visibility\", \"Visibility\", \"A+\"," + Number(defaultValue),
+            StringComparison.Ordinal);
+        const string originalChannel =
+            "\t\t\tChannel: \"Visibility\" {\n" +
+            "\t\t\t\tDefault: 1\n" +
+            "\t\t\t\tKeyVer: 4005\n" +
+            "\t\t\t\tKeyCount: 3\n" +
+            "\t\t\t\tKey: 1924423250,1,C,s,26941925500,1,C,s,46186158000,1,C,s\n" +
+            "\t\t\t\tColor: 1,1,1\n" +
+            "\t\t\t}";
+        Assert.True(fixture.Contains(originalChannel, StringComparison.Ordinal));
+        var keyData = smoothSource
+            ? $"1924423250,{Number(first)},U,s,0,0,n,26941925500,{Number(middle)},U,s,0,0,n,46186158000,{Number(last)},U,s,0,0,n"
+            : $"1924423250,{Number(first)},C,s,26941925500,{Number(middle)},C,s,46186158000,{Number(last)},C,s";
+        var replacementChannel =
+            "\t\t\tChannel: \"Visibility\" {\n" +
+            $"\t\t\t\tDefault: {Number(defaultValue)}\n" +
+            "\t\t\t\tKeyVer: 4005\n" +
+            "\t\t\t\tKeyCount: 3\n" +
+            $"\t\t\t\tKey: {keyData}\n" +
+            "\t\t\t\tColor: 1,1,1\n" +
+            "\t\t\t}";
+        var rewritten = fixture.Replace(originalChannel, replacementChannel, StringComparison.Ordinal);
+        File.WriteAllText(fullPath, rewritten);
+        AssetDatabase.ImportAsset(path);
         var importer = ModelImporter.GetAtPath(path);
         configure(importer);
         importer.SaveAndReimport();

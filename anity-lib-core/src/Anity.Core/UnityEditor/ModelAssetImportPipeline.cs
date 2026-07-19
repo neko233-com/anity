@@ -41,7 +41,7 @@ internal static class ModelAssetImportPipeline
     try
     {
       var meshes = BuildMeshes(decoded, importer);
-      var root = BuildHierarchy(decoded, meshes, Path.GetFileNameWithoutExtension(assetPath), out var nodes);
+      var root = BuildHierarchy(decoded, meshes, Path.GetFileNameWithoutExtension(assetPath), importer, out var nodes);
       var defaultClips = decoded.Clips.Select(clip => new ModelImporterClipAnimation
       {
         name = clip.Name,
@@ -196,7 +196,8 @@ internal static class ModelAssetImportPipeline
     return meshes;
   }
 
-  private static GameObject BuildHierarchy(NativeModelDecoder.Scene decoded, Mesh[] meshes, string assetName, out GameObject[] nodeObjects)
+  private static GameObject BuildHierarchy(NativeModelDecoder.Scene decoded, Mesh[] meshes,
+    string assetName, ModelImporter importer, out GameObject[] nodeObjects)
   {
     nodeObjects = new GameObject[decoded.Nodes.Length];
     var topNodes = Enumerable.Range(0, decoded.Nodes.Length).Where(index => decoded.Nodes[index].ParentIndex < 0).ToArray();
@@ -238,6 +239,7 @@ internal static class ModelAssetImportPipeline
         var renderer = nodeObjects[nodeIndex].AddComponent<SkinnedMeshRenderer>();
         renderer.sharedMesh = meshes[source.MeshIndex];
         renderer.localBounds = renderer.sharedMesh.bounds;
+        renderer.enabled = !importer.importVisibility || source.Visible;
         if (decodedMesh.Bones.Length != 0)
         {
           renderer.bones = decodedMesh.Bones.Select(bone => bone.NodeIndex >= 0 && bone.NodeIndex < hierarchyNodes.Length
@@ -249,7 +251,8 @@ internal static class ModelAssetImportPipeline
       {
         var filter = nodeObjects[nodeIndex].AddComponent<MeshFilter>();
         filter.sharedMesh = meshes[source.MeshIndex];
-        nodeObjects[nodeIndex].AddComponent<MeshRenderer>();
+        var renderer = nodeObjects[nodeIndex].AddComponent<MeshRenderer>();
+        renderer.enabled = !importer.importVisibility || source.Visible;
       }
     }
     return root;
@@ -327,6 +330,15 @@ internal static class ModelAssetImportPipeline
           AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd,
             importer.animationCompression, importer.animationScaleError);
       }
+      if (importer.importVisibility)
+        foreach (var track in source.VisibilityTracks)
+        {
+          if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length) continue;
+          var path = RelativePath(root.transform, nodes[track.NodeIndex].transform);
+          clip.SetCurve(path, typeof(Renderer), "m_Enabled",
+            ScalarCurveForRange(track.Keys, rangeStart, rangeEnd,
+              importer.animationCompression, importer.animationPositionError));
+        }
       if (importer.importBlendShapes && importer.importBlendShapeDeformPercent)
         foreach (var track in source.BlendShapeTracks)
         {
@@ -649,7 +661,9 @@ internal static class ModelAssetImportPipeline
   {
     var keys = source.keys;
     if (compression == ModelImporterAnimationCompression.Off || keys.Length <= 2 ||
-        float.IsNaN(percentageError) || percentageError <= 0f) return source;
+        float.IsNaN(percentageError) || percentageError <= 0f ||
+        keys.Any(key => !float.IsFinite(key.inTangent) || !float.IsFinite(key.outTangent)))
+      return source;
     var allowedRelativeError = float.IsPositiveInfinity(percentageError)
       ? float.PositiveInfinity : percentageError / 100f;
     var kept = new List<Keyframe> { keys[0] };
@@ -702,6 +716,8 @@ internal static class ModelAssetImportPipeline
   {
     var duration = right.time - left.time;
     if (MathF.Abs(duration) < 1e-8f) return left.value;
+    if (!float.IsFinite(left.outTangent) || !float.IsFinite(right.inTangent))
+      return time < right.time ? left.value : right.value;
     var t = Math.Clamp((time - left.time) / duration, 0f, 1f);
     var t2 = t * t;
     var t3 = t2 * t;
@@ -715,6 +731,7 @@ internal static class ModelAssetImportPipeline
   {
     var duration = right.time - left.time;
     if (MathF.Abs(duration) < 1e-8f) return 0f;
+    if (!float.IsFinite(left.outTangent) || !float.IsFinite(right.inTangent)) return 0f;
     var t = Math.Clamp((time - left.time) / duration, 0f, 1f);
     var t2 = t * t;
     return ((6f * t2 - 6f * t) * left.value +

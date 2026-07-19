@@ -31,6 +31,7 @@ typedef struct AnityModelNodeInfo {
   const char* name;
   int32_t parentIndex;
   int32_t meshIndex;
+  int32_t visible;
   float positionX, positionY, positionZ;
   float rotationX, rotationY, rotationZ, rotationW;
   float scaleX, scaleY, scaleZ;
@@ -98,6 +99,7 @@ typedef struct AnityModelClipInfo {
   float frameRate;
   int32_t trackCount;
   int32_t blendShapeTrackCount;
+  int32_t visibilityTrackCount;
   float firstFrame;
   float lastFrame;
 } AnityModelClipInfo;
@@ -143,6 +145,11 @@ typedef struct AnityModelBlendShapeTrackInfo {
   int32_t keyCount;
 } AnityModelBlendShapeTrackInfo;
 
+typedef struct AnityModelVisibilityTrackInfo {
+  int32_t nodeIndex;
+  int32_t keyCount;
+} AnityModelVisibilityTrackInfo;
+
 typedef struct AnityModelScalarKey {
   float time;
   float value;
@@ -175,6 +182,8 @@ ANITY_API AnityResult ANITY_CALL AnityModel_GetTransformCurveInfo(const AnityMod
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyTransformCurveKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, int32_t curveIndex, AnityModelScalarKey* keys, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_GetBlendShapeTrackInfo(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelBlendShapeTrackInfo* outInfo);
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyBlendShapeKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelScalarKey* keys, int32_t capacity);
+ANITY_API AnityResult ANITY_CALL AnityModel_GetVisibilityTrackInfo(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelVisibilityTrackInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityModel_CopyVisibilityKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelScalarKey* keys, int32_t capacity);
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,26 @@
 # PLAN
 
+## 2026-07-20 — Unity FBX Visibility / `Renderer.m_Enabled`
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 构造 **10 组** Visibility 权威 fixture：静态 visible/hidden、visible-hidden-visible、hidden-visible-hidden、负值/零/正值、正小数、混合符号、smooth source、默认 hidden 但动画 visible，以及 `importVisibility=false`。确认绑定必须是空 path、`UnityEngine.Renderer`、`m_Enabled`、`isDiscreteCurve=false`；曲线保留原始 float，真正应用到 bool 时按 `value != 0`。
+- `anity-native` model ABI 新增 node visibility、clip visibility-track count、track info/key copy 两个 C 入口；静态状态读取 FBX 原始 real property，避免 ufbx integer convenience field 把 `0.01` / `-0.25` 截为 false。动画按实际 clip 与 visibility curve 的联合末端采样，不再错误扩展到 Take 声明的 120 帧。
+- 对齐 Unity 两条曲线路径：resample + Compression Off 为 24 帧 stepped values、逐段 linear tangent；不 resample 时在每个跳变前插入 `T-1e-5` 的旧值并使用 `-Infinity` tangent；三种 keyframe reduction/compression 模式均保留官方 `0/12/13/22/23` 五帧布局。`AnimationCurve` 与 importer slicing 已可安全求值 infinite-tangent step，不产生 NaN。
+- ModelImporter 现在把静态 visibility 写入 `MeshRenderer` / `SkinnedMeshRenderer.enabled`，`importVisibility=false` 强制 enabled 且不生成 curve；AnimationClip/Animator 的共享 float-property pose 可播放 `Renderer.m_Enabled`。`AnimationUtility.GetEditorCurveValueType` 返回 `Boolean`，`GetFloatValue` 返回当前 0/1，与官方探针一致。
+- 新增 **15 个**测试发现项（10 组 importer/runtime A/B、non-resampled five-key、3 种 compression、真实 Animator 播放），`NativeModelImportTests` 从 **142/142** 增至 **157/157**。最终 native-required 八工程矩阵为 **4212/4212**（Core **3190/3190**），0 失败、0 跳过；`bash _scripts/build-all.sh Release` 全产品 0 编译错误。
+- `/Applications/Anity.app` 已重新安装；Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，深度签名、Info.plist、图标逐 byte 及 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过。
+- 最终门禁后逐项确认并移出 **40 个** Git ignored、内部零 tracked 的 repo-local `bin/obj/build` 目录，共 **381,648 KiB（约 372.7 MiB）**，可从废纸篓 `/Users/solarisneko/.Trash/anity-visibility-final.qhTy3y` 恢复；复扫 `node_modules/bin/obj/build/dist/Library/Temp/Logs/UserSettings/.cache/.vite/packages/Generated` 为 0。全机共享 NuGet/Homebrew/Unity 缓存未越界删除。
+
+### 尚未完成
+- 权威证据来自当前可用的 Unity 2022.3.51f1，目标 2022.3.61f1 Pro 尚未安装；helper/instanced topology、多个 animation layer、非 Mesh Renderer、custom clip slicing/loop、Animator crossfade/override/additive 对 bool curve 的逐帧官方 A/B 仍未闭环。
+- Visibility 完成的是当前 FBX mesh-node 单 layer 主链，不代表整个 ModelImporter/AnimationClip/Mecanim 已完全对齐；material extraction、复杂 tangent/weighted/broken、root motion、Humanoid、artifact/fileID/type-tree 与跨平台 importer 仍是 🟡。
+- 该模块进展不代表 Editor GUI、IL2CPP、各 Player、Package Manager 或全套 Unity 2022.3 Pro 已完成；整体目标继续推进。
+
+### 下一优先项
+1. 扩展 pre/post 与 visibility 到非 XYZ rotation order、axis/unit、helper/instanced/skinned/bindpose 和多 animation layer 权威 fixture。
+2. 对齐 custom clip、loop/root motion、Animator crossfade/layer/mask 对 transform、visibility 与 blend-shape 的联合语义。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑 ModelImporter/AnimationClip A/B，并在 Windows 11 x64 与 Linux x64 实跑 CLI/Player 分发门禁。
+
 ## 2026-07-20 — Unity FBX PreRotation/PostRotation quaternion exact-bit
 
 ### 已完成
