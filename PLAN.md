@@ -1,5 +1,24 @@
 # PLAN
 
+## 2026-07-19 — Unity imported curve compression / tangent / take timeline
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对同一 Maya blend-shape FBX 做 `Off`、`KeyframeReduction`、`KeyframeReductionAndCompression`、`Optimal`，以及 position error `1 / 0.5 / 0.1 / 0.01` 的逐 key 黑盒探针；锁定 Unity 的 forward-greedy Hermite reduction、相对误差、每个源区间“中点 + 右端点”采样规则，并逐帧复现 TopH/TopV 全部保留 key。确认压缩保留源中央差分 tangent、先压缩完整 take 再切片、默认 source take 为 frame `1..120`。
+- `anity-native` model C ABI 现传递 `resampleCurves`、source take first/last frame 与 scalar in/out tangent。C++ 重采样路径生成 Unity 同语义中央差分 tangent；关闭 Resample Curves 时直接保留单层源 Maya/FBX Bezier key、时间和 handle slope，不再先烘焙成每帧 key。
+- 托管 ModelImporter 现使用 source frame origin 解释 `clipAnimations.firstFrame/lastFrame`，对 position/rotation/scale 与 blend-shape curve 应用 compression mode/error，按 Unity 的完整曲线压缩结果生成切片边界值和导数。Blend-shape 在 `Off` 下精确保留 TopH 60 / TopV 90 个重采样 key，在默认压缩下分别保留 8 / 7 个 key；`resampleCurves=false` 分别保留 3 个源 key。
+- 新增 compression mode/error、逐 key time、中央/源 Bezier tangent、raw curves、take frame origin 与压缩后切片专项 **15 个用例**；`NativeSkinnedModelImportTests` 合计 **42/42**。`_scripts/build-all.sh Release` 全部 0 编译错误；统一 native-required 八工程矩阵 **4045/4045**（Core **3047/3047**），0 失败、0 跳过。
+
+### 尚未完成
+- 本轮以 blend-shape scalar curve 锁定并验证 importer reduction；Transform rotation 目前按四个 quaternion component 使用 rotation error，尚需 Unity 逐 key 探针确认其联合 quaternion/angular error、Euler resampling 与 quaternion continuity 的完全语义。
+- 多 animation layer/多 curve 合成下 `resampleCurves=false` 的源曲线、constant/stepped/weighted/broken tangent、infinite tangent、pre/post extrapolation，以及 clip loop pose/root locks/mirror/cycle offset/root motion/additive/mask 仍需覆盖。
+- 本轮 CLI 冒烟确认 `anity -batchmode -quit` 可运行，同时发现 `-logFile -` 仍把 `-` 当作普通文件路径，而 Unity 应把它解释为 stdout；该 CLI 兼容差距已登记，不能继续将 CLI 标成完整。
+- 正式证据仍需 Unity 2022.3.61f1 Pro 的 transform/morph Player 连续时间采样、Editor curve visualization、sub-asset/fileID 与重导入持久化 A/B，因此 ModelImporter 与 AnimationClip 保持 🟡。
+
+### 下一优先项
+1. 黑盒并实现 Transform quaternion/Euler reduction、raw curve layer 合成和 constant/stepped/weighted tangent 全语义。
+2. 完成 loop pose/root locks/mirror/cycle offset/root motion/additive/mask 的 importer-to-runtime 全链路，并扩展 material/自定义组件 float/object-reference property pose graph。
+3. 修复 `-logFile -` stdout 语义并补 CLI 深测；补 stable sub-asset fileID/type-tree/artifact cache，在 Unity 2022.3.61f1 Pro 执行 Editor preview 与 Player 连续时间 skin/morph/animation A/B。
+
 ## 2026-07-19 — FBX blend-shape animation / clip slicing / Animator float pose
 
 ### 已完成

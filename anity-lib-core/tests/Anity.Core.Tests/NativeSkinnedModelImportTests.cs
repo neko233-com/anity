@@ -193,6 +193,134 @@ public sealed class NativeSkinnedModelImportTests : IDisposable
     }
 
     [Fact]
+    public void DefaultCompressionMatchesUnityBlendShapeKeyCounts()
+    {
+        var clip = BlendShapeClip(out _);
+        Assert.Equal(8, BlendCurve(clip, "TopH").length);
+        Assert.Equal(7, BlendCurve(clip, "TopV").length);
+    }
+
+    [Fact]
+    public void DefaultTopHCompressionMatchesUnityKeyTimes()
+        => AssertKeyTimes(BlendCurve(BlendShapeClip(out _), "TopH"),
+            0, 5, 21, 22, 23, 24, 58, 59);
+
+    [Fact]
+    public void DefaultTopVCompressionMatchesUnityKeyTimes()
+        => AssertKeyTimes(BlendCurve(BlendShapeClip(out _), "TopV"),
+            0, 16, 38, 39, 40, 88, 89);
+
+    [Fact]
+    public void DefaultCompressionPreservesUnitySourceTangents()
+    {
+        var clip = BlendShapeClip(out _);
+        var horizontal = BlendCurve(clip, "TopH").keys;
+        var vertical = BlendCurve(clip, "TopV").keys;
+        Assert.Equal(-13.216f, horizontal[0].outTangent, 3);
+        Assert.Equal(-106.1232f, horizontal[1].inTangent, 3);
+        Assert.Equal(-89.25299f, vertical[1].outTangent, 3);
+        Assert.Equal(5.606412f, vertical[^2].inTangent, 3);
+    }
+
+    [Fact]
+    public void CompressionOffKeepsEveryUnityResampledKey()
+    {
+        var clip = ReimportBlendShape(importer => importer.animationCompression = ModelImporterAnimationCompression.Off);
+        Assert.Equal(60, BlendCurve(clip, "TopH").length);
+        Assert.Equal(90, BlendCurve(clip, "TopV").length);
+    }
+
+    [Fact]
+    public void CompressionOffUsesUnityCentralDifferenceTangents()
+    {
+        var clip = ReimportBlendShape(importer => importer.animationCompression = ModelImporterAnimationCompression.Off);
+        var horizontal = BlendCurve(clip, "TopH").keys;
+        var vertical = BlendCurve(clip, "TopV").keys;
+        Assert.Equal(-13.216f, horizontal[0].inTangent, 3);
+        Assert.Equal(-106.1232f, horizontal[5].outTangent, 3);
+        Assert.Equal(-89.25299f, vertical[16].inTangent, 3);
+        Assert.Equal(2.841624f, vertical[^1].outTangent, 3);
+    }
+
+    [Theory]
+    [InlineData(ModelImporterAnimationCompression.KeyframeReduction)]
+    [InlineData(ModelImporterAnimationCompression.KeyframeReductionAndCompression)]
+    [InlineData(ModelImporterAnimationCompression.Optimal)]
+    public void UnityReductionModesExposeTheSameBlendShapeKeys(ModelImporterAnimationCompression mode)
+    {
+        var clip = ReimportBlendShape(importer => importer.animationCompression = mode);
+        AssertKeyTimes(BlendCurve(clip, "TopH"), 0, 5, 21, 22, 23, 24, 58, 59);
+        AssertKeyTimes(BlendCurve(clip, "TopV"), 0, 16, 38, 39, 40, 88, 89);
+    }
+
+    [Fact]
+    public void OnePercentErrorMatchesUnityReducedKeyTimes()
+    {
+        var clip = ReimportBlendShape(importer =>
+        {
+            importer.animationCompression = ModelImporterAnimationCompression.Optimal;
+            importer.animationPositionError = 1f;
+        });
+        AssertKeyTimes(BlendCurve(clip, "TopH"), 0, 11, 22, 23, 24, 58, 59);
+        AssertKeyTimes(BlendCurve(clip, "TopV"), 0, 28, 38, 39, 40, 88, 89);
+    }
+
+    [Fact]
+    public void TenthPercentErrorMatchesUnityReducedKeyTimes()
+    {
+        var clip = ReimportBlendShape(importer =>
+        {
+            importer.animationCompression = ModelImporterAnimationCompression.Optimal;
+            importer.animationPositionError = 0.1f;
+        });
+        AssertKeyTimes(BlendCurve(clip, "TopH"), 0, 1, 17, 20, 21, 22, 23, 24, 25, 28, 58, 59);
+        AssertKeyTimes(BlendCurve(clip, "TopV"), 0, 3, 35, 37, 38, 39, 40, 41, 48, 88, 89);
+    }
+
+    [Fact]
+    public void HundredthPercentErrorMatchesUnityReducedKeyTimes()
+    {
+        var clip = ReimportBlendShape(importer =>
+        {
+            importer.animationCompression = ModelImporterAnimationCompression.Optimal;
+            importer.animationPositionError = 0.01f;
+        });
+        AssertKeyTimes(BlendCurve(clip, "TopH"), 0, 1, 6, 10, 12, 14, 15, 16, 17, 18, 19, 20,
+            21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 34, 40, 53, 58, 59);
+        AssertKeyTimes(BlendCurve(clip, "TopV"), 0, 1, 20, 27, 31, 33, 34, 35, 36, 37, 38, 39,
+            40, 41, 42, 43, 44, 46, 50, 61, 88, 89);
+    }
+
+    [Fact]
+    public void DisablingResampleCurvesPreservesThreeSourceMayaKeys()
+    {
+        var clip = ReimportBlendShape(importer =>
+        {
+            importer.resampleCurves = false;
+            importer.animationCompression = ModelImporterAnimationCompression.Optimal;
+        });
+        AssertKeyTimes(BlendCurve(clip, "TopH"), 0, 23, 59);
+        AssertKeyTimes(BlendCurve(clip, "TopV"), 0, 39, 89);
+    }
+
+    [Fact]
+    public void DisablingResampleCurvesPreservesSourceBezierTangents()
+    {
+        var clip = ReimportBlendShape(importer => importer.resampleCurves = false);
+        Assert.All(BlendCurve(clip, "TopH").keys, key => Assert.InRange(MathF.Abs(key.inTangent), 0f, 0.0001f));
+        Assert.All(BlendCurve(clip, "TopV").keys, key => Assert.InRange(MathF.Abs(key.outTangent), 0f, 0.0001f));
+    }
+
+    [Fact]
+    public void DefaultTakeFramesMatchUnitySourceTimeline()
+    {
+        var path = ImportPath("BlendShapeCube.fbx");
+        var take = Assert.Single(ModelImporter.GetAtPath(path).defaultClipAnimations);
+        Assert.Equal(1f, take.firstFrame, 5);
+        Assert.Equal(120f, take.lastFrame, 5);
+    }
+
+    [Fact]
     public void SampleAnimationAppliesImportedBlendShapeWeights()
     {
         var clip = BlendShapeClip(out var root);
@@ -244,10 +372,6 @@ public sealed class NativeSkinnedModelImportTests : IDisposable
     public void CustomClipFrameRangeSlicesAndShiftsBlendShapeCurves()
     {
         var path = ImportPath("BlendShapeCube.fbx");
-        var original = Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>());
-        var originalCurve = BlendCurve(original, "TopH");
-        var expectedStart = originalCurve.Evaluate(1f);
-        var expectedEnd = originalCurve.Evaluate(2f);
         var importer = ModelImporter.GetAtPath(path);
         importer.clipAnimations = new[]
         {
@@ -258,8 +382,9 @@ public sealed class NativeSkinnedModelImportTests : IDisposable
         var slicedCurve = BlendCurve(sliced, "TopH");
         Assert.Equal("Slice", sliced.name);
         Assert.Equal(1f, sliced.length, 5);
-        Assert.Equal(expectedStart, slicedCurve.Evaluate(0f), 4);
-        Assert.Equal(expectedEnd, slicedCurve.Evaluate(1f), 4);
+        Assert.Equal(3, slicedCurve.length);
+        Assert.Equal(0f, slicedCurve.Evaluate(0f), 4);
+        Assert.Equal(74.08532f, slicedCurve.Evaluate(1f), 3);
         Assert.Equal(0f, slicedCurve.keys[0].time, 5);
         Assert.Equal(1f, slicedCurve.keys[^1].time, 5);
     }
@@ -298,8 +423,8 @@ public sealed class NativeSkinnedModelImportTests : IDisposable
         var importer = ModelImporter.GetAtPath(path);
         importer.clipAnimations = new[]
         {
-            new ModelImporterClipAnimation { name = "First", takeName = "Take 001", firstFrame = 0f, lastFrame = 24f },
-            new ModelImporterClipAnimation { name = "Second", takeName = "Take 001", firstFrame = 24f, lastFrame = 48f },
+            new ModelImporterClipAnimation { name = "First", takeName = "Take 001", firstFrame = 1f, lastFrame = 25f },
+            new ModelImporterClipAnimation { name = "Second", takeName = "Take 001", firstFrame = 25f, lastFrame = 49f },
         };
         importer.SaveAndReimport();
         var clips = AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().OrderBy(clip => clip.name).ToArray();
@@ -358,6 +483,15 @@ public sealed class NativeSkinnedModelImportTests : IDisposable
         return Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>());
     }
 
+    private AnimationClip ReimportBlendShape(Action<ModelImporter> configure)
+    {
+        var path = ImportPath("BlendShapeCube.fbx");
+        var importer = ModelImporter.GetAtPath(path);
+        configure(importer);
+        importer.SaveAndReimport();
+        return Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>());
+    }
+
     private static AnimationCurve BlendCurve(AnimationClip clip, string name)
         => Assert.IsType<AnimationCurve>(AnimationUtility.GetEditorCurve(
             clip,
@@ -369,6 +503,13 @@ public sealed class NativeSkinnedModelImportTests : IDisposable
         clip.SetCurve(string.Empty, typeof(SkinnedMeshRenderer), "blendShape.TopH",
             AnimationCurve.Linear(0f, value, 1f, value));
         return clip;
+    }
+
+    private static void AssertKeyTimes(AnimationCurve curve, params int[] frames)
+    {
+        Assert.Equal(frames.Length, curve.length);
+        for (var index = 0; index < frames.Length; index++)
+            Assert.Equal(frames[index] / 24f, curve.keys[index].time, 5);
     }
 
     private GameObject Import(string fixture) => AssetDatabase.LoadAssetAtPath<GameObject>(ImportPath(fixture))!;

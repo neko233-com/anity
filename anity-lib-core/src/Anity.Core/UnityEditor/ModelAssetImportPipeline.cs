@@ -34,6 +34,7 @@ internal static class ModelAssetImportPipeline
       importBlendShapes = importer.importBlendShapes ? (byte)1 : (byte)0,
       maxBonesPerVertex = importer.skinWeights == ModelImporterSkinWeights.Unlimited ? 8 : Math.Clamp(importer.maxBonesPerVertex, 1, 8),
       minBoneWeight = Math.Clamp(importer.minBoneWeight, 0f, 1f),
+      resampleCurves = importer.resampleCurves ? (byte)1 : (byte)0,
     };
     if (!NativeModelDecoder.TryLoad(fullPath, options, out var decoded, out error)) return false;
 
@@ -45,8 +46,8 @@ internal static class ModelAssetImportPipeline
       {
         name = clip.Name,
         takeName = clip.Name,
-        firstFrame = 0f,
-        lastFrame = MathF.Round(clip.Duration * clip.FrameRate),
+        firstFrame = clip.FirstFrame,
+        lastFrame = clip.LastFrame,
       }).ToArray();
       importer.SetImportedModelMetadata(decoded.FileScale, defaultClips);
 
@@ -289,8 +290,10 @@ internal static class ModelAssetImportPipeline
     void BuildClip(NativeModelDecoder.Clip source, ModelImporterClipAnimation? clipSettings)
     {
       var frameRate = source.FrameRate > 0f ? source.FrameRate : decoded.FrameRate;
-      var rangeStart = clipSettings is not null && clipSettings.firstFrame > 0f ? clipSettings.firstFrame / frameRate : 0f;
-      var rangeEnd = clipSettings is not null && clipSettings.lastFrame >= 0f ? clipSettings.lastFrame / frameRate : source.Duration;
+      var rangeStart = clipSettings is not null
+        ? (clipSettings.firstFrame - source.FirstFrame) / frameRate : 0f;
+      var rangeEnd = clipSettings is not null && clipSettings.lastFrame >= 0f
+        ? (clipSettings.lastFrame - source.FirstFrame) / frameRate : source.Duration;
       rangeStart = Math.Clamp(rangeStart, 0f, source.Duration);
       rangeEnd = Math.Clamp(rangeEnd, rangeStart, source.Duration);
       var clip = new AnimationClip
@@ -306,9 +309,12 @@ internal static class ModelAssetImportPipeline
       {
         if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length) continue;
         var path = RelativePath(root.transform, nodes[track.NodeIndex].transform);
-        AddVectorCurves(clip, path, "m_LocalPosition", track.PositionKeys, rangeStart, rangeEnd);
-        AddQuaternionCurves(clip, path, track.RotationKeys, rangeStart, rangeEnd);
-        AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd);
+        AddVectorCurves(clip, path, "m_LocalPosition", track.PositionKeys, rangeStart, rangeEnd,
+          importer.animationCompression, importer.animationPositionError);
+        AddQuaternionCurves(clip, path, track.RotationKeys, rangeStart, rangeEnd,
+          importer.animationCompression, importer.animationRotationError);
+        AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd,
+          importer.animationCompression, importer.animationScaleError);
       }
       if (importer.importBlendShapes && importer.importBlendShapeDeformPercent)
         foreach (var track in source.BlendShapeTracks)
@@ -316,7 +322,8 @@ internal static class ModelAssetImportPipeline
           if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length || string.IsNullOrEmpty(track.Name)) continue;
           var path = RelativePath(root.transform, nodes[track.NodeIndex].transform);
           clip.SetCurve(path, typeof(SkinnedMeshRenderer), "blendShape." + track.Name,
-            CurveForRange(track.Keys.Select(key => (key.time, key.value)).ToArray(), rangeStart, rangeEnd));
+            ScalarCurveForRange(track.Keys, rangeStart, rangeEnd,
+              importer.animationCompression, importer.animationPositionError));
         }
       clip.EnsureQuaternionContinuity();
       clip.MarkMecanimDataBuilt();
@@ -332,34 +339,63 @@ internal static class ModelAssetImportPipeline
     return string.Join("/", names);
   }
 
-  private static void AddVectorCurves(AnimationClip clip, string path, string property, NativeModelDecoder.VectorKey[] keys, float start, float end)
+  private static void AddVectorCurves(AnimationClip clip, string path, string property,
+    NativeModelDecoder.VectorKey[] keys, float start, float end,
+    ModelImporterAnimationCompression compression, float error)
   {
     if (keys.Length == 0) return;
-    clip.SetCurve(path, typeof(Transform), property + ".x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end));
-    clip.SetCurve(path, typeof(Transform), property + ".y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end));
-    clip.SetCurve(path, typeof(Transform), property + ".z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end));
+    clip.SetCurve(path, typeof(Transform), property + ".x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end, compression, error));
+    clip.SetCurve(path, typeof(Transform), property + ".y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end, compression, error));
+    clip.SetCurve(path, typeof(Transform), property + ".z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end, compression, error));
   }
 
-  private static void AddQuaternionCurves(AnimationClip clip, string path, NativeModelDecoder.QuaternionKey[] keys, float start, float end)
+  private static void AddQuaternionCurves(AnimationClip clip, string path,
+    NativeModelDecoder.QuaternionKey[] keys, float start, float end,
+    ModelImporterAnimationCompression compression, float error)
   {
     if (keys.Length == 0) return;
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.w", CurveForRange(keys.Select(key => (key.time, key.w)).ToArray(), start, end));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end, compression, error));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end, compression, error));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end, compression, error));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.w", CurveForRange(keys.Select(key => (key.time, key.w)).ToArray(), start, end, compression, error));
   }
 
-  private static AnimationCurve CurveForRange((float Time, float Value)[] values, float start, float end)
+  private static AnimationCurve ScalarCurveForRange(NativeModelDecoder.ScalarKey[] values, float start, float end,
+    ModelImporterAnimationCompression compression, float error)
+  {
+    var keys = values.Select(value => new Keyframe(
+      value.time, value.value, value.inTangent, value.outTangent)).ToArray();
+    return SliceCurve(CompressCurve(new AnimationCurve(keys), compression, error), start, end);
+  }
+
+  private static AnimationCurve CurveForRange((float Time, float Value)[] values, float start, float end,
+    ModelImporterAnimationCompression compression, float error)
   {
     if (values.Length == 0) return new AnimationCurve();
-    var source = Curve(values);
-    if (start <= 0f && end >= values[^1].Time) return source;
-    var sliced = new List<(float Time, float Value)> { (0f, source.Evaluate(start)) };
-    foreach (var value in values)
-      if (value.Time > start && value.Time < end) sliced.Add((value.Time - start, value.Value));
+    return SliceCurve(CompressCurve(Curve(values), compression, error), start, end);
+  }
+
+  private static AnimationCurve SliceCurve(AnimationCurve source, float start, float end)
+  {
+    var sourceKeys = source.keys;
+    if (sourceKeys.Length == 0) return source;
+    if (start <= sourceKeys[0].time && end >= sourceKeys[^1].time) return source;
+    var startTangent = EvaluateDerivative(sourceKeys, start);
+    var sliced = new List<Keyframe> { new(0f, source.Evaluate(start), startTangent, startTangent) };
+    foreach (var sourceKey in sourceKeys)
+      if (sourceKey.time > start && sourceKey.time < end)
+      {
+        var key = sourceKey;
+        key.time -= start;
+        sliced.Add(key);
+      }
     var duration = end - start;
-    if (duration > 0f) sliced.Add((duration, source.Evaluate(end)));
-    return Curve(sliced.ToArray());
+    if (duration > 0f)
+    {
+      var endTangent = EvaluateDerivative(sourceKeys, end);
+      sliced.Add(new Keyframe(duration, source.Evaluate(end), endTangent, endTangent));
+    }
+    return new AnimationCurve(sliced.ToArray());
   }
 
   private static AnimationCurve Curve((float Time, float Value)[] values)
@@ -367,11 +403,90 @@ internal static class ModelAssetImportPipeline
     var keys = new Keyframe[values.Length];
     for (var index = 0; index < values.Length; index++)
     {
-      var inSlope = index == 0 ? Slope(values, index, index + 1) : Slope(values, index - 1, index);
-      var outSlope = index + 1 >= values.Length ? inSlope : Slope(values, index, index + 1);
-      keys[index] = new Keyframe(values[index].Time, values[index].Value, inSlope, outSlope);
+      var tangent = Slope(values, index == 0 ? index : index - 1,
+        index + 1 < values.Length ? index + 1 : index);
+      keys[index] = new Keyframe(values[index].Time, values[index].Value, tangent, tangent);
     }
     return new AnimationCurve(keys);
+  }
+
+  private static AnimationCurve CompressCurve(AnimationCurve source,
+    ModelImporterAnimationCompression compression, float percentageError)
+  {
+    var keys = source.keys;
+    if (compression == ModelImporterAnimationCompression.Off || keys.Length <= 2 ||
+        float.IsNaN(percentageError) || percentageError <= 0f) return source;
+    var allowedRelativeError = float.IsPositiveInfinity(percentageError)
+      ? float.PositiveInfinity : percentageError / 100f;
+    var kept = new List<Keyframe> { keys[0] };
+    var begin = 0;
+    while (begin + 1 < keys.Length)
+    {
+      var best = begin + 1;
+      for (var candidate = begin + 2; candidate < keys.Length; candidate++)
+      {
+        if (MaximumRelativeError(keys, begin, candidate) <= allowedRelativeError) best = candidate;
+        else break;
+      }
+      kept.Add(keys[best]);
+      begin = best;
+    }
+    return new AnimationCurve(kept.ToArray());
+  }
+
+  private static float MaximumRelativeError(Keyframe[] keys, int begin, int end)
+  {
+    var maximum = 0f;
+    for (var segment = begin; segment < end; segment++)
+    {
+      // Unity 2022's importer checks the midpoint and right endpoint of every
+      // source-key interval when deciding whether a reduced Hermite edge fits.
+      for (var step = 1; step <= 2; step++)
+      {
+        var time = keys[segment].time +
+          (keys[segment + 1].time - keys[segment].time) * (step / 2f);
+        var original = EvaluateHermite(keys[segment], keys[segment + 1], time);
+        var reduced = EvaluateHermite(keys[begin], keys[end], time);
+        var relative = MathF.Abs(original - reduced) / MathF.Max(MathF.Abs(original), 0.000001f);
+        if (relative > maximum) maximum = relative;
+      }
+    }
+    return maximum;
+  }
+
+  private static float EvaluateDerivative(Keyframe[] keys, float time)
+  {
+    if (keys.Length == 0) return 0f;
+    if (keys.Length == 1) return keys[0].outTangent;
+    if (time <= keys[0].time) return keys[0].outTangent;
+    for (var index = 1; index < keys.Length; index++)
+      if (time <= keys[index].time) return EvaluateHermiteDerivative(keys[index - 1], keys[index], time);
+    return keys[^1].inTangent;
+  }
+
+  private static float EvaluateHermite(Keyframe left, Keyframe right, float time)
+  {
+    var duration = right.time - left.time;
+    if (MathF.Abs(duration) < 1e-8f) return left.value;
+    var t = Math.Clamp((time - left.time) / duration, 0f, 1f);
+    var t2 = t * t;
+    var t3 = t2 * t;
+    return (2f * t3 - 3f * t2 + 1f) * left.value +
+      (t3 - 2f * t2 + t) * duration * left.outTangent +
+      (-2f * t3 + 3f * t2) * right.value +
+      (t3 - t2) * duration * right.inTangent;
+  }
+
+  private static float EvaluateHermiteDerivative(Keyframe left, Keyframe right, float time)
+  {
+    var duration = right.time - left.time;
+    if (MathF.Abs(duration) < 1e-8f) return 0f;
+    var t = Math.Clamp((time - left.time) / duration, 0f, 1f);
+    var t2 = t * t;
+    return ((6f * t2 - 6f * t) * left.value +
+      (3f * t2 - 4f * t + 1f) * duration * left.outTangent +
+      (-6f * t2 + 6f * t) * right.value +
+      (3f * t2 - 2f * t) * duration * right.inTangent) / duration;
   }
 
   private static float Slope((float Time, float Value)[] values, int from, int to)

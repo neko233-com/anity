@@ -16,6 +16,7 @@ typedef struct AnityModelImportOptions {
   uint8_t importBlendShapes;
   int32_t maxBonesPerVertex;
   float minBoneWeight;
+  uint8_t resampleCurves;
 } AnityModelImportOptions;
 
 typedef struct AnityModelSceneInfo {
@@ -97,6 +98,8 @@ typedef struct AnityModelClipInfo {
   float frameRate;
   int32_t trackCount;
   int32_t blendShapeTrackCount;
+  float firstFrame;
+  float lastFrame;
 } AnityModelClipInfo;
 
 typedef struct AnityModelTrackInfo {
@@ -125,6 +128,8 @@ typedef struct AnityModelBlendShapeTrackInfo {
 typedef struct AnityModelScalarKey {
   float time;
   float value;
+  float inTangent;
+  float outTangent;
 } AnityModelScalarKey;
 
 ANITY_API AnityResult ANITY_CALL AnityModel_LoadFile(

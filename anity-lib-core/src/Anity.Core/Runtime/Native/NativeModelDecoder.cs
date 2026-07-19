@@ -61,6 +61,8 @@ internal static class NativeModelDecoder
         internal string Name = string.Empty;
         internal float Duration;
         internal float FrameRate;
+        internal float FirstFrame;
+        internal float LastFrame;
         internal Track[] Tracks = Array.Empty<Track>();
         internal BlendShapeTrack[] BlendShapeTracks = Array.Empty<BlendShapeTrack>();
     }
@@ -90,6 +92,7 @@ internal static class NativeModelDecoder
         internal byte importBlendShapes;
         internal int maxBonesPerVertex;
         internal float minBoneWeight;
+        internal byte resampleCurves;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -165,6 +168,7 @@ internal static class NativeModelDecoder
         internal IntPtr name;
         internal float duration, frameRate;
         internal int trackCount, blendShapeTrackCount;
+        internal float firstFrame, lastFrame;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -194,7 +198,7 @@ internal static class NativeModelDecoder
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct ScalarKey { internal float time, value; }
+    internal struct ScalarKey { internal float time, value, inTangent, outTangent; }
 
     internal static bool TryLoad(string path, Options options, out Scene scene, out string error)
     {
@@ -298,6 +302,7 @@ internal static class NativeModelDecoder
                 var clip = new Clip
                 {
                     Name = Utf8(native.name), Duration = native.duration, FrameRate = native.frameRate,
+                    FirstFrame = native.firstFrame, LastFrame = native.lastFrame,
                     Tracks = new Track[native.trackCount], BlendShapeTracks = new BlendShapeTrack[native.blendShapeTrackCount],
                 };
                 for (var trackIndex = 0; trackIndex < clip.Tracks.Length; trackIndex++)

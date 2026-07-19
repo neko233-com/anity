@@ -70,6 +70,8 @@ struct Clip {
   std::string name;
   float duration = 0.0f;
   float frameRate = 30.0f;
+  float firstFrame = 0.0f;
+  float lastFrame = 0.0f;
   std::vector<Track> tracks;
   std::vector<BlendShapeTrack> blendShapeTracks;
 };
@@ -291,6 +293,84 @@ static bool HasBlendShape(const Mesh& mesh, ufbx_string name) {
   return false;
 }
 
+static bool SameString(ufbx_string left, ufbx_string right) {
+  return left.length == right.length &&
+    (left.length == 0 || std::memcmp(left.data, right.data, left.length) == 0);
+}
+
+static const ufbx_anim_curve* FindSingleRawCurve(
+    const ufbx_anim_stack* stack, const ufbx_element* element, ufbx_string propertyName) {
+  const ufbx_anim_curve* result = nullptr;
+  for (size_t layerIndex = 0; layerIndex < stack->layers.count; ++layerIndex) {
+    const ufbx_anim_layer* layer = stack->layers.data[layerIndex];
+    for (size_t propIndex = 0; propIndex < layer->anim_props.count; ++propIndex) {
+      const ufbx_anim_prop& property = layer->anim_props.data[propIndex];
+      if (property.element != element || !SameString(property.prop_name, propertyName) ||
+          !property.anim_value || !property.anim_value->curves[0]) continue;
+      if (result && result != property.anim_value->curves[0]) return nullptr;
+      result = property.anim_value->curves[0];
+    }
+  }
+  return result;
+}
+
+static float Secant(const ufbx_keyframe& left, const ufbx_keyframe& right) {
+  const double delta = right.time - left.time;
+  return std::abs(delta) > 1e-12 ? Real((right.value - left.value) / delta) : 0.0f;
+}
+
+static float HandleSlope(ufbx_tangent tangent, float fallback) {
+  return std::abs(tangent.dx) > 1e-12f ? Real(tangent.dy / tangent.dx) : fallback;
+}
+
+static float RawInTangent(const ufbx_anim_curve* curve, size_t index) {
+  if (!curve || curve->keyframes.count < 2) return 0.0f;
+  if (index == 0) index = 1;
+  const ufbx_keyframe& previous = curve->keyframes.data[index - 1];
+  const ufbx_keyframe& key = curve->keyframes.data[index];
+  const float linear = Secant(previous, key);
+  return previous.interpolation == UFBX_INTERPOLATION_CUBIC ? HandleSlope(key.left, linear) : linear;
+}
+
+static float RawOutTangent(const ufbx_anim_curve* curve, size_t index) {
+  if (!curve || curve->keyframes.count < 2) return 0.0f;
+  if (index + 1 >= curve->keyframes.count) return RawInTangent(curve, index);
+  const ufbx_keyframe& key = curve->keyframes.data[index];
+  const ufbx_keyframe& next = curve->keyframes.data[index + 1];
+  const float linear = Secant(key, next);
+  return key.interpolation == UFBX_INTERPOLATION_CUBIC ? HandleSlope(key.right, linear) : linear;
+}
+
+static bool BuildRawScalarKeys(const ufbx_anim_stack* stack, const ufbx_element* element,
+    ufbx_string propertyName, double trimStart, std::vector<AnityModelScalarKey>& destination) {
+  const ufbx_anim_curve* curve = FindSingleRawCurve(stack, element, propertyName);
+  if (!curve || curve->keyframes.count == 0) return false;
+  destination.reserve(curve->keyframes.count);
+  for (size_t index = 0; index < curve->keyframes.count; ++index) {
+    const ufbx_keyframe& key = curve->keyframes.data[index];
+    float inTangent = RawInTangent(curve, index);
+    float outTangent = RawOutTangent(curve, index);
+    if (index == 0) inTangent = outTangent;
+    if (index + 1 == curve->keyframes.count) outTangent = inTangent;
+    float time = Real(key.time - trimStart);
+    if (std::abs(time) < 1e-7f) time = 0.0f;
+    destination.push_back({time, Real(key.value), inTangent, outTangent});
+  }
+  return true;
+}
+
+static void BuildCentralScalarTangents(std::vector<AnityModelScalarKey>& keys) {
+  if (keys.empty()) return;
+  for (size_t index = 0; index < keys.size(); ++index) {
+    size_t left = index == 0 ? 0 : index - 1;
+    size_t right = index + 1 < keys.size() ? index + 1 : index;
+    const float delta = keys[right].time - keys[left].time;
+    const float tangent = std::abs(delta) > 1e-8f ? (keys[right].value - keys[left].value) / delta : 0.0f;
+    keys[index].inTangent = tangent;
+    keys[index].outTangent = tangent;
+  }
+}
+
 template <typename T>
 static AnityResult CopyVector(const std::vector<T>& source, T* destination, int32_t capacity) {
   if (capacity < 0 || capacity < static_cast<int32_t>(source.size()) || (!destination && !source.empty()))
@@ -424,6 +504,8 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
         if (clip.name.empty()) clip.name = "Default Take";
         clip.duration = 0.0f;
         clip.frameRate = scene->frameRate;
+        clip.firstFrame = Real(baked->playback_time_begin * scene->frameRate);
+        clip.lastFrame = Real(baked->playback_time_end * scene->frameRate);
         clip.tracks.reserve(baked->nodes.count);
         for (size_t trackIndex = 0; trackIndex < baked->nodes.count; ++trackIndex) {
           const ufbx_baked_node& bakedNode = baked->nodes.data[trackIndex];
@@ -463,20 +545,26 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
                 BlendShapeTrack track;
                 track.nodeIndex = found->second;
                 track.name = String(prop.name);
-                const double duration = prop.keys.data[prop.keys.count - 1].time;
-                const int64_t lastFrame = static_cast<int64_t>(std::floor(duration * scene->frameRate + 0.5));
-                track.keys.reserve(static_cast<size_t>(lastFrame + 2));
-                for (int64_t frame = 0; frame <= lastFrame; ++frame) {
-                  const double time = static_cast<double>(frame) / scene->frameRate;
-                  const ufbx_prop value = ufbx_evaluate_prop_len(stack->anim, element,
-                    prop.name.data, prop.name.length, baked->playback_time_begin + time);
-                  track.keys.push_back({Real(time), Real(value.value_real)});
-                }
-                const double sampledEnd = static_cast<double>(lastFrame) / scene->frameRate;
-                if (duration - sampledEnd > 1e-8) {
-                  const ufbx_prop value = ufbx_evaluate_prop_len(stack->anim, element,
-                    prop.name.data, prop.name.length, baked->playback_time_begin + duration);
-                  track.keys.push_back({Real(duration), Real(value.value_real)});
+                if (options->resampleCurves == 0 &&
+                    BuildRawScalarKeys(stack, element, prop.name, baked->playback_time_begin, track.keys)) {
+                  // Preserve source Bezier tangents when Unity's Resample Curves option is disabled.
+                } else {
+                  const double duration = prop.keys.data[prop.keys.count - 1].time;
+                  const int64_t lastFrame = static_cast<int64_t>(std::floor(duration * scene->frameRate + 0.5));
+                  track.keys.reserve(static_cast<size_t>(lastFrame + 2));
+                  for (int64_t frame = 0; frame <= lastFrame; ++frame) {
+                    const double time = static_cast<double>(frame) / scene->frameRate;
+                    const ufbx_prop value = ufbx_evaluate_prop_len(stack->anim, element,
+                      prop.name.data, prop.name.length, baked->playback_time_begin + time);
+                    track.keys.push_back({Real(time), Real(value.value_real), 0.0f, 0.0f});
+                  }
+                  const double sampledEnd = static_cast<double>(lastFrame) / scene->frameRate;
+                  if (duration - sampledEnd > 1e-8) {
+                    const ufbx_prop value = ufbx_evaluate_prop_len(stack->anim, element,
+                      prop.name.data, prop.name.length, baked->playback_time_begin + duration);
+                    track.keys.push_back({Real(duration), Real(value.value_real), 0.0f, 0.0f});
+                  }
+                  BuildCentralScalarTangents(track.keys);
                 }
                 if (!track.keys.empty()) clip.duration = std::max(clip.duration, track.keys.back().time);
                 clip.blendShapeTracks.push_back(std::move(track));
@@ -608,7 +696,7 @@ AnityResult ANITY_CALL AnityModel_GetClipInfo(const AnityModelScene* scene, int3
   if (!scene || !outInfo || clipIndex < 0 || clipIndex >= static_cast<int32_t>(scene->clips.size())) return ANITY_ERR_INVALID_ARG;
   const Clip& clip = scene->clips[clipIndex];
   *outInfo = { clip.name.c_str(), clip.duration, clip.frameRate, static_cast<int32_t>(clip.tracks.size()),
-    static_cast<int32_t>(clip.blendShapeTracks.size()) };
+    static_cast<int32_t>(clip.blendShapeTracks.size()), clip.firstFrame, clip.lastFrame };
   return ANITY_OK;
 }
 
