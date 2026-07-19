@@ -1,5 +1,21 @@
 # PLAN
 
+## 2026-07-19 — ModelImporter humanoid SkeletonBone YAML
+
+### 已完成
+- 依据本机 Unity 2022.3 项目生成的真实 ModelImporter `.meta`，`humanDescription.skeleton` 现按官方 `name` / importer-only `parentName` / `position` / `rotation` / `scale` 布局双向持久化。公开 `SkeletonBone` 不增加 Unity 不存在的 `parentName`；已有 parent/未来字段原样保留，新增骨骼使用空 parent 占位。
+- reader 支持空列表、科学计数法兼容的 Vector3/Quaternion、多个骨骼和缺失列表；writer 支持原位更新、追加、缩短、清空、null、缺失 transform 字段补齐、需要转义的名称，以及跨 project session 重载。`human: []` 也会恢复为非 null 空数组，不再与缺失 section 混淆。
+- 新增 10 组读取、10 组写入及 10 个边界场景，Model YAML suite 从 77 增至 **107/107**；连同 humanoid 公开面门禁为 **138/138**。统一 Release 回归覆盖 Core 2873、Agent 91、Editor 164、Shader Graph 198、VFX Graph 490、CLI 16、Unity API parity 17 与 A/B compare 22，合计 **3871/3871**、0 失败、0 跳过。
+
+### 尚未完成
+- `rootMotionBoneName`、avatar source/material remap、`skeletonHasParents` 等 importer 内部语义尚未接通；SkeletonBone YAML 仅证明 managed importer 持久化闭环，不证明 native Avatar 构建、层级校验、muscle/retargeting 与 Unity Player 结果等价。
+- 当前样本和公开面反射仍来自本机 Unity 2022.3.51f1；目标 2022.3.61f1 Pro 尚未安装，因此不能作为最终版本 A/B 证据。
+
+### 下一优先项
+1. 接通 `rootMotionBoneName`、avatar source 与 remap 的 Unity YAML/对象引用语义，并补至少 10 个跨 session/非法引用/未知字段用例。
+2. 将 SkeletonBone hierarchy 输入连接到 `anity-native` Avatar build/validation，覆盖 parent 缺失、循环、重复名称、非单位 scale 与 humanoid 必需骨骼。
+3. 获得 Unity 2022.3.61f1 Pro 后重跑公开面及 importer fixture A/B，按真实差异修正而非沿用 2022.3.51f1 推断。
+
 ## 2026-07-18 — UnityEditor.AssetDatabase package import lifecycle
 
 ### 已完成
@@ -33,22 +49,22 @@
 - importer 的 `assetBundleName` / `assetBundleVariant` 现写入并读取 Unity 实际的 `*Importer` YAML 块（`TextureImporter` / `AudioImporter` / `DefaultImporter`）；旧 Anity 根字段仍可读以完成迁移。YAML-only meta、CRLF、quoted scalar、空/过期字段、跨 session 和损坏旧 payload 均有回归，且当迁移期 Anity 兼容注释同存时以 Unity YAML 为准。Texture/Audio 常用层级字段（mipmap、sampling、sprite、normal、audio sample/flags）已按本机 Unity 2022.3.51f1 样本读取，并仅在既有 Unity importer 块中原位写回，保留未知 YAML 字段；缺失字段及剩余 importer/platform overrides 仍暂存兼容 payload，尚非完整 Unity importer YAML serializer。
 - `.fbx` / `.obj` / `.dae` / `.blend` / `.3ds` / `.dxf` 现会稳定登记为 `ModelImporter`，`ModelImporter.GetAtPath` 返回 registry identity；按本机 Unity 2022.3.51f1 ModelImporter 样本接通 materials、animations、meshes、tangent space、animation type 与 userData 的原位 YAML 读写。`DefaultImporter.userData` 也直接读写 YAML，所有上述路径保留未知字段。11 项 Model/Default 专项用例通过；material remapping、platform-specific model settings 和 Unity 2022.3.61f1 A/B 仍待完成。
 - `ModelImporter.animations.clipAnimations` 现可读取 Unity YAML 的空列表或常用 scalar clip 字段（name/take、frame range、loop、root locks、mirror、wrap、offset、original transforms、additive pose），并对已有 YAML clip 项原位写回而保留未知字段；新增 clip 会追加标准 v16 项，`clipAnimations: []` 会在首次新增时转为块列表，缩短 array 会删除尾部 YAML clip 块。10 组参数化 fixture 与写回/追加/空列表/删除回归使 Model YAML suite 达 25/25。mask/reference pose/humanDescription 与 Unity 2022.3.61f1 A/B 仍待完成。
-- `ModelImporter.humanDescription` 已补进公开 API，并将 Unity YAML 的 `armTwist`/`foreArmTwist`/`legTwist` 正确映射到官方 `upperArmTwist`/`lowerArmTwist`/`lowerLegTwist`，同时接通 stretch、feet spacing 与 translation DoF。YAML 内部 `hasExtraRoot` 会原样保留但不再伪造成 Unity 不存在的公共属性。SkeletonBone 映射数组、root-motion bone、avatar remapping 与 Unity 2022.3.61f1 A/B 仍待完成。
+- `ModelImporter.humanDescription` 已补进公开 API，并将 Unity YAML 的 `armTwist`/`foreArmTwist`/`legTwist` 正确映射到官方 `upperArmTwist`/`lowerArmTwist`/`lowerLegTwist`，同时接通 stretch、feet spacing 与 translation DoF。YAML 内部 `hasExtraRoot` 会原样保留但不再伪造成 Unity 不存在的公共属性。HumanBone 与 SkeletonBone 映射数组均已双向持久化；root-motion bone、avatar remapping 与 Unity 2022.3.61f1 A/B 仍待完成。
 - `ModelImporter.avatarSetup` 已按本机 Unity 2022.3.51f1 的官方名称和 `NoAvatar` / `CreateFromThisModel` / `CopyFromOther` 枚举值接通，并将 `autoGenerateAvatarMappingIfUnspecified` 与两项设置一同原位读写 ModelImporter YAML；历史误名 `avatarDefinition` 仅保留 obsolete 转发。新增读写回归后 Model YAML suite 为 **29/29**。Avatar source/remapping、完整 humanoid arrays 与 Unity 2022.3.61f1 A/B 仍待完成。
 - 本机 Unity 2022.3.51f1 反射已核验 `importMaterials` 为由 `materialImportMode` 派生的只读属性；Anity 现同步公开 `ModelImporterMaterialImportMode`（None/ImportStandard/ImportViaMaterialDescription 及官方别名）、`materialImportMode`、`materialLocation` 和 `useSRGBMaterialColor`，并实际读写 Unity ModelImporter 的 `materials.materialImportMode`/`materialLocation` 与 `meshes.useSRGBMaterialColor`。旧 `materials.importMaterials` 仅作为兼容输入迁移为 mode，新的保存不会再生成它。3+3+2+2 个模式/位置/sRGB 测试与既有 suite 合计 **39/39** 通过；外部 material remap、material extraction 与 Unity 2022.3.61f1 A/B 仍待完成。
-- `ModelImporter` 已继续接通 Unity YAML 的 `bakeIK`、`removeConstantScaleCurves`、`importAnimatedCustomProperties`、`importConstraints`、`importPhysicalCameras`、`sortHierarchyByName`、`bakeAxisConversion`、`preserveHierarchy`、`strictVertexDataChecks` 和 `importBlendShapeDeformPercent`；每个字段均有读写反转回归。HumanBone humanoid mapping 列表现已支持读取、原位写回、空列表、新增、缩短、null、跨 project session 重载、YAML 转义与未知字段保留；10 组读取和 10 组写入参数矩阵连同边界用例使 Model YAML suite 增至 **77/77**。
-- 本机 Unity 2022.3.51f1 预备反射确认 `HumanDescription`、`HumanBone`、`HumanLimit`、`SkeletonBone` 四个类型的字段/属性、obsolete metadata、NativeHeader/NativeType/NativeName/RequiredByNativeCode 已逐项完全一致；移除了错误公共别名并将 serialized members 恢复为官方 public fields。31 项公开面门禁加 Model YAML 共 **108/108**，AssetDatabase/importer 聚焦回归 **308/308**。目标 2022.3.61f1 未安装，因此这仍不是最终 Pro 证据。
+- `ModelImporter` 已继续接通 Unity YAML 的 `bakeIK`、`removeConstantScaleCurves`、`importAnimatedCustomProperties`、`importConstraints`、`importPhysicalCameras`、`sortHierarchyByName`、`bakeAxisConversion`、`preserveHierarchy`、`strictVertexDataChecks` 和 `importBlendShapeDeformPercent`；每个字段均有读写反转回归。HumanBone 与 SkeletonBone humanoid mapping 列表现已支持读取、原位写回、空列表、新增、缩短、null、跨 project session 重载、YAML 转义与未知字段保留；Model YAML suite 增至 **107/107**。
+- 本机 Unity 2022.3.51f1 预备反射确认 `HumanDescription`、`HumanBone`、`HumanLimit`、`SkeletonBone` 四个类型的字段/属性、obsolete metadata、NativeHeader/NativeType/NativeName/RequiredByNativeCode 已逐项完全一致；移除了错误公共别名并将 serialized members 恢复为官方 public fields。31 项公开面门禁加 Model YAML 共 **138/138**。目标 2022.3.61f1 未安装，因此这仍不是最终 Pro 证据。
 - TextureImporter `platformSettings` 的 Unity YAML 列表现会实际解析为 `TextureImporterPlatformSettings`：Default/Standalone/Android/iPhone/WebGL 等 target 的 size、format、compression、quality、override、crunch、alpha split 和 Android ETC2 fallback 已由 10 个平台配置用例覆盖。已存在平台项可原位写回并保留未知字段/列表顺序，缺失平台可追加标准 version-3 条目，Clear 会将既有项的 `overridden` 清零；复杂平台字段、Unity 2022.3.61f1 A/B 和序列化排序细节仍待完成。
 - `ImportPackage(path, interactive)` 现在执行可观察的事务生命周期：先通知开始，拒绝空路径和不存在的 package 并报告绝对路径错误；有效文件会报告规范化的绝对 package item path 后完成。11 个 xUnit 用例覆盖成功、失败、回调顺序、路径、订阅解除、多个订阅者与 interactive 两条调用路径。
 - 本机 Unity 2022.3.51f1 的**预备**反射审计当前为 types present **989/4117**、exact **460**，members present **9242/37164**、exact **6973**；四个 humanoid description 类型已从 mismatch 转为 exact。2022.3.61f1 尚未安装，不能作为最终 Pro 验收。
-- 本轮统一 Release 门禁已在 native-required 模式下完成：`_scripts/build-native.sh Release` 构建通过，`_scripts/run-tests.sh Release` 覆盖 Core 2843、Agent 91、Editor 164、Shader Graph 198、VFX Graph 490、CLI 16、Unity API parity 17 与 A/B compare 22，合计 **3841/3841**、0 失败、0 跳过。Editor 测试工程现会在 native-required 时复制平台原生库，测试临时 project root 也会在 fixture 初始化时创建，统一入口不再依赖手工准备。
+- 本轮统一 Release 门禁已在 native-required 模式下完成：`_scripts/build-native.sh Release` 构建通过，`_scripts/run-tests.sh Release` 覆盖 Core 2873、Agent 91、Editor 164、Shader Graph 198、VFX Graph 490、CLI 16、Unity API parity 17 与 A/B compare 22，合计 **3871/3871**、0 失败、0 跳过。Editor 测试工程现会在 native-required 时复制平台原生库，测试临时 project root 也会在 fixture 初始化时创建，统一入口不再依赖手工准备。
 
 ### 尚未完成
 - `.unitypackage` 的 gzip/tar asset/meta 解包、指定已落盘 asset 的导出（含 Recurse/IncludeDependencies）、磁盘 meta GUID、Refresh discovery、基础 importer settings/文件操作、单/批量 Move、显式/文件夹继承 AssetBundle name/variant registry、默认 BuildPipeline bundle 分组、基于文本 YAML GUID 的跨 bundle 直接依赖图、确定性 dependency invalidation hash 与内存 main/sub-asset 关系已实现；但 export 的 IncludeLibraryAssets 与 Interactive UI 尚未实现，bundle 依赖尚未做 Unity 2022.3.61f1 A/B，且 dependency lookup 仍是文本 GUID 提取，sub-asset 尚未持久序列化，hash 未与 Unity artifact/importer hash A/B，均不是 Unity 完整序列化 type tree/fileID 语义，settings storage 也仍是 Anity 注释 payload，尚不是 Unity 原生 importer YAML serializer。跨 asset YAML GUID/fileID 引用重写、scripted/model/font 等完整 importer、platform override、import worker/后台时序、取消 UI、cache server 和其余大量 AssetDatabase API 尚未完成；本项保持 🟡，不得以当前事务闭环冒充完整资源导入。
 
 ### 下一优先项
 1. 用 Unity 2022.3.61f1 Pro 做显式/隐式 bundle name、variant、跨 bundle dependency 和默认 BuildPipeline A/B，并按差异补齐 variant resolution 与 build-map 语义。
-2. 继续完成 `humanDescription.skeleton`、root-motion bone、Avatar source/material remap 与 ModelImporter 剩余官方公开面，并保持每批预备反射差异单调下降。
+2. 继续完成 root-motion bone、Avatar source/material remap 与 ModelImporter 剩余官方公开面，并保持每批预备反射差异单调下降。
 3. 将 current Anity importer-settings payload 逐字段迁移为 Unity 原生 YAML（含 Texture/Audio platform override）、实现 YAML GUID/fileID 引用重写与 scripted/model/font importer，再补 importer/postprocessor 行为 A/B。
 
 ## 2026-07-18 — UnityEngine.Rendering.AsyncGPUReadback 真实异步读回

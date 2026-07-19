@@ -143,6 +143,67 @@ public sealed class ModelImporterYamlTests : IDisposable
     [Fact] public void ModelYaml_SaveSettingsTreatsNullHumanArrayAsEmpty() { var path = ImportModelWithHumanBone("Hips", "Hips", 1); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.human = null!; model.humanDescription = description; model.SaveSettings(); Assert.Contains("human: []", Meta(path)); }
     [Fact] public void ModelYaml_SaveSettingsPreservesUnknownHumanBoneAndLimitFields() { var path = ImportModelWithHumanBone("Hips", "Hips", 1); var metaPath = FullPath(path) + ".meta"; File.WriteAllText(metaPath, Meta(path).Replace("      humanName: Hips", "      humanName: Hips\n      futureBoneField: 88", StringComparison.Ordinal).Replace("        modified: 0", "        modified: 0\n        futureLimitField: 77", StringComparison.Ordinal)); AssetDatabase.ImportAsset(path); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.human = new[] { CreateHumanBone("Spine", "Spine", 3, true) }; model.humanDescription = description; model.SaveSettings(); var saved = Meta(path); Assert.Contains("futureBoneField: 88", saved); Assert.Contains("futureLimitField: 77", saved); }
     [Fact] public void ModelYaml_SaveSettingsQuotesHumanBoneNamesThatNeedYamlEscaping() { var path = ImportModelWithHumanBone("Hips", "Hips", 1); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.human = new[] { CreateHumanBone("Rig: Left Arm", "Left Arm", 1, true) }; model.humanDescription = description; model.SaveSettings(); var meta = Meta(path); Assert.Contains("boneName: \"Rig: Left Arm\"", meta); Assert.Contains("humanName: \"Left Arm\"", meta); }
+    [Theory]
+    [InlineData("Root", 1f)]
+    [InlineData("Hips", 2f)]
+    [InlineData("Spine", 3f)]
+    [InlineData("Chest", 4f)]
+    [InlineData("Neck", 5f)]
+    [InlineData("Head", 6f)]
+    [InlineData("LeftUpperArm", 7f)]
+    [InlineData("RightUpperArm", 8f)]
+    [InlineData("LeftUpperLeg", 9f)]
+    [InlineData("RightUpperLeg", 10f)]
+    public void ModelYaml_ReadsOfficialSkeletonBoneTransform(string name, float offset)
+    {
+        var bone = Assert.Single(ModelImporter.GetAtPath(ImportModelWithSkeletonBone(name, offset)).humanDescription.skeleton);
+        Assert.Equal(name, bone.name);
+        Assert.Equal(offset, bone.position.x);
+        Assert.Equal(offset + 1, bone.position.y);
+        Assert.Equal(offset + 2, bone.position.z);
+        Assert.Equal(offset + 3, bone.rotation.x);
+        Assert.Equal(offset + 4, bone.rotation.y);
+        Assert.Equal(offset + 5, bone.rotation.z);
+        Assert.Equal(offset + 6, bone.rotation.w);
+        Assert.Equal(offset + 7, bone.scale.x);
+        Assert.Equal(offset + 8, bone.scale.y);
+        Assert.Equal(offset + 9, bone.scale.z);
+    }
+    [Theory]
+    [InlineData("Root", 1f)]
+    [InlineData("Hips", 2f)]
+    [InlineData("Spine", 3f)]
+    [InlineData("Chest", 4f)]
+    [InlineData("Neck", 5f)]
+    [InlineData("Head", 6f)]
+    [InlineData("LeftUpperArm", 7f)]
+    [InlineData("RightUpperArm", 8f)]
+    [InlineData("LeftUpperLeg", 9f)]
+    [InlineData("RightUpperLeg", 10f)]
+    public void ModelYaml_SaveSettingsWritesOfficialSkeletonBoneTransform(string name, float offset)
+    {
+        var path = ImportModelWithSkeletonBone("OldBone", 0);
+        var model = ModelImporter.GetAtPath(path);
+        var description = model.humanDescription;
+        description.skeleton = new[] { CreateSkeletonBone(name, offset) };
+        model.humanDescription = description;
+        model.SaveSettings();
+        var meta = Meta(path);
+        Assert.Contains("- name: " + name, meta);
+        Assert.Contains("position: {x: " + offset + ", y: " + (offset + 1) + ", z: " + (offset + 2) + "}", meta);
+        Assert.Contains("rotation: {x: " + (offset + 3) + ", y: " + (offset + 4) + ", z: " + (offset + 5) + ", w: " + (offset + 6) + "}", meta);
+        Assert.Contains("scale: {x: " + (offset + 7) + ", y: " + (offset + 8) + ", z: " + (offset + 9) + "}", meta);
+    }
+    [Fact] public void ModelYaml_SaveSettingsAppendsSkeletonBoneAndRoundTripsAcrossProjectSession() { var path = ImportModelWithSkeletonBone("Root", 1); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = new[] { description.skeleton[0], CreateSkeletonBone("Hips", 20) }; model.humanDescription = description; model.SaveSettings(); EditorApplication.OpenProject(_dir); AssetDatabase.ImportAsset(path); var bones = ModelImporter.GetAtPath(path).humanDescription.skeleton; Assert.Equal(2, bones.Length); Assert.Equal("Root", bones[0].name); Assert.Equal("Hips", bones[1].name); Assert.Equal(29, bones[1].scale.z); }
+    [Fact] public void ModelYaml_SaveSettingsConvertsEmptySkeletonArrayWhenAddingBone() { var path = ImportModelWithEmptySkeletonArray(); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = new[] { CreateSkeletonBone("Root", 1) }; model.humanDescription = description; model.SaveSettings(); var meta = Meta(path); Assert.DoesNotContain("skeleton: []", meta); Assert.Contains("skeleton:\n    - name: Root", meta); }
+    [Fact] public void ModelYaml_SaveSettingsAddsMissingSkeletonArrayToExistingDescription() { var path = ImportModel(); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = new[] { CreateSkeletonBone("Root", 2) }; model.humanDescription = description; model.SaveSettings(); var meta = Meta(path); Assert.Contains("    skeleton:\n    - name: Root", meta); Assert.Contains("  animationType: 3", meta); }
+    [Fact] public void ModelYaml_SaveSettingsDeletesTrailingSkeletonBonesWhenArrayShrinks() { var path = ImportModelWithSkeletonBone("Root", 1); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = new[] { description.skeleton[0], CreateSkeletonBone("Head", 20) }; model.humanDescription = description; model.SaveSettings(); description = model.humanDescription; description.skeleton = new[] { description.skeleton[0] }; model.humanDescription = description; model.SaveSettings(); var meta = Meta(path); Assert.Contains("- name: Root", meta); Assert.DoesNotContain("- name: Head", meta); }
+    [Fact] public void ModelYaml_SaveSettingsWritesEmptySkeletonArrayWhenBonesAreCleared() { var path = ImportModelWithSkeletonBone("Root", 1); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = Array.Empty<SkeletonBone>(); model.humanDescription = description; model.SaveSettings(); var meta = Meta(path); Assert.Contains("skeleton: []", meta); Assert.DoesNotContain("- name:", meta); }
+    [Fact] public void ModelYaml_SaveSettingsTreatsNullSkeletonArrayAsEmpty() { var path = ImportModelWithSkeletonBone("Root", 1); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = null!; model.humanDescription = description; model.SaveSettings(); Assert.Contains("skeleton: []", Meta(path)); }
+    [Fact] public void ModelYaml_SaveSettingsPreservesParentNameAndUnknownSkeletonFields() { var path = ImportModelWithSkeletonBone("Root", 1); var metaPath = FullPath(path) + ".meta"; File.WriteAllText(metaPath, Meta(path).Replace("      parentName: Parent", "      parentName: Parent\n      futureSkeletonField: 88", StringComparison.Ordinal)); AssetDatabase.ImportAsset(path); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = new[] { CreateSkeletonBone("Renamed", 3) }; model.humanDescription = description; model.SaveSettings(); var saved = Meta(path); Assert.Contains("parentName: Parent", saved); Assert.Contains("futureSkeletonField: 88", saved); }
+    [Fact] public void ModelYaml_SaveSettingsQuotesSkeletonNamesThatNeedYamlEscaping() { var path = ImportModelWithSkeletonBone("Root", 1); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = new[] { CreateSkeletonBone("Rig: Root Bone", 1) }; model.humanDescription = description; model.SaveSettings(); Assert.Contains("- name: \"Rig: Root Bone\"", Meta(path)); }
+    [Fact] public void ModelYaml_SaveSettingsAddsMissingSkeletonTransformFields() { var path = ImportModelWithSkeletonBone("Root", 1); var metaPath = FullPath(path) + ".meta"; var meta = Meta(path); meta = meta.Replace("      position: {x: 1, y: 2, z: 3}\n", string.Empty, StringComparison.Ordinal).Replace("      rotation: {x: 4, y: 5, z: 6, w: 7}\n", string.Empty, StringComparison.Ordinal).Replace("      scale: {x: 8, y: 9, z: 10}\n", string.Empty, StringComparison.Ordinal); File.WriteAllText(metaPath, meta); AssetDatabase.ImportAsset(path); var model = ModelImporter.GetAtPath(path); var description = model.humanDescription; description.skeleton = new[] { CreateSkeletonBone("Root", 2) }; model.humanDescription = description; model.SaveSettings(); var saved = Meta(path); Assert.Contains("position: {x: 2, y: 3, z: 4}", saved); Assert.Contains("rotation: {x: 5, y: 6, z: 7, w: 8}", saved); Assert.Contains("scale: {x: 9, y: 10, z: 11}", saved); }
+    [Fact] public void ModelYaml_EmptySkeletonArrayReadsAsNonNullEmptyArray() { var skeleton = ModelImporter.GetAtPath(ImportModelWithEmptySkeletonArray()).humanDescription.skeleton; Assert.NotNull(skeleton); Assert.Empty(skeleton); }
     [Fact] public void ModelYaml_SaveSettingsWritesAnimationSettings() { var path = ImportModel(); var model = ModelImporter.GetAtPath(path); model.bakeSimulation = false; model.resampleCurves = true; model.optimizeGameObjects = false; model.animationCompression = ModelImporterAnimationCompression.Off; model.animationRotationError = .75f; model.animationPositionError = .8f; model.animationScaleError = .9f; model.isReadable = false; model.SaveSettings(); var meta = Meta(path); Assert.Contains("bakeSimulation: 0", meta); Assert.Contains("resampleCurves: 1", meta); Assert.Contains("optimizeGameObjects: 0", meta); Assert.Contains("animationCompression: 0", meta); Assert.Contains("animationRotationError: 0.75", meta); Assert.Contains("isReadable: 0", meta); }
     [Fact] public void ModelYaml_SaveSettingsWritesMeshSettings() { var path = ImportModel(); var model = ModelImporter.GetAtPath(path); model.globalScale = 1.25f; model.meshCompression = ModelImporterMeshCompression.Low; model.addCollider = false; model.importVisibility = true; model.importBlendShapes = true; model.importCameras = true; model.importLights = true; model.swapUVChannels = true; model.generateSecondaryUV = false; model.optimizeMesh = false; model.keepQuads = true; model.weldVertices = false; model.indexFormat = ModelImporterIndexFormat.UInt16; model.SaveSettings(); var meta = Meta(path); Assert.Contains("globalScale: 1.25", meta); Assert.Contains("meshCompression: 1", meta); Assert.Contains("addColliders: 0", meta); Assert.Contains("swapUVChannels: 1", meta); Assert.Contains("keepQuads: 1", meta); Assert.Contains("weldVertices: 0", meta); Assert.Contains("indexFormat: 1", meta); }
     [Fact] public void ModelYaml_SaveSettingsWritesTangentAnimationTypeAndUserData() { var path = ImportModel(); var model = ModelImporter.GetAtPath(path); model.importNormals = ModelImporterNormals.None; model.importTangents = ModelImporterTangents.None; model.importAnimation = true; model.animationType = ModelImporterAnimationType.Generic; model.editorUserSettingsData = "model: final"; model.SaveSettings(); var meta = Meta(path); Assert.Contains("normalImportMode: 2", meta); Assert.Contains("tangentImportMode: 3", meta); Assert.Contains("importAnimation: 1", meta); Assert.Contains("animationType: 2", meta); Assert.Contains("userData: \"model: final\"", meta); }
@@ -212,6 +273,32 @@ public sealed class ModelImporterYamlTests : IDisposable
             axisLength = offset + 9,
             useDefaultValues = useDefaultValues,
         },
+    };
+
+    private string ImportModelWithSkeletonBone(string name, float offset)
+    {
+        var path = "Assets/Models/" + Guid.NewGuid().ToString("N") + ".fbx";
+        Write(path, "Kaydara FBX Binary");
+        File.WriteAllText(FullPath(path) + ".meta", "fileFormatVersion: 2\nguid: 0123456789abcdef0123456789abcdef\nModelImporter:\n  serializedVersion: 23\n  humanDescription:\n    serializedVersion: 3\n    human: []\n    skeleton:\n    - name: " + name + "\n      parentName: Parent\n      position: {x: " + offset + ", y: " + (offset + 1) + ", z: " + (offset + 2) + "}\n      rotation: {x: " + (offset + 3) + ", y: " + (offset + 4) + ", z: " + (offset + 5) + ", w: " + (offset + 6) + "}\n      scale: {x: " + (offset + 7) + ", y: " + (offset + 8) + ", z: " + (offset + 9) + "}\n    armTwist: 0.5\n  assetBundleName: \n  assetBundleVariant: \n");
+        AssetDatabase.ImportAsset(path);
+        return path;
+    }
+
+    private string ImportModelWithEmptySkeletonArray()
+    {
+        var path = "Assets/Models/" + Guid.NewGuid().ToString("N") + ".fbx";
+        Write(path, "Kaydara FBX Binary");
+        File.WriteAllText(FullPath(path) + ".meta", "fileFormatVersion: 2\nguid: 0123456789abcdef0123456789abcdef\nModelImporter:\n  serializedVersion: 23\n  humanDescription:\n    serializedVersion: 3\n    human: []\n    skeleton: []\n    armTwist: 0.5\n  assetBundleName: \n  assetBundleVariant: \n");
+        AssetDatabase.ImportAsset(path);
+        return path;
+    }
+
+    private static SkeletonBone CreateSkeletonBone(string name, float offset) => new()
+    {
+        name = name,
+        position = new Vector3(offset, offset + 1, offset + 2),
+        rotation = new Quaternion(offset + 3, offset + 4, offset + 5, offset + 6),
+        scale = new Vector3(offset + 7, offset + 8, offset + 9),
     };
 
     private string ImportModelWithClip(string name, int first, int last, int loopTime, int loopPose, int lockRotation, int lockHeight, int mirror, int wrapMode, int additive)

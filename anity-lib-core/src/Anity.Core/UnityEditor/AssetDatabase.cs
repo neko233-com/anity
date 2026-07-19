@@ -1933,6 +1933,7 @@ public sealed class AssetDatabase
       if (TryGetYamlBool(values, "ModelImporter/humanDescription/hasTranslationDoF", out var translationDof)) { humanDescription.hasTranslationDoF = translationDof; hasHumanDescription = true; }
       if (hasHumanDescription) model.humanDescription = humanDescription;
       ApplyUnityHumanDescriptionBones(model, content);
+      ApplyUnityHumanDescriptionSkeleton(model, content);
       if (TryGetYamlEnum(values, "ModelImporter/animationType", out ModelImporterAnimationType animationType)) model.animationType = animationType;
       if (values.TryGetValue("ModelImporter/userData", out var modelUserData)) importer.editorUserSettingsData = modelUserData;
       ApplyUnityModelClipAnimations(model, content);
@@ -1954,6 +1955,7 @@ public sealed class AssetDatabase
     var inDescription = false;
     var inHuman = false;
     var inLimit = false;
+    var hadHumanSection = false;
     var bones = new List<HumanBone>();
     HumanBone? current = null;
     void Commit() { if (current.HasValue) bones.Add(current.Value); }
@@ -1965,7 +1967,7 @@ public sealed class AssetDatabase
       if (!inModel) continue;
       if (indent == 2 && line == "humanDescription:") { inDescription = true; continue; }
       if (!inDescription) continue;
-      if (indent == 4 && line.StartsWith("human:", StringComparison.Ordinal)) { inHuman = !line.EndsWith("[]", StringComparison.Ordinal); continue; }
+      if (indent == 4 && line.StartsWith("human:", StringComparison.Ordinal)) { hadHumanSection = true; inHuman = !line.EndsWith("[]", StringComparison.Ordinal); continue; }
       if (!inHuman) continue;
       if (indent == 4 && line.StartsWith("- ", StringComparison.Ordinal))
       {
@@ -2001,9 +2003,72 @@ public sealed class AssetDatabase
       current = bone;
     }
     if (inHuman) Commit();
-    if (bones.Count == 0) return;
+    if (!hadHumanSection) return;
     var description = model.humanDescription;
     description.human = bones.ToArray();
+    model.humanDescription = description;
+  }
+
+  private static void ApplyUnityHumanDescriptionSkeleton(ModelImporter model, string content)
+  {
+    var inModel = false;
+    var inDescription = false;
+    var inSkeleton = false;
+    var hadSkeletonSection = false;
+    var bones = new List<SkeletonBone>();
+    SkeletonBone? current = null;
+    void Commit() { if (current.HasValue) bones.Add(current.Value); }
+    foreach (var source in content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+    {
+      var indent = source.Length - source.TrimStart(' ').Length;
+      var line = source.Trim();
+      if (indent == 0 && line.EndsWith(":", StringComparison.Ordinal))
+      {
+        if (inSkeleton) Commit();
+        inModel = line == "ModelImporter:";
+        inDescription = false;
+        inSkeleton = false;
+        current = null;
+        continue;
+      }
+      if (!inModel) continue;
+      if (indent == 2 && line == "humanDescription:") { inDescription = true; continue; }
+      if (!inDescription) continue;
+      if (indent == 4 && line.StartsWith("skeleton:", StringComparison.Ordinal))
+      {
+        hadSkeletonSection = true;
+        inSkeleton = !line.EndsWith("[]", StringComparison.Ordinal);
+        continue;
+      }
+      if (!inSkeleton) continue;
+      if (indent == 4 && line.StartsWith("- ", StringComparison.Ordinal))
+      {
+        Commit();
+        var bone = new SkeletonBone();
+        var first = line[2..];
+        var firstColon = first.IndexOf(':');
+        if (firstColon > 0 && first[..firstColon].Trim() == "name")
+          bone.name = DecodeUnityYamlScalar(first[(firstColon + 1)..].Trim());
+        current = bone;
+        continue;
+      }
+      if (indent <= 4) { Commit(); inSkeleton = false; current = null; continue; }
+      if (!current.HasValue) continue;
+      var colon = line.IndexOf(':');
+      if (colon <= 0) continue;
+      var key = line[..colon].Trim();
+      var value = DecodeUnityYamlScalar(line[(colon + 1)..].Trim());
+      var boneValue = current.Value;
+      if (indent == 6 && key == "name") boneValue.name = value;
+      else if (indent == 6 && key == "position" && TryParseUnityYamlVector3(value, out var position)) boneValue.position = position;
+      else if (indent == 6 && key == "rotation" && TryParseUnityYamlQuaternion(value, out var rotation)) boneValue.rotation = rotation;
+      else if (indent == 6 && key == "scale" && TryParseUnityYamlVector3(value, out var scale)) boneValue.scale = scale;
+      current = boneValue;
+    }
+    if (inSkeleton) Commit();
+    if (!hadSkeletonSection) return;
+    var description = model.humanDescription;
+    description.skeleton = bones.ToArray();
     model.humanDescription = description;
   }
 
@@ -2020,6 +2085,22 @@ public sealed class AssetDatabase
     }
     if (!values.TryGetValue("x", out var x) || !values.TryGetValue("y", out var y) || !values.TryGetValue("z", out var z)) return false;
     vector = new Vector3(x, y, z);
+    return true;
+  }
+
+  private static bool TryParseUnityYamlQuaternion(string value, out Quaternion quaternion)
+  {
+    quaternion = default;
+    var trimmed = value.Trim().TrimStart('{').TrimEnd('}');
+    var values = new Dictionary<string, float>(StringComparer.Ordinal);
+    foreach (var part in trimmed.Split(','))
+    {
+      var colon = part.IndexOf(':');
+      if (colon <= 0 || !float.TryParse(part[(colon + 1)..].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)) continue;
+      values[part[..colon].Trim()] = parsed;
+    }
+    if (!values.TryGetValue("x", out var x) || !values.TryGetValue("y", out var y) || !values.TryGetValue("z", out var z) || !values.TryGetValue("w", out var w)) return false;
+    quaternion = new Quaternion(x, y, z, w);
     return true;
   }
 
@@ -2313,6 +2394,7 @@ public sealed class AssetDatabase
     if (importer is ModelImporter modelWithClips)
     {
       WriteExistingUnityHumanDescriptionBones(lines, modelWithClips);
+      WriteExistingUnityHumanDescriptionSkeleton(lines, modelWithClips);
       WriteExistingUnityModelClipAnimations(lines, modelWithClips);
     }
   }
@@ -2475,6 +2557,188 @@ public sealed class AssetDatabase
         continue;
       }
       if (!inHuman) continue;
+      if (indent == 4 && line.StartsWith("- ", StringComparison.Ordinal))
+      {
+        if (start >= 0) ranges.Add((start, index - start));
+        start = index;
+        continue;
+      }
+      if (indent <= 4)
+      {
+        if (start >= 0) ranges.Add((start, index - start));
+        start = -1;
+        break;
+      }
+    }
+    if (start >= 0 && (ranges.Count == 0 || ranges[^1].Start != start)) ranges.Add((start, lines.Count - start));
+    return ranges;
+  }
+
+  private static void WriteExistingUnityHumanDescriptionSkeleton(List<string> lines, ModelImporter model)
+  {
+    var bones = model.humanDescription.skeleton ?? Array.Empty<SkeletonBone>();
+    var descriptionLine = -1;
+    var skeletonLine = -1;
+    var descriptionEnd = -1;
+    var inModelImporter = false;
+    var inHumanDescription = false;
+    for (var index = 0; index < lines.Count; index++)
+    {
+      var source = lines[index];
+      var indent = source.Length - source.TrimStart(' ').Length;
+      var line = source.Trim();
+      if (indent == 0 && line.EndsWith(":", StringComparison.Ordinal))
+      {
+        if (inHumanDescription && descriptionEnd < 0) descriptionEnd = index;
+        inModelImporter = line == "ModelImporter:";
+        inHumanDescription = false;
+        continue;
+      }
+      if (!inModelImporter) continue;
+      if (indent == 2 && line == "humanDescription:")
+      {
+        descriptionLine = index;
+        inHumanDescription = true;
+        continue;
+      }
+      if (!inHumanDescription) continue;
+      if (indent <= 2)
+      {
+        descriptionEnd = index;
+        inHumanDescription = false;
+        continue;
+      }
+      if (indent == 4 && line.StartsWith("skeleton:", StringComparison.Ordinal)) skeletonLine = index;
+    }
+    if (descriptionLine < 0) return;
+    if (descriptionEnd < 0) descriptionEnd = lines.Count;
+
+    if (skeletonLine < 0)
+    {
+      var humanRanges = FindUnityHumanBoneItemRanges(lines);
+      if (humanRanges.Count > 0)
+      {
+        skeletonLine = humanRanges[^1].Start + humanRanges[^1].Length;
+      }
+      else
+      {
+        skeletonLine = descriptionLine + 1;
+        for (var index = descriptionLine + 1; index < descriptionEnd; index++)
+        {
+          var source = lines[index];
+          var indent = source.Length - source.TrimStart(' ').Length;
+          var line = source.Trim();
+          if (indent == 4 && (line.StartsWith("serializedVersion:", StringComparison.Ordinal) || line.StartsWith("human:", StringComparison.Ordinal)))
+            skeletonLine = index + 1;
+        }
+      }
+      lines.Insert(skeletonLine, bones.Length == 0 ? "    skeleton: []" : "    skeleton:");
+    }
+
+    var ranges = FindUnitySkeletonBoneItemRanges(lines);
+    if (bones.Length == 0)
+    {
+      for (var index = ranges.Count - 1; index >= 0; index--)
+        lines.RemoveRange(ranges[index].Start, ranges[index].Length);
+      lines[skeletonLine] = "    skeleton: []";
+      return;
+    }
+
+    lines[skeletonLine] = "    skeleton:";
+    var existingCount = Math.Min(ranges.Count, bones.Length);
+    for (var boneIndex = existingCount - 1; boneIndex >= 0; boneIndex--)
+      WriteExistingUnitySkeletonBone(lines, ranges[boneIndex], bones[boneIndex]);
+
+    ranges = FindUnitySkeletonBoneItemRanges(lines);
+    for (var index = ranges.Count - 1; index >= bones.Length; index--)
+      lines.RemoveRange(ranges[index].Start, ranges[index].Length);
+
+    ranges = FindUnitySkeletonBoneItemRanges(lines);
+    if (bones.Length <= ranges.Count) return;
+    var appendAt = ranges.Count > 0 ? ranges[^1].Start + ranges[^1].Length : skeletonLine + 1;
+    var yaml = new List<string>();
+    foreach (var bone in bones.Skip(ranges.Count)) AppendUnitySkeletonBone(yaml, bone);
+    lines.InsertRange(appendAt, yaml);
+  }
+
+  private static void WriteExistingUnitySkeletonBone(List<string> lines, (int Start, int Length) range, SkeletonBone bone)
+  {
+    var end = range.Start + range.Length;
+    var hasPosition = false;
+    var hasRotation = false;
+    var hasScale = false;
+    lines[range.Start] = "    - name: " + EncodeUnityYamlScalar(bone.name);
+    for (var index = range.Start + 1; index < end; index++)
+    {
+      var source = lines[index];
+      var indent = source.Length - source.TrimStart(' ').Length;
+      var line = source.Trim();
+      var colon = line.IndexOf(':');
+      if (indent != 6 || colon <= 0) continue;
+      var key = line[..colon].Trim();
+      string? replacement = null;
+      if (key == "name") replacement = EncodeUnityYamlScalar(bone.name);
+      else if (key == "position") { replacement = EncodeUnityYamlVector3(bone.position); hasPosition = true; }
+      else if (key == "rotation") { replacement = EncodeUnityYamlQuaternion(bone.rotation); hasRotation = true; }
+      else if (key == "scale") { replacement = EncodeUnityYamlVector3(bone.scale); hasScale = true; }
+      if (replacement is not null)
+      {
+        var sourceColon = source.IndexOf(':');
+        lines[index] = source[..(sourceColon + 1)] + " " + replacement;
+      }
+    }
+    var missing = new List<string>();
+    if (!hasPosition) missing.Add("      position: " + EncodeUnityYamlVector3(bone.position));
+    if (!hasRotation) missing.Add("      rotation: " + EncodeUnityYamlQuaternion(bone.rotation));
+    if (!hasScale) missing.Add("      scale: " + EncodeUnityYamlVector3(bone.scale));
+    if (missing.Count > 0) lines.InsertRange(end, missing);
+  }
+
+  private static void AppendUnitySkeletonBone(List<string> yaml, SkeletonBone bone)
+  {
+    yaml.Add("    - name: " + EncodeUnityYamlScalar(bone.name));
+    yaml.Add("      parentName: ");
+    yaml.Add("      position: " + EncodeUnityYamlVector3(bone.position));
+    yaml.Add("      rotation: " + EncodeUnityYamlQuaternion(bone.rotation));
+    yaml.Add("      scale: " + EncodeUnityYamlVector3(bone.scale));
+  }
+
+  private static string EncodeUnityYamlQuaternion(Quaternion value) =>
+    "{x: " + value.x.ToString("R", CultureInfo.InvariantCulture) +
+    ", y: " + value.y.ToString("R", CultureInfo.InvariantCulture) +
+    ", z: " + value.z.ToString("R", CultureInfo.InvariantCulture) +
+    ", w: " + value.w.ToString("R", CultureInfo.InvariantCulture) + "}";
+
+  private static List<(int Start, int Length)> FindUnitySkeletonBoneItemRanges(IReadOnlyList<string> lines)
+  {
+    var ranges = new List<(int Start, int Length)>();
+    var inModelImporter = false;
+    var inHumanDescription = false;
+    var inSkeleton = false;
+    var start = -1;
+    for (var index = 0; index < lines.Count; index++)
+    {
+      var source = lines[index];
+      var indent = source.Length - source.TrimStart(' ').Length;
+      var line = source.Trim();
+      if (indent == 0 && line.EndsWith(":", StringComparison.Ordinal))
+      {
+        if (start >= 0) ranges.Add((start, index - start));
+        inModelImporter = line == "ModelImporter:";
+        inHumanDescription = false;
+        inSkeleton = false;
+        start = -1;
+        continue;
+      }
+      if (!inModelImporter) continue;
+      if (indent == 2 && line == "humanDescription:") { inHumanDescription = true; continue; }
+      if (!inHumanDescription) continue;
+      if (indent == 4 && line.StartsWith("skeleton:", StringComparison.Ordinal))
+      {
+        inSkeleton = !line.EndsWith("[]", StringComparison.Ordinal);
+        continue;
+      }
+      if (!inSkeleton) continue;
       if (indent == 4 && line.StartsWith("- ", StringComparison.Ordinal))
       {
         if (start >= 0) ranges.Add((start, index - start));
