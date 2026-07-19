@@ -28,6 +28,73 @@ public sealed class NativeModelImportTests : IDisposable
         try { Directory.Delete(_project, true); } catch { }
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void NonXyzRotationOrdersResampleTwentyFourSynchronizedQuaternionFrames(int rotationOrder)
+    {
+        var imported = ReimportOrderedAnimation(rotationOrder, importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        });
+        var expectedFrames = Enumerable.Range(0, 24).ToArray();
+        foreach (var property in QuaternionProperties)
+            Assert.Equal(expectedFrames, Frames(Curve(imported.Clip, property), imported.Clip.frameRate));
+    }
+
+    [Theory]
+    [InlineData(1, 0.127679437f, -0.189307854f, -0.239298344f, 0.9437144f)]
+    [InlineData(2, 0.03813458f, -0.144878134f, -0.268535852f, 0.9515486f)]
+    [InlineData(3, 0.0381345823f, -0.189307854f, -0.2685358f, 0.9437144f)]
+    [InlineData(4, 0.127679437f, -0.144878119f, -0.239298344f, 0.9515485f)]
+    [InlineData(5, 0.127679437f, -0.144878134f, -0.268535823f, 0.9437144f)]
+    public void NonXyzRotationOrdersMatchUnity2022AtMiddleSourceKey(
+        int rotationOrder, float x, float y, float z, float w)
+    {
+        var imported = ReimportOrderedAnimation(rotationOrder, importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        });
+        Assert.Equal(x, Curve(imported.Clip, "m_LocalRotation.x").keys[13].value);
+        Assert.Equal(y, Curve(imported.Clip, "m_LocalRotation.y").keys[13].value);
+        Assert.Equal(z, Curve(imported.Clip, "m_LocalRotation.z").keys[13].value);
+        Assert.Equal(w, Curve(imported.Clip, "m_LocalRotation.w").keys[13].value);
+    }
+
+    [Theory]
+    [InlineData(1, 0.01f, "0,1,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23")]
+    [InlineData(2, 0.01f, "0,1,3,5,6,8,12,13,14,16,17,18,19,21,22,23")]
+    [InlineData(3, 0.01f, "0,1,3,4,6,7,10,12,13,14,15,16,17,18,19,20,21,22,23")]
+    [InlineData(4, 0.01f, "0,1,3,5,6,10,11,12,13,14,16,17,18,19,20,21,22,23")]
+    [InlineData(1, 0.1f, "0,1,7,12,14,17,19,22,23")]
+    [InlineData(2, 0.1f, "0,1,7,12,14,17,19,22,23")]
+    [InlineData(3, 0.1f, "0,1,7,12,13,14,17,19,22,23")]
+    [InlineData(4, 0.1f, "0,1,7,12,14,17,19,22,23")]
+    [InlineData(5, 0.1f, "0,1,7,12,13,14,17,19,22,23")]
+    [InlineData(1, 0.5f, "0,5,11,14,17,19,22,23")]
+    [InlineData(2, 0.5f, "0,5,11,14,17,19,22,23")]
+    [InlineData(3, 0.5f, "0,5,11,14,17,19,22,23")]
+    [InlineData(4, 0.5f, "0,5,11,14,17,19,22,23")]
+    [InlineData(5, 0.5f, "0,5,11,14,17,19,22,23")]
+    public void NonXyzRotationOrderReductionMatchesUnity2022RetainedFrames(
+        int rotationOrder, float rotationError, string expectedFrames)
+    {
+        var imported = ReimportOrderedAnimation(rotationOrder, importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Optimal;
+            importer.animationRotationError = rotationError;
+        });
+        var expected = expectedFrames.Split(',').Select(int.Parse).ToArray();
+        foreach (var property in QuaternionProperties)
+            Assert.Equal(expected, Frames(Curve(imported.Clip, property), imported.Clip.frameRate));
+    }
+
     [Fact]
     public void FbxImportCreatesGameObjectMainAssetInsteadOfTextAsset()
     {
@@ -336,6 +403,27 @@ public sealed class NativeModelImportTests : IDisposable
     private (GameObject Root, AnimationClip Clip) ReimportAnimated(Action<ModelImporter> configure)
     {
         var path = ImportAnimatedFbx();
+        var importer = ModelImporter.GetAtPath(path);
+        configure(importer);
+        importer.SaveAndReimport();
+        return (
+            AssetDatabase.LoadAssetAtPath<GameObject>(path)!,
+            AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single());
+    }
+
+    private (GameObject Root, AnimationClip Clip) ReimportOrderedAnimation(
+        int rotationOrder, Action<ModelImporter> configure)
+    {
+        var path = CopyAnimatedFixture();
+        var fullPath = FullPath(path);
+        var fixture = File.ReadAllText(fullPath);
+        var orderedFixture = fixture.Replace(
+            "Property: \"RotationOrder\", \"enum\", \"\",0",
+            "Property: \"RotationOrder\", \"enum\", \"\"," + rotationOrder,
+            StringComparison.Ordinal);
+        Assert.NotEqual(fixture, orderedFixture);
+        File.WriteAllText(fullPath, orderedFixture);
+        AssetDatabase.ImportAsset(path);
         var importer = ModelImporter.GetAtPath(path);
         configure(importer);
         importer.SaveAndReimport();
