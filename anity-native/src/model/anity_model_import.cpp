@@ -664,6 +664,134 @@ static ufbx_quat UnityFbxEulerToQuaternion(
   return result;
 }
 
+struct UnityFbxRotationMatrix3 {
+  double m[3][3];
+};
+
+static UnityFbxRotationMatrix3 UnityFbxColumnRotationMatrix(
+    ufbx_vec3 euler, ufbx_rotation_order order) {
+  if (order != UFBX_ROTATION_ORDER_XYZ) {
+    const ufbx_quat q = UnityFbxEulerToQuaternion(euler, order);
+    const double xx = q.x * q.x;
+    const double yy = q.y * q.y;
+    const double zz = q.z * q.z;
+    const double xy = q.x * q.y;
+    const double xz = q.x * q.z;
+    const double yz = q.y * q.z;
+    const double wx = q.w * q.x;
+    const double wy = q.w * q.y;
+    const double wz = q.w * q.z;
+    return {{{1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz),
+              2.0 * (xz + wy)},
+             {2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz),
+              2.0 * (yz - wx)},
+             {2.0 * (xz - wy), 2.0 * (yz + wx),
+              1.0 - 2.0 * (xx + yy)}}};
+  }
+
+  constexpr double degreesToRadians =
+    3.14159265358979323846264338327950288 / 180.0;
+  double sx = 0.0, cx = 1.0;
+  double sy = 0.0, cy = 1.0;
+  double sz = 0.0, cz = 1.0;
+  UnityFbxSinCos(euler.x * degreesToRadians, &sx, &cx);
+  UnityFbxSinCos(euler.y * degreesToRadians, &sy, &cy);
+  UnityFbxSinCos(euler.z * degreesToRadians, &sz, &cz);
+  const double sinXSinY = sx * sy;
+  const double cosXSinY = cx * sy;
+  const double r00 = cy * cz;
+  const double r01 = cy * sz;
+  const double r02 = -sy;
+  volatile double r10Left = cz * sinXSinY;
+  volatile double r10Right = cx * sz;
+  const double r10 = r10Left - r10Right;
+  volatile double r11Left = cx * cz;
+  volatile double r11Right = sz * sinXSinY;
+  const double r11 = r11Left + r11Right;
+  const double r12 = cy * sx;
+  volatile double r20Left = sx * sz;
+  volatile double r20Right = cz * cosXSinY;
+  const double r20 = r20Left + r20Right;
+  volatile double r21Left = sz * cosXSinY;
+  volatile double r21Right = sx * cz;
+  const double r21 = r21Left - r21Right;
+  const double r22 = cy * cx;
+  // FbxAMatrix stores the row-vector form above. MatrixConverter composes the
+  // equivalent column matrices, so transpose once at this boundary.
+  return {{{r00, r10, r20}, {r01, r11, r21}, {r02, r12, r22}}};
+}
+
+static UnityFbxRotationMatrix3 UnityFbxMultiplyRotationMatrix(
+    const UnityFbxRotationMatrix3& left,
+    const UnityFbxRotationMatrix3& right) {
+  UnityFbxRotationMatrix3 result{};
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      volatile double p0 = left.m[row][0] * right.m[0][column];
+      volatile double p1 = left.m[row][1] * right.m[1][column];
+      volatile double sum01 = p0 + p1;
+      volatile double p2 = left.m[row][2] * right.m[2][column];
+      result.m[row][column] = sum01 + p2;
+    }
+  }
+  return result;
+}
+
+static UnityFbxRotationMatrix3 UnityFbxTransposeRotationMatrix(
+    const UnityFbxRotationMatrix3& source) {
+  return {{{source.m[0][0], source.m[1][0], source.m[2][0]},
+           {source.m[0][1], source.m[1][1], source.m[2][1]},
+           {source.m[0][2], source.m[1][2], source.m[2][2]}}};
+}
+
+static ufbx_vec3 UnityFbxRotationMatrixToXyzEuler(
+    const UnityFbxRotationMatrix3& columnMatrix) {
+  // M2V(XYZ) reads FbxAMatrix's row-vector representation.
+  const double r00 = columnMatrix.m[0][0];
+  const double r01 = columnMatrix.m[1][0];
+  const double r02 = columnMatrix.m[2][0];
+  const double r11 = columnMatrix.m[1][1];
+  const double r12 = columnMatrix.m[2][1];
+  const double r21 = columnMatrix.m[1][2];
+  const double r22 = columnMatrix.m[2][2];
+  constexpr double singularThreshold = 0x1p-48;
+  volatile double projectionX = r00 * r00;
+  volatile double projectionY = r01 * r01;
+  const double projection = std::sqrt(projectionX + projectionY);
+  const double x = projection > singularThreshold
+    ? std::atan2(r12, r22) : std::atan2(-r21, r11);
+  const double y = std::atan2(-r02, projection);
+  const double z = projection > singularThreshold
+    ? std::atan2(r01, r00) : 0.0;
+  constexpr double radiansToDegrees = 180.0 /
+    3.14159265358979323846264338327950288;
+  const bool exactIdentityMatrix =
+    r00 == 1.0 && r01 == 0.0 && r02 == 0.0 &&
+    columnMatrix.m[0][1] == 0.0 && r11 == 1.0 && r12 == 0.0 &&
+    columnMatrix.m[0][2] == 0.0 && r21 == 0.0 && r22 == 1.0;
+  const auto store = [exactIdentityMatrix, radiansToDegrees](double value) {
+    return exactIdentityMatrix ? 0.0f
+      : static_cast<float>(value * radiansToDegrees);
+  };
+  return {store(x), store(y), store(z)};
+}
+
+static ufbx_vec3 UnityFbxComposePrePostXyzEuler(
+    const ufbx_node* node, ufbx_vec3 localEuler) {
+  const ufbx_vec3 preRotation = ufbx_find_vec3(
+    &node->props, UFBX_PreRotation, ufbx_vec3{});
+  const ufbx_vec3 postRotation = ufbx_find_vec3(
+    &node->props, UFBX_PostRotation, ufbx_vec3{});
+  const UnityFbxRotationMatrix3 pre = UnityFbxColumnRotationMatrix(
+    preRotation, UFBX_ROTATION_ORDER_XYZ);
+  const UnityFbxRotationMatrix3 local = UnityFbxColumnRotationMatrix(
+    localEuler, node->rotation_order);
+  const UnityFbxRotationMatrix3 inversePost = UnityFbxTransposeRotationMatrix(
+    UnityFbxColumnRotationMatrix(postRotation, UFBX_ROTATION_ORDER_XYZ));
+  return UnityFbxRotationMatrixToXyzEuler(UnityFbxMultiplyRotationMatrix(
+    UnityFbxMultiplyRotationMatrix(pre, local), inversePost));
+}
+
 static float EvaluateUnityConvertedFrameSegment(
     float previousValue, float leftValue, float rightValue, float nextValue,
     double leftTangentValue, double rightTangentValue,
@@ -799,6 +927,8 @@ struct UnityFbxConvertedEulerKey {
   bool usesAutoTangent;
 };
 
+static bool HasNonZeroVectorProperty(const ufbx_node* node, const char* name);
+
 static bool UnityFbxPreservesUnrolledQuaternionZeroSigns(
     const ufbx_anim_value* rawRotation) {
   if (!rawRotation) return false;
@@ -817,10 +947,15 @@ static bool UnityFbxPreservesUnrolledQuaternionZeroSigns(
 }
 
 static std::vector<UnityFbxConvertedEulerKey> BuildUnityFbxConvertedEulerKeys(
-    const ufbx_anim_value* rawRotation, ufbx_rotation_order rotationOrder,
+    const ufbx_anim_value* rawRotation, const ufbx_node* node,
+    ufbx_rotation_order rotationOrder,
     double playbackTimeBegin, float frameRate, size_t keyCount) {
   std::vector<UnityFbxConvertedEulerKey> result;
-  if (!rawRotation || rotationOrder == UFBX_ROTATION_ORDER_XYZ ||
+  const bool hasPreOrPostRotation =
+    HasNonZeroVectorProperty(node, UFBX_PreRotation) ||
+    HasNonZeroVectorProperty(node, UFBX_PostRotation);
+  if (!rawRotation || (!hasPreOrPostRotation &&
+      rotationOrder == UFBX_ROTATION_ORDER_XYZ) ||
       rotationOrder == UFBX_ROTATION_ORDER_SPHERIC || !(frameRate > 0.0f))
     return result;
 
@@ -834,15 +969,26 @@ static std::vector<UnityFbxConvertedEulerKey> BuildUnityFbxConvertedEulerKeys(
   for (size_t key = 0; key < keyCount; ++key) {
     const double time = static_cast<double>(
       startTicks + static_cast<int64_t>(key) * frameTicks) / ticksPerSecond;
-    ufbx_vec3 source = rawRotation->default_value;
-    source.x = static_cast<float>(EvaluateUnityCompatibleCurve(
-      rawRotation->curves[0], time, source.x));
-    source.y = static_cast<float>(EvaluateUnityCompatibleCurve(
-      rawRotation->curves[1], time, source.y));
-    source.z = static_cast<float>(EvaluateUnityCompatibleCurve(
-      rawRotation->curves[2], time, source.z));
     ufbx_vec3 stored{};
-    UnityFbxEulerToQuaternion(source, rotationOrder, &stored);
+    if (hasPreOrPostRotation) {
+      ufbx_vec3 source = rawRotation->default_value;
+      source.x = static_cast<float>(EvaluateUnityCompatibleCurve(
+        rawRotation->curves[0], time, source.x));
+      source.y = static_cast<float>(EvaluateUnityCompatibleCurve(
+        rawRotation->curves[1], time, source.y));
+      source.z = static_cast<float>(EvaluateUnityCompatibleCurve(
+        rawRotation->curves[2], time, source.z));
+      stored = UnityFbxComposePrePostXyzEuler(node, source);
+    } else {
+      ufbx_vec3 source = rawRotation->default_value;
+      source.x = static_cast<float>(EvaluateUnityCompatibleCurve(
+        rawRotation->curves[0], time, source.x));
+      source.y = static_cast<float>(EvaluateUnityCompatibleCurve(
+        rawRotation->curves[1], time, source.y));
+      source.z = static_cast<float>(EvaluateUnityCompatibleCurve(
+        rawRotation->curves[2], time, source.z));
+      UnityFbxEulerToQuaternion(source, rotationOrder, &stored);
+    }
     bool usesAutoTangent = false;
     const ufbx_vec3 continuous = key == 0
       ? stored : UnityFbxContinuousXyzEuler(
@@ -889,9 +1035,10 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
   referenceEuler.y = ufbx_evaluate_curve(rawRotation->curves[1], evaluationTime, referenceEuler.y);
   referenceEuler.z = ufbx_evaluate_curve(rawRotation->curves[2], evaluationTime, referenceEuler.z);
   ufbx_vec3 unityXyzEuler = euler;
-  const ufbx_quat compatibleRaw = UnityFbxEulerToQuaternion(
-    euler, node->rotation_order, &unityXyzEuler);
-  if (node->rotation_order != UFBX_ROTATION_ORDER_XYZ && frameRate > 0.0f) {
+  UnityFbxEulerToQuaternion(euler, node->rotation_order, &unityXyzEuler);
+  const bool hasConvertedEulerKeys = convertedEulerKeys &&
+    !convertedEulerKeys->empty();
+  if (hasConvertedEulerKeys && frameRate > 0.0f) {
     const double timeOffset = absoluteTime - orderedConversionTime;
     // Unity evaluates the converted destination curve on its float-derived
     // KTime even when that sample is only a few ticks away from a source key.
@@ -969,18 +1116,22 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     static_cast<float>(unityXyzEuler.y),
     static_cast<float>(unityXyzEuler.z),
   };
+  const ufbx_quat extractedRaw = UnityFbxEulerToQuaternion(
+    extractedEuler, UFBX_ROTATION_ORDER_XYZ);
   const ufbx_quat compatible = xAxisBasis
     ? UnityFbxEulerToQuaternion(
         {extractedEuler.x, -extractedEuler.y, -extractedEuler.z},
         UFBX_ROTATION_ORDER_XYZ)
     : ufbx_quat_mul(
-        ufbx_quat_mul(node->adjust_pre_rotation, compatibleRaw), inverseAdjustment);
-  const ufbx_quat reference = ufbx_quat_mul(
-    ufbx_quat_mul(node->adjust_pre_rotation, referenceRaw), inverseAdjustment);
+        ufbx_quat_mul(node->adjust_pre_rotation, extractedRaw), inverseAdjustment);
+  const ufbx_quat reference = hasConvertedEulerKeys
+    ? compatible
+    : ufbx_quat_mul(
+        ufbx_quat_mul(node->adjust_pre_rotation, referenceRaw), inverseAdjustment);
 
-  // Only replace a baked value when it matches the same raw Euler rotation
-  // after coordinate conversion. Complex FBX pre/post rotations, pivots,
-  // layers, and helper transforms retain the baked path.
+  // Only replace a baked value when it matches the reconstructed rotation.
+  // Pre/post tracks compare against MatrixConverter's composed XYZ result;
+  // unsupported layers and helper transforms retain the baked path.
   const double dx = static_cast<double>(fallback.x) - reference.x;
   const double dy = static_cast<double>(fallback.y) - reference.y;
   const double dz = static_cast<double>(fallback.z) - reference.z;
@@ -1017,7 +1168,8 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     z /= magnitude;
     w /= magnitude;
   }
-  if (node->rotation_order != UFBX_ROTATION_ORDER_XYZ &&
+  if ((hasConvertedEulerKeys ||
+      node->rotation_order != UFBX_ROTATION_ORDER_XYZ) &&
       !preserveUnrolledZeroSigns) {
     if (x == 0.0f) x = 0.0f;
     if (y == 0.0f) y = 0.0f;
@@ -1645,7 +1797,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             ? FindSingleRawValue(stack, &sourceNode->element, UFBX_Lcl_Rotation) : nullptr;
           const std::vector<UnityFbxConvertedEulerKey> convertedEulerKeys =
             BuildUnityFbxConvertedEulerKeys(
-              rawRotation,
+              rawRotation, sourceNode,
               sourceNode ? sourceNode->rotation_order : UFBX_ROTATION_ORDER_XYZ,
               baked->playback_time_begin, scene->frameRate,
               rotationSampleCount);

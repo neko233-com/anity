@@ -1,5 +1,24 @@
 # PLAN
 
+## 2026-07-20 — Unity FBX PreRotation/PostRotation quaternion exact-bit
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对 `PreRotation` / `PostRotation` 的正值、负值、单轴、mixed 与 fractional 组合构造 **10 组**权威 fixture；每组固化 24 帧 × X/Y/Z/W，共 **960 个 Unity quaternion float bit pattern**。旧安全路径依赖 ufbx baked quaternion，几何姿态正确但多数动态帧仍有 1–5 ULP、零交叉残差与 signed-zero 差异，现已改为逐 bit 门禁。
+- `anity-native` 新增 FBX row/column rotation matrix 边界、逐乘逐加且禁止 contraction 的 3×3 组合与 `M2V(XYZ)` 提取。Pre/Post 动画现在在 exact FbxTime 帧网格上先将 scalar curve 落为 float，再按 `Pre * Local * Post^-1` 组合，经过 `V2VRef` 连续 destination Euler、float key/tangent、legacy KTime 插值、`SetROnly/GetR/GetQ` 与分量级 float normalize；零分量按 Unity MatrixConverter 输出规范化为 positive zero。
+- 新增 `PrePostRotationsMatchUnityQuaternionBitsAcrossEveryResampledFrame` 的 **10 个**永久理论用例，960/960 float 全部 exact-bit；`NativeModelImportTests` 由 **132/132** 增至 **142/142**。完整强制 native 八工程矩阵由 **4187/4187** 增至 **4197/4197**（Core **3175/3175**），0 失败、0 跳过。
+- `bash _scripts/build-all.sh Release` 通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与 URP sample 均 0 编译错误。`/Applications/Anity.app` 已重新安装；Host、内置 CLI、native 均为 ARM64，深度签名、图标逐 byte 与 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过。
+- 首轮门禁后逐项验证并移出 **39 个** Git ignored、零 tracked 的 repo-local `bin/obj/build` 目录，共 **375,116 KiB**；最终 cross-axis basis 审阅修正后重新执行全产品构建、4,197 项测试与 App 安装门禁，再移出重建产生的 **39 个 / 375,060 KiB**。两轮累计 **78 个 / 750,176 KiB（约 732.6 MiB）**，可分别从废纸篓 `/Users/solarisneko/.Trash/anity-prepost-final.ak5e6t` 与 `/Users/solarisneko/.Trash/anity-prepost-postreview.RHa6Z2` 恢复；最终复扫 `node_modules/bin/obj/build/dist/Library/Temp/Logs/UserSettings/.cache/.vite/packages/Generated` 为 0。全机共享 NuGet/Homebrew/Unity 缓存未越界删除。
+
+### 尚未完成
+- exact-bit 证据来自当前可用的 Unity 2022.3.51f1、Maya FBX 坐标基与 XYZ local rotation order；目标 Unity 2022.3.61f1 Pro 尚未安装，非 XYZ local order 与 pre/post、其它 axis/unit、gimbal/wrap、helper/instanced/skinned/bindpose 组合仍需独立 2022.3.61f1 A/B，不能把本轮 960/960 外推为完整 ModelImporter。
+- Unity raw FBX 的 `Renderer.m_Enabled` visibility binding 仍缺；多 animation layer、constant/stepped/weighted/broken tangent、loop/root motion/additive/mask、stable artifact/fileID/type-tree 与 Humanoid/Mecanim 仍未闭环。
+- 该数值路径完成不代表 Editor GUI、IL2CPP、各 Player、Package Manager 或全套 Unity 2022.3 Pro 已完全对齐；整体状态继续为 🟡。
+
+### 下一优先项
+1. 增加 Renderer visibility `m_Enabled` binding，并补 ≥10 个 importer/runtime/Animator 用例。
+2. 扩展 pre/post 的非 XYZ rotation order、axis/unit、gimbal/wrap、helper/instanced/skinned/bindpose 权威 fixture。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑 ModelImporter/AnimationClip A/B，并在 Windows 11 x64 与 Linux x64 实跑 CLI/Player 分发门禁。
+
 ## 2026-07-20 — 独立 self-contained Anity CLI 分发门禁
 
 ### 已完成
