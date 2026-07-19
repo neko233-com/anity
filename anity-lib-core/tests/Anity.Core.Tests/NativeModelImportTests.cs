@@ -334,6 +334,49 @@ public sealed class NativeModelImportTests : IDisposable
             caseName + ":euler-z");
     }
 
+    public static TheoryData<string, string, string> PivotRawPositionUnitySamples => new()
+    {
+        { "rotation-positive", "RotationPivot=25,-10,15",
+          "AAAAgByFzzqUG8A7DsZEPGacnDxlbtc8RkgGPSm4Gz252Co90qozPcc+Nz3qZDc9WTg2PdiNNT0VRTc9IKs0PVddHT2FPMU8AAAAgBN5AL2doYS9h7TAvbkG6r3FK/m9AAAAAGuWvLoPdra7edpHvJArrbyNbwO9JZI2vUJTbb0IP5K94U6svbckw70iLNW9PffgvcIw5b0yHte9LsewvZ1gcr0wB+m8AAAAAIcnrDx+/QM9cB8PPUtYCD345wI9AAAAAN3mFDuNZg080NeWPFil/TzKvzo9Jjh8Pc0HoD0HeME93bPgPdf8+z39ygg+BeQPPkBxEj4q9gk+OQvmPR0eoz03Hic9AAAAABvvHr2WH5S9YBPJvaz+6r2KD/e9" },
+        { "rotation-negative", "RotationPivot=-35,20,-5",
+          "AAAAgG5yELu71gS8Fq+GvCyT07zZQQ+9SnkvvRKoR71Awla9R2tdvQylXb1JTFq94XdWvbXIVL1EwVm9d91dvVdoSb2M1gO9AAAAgFSrOj0G0sc9JYwVPotZOT6v10Y+AAAAAEJvVztJoU08LNvcPBT6Oj3fc4o986i7PVNe7j133A8+0nsmPnLPOT6bxEg+hGpSPsrYVT7uXUo+Pk0qPuD08j0+Znc9AAAAAMEWW72hYr+9orXxvQv0BL4eVgi+AAAAAMdTDLvU6AS8bzSNvAsq7Lx4wiy9h6JnvYfUkb2d6K69F5nJve+G4L3zafK9Rwr+vd0YAb7XVfS9hB3OvUWJlL327Rq9AAAAAJkzGD3CiY89j3XEPUqx5j1n6/I9" },
+        { "rotation-fractional", "RotationPivot=0.5,-0.75,1.25",
+          "AAAAgFlM8reXm+e4qrp6uUlg2LmuqSW6sn5ruvSnnrrudsy6a8X8uj/dFbs0ICq7JUk4uz6LPbsYaSy7N80Cu2ylorodOhK6AAAAgKmKBDoO8oo6ATLbOvp7EDt7NB87AAAAAAQ7rDn9laE650EpO/8Zizsnpsc7GEADPG8xIjwLRT88BU9ZPBhIbzzUHIA8hZWFPKOIhzy/BIE85aldPCDvJDzNJbQ7AAAAAFi2x7skZ0i8q6CQvBY0sLyiGry8AAAAAML/ETqpSgo7PfuSOysS9jsAVjQ8c3dyPNM3mTwQmLg8M87VPCZH7zy5tgE90VUIPUy3Cj3PzQI9XsvaPNcenDxbnSE8AAAAAPziHrxUH5e8ayPRvA/397wjFAO9" },
+        { "scaling-positive", "ScalingPivot=30,20,10",
+          "AAAAgHsLrzlGcqE6CYMkO1chgjtyxrE78N7bO8x7/DuAvAg8YmINPJQ3DTwvLgo8HL0GPBw3BTyXsQk8uqoNPL7j/jsdIaM7AAAAgDmG37tJ5m+8r6S1vLX647wY7/W8AAAAAHgjsrnGmay6rqM9u549pbvDBP27fNYxvE+jarxoEJO8xl+wvKYmy7yTGeG89+DvvD5C9byrg+O87oe1vG/8b7xKmt+7AAAAAORMozvdJgA8LL0PPD1QDTzZjAk8AAAAAFmWhjXlwXc3n8yROGnDVjlTyPM5pT5pOo/wxDqIjRY7KYdTOxayiTu0u6Y7eLq7OwSpwzt8Fao7yjlfO8Z6zTqcWsA5AAAAAExWgjmA7UA6wsiYOjfKuTrAF8Q6" },
+        { "scaling-negative", "ScalingPivot=-12,-18,-6",
+          "AAAAgCZkwLnkHLG6SRg0u49QjrviwsK7AGryu7/6DLwO5Ru8a+8lvFS9K7x0aS68O0AvvBtgL7ybmS68ZkknvOaKDrxpi7K7AAAAgNyq+jtckok80kTUPCfRBj0JDBI9AAAAAKt0dzpVqmo7Psf5O/NiUTw2oZk8ArjOPPitAj1XdB09c1o2PWkKTD0LLl09xm9oPYN7bD2eCF89T5o6PVQoBT3Nook8AAAAAK8ChbwpK/i8Cp0nvaV3Qr1Ktku9AAAAAHwQVDpn/Ug7IMTVOwsGMzx5MYM8/kCwPKBj3jzaogU9Sk8aPckfLD1NDTo9Lh5DPQFcRj2wjDs9zdAdPfKO4jzjKms8AAAAAMY8ZbwBDNi87RoUvaVfLr3c2ze9" },
+        { "scaling-fractional", "ScalingPivot=-0.5,0.75,-1.25",
+          "AAAAgLwLOrk8ozG6NRq/uvNqIruGLHK7dL+lu+Ex1bu0iQK80V0ZvNKmLbxA6z28h7RIvK6ZTLydsD+8J1AdvPuR2buG1Ve7AAAAgHQOQDvtIK87OWXrO3BhCTzGjRA8AAAAAMRKozkXV5o61pMjO0SMiDsnuMc7ZyEGPHmSKTwJnkw8OZdtPBhXhTw3+ZA8vK+YPC55mzxXPZI8+UJzPPbMLDweFrM7AAAAACBVtbsg5DC8XRh7vAe6l7wBmKG8AAAAAIL3FDoh0ww7CDiVOzTX+Ds0iDU8AdpyPFmpmDyw+bY8NOjSPB4J6zwA+f08cSwFPTJkBz3HAQA9RKbXPLJ6mzxp7iI8AAAAAMUtJLwUwJ28JADcvO8OA70jzAq9" },
+        { "scaling-offset-positive", "ScalingPivot=-12,18,6;ScalingOffset=4,-8,10",
+          "CtcjvUKqKr1Nwj29AhBbvXcvgL3QnJW9eHmsvZRnw73YHdm963/svVWq/L3UdgS+oFwIvqy8Cb78HAW+1bjvvbdyxb2uo469CtcjvQtgQ7wXLiw802LPPEc5Bz1JqRA9CtejvY4/pL0bJKW9W9ClvRl8pb1kgaO9EoWfvWyNmb1QBJK996aJvWlpgb2lrHS9oORqvQ9KZ73UFnO9shqIvTjsmL0HVqS9CtejvQsplb3hmne94kg/vYc5E70NFAK9zMzMPYE9zD2Ykso9PbrHPeacwz1kNb49a6C3PUAjsD34Kag9dD+gPZoBmT0lFZM9KxuPPV+pjT2lbpI9XNqePc5srz0gDMA9zMzMPQoV0z14jdI9G1TNPQRExz1LhMQ9" },
+        { "scaling-offset-negative", "ScalingPivot=12,-18,-6;ScalingOffset=-4,8,-10",
+          "CtcjPRNJKT3tiTg9/fxPPVvgbT2QGIg9WFqaPfKQrD1XrL09c8nMPRU+2T0UlOI9F3ToPZWD6j1pj+M9HUjPPc4urj3lg4I9CtcjPSkvkjxTE1863z8bvKWQZ7wQ93q8CtejPb2gpT17XKo9YOOwPa76tz3mib49UsPDPbA6xz1T58g96RPJPelByD14Ccc9pvzFPY2QxT2H4MY9JPzIPQt0xz2Zlbw9CtejPfPSeT07ixo9/hd2PIIW7rrzCwe8zMzMvbkryr0JvsK9tR23vQbfp72gqJW9C0OBvbA+V73nqiu9GDgCvWrzuryyIYC8V10yvLtAFrzJd3O8xyD2vCVCU73GrJu9zMzMvWV0972aLAy+IlMXvtehHb7Jsh++" },
+        { "rotation-large", "RotationPivot=1250,-750,500",
+          "AAAAgLTawT1nhrM+vQ04P8LAkj8Ngco/XK/9PxcgFECwCCRA63suQNw8NEC8oDZAGS83QNIwN0AzxjZA1tovQILNFUDTL7k/AAAAgONN8L/uV3nAgUu2wA+O3sBBdu3AAAAAAIEjxL2glLy+/LRMv0mFr7+EwgPAORA1wBQJacCAWI7AB3mmwOVru8A32cvAfIvWwB5e2sCbnc3AM5aqwDDLbcCFauq/AAAAAA2FvD82YhpARbY1QKv4O0CVtDtAAAAAAHTlxD1l0Lo+5gJHP9cBpz+jWvU/Xj4lQFIUUUBdAHxAjOiRQAgvo0BFx7BAday5QBfdvEDHPrJAgEyVQPANVUBKu9s/AAAAAOI00795b0XAEzaGwKvtnMA3/6TA" },
+        { "scaling-large", "ScalingPivot=-900,1100,-1300",
+          "AAAAgHVkg7yKrIu9pwItvg6iqr5CcBK/pRNjv3JQor/Prdi/6zsIwL5YIsB0CDjAJrlGwBsVTMDXbTrAhTkNwC4Vp7+XEPq+AAAAgPi7Vz105IG+3Wo2v47IjL9yY6C/AAAAABmZFr002A6+BIeXvs9U+76igDS/tLFqv+Rrjb90ZaC/nEOtv+1JtL/r3ra//BG3vxXYtr+S/La/gPWuv9Bhj7+3BCO/AAAAAAuIGT/h+no/aTWLPxEmgz83dXg/AAAAALUjhz1Fdn0+DY4EP04sWT9m9Jo/4PDJP8GL9j+JNA9A4/YfQFIfLUCdjDZAL0Q8QHg6PkBJhDdAQKYiQM9l+j8JHow/AAAAAMu2m7+gmxnABB5ZwP/6gcAtyonA" },
+    };
+
+    [Theory]
+    [MemberData(nameof(PivotRawPositionUnitySamples))]
+    public void PivotRawPositionUsesUnity2022MatrixConverterBits(
+        string caseName, string propertyOverrides, string expectedBase64)
+    {
+        var imported = ReimportTransformStack(caseName, propertyOverrides, false);
+        var curves = new[]
+        {
+            Curve(imported.Clip, "m_LocalPosition.x"),
+            Curve(imported.Clip, "m_LocalPosition.y"),
+            Curve(imported.Clip, "m_LocalPosition.z"),
+        };
+        foreach (var curve in curves)
+            Assert.Equal(Enumerable.Range(0, 24), Frames(curve, imported.Clip.frameRate));
+        AssertUnityBits(expectedBase64,
+            curves.SelectMany(curve => curve.keys.Select(key => key.value)).ToArray(),
+            caseName + ":position");
+    }
+
     private static void AssertQuaternionBits(
         AnimationClip clip, string expectedSamplesBase64)
     {

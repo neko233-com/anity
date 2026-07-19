@@ -1151,10 +1151,177 @@ static void BuildSampledEulerCurves(const ufbx_anim_stack* stack,
   }
 }
 
-static void BuildRetainedPivotPositionCurves(const ufbx_baked_node* retainedNode,
+static ufbx_vec3 EvaluateUnityRawVector(const ufbx_anim_stack* stack,
+    const ufbx_node* node, const char* propertyName,
+    ufbx_vec3 fallback, double time) {
+  const ufbx_anim_value* value = FindSingleRawValue(
+    stack, &node->element, propertyName);
+  if (!value) return fallback;
+  ufbx_vec3 result = value->default_value;
+  for (int axis = 0; axis < 3; ++axis) {
+    result.v[axis] = static_cast<float>(EvaluateUnityCompatibleCurve(
+      value->curves[axis], time, result.v[axis]));
+  }
+  return result;
+}
+
+struct UnityFbxAffineMatrix {
+  double m[3][3];
+  double t[3];
+};
+
+static UnityFbxAffineMatrix UnityFbxIdentityMatrix() {
+  return {{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}},
+    {0.0, 0.0, 0.0}};
+}
+
+static UnityFbxAffineMatrix UnityFbxTranslationMatrix(ufbx_vec3 value) {
+  UnityFbxAffineMatrix result = UnityFbxIdentityMatrix();
+  result.t[0] = value.x;
+  result.t[1] = value.y;
+  result.t[2] = value.z;
+  return result;
+}
+
+static UnityFbxAffineMatrix UnityFbxScaleMatrix(ufbx_vec3 value) {
+  UnityFbxAffineMatrix result = UnityFbxIdentityMatrix();
+  result.m[0][0] = value.x;
+  result.m[1][1] = value.y;
+  result.m[2][2] = value.z;
+  return result;
+}
+
+static UnityFbxAffineMatrix UnityFbxMultiplyMatrix(
+    const UnityFbxAffineMatrix& left, const UnityFbxAffineMatrix& right) {
+  UnityFbxAffineMatrix result{};
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      volatile double p0 = left.m[row][0] * right.m[0][column];
+      volatile double p1 = left.m[row][1] * right.m[1][column];
+      volatile double sum01 = p0 + p1;
+      volatile double p2 = left.m[row][2] * right.m[2][column];
+      result.m[row][column] = sum01 + p2;
+    }
+    volatile double p0 = left.m[row][0] * right.t[0];
+    volatile double p1 = left.m[row][1] * right.t[1];
+    volatile double sum01 = p0 + p1;
+    volatile double p2 = left.m[row][2] * right.t[2];
+    volatile double sum012 = sum01 + p2;
+    result.t[row] = sum012 + left.t[row];
+  }
+  return result;
+}
+
+static UnityFbxAffineMatrix UnityFbxRotationMatrixXyz(ufbx_vec3 euler) {
+  constexpr double degreesToRadians =
+    3.14159265358979323846264338327950288 / 180.0;
+  double sx = 0.0, cx = 1.0;
+  double sy = 0.0, cy = 1.0;
+  double sz = 0.0, cz = 1.0;
+  UnityFbxSinCos(euler.x * degreesToRadians, &sx, &cx);
+  UnityFbxSinCos(euler.y * degreesToRadians, &sy, &cy);
+  UnityFbxSinCos(euler.z * degreesToRadians, &sz, &cz);
+
+  const double sinXSinY = sx * sy;
+  const double cosXSinY = cx * sy;
+  const double m00 = cy * cz;
+  const double m01 = cy * sz;
+  const double m02 = -sy;
+  volatile double m10Left = cz * sinXSinY;
+  volatile double m10Right = cx * sz;
+  const double m10 = m10Left - m10Right;
+  volatile double m11Left = cx * cz;
+  volatile double m11Right = sz * sinXSinY;
+  const double m11 = m11Left + m11Right;
+  const double m12 = cy * sx;
+  volatile double m20Left = sx * sz;
+  volatile double m20Right = cz * cosXSinY;
+  const double m20 = m20Left + m20Right;
+  volatile double m21Left = sz * cosXSinY;
+  volatile double m21Right = sx * cz;
+  const double m21 = m21Left - m21Right;
+  const double m22 = cy * cx;
+
+  return {{{m00, m10, m20}, {m01, m11, m21}, {m02, m12, m22}},
+    {0.0, 0.0, 0.0}};
+}
+
+static ufbx_vec3 EvaluateUnityRetainedPivotPosition(
+    const ufbx_anim_stack* stack, const ufbx_node* node, double time) {
+  const ufbx_vec3 rotationPivot = ufbx_find_vec3(
+    &node->props, UFBX_RotationPivot, ufbx_vec3{});
+  const ufbx_vec3 scalingPivot = ufbx_find_vec3(
+    &node->props, UFBX_ScalingPivot, ufbx_vec3{});
+  const ufbx_vec3 rotationOffset = ufbx_find_vec3(
+    &node->props, UFBX_RotationOffset, ufbx_vec3{});
+  const ufbx_vec3 scalingOffset = ufbx_find_vec3(
+    &node->props, UFBX_ScalingOffset, ufbx_vec3{});
+  const ufbx_vec3 translation = EvaluateUnityRawVector(
+    stack, node, UFBX_Lcl_Translation,
+    ufbx_find_vec3(&node->props, UFBX_Lcl_Translation, ufbx_vec3{}), time);
+  const ufbx_vec3 rotation = EvaluateUnityRawVector(
+    stack, node, UFBX_Lcl_Rotation,
+    ufbx_find_vec3(&node->props, UFBX_Lcl_Rotation, ufbx_vec3{}), time);
+  const ufbx_vec3 scaling = EvaluateUnityRawVector(
+    stack, node, UFBX_Lcl_Scaling,
+    ufbx_find_vec3(&node->props, UFBX_Lcl_Scaling, ufbx_vec3{1.0, 1.0, 1.0}), time);
+
+  UnityFbxAffineMatrix matrix = UnityFbxTranslationMatrix(translation);
+  matrix = UnityFbxMultiplyMatrix(
+    matrix, UnityFbxTranslationMatrix(rotationOffset));
+  matrix = UnityFbxMultiplyMatrix(
+    matrix, UnityFbxTranslationMatrix(rotationPivot));
+  if (node->rotation_order == UFBX_ROTATION_ORDER_XYZ) {
+    matrix = UnityFbxMultiplyMatrix(
+      matrix, UnityFbxRotationMatrixXyz(rotation));
+  } else {
+    const ufbx_transform transform{ufbx_vec3{},
+      UnityFbxEulerToQuaternion(rotation, node->rotation_order),
+      ufbx_vec3{1.0, 1.0, 1.0}};
+    const ufbx_matrix source = ufbx_transform_to_matrix(&transform);
+    UnityFbxAffineMatrix converted{};
+    for (int row = 0; row < 3; ++row)
+      for (int column = 0; column < 3; ++column)
+        converted.m[row][column] = source.cols[column].v[row];
+    matrix = UnityFbxMultiplyMatrix(matrix, converted);
+  }
+  matrix = UnityFbxMultiplyMatrix(matrix, UnityFbxTranslationMatrix(
+    ufbx_vec3{-rotationPivot.x, -rotationPivot.y, -rotationPivot.z}));
+  matrix = UnityFbxMultiplyMatrix(
+    matrix, UnityFbxTranslationMatrix(scalingOffset));
+  matrix = UnityFbxMultiplyMatrix(
+    matrix, UnityFbxTranslationMatrix(scalingPivot));
+  matrix = UnityFbxMultiplyMatrix(matrix, UnityFbxScaleMatrix(scaling));
+  matrix = UnityFbxMultiplyMatrix(matrix, UnityFbxTranslationMatrix(
+    ufbx_vec3{-scalingPivot.x, -scalingPivot.y, -scalingPivot.z}));
+  ufbx_vec3 value{matrix.t[0], matrix.t[1], matrix.t[2]};
+  for (int axis = 0; axis < 3; ++axis)
+    value.v[axis] += node->adjust_pre_translation.v[axis];
+
+  const ufbx_quat adjust = node->adjust_pre_rotation;
+  if (adjust.x == 1.0 && adjust.y == 0.0 &&
+      adjust.z == 0.0 && adjust.w == 0.0) {
+    value.y = -value.y;
+    value.z = -value.z;
+  } else {
+    value = ufbx_quat_rotate_vec3(adjust, value);
+  }
+  const double scale = static_cast<float>(node->adjust_pre_scale *
+    node->adjust_translation_scale);
+  value.x = static_cast<float>(value.x) * static_cast<float>(scale);
+  value.y = static_cast<float>(value.y) * static_cast<float>(scale);
+  value.z = static_cast<float>(value.z) * static_cast<float>(scale);
+  if (node->adjust_mirror_axis != UFBX_MIRROR_AXIS_NONE)
+    value.v[static_cast<int>(node->adjust_mirror_axis) - 1] =
+      -value.v[static_cast<int>(node->adjust_mirror_axis) - 1];
+  return value;
+}
+
+static void BuildRetainedPivotPositionCurves(
+    const ufbx_anim_stack* retainedStack, const ufbx_node* retainedNode,
     double trimStart, float frameRate, size_t sampleCount,
     float globalScale, Track& track) {
-  if (!retainedNode || sampleCount == 0) return;
+  if (!retainedStack || !retainedNode || sampleCount == 0) return;
   for (int axis = 0; axis < 3; ++axis) {
     Track::TransformCurve curve;
     curve.property = static_cast<AnityModelTransformCurveProperty>(
@@ -1162,9 +1329,8 @@ static void BuildRetainedPivotPositionCurves(const ufbx_baked_node* retainedNode
     curve.keys.reserve(sampleCount);
     for (size_t index = 0; index < sampleCount; ++index) {
       const double absoluteTime = UnityFbxFrameTime(trimStart, frameRate, index);
-      const double bakedTime = absoluteTime - trimStart;
-      const ufbx_vec3 value = ufbx_evaluate_baked_vec3(
-        retainedNode->translation_keys, bakedTime);
+      const ufbx_vec3 value = EvaluateUnityRetainedPivotPosition(
+        retainedStack, retainedNode, absoluteTime);
       const double component = axis == 0 ? value.x : axis == 1 ? value.y : value.z;
       float relativeTime = Real(absoluteTime) - Real(trimStart);
       if (std::abs(relativeTime) < 1e-7f) relativeTime = 0.0f;
@@ -1177,7 +1343,8 @@ static void BuildRetainedPivotPositionCurves(const ufbx_baked_node* retainedNode
 
 static void BuildUnityRawTransformCurves(const ufbx_anim_stack* stack,
     const ufbx_node* sourceNode, const ufbx_baked_node* bakedNode,
-    const ufbx_baked_node* retainedPivotNode,
+    const ufbx_anim_stack* retainedPivotStack,
+    const ufbx_node* retainedPivotNode,
     double trimStart, float frameRate, size_t sampleCount,
     float globalScale, Track& track) {
   const bool hasPreOrPostRotation =
@@ -1203,8 +1370,8 @@ static void BuildUnityRawTransformCurves(const ufbx_anim_stack* stack,
     // the shared baked grid. With no rotation offset Unity can still expose
     // the evaluated Euler source as localEulerAnglesRaw; otherwise it falls
     // back to the baked quaternion path.
-    BuildRetainedPivotPositionCurves(retainedPivotNode, trimStart, frameRate,
-      sampleCount, globalScale, track);
+    BuildRetainedPivotPositionCurves(retainedPivotStack, retainedPivotNode,
+      trimStart, frameRate, sampleCount, globalScale, track);
     if (!hasRotationOffset)
       BuildSampledEulerCurves(stack, sourceNode, trimStart, frameRate,
         sampleCount, globalScale, track);
@@ -1435,26 +1602,11 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           break;
         }
 
-        std::unique_ptr<ufbx_baked_anim, decltype(&ufbx_free_baked_anim)>
-          retainedPivotBaked(nullptr, &ufbx_free_baked_anim);
-        std::unordered_map<uint32_t, const ufbx_baked_node*> retainedPivotNodes;
-        if (rawTransformSource && clipIndex < rawTransformSource->anim_stacks.count) {
-          const ufbx_anim_stack* retainedStack =
+        const ufbx_anim_stack* retainedPivotStack = nullptr;
+        if (rawTransformSource &&
+            clipIndex < rawTransformSource->anim_stacks.count) {
+          retainedPivotStack =
             rawTransformSource->anim_stacks.data[clipIndex];
-          ufbx_error retainedBakeError{};
-          retainedPivotBaked.reset(ufbx_bake_anim(
-            rawTransformSource, retainedStack->anim,
-            &bakeOptions, &retainedBakeError));
-          if (!retainedPivotBaked) {
-            char buffer[1024]{};
-            ufbx_format_error(buffer, sizeof(buffer), &retainedBakeError);
-            CopyError(errorBuffer, errorBufferSize, buffer);
-            ufbx_free_baked_anim(baked);
-            result = ANITY_ERR_DECODE;
-            break;
-          }
-          for (const ufbx_baked_node& node : retainedPivotBaked->nodes)
-            retainedPivotNodes[node.typed_id] = &node;
         }
 
         Clip clip;
@@ -1486,9 +1638,9 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           track.rotationKeys.reserve(rotationSampleCount);
           const ufbx_node* sourceNode = bakedNode.typed_id < source->nodes.count
             ? source->nodes.data[bakedNode.typed_id] : nullptr;
-          const auto retainedPivot = retainedPivotNodes.find(bakedNode.typed_id);
-          const ufbx_baked_node* retainedPivotNode =
-            retainedPivot != retainedPivotNodes.end() ? retainedPivot->second : nullptr;
+          const ufbx_node* retainedPivotNode = rawTransformSource &&
+              bakedNode.typed_id < rawTransformSource->nodes.count
+            ? rawTransformSource->nodes.data[bakedNode.typed_id] : nullptr;
           const ufbx_anim_value* rawRotation = sourceNode
             ? FindSingleRawValue(stack, &sourceNode->element, UFBX_Lcl_Rotation) : nullptr;
           const std::vector<UnityFbxConvertedEulerKey> convertedEulerKeys =
@@ -1563,7 +1715,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             track.scaleKeys.push_back(VectorKey(bakedNode.scale_keys.data[key], 1.0f));
           if (options->resampleCurves == 0 && sourceNode)
             BuildUnityRawTransformCurves(stack, sourceNode, &bakedNode,
-              retainedPivotNode,
+              retainedPivotStack, retainedPivotNode,
               baked->playback_time_begin, scene->frameRate,
               rotationSampleCount, options->globalScale, track);
           if (!track.positionKeys.empty()) clip.duration = std::max(clip.duration, track.positionKeys.back().time);

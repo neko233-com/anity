@@ -1,5 +1,23 @@
 # PLAN
 
+## 2026-07-20 — Unity FBX retained-pivot position exact-bit 与废弃 bake 清理
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 重新采集 positive/negative/fractional/large rotation pivot、scaling pivot 与 scaling offset **10 组** fixture；每组 `m_LocalPosition.x/y/z` 各 24 keys，共固化 **720 个 Unity float bit pattern**。旧路径仅 **143/720** 逐 bit 一致，并有 16 个 signed-zero 与 561 个数值差异。
+- 根因确认是 retained scene 的 `ufbx_bake_anim()` 先做矩阵分解，导致 Unity 原本精确的 `0/1` 被提前变成极小残差或 `1±3e-8`。native 现直接在 exact `FbxTime` 上用 Unity-compatible KFCurve 求值，将 scalar 先落为 float，再按 FBX translation/rotation offset/pivot/scaling offset/pivot/scale 顺序组合仿射矩阵，translation 提取为 float 后才执行 float 文件单位转换，并保留 Unity 的 180° axis-adjust signed-zero。
+- 新路径对 10 组 position fixture 达到 **720/720 float exact-bit**，0 signed-zero 差异、0 数值差异；新增 **10 个**永久 bit-pattern 回归，`NativeModelImportTests` **132/132**。删除已经不再被任何输出读取的第二次 retained-pivot `ufbx_bake_anim()`、baked-node typed-id map 与相关临时对象，只保留 raw retained scene，避免双份 bake 成本与死路径继续漂移。
+- `_scripts/build-all.sh Release` 全产品工程 0 编译错误；统一 native-required 八工程矩阵 **4174/4174**（Core **3165/3165**），0 失败、0 跳过。Unity-compatible CLI `-batchmode -quit -nographics -logFile -` exit 0；`/Applications/Anity.app` 已重新安装并独立验证 host/native 均为 ARM64、深度签名有效、batchmode exit 0、应用图标逐 byte 一致。
+- 发布门禁完成后再次解析并审计仓库生成目录：删除 40 个无 tracked 文件的 `bin/obj/build/Generated` 目标，共 **290632 KiB（约 284 MiB）**；两个 `osx-arm64` restore 临时写入的 lockfile section 已还原，最终提交不包含安装缓存或生成依赖漂移。全机 NuGet/Homebrew/Unity 共享缓存未删除，避免破坏其它项目。
+
+### 尚未完成
+- 本轮 exact-bit 证据限定于已固化的 Unity Maya FBX 坐标/单位基与 10 组 XYZ pivot/offset fixture；其它 axis system、unit scale、non-XYZ pivot composition、instanced/helper/skinned pivot 与 bindpose 仍需权威 A/B，不能外推为完整 FBX transform stack。
+- pre/post rotation baked quaternion 仍有 1–5 ULP，`Renderer.m_Enabled` visibility binding 仍缺失；多 animation layer、constant/stepped/weighted/broken tangent、loop/root motion/additive/mask、Unity 2022.3.61f1 Pro Editor/Player A/B 尚未闭环，因此 ModelImporter/AnimationClip 继续为 🟡。
+
+### 下一优先项
+1. 对齐 pre/post rotation baked quaternion 的 MatrixConverter stack、normalize 舍入与 signed-zero，收紧到 exact-bit。
+2. 增加 Renderer visibility `m_Enabled` binding，并补 ≥10 个 importer/runtime/Animator 用例。
+3. 扩展其它 axis/unit/rotation-order、helper/instanced/skinned pivot/bindpose fixture，再推进多 layer、tangent mode 与 root motion。
+
 ## 2026-07-19 — 安装缓存与未使用 legacy 基础设施清理
 
 ### 已完成
