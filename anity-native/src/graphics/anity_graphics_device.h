@@ -30,6 +30,9 @@ struct AnityGraphicsDevice {
   AnityGraphicsUIUploadState* uiUpload = nullptr;
   AnityGraphicsTextureRegistry* textures = nullptr;
   AnityGraphicsVFXEventRegistry* vfxEvents = nullptr;
+  uint64_t cameraPassSequence = 0;
+  AnityGraphicsCameraPassInfo lastCameraPass{};
+  int32_t hasCameraPass = 0;
 };
 
 void AnityGraphics_DestroyUIUpload(AnityGraphicsDevice* device);

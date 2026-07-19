@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Anity.Core.Runtime.Native;
 using UnityEngine.Rendering;
 
 namespace UnityEngine;
@@ -99,6 +100,8 @@ public struct RenderTextureDescriptor
     public bool useMipMap { get; set; }
     public bool autoGenerateMips { get; set; }
     public bool enableRandomWrite { get; set; }
+    /// <summary>Lets a render target participate in dynamic-resolution allocation.</summary>
+    public bool useDynamicScale { get; set; }
     public RenderTextureMemoryless memoryless { get; set; }
     public VRTextureUsage vrUsage { get; set; }
     public int bindMS { get; set; }
@@ -122,6 +125,7 @@ public struct RenderTextureDescriptor
         useMipMap = mipCount > 0;
         autoGenerateMips = true;
         enableRandomWrite = false;
+        useDynamicScale = false;
         memoryless = RenderTextureMemoryless.None;
         vrUsage = VRTextureUsage.None;
         bindMS = 0;
@@ -147,6 +151,7 @@ public class RenderTexture : Texture
     public bool useMipMap { get; set; }
     public bool autoGenerateMips { get; set; }
     public bool enableRandomWrite { get; set; }
+    public bool useDynamicScale { get; set; }
     public int volumeDepth { get; set; }
     public new TextureDimension dimension { get; set; }
     public RenderTextureMemoryless memorylessMode { get; set; }
@@ -180,6 +185,7 @@ public class RenderTexture : Texture
             useMipMap = value.useMipMap;
             autoGenerateMips = value.autoGenerateMips;
             enableRandomWrite = value.enableRandomWrite;
+            useDynamicScale = value.useDynamicScale;
             memorylessMode = value.memoryless;
             vrUsage = value.vrUsage;
             bindTextureMS = value.bindMS > 0;
@@ -236,6 +242,7 @@ public class RenderTexture : Texture
 
     public void Release()
     {
+        NativeGraphicsDevice.ReleaseCameraRenderTargetFromAll(this);
         _isCreated = false;
     }
 

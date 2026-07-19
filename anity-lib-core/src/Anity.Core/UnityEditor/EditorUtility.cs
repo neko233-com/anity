@@ -168,7 +168,7 @@ public static class EditorUtility
 
   public static void RequestScriptReload()
   {
-    // no-op in shell mode
+    UnityEditorInternal.InternalEditorUtility.RequestScriptReload();
   }
 
   public static void ShowNotification(Object? target, string message)

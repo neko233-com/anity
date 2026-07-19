@@ -167,14 +167,11 @@ namespace UnityEngine.Rendering.Universal
         true,
         RenderQueueRange.opaque,
         (uint)(m_Data != null ? m_Data.opaqueLayerMask : -1));
-      EnqueuePass(m_OpaquePass);
-
       m_TransparentPass = new DrawObjectsPass(
         "Draw Transparent Objects",
         false,
         RenderQueueRange.transparent,
         (uint)(m_Data != null ? m_Data.transparentLayerMask : -1));
-      EnqueuePass(m_TransparentPass);
     }
 
     public override void SetupCullingParameters(ref ScriptableCullingParameters cullingParameters, ref CameraData cameraData)
@@ -184,23 +181,22 @@ namespace UnityEngine.Rendering.Universal
 
     public override void Setup(ScriptableRenderContext context, ref RenderingData renderingData)
     {
+      // Renderer-data defaults are visible to renderer features during their
+      // setup callbacks, just like per-camera requests.
+      renderingData.cameraData.requiresDepthTexture |= m_Data?.supportsCameraDepthTexture ?? false;
+      renderingData.cameraData.requiresOpaqueTexture |= m_Data?.supportsCameraOpaqueTexture ?? false;
       base.Setup(context, ref renderingData);
+      // ScriptableRenderer clears its queue at the start of every camera.
+      // Default URP geometry passes must therefore be enqueued per camera,
+      // rather than only once in the renderer constructor.
+      EnqueuePass(m_OpaquePass);
+      EnqueuePass(m_TransparentPass);
+      UpdateCameraInputRequirements(ref renderingData);
     }
 
     public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
     {
-      var camera = renderingData.cameraData.camera;
-
-      if (camera.clearFlags == CameraClearFlags.Skybox)
-      {
-        context.DrawSkybox(camera);
-      }
-
-      foreach (var pass in activeRenderPassQueue)
-      {
-        pass.Execute(context, ref renderingData);
-      }
-      activeRenderPassQueue.Clear();
+      ExecuteRenderPassQueue(context, ref renderingData, drawSkybox: true);
     }
   }
 
@@ -256,21 +252,17 @@ namespace UnityEngine.Rendering.Universal
         true,
         RenderQueueRange.all,
         (uint)(m_Data != null ? m_Data.light2DLayerMask : -1));
-      EnqueuePass(m_SpritePass);
     }
 
     public override void Setup(ScriptableRenderContext context, ref RenderingData renderingData)
     {
       base.Setup(context, ref renderingData);
+      EnqueuePass(m_SpritePass);
     }
 
     public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
     {
-      foreach (var pass in activeRenderPassQueue)
-      {
-        pass.Execute(context, ref renderingData);
-      }
-      activeRenderPassQueue.Clear();
+      ExecuteRenderPassQueue(context, ref renderingData, drawSkybox: false);
     }
   }
 

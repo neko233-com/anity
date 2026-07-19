@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.VFX;
@@ -60,6 +61,7 @@ public sealed class NativeGraphicsDevice : IDisposable
     public int PresentCount { get; private set; }
     public AnityNative.Result LastSwapchainResult { get; private set; } =
         AnityNative.Result.Ok;
+    public AnityNative.GraphicsCameraPassInfo LastCameraPass { get; private set; }
     public bool HasAttachedUICanvas => _uiCanvas is { IsValid: true };
     internal NativeUICanvas? AttachedUICanvas => _uiCanvas is { IsValid: true } ? _uiCanvas : null;
     public AnityNative.GraphicsUIUploadStats LastUIUploadStats { get; private set; }
@@ -188,6 +190,561 @@ public sealed class NativeGraphicsDevice : IDisposable
     }
 
     /// <summary>
+    /// Records one validated camera render-pass contract in the native graphics
+    /// control plane. Backend encoders consume this state as target support is
+    /// brought online; callers can inspect the returned native sequence now.
+    /// </summary>
+    public bool TryRecordCameraPass(
+        ulong targetId, int targetWidth, int targetHeight, Rect viewport,
+        Color clearColor, bool clearDepth, bool clearColorEnabled,
+        int msaaSamples, bool isFinal, bool hdr, bool isCameraTarget = true,
+        float clearDepthValue = 1f, int depthSlice = 0, int depthSliceCount = 1)
+    {
+        if (_disposed || _handle == IntPtr.Zero || !AnityNative.Available) return false;
+        var flags = AnityNative.GraphicsCameraPassFlags.StoreColor |
+                    AnityNative.GraphicsCameraPassFlags.StoreDepth;
+        if (clearColorEnabled) flags |= AnityNative.GraphicsCameraPassFlags.ClearColor;
+        if (clearDepth) flags |= AnityNative.GraphicsCameraPassFlags.ClearDepth;
+        if (isFinal) flags |= AnityNative.GraphicsCameraPassFlags.Final;
+        if (hdr) flags |= AnityNative.GraphicsCameraPassFlags.Hdr;
+        if (isCameraTarget) flags |= AnityNative.GraphicsCameraPassFlags.TargetIsCameraTarget;
+        var desc = new AnityNative.GraphicsCameraPassDesc
+        {
+            targetId = targetId,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            viewportX = viewport.x,
+            viewportY = viewport.y,
+            viewportWidth = viewport.width,
+            viewportHeight = viewport.height,
+            clearR = clearColor.r,
+            clearG = clearColor.g,
+            clearB = clearColor.b,
+            clearA = clearColor.a,
+            clearDepth = clearDepthValue,
+            msaaSamples = msaaSamples,
+            depthSlice = depthSlice,
+            depthSliceCount = depthSliceCount,
+            flags = flags
+        };
+        try
+        {
+            if (AnityNative.Graphics_RecordCameraPass(_handle, ref desc, out var info) != AnityNative.Result.Ok)
+                return false;
+            LastCameraPass = info;
+            return true;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Ensures a native offscreen attachment for <see cref="Camera.targetTexture"/>.</summary>
+    internal bool EnsureCameraRenderTarget(RenderTexture? target)
+    {
+        if (target is null || target.width <= 0 || target.height <= 0 ||
+            _disposed || _handle == IntPtr.Zero || !AnityNative.Available) return false;
+        if (!target.IsCreated()) target.Create();
+        int samples = Math.Max(1, target.msaaSamples);
+        var desc = new AnityNative.GraphicsCameraRenderTargetDesc
+        {
+            targetId = unchecked((ulong)(uint)target.GetInstanceID()),
+            width = target.width,
+            height = target.height,
+            msaaSamples = samples,
+            hdrEnabled = IsHdrRenderTexture(target) ? 1 : 0,
+            dimension = (int)target.dimension,
+            volumeDepth = Math.Max(1, target.volumeDepth),
+            colorFormat = target.graphicsFormat == GraphicsFormat.R8G8B8A8_SNorm ? 1 :
+                (target.graphicsFormat == GraphicsFormat.R16G16_SFloat || target.format == RenderTextureFormat.RGHalf ? 2 : 0)
+        };
+        try
+        {
+            return AnityNative.Graphics_EnsureCameraRenderTarget(_handle, ref desc) ==
+                AnityNative.Result.Ok;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    internal bool ReleaseCameraRenderTarget(RenderTexture? target)
+    {
+        if (target is null || _disposed || _handle == IntPtr.Zero || !AnityNative.Available)
+            return false;
+        try
+        {
+            return AnityNative.Graphics_DestroyCameraRenderTarget(
+                _handle, unchecked((ulong)(uint)target.GetInstanceID())) == AnityNative.Result.Ok;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    internal bool TryDrawCameraMesh(RenderTexture? target, Vector3[] positions,
+        Vector3[] normals, Color[] colors, int[] indices, Matrix4x4 objectToClip,
+        Matrix4x4? normalObjectToWorld = null, Matrix4x4? previousObjectToClip = null,
+        Matrix4x4? tangentObjectToWorld = null, Matrix4x4? motionObjectToClip = null,
+        bool targetIsCameraTarget = false, int blendMode = 0, bool depthWriteEnabled = true,
+        bool writeMotionVectors = true, int depthSlice = 0,
+        bool alphaClipEnabled = false, float alphaClipThreshold = 0.5f,
+        Vector2[]? uvs = null, Texture? baseTexture = null, Vector2? baseMapScale = null,
+        Vector2? baseMapOffset = null, Vector4[]? tangents = null, Texture? normalMap = null,
+        Vector3[]? previousPositions = null, Matrix4x4? stereoRightObjectToClip = null,
+        Matrix4x4? stereoRightMotionObjectToClip = null,
+        Matrix4x4? stereoRightPreviousObjectToClip = null)
+    {
+        if ((target is null && !targetIsCameraTarget) || positions is null || indices is null || positions.Length == 0 ||
+            indices.Length == 0 || indices.Length % 3 != 0 || _disposed || _handle == IntPtr.Zero ||
+            !AnityNative.Available || blendMode < 0 || blendMode > 4 || !float.IsFinite(alphaClipThreshold) ||
+            depthSlice < 0 ||
+            (target is not null && !EnsureCameraRenderTarget(target))) return false;
+        if (stereoRightObjectToClip.HasValue &&
+            (target is null || target.dimension != UnityEngine.TextureDimension.Tex2DArray || target.volumeDepth < depthSlice + 2))
+            return false;
+        Matrix4x4 normalMatrix = normalObjectToWorld ?? Matrix4x4.identity;
+        Matrix4x4 tangentMatrix = tangentObjectToWorld ?? normalMatrix;
+        float tangentHandedness = tangentMatrix.determinant < 0f ? -1f : 1f;
+        var vertices = new AnityNative.GraphicsMeshVertex[positions.Length];
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            var p = positions[i]; var localNormal = i < normals.Length ? normals[i] : Vector3.forward;
+            var previousPosition = previousPositions is not null && i < previousPositions.Length ? previousPositions[i] : p;
+            var uv = uvs is not null && i < uvs.Length ? uvs[i] : Vector2.zero;
+            var n = normalMatrix.MultiplyVector(localNormal).normalized;
+            if (n.sqrMagnitude < 1e-12f) n = Vector3.forward;
+            var localTangent = tangents is not null && i < tangents.Length ? tangents[i] : new Vector4(1f, 0f, 0f, 1f);
+            var tangent = tangentMatrix.MultiplyVector(new Vector3(localTangent.x, localTangent.y, localTangent.z));
+            tangent = (tangent - n * Vector3.Dot(n, tangent)).normalized;
+            if (tangent.sqrMagnitude < 1e-12f)
+                tangent = Vector3.Cross(Math.Abs(n.z) < .999f ? Vector3.forward : Vector3.up, n).normalized;
+            var c = i < colors.Length ? colors[i] : Color.white;
+            vertices[i] = new AnityNative.GraphicsMeshVertex { px = p.x, py = p.y, pz = p.z,
+                ppx = previousPosition.x, ppy = previousPosition.y, ppz = previousPosition.z,
+                nx = n.x, ny = n.y, nz = n.z, tx = tangent.x, ty = tangent.y, tz = tangent.z, tw = localTangent.w * tangentHandedness,
+                u = uv.x, v = uv.y, r = c.r, g = c.g, b = c.b, a = c.a };
+        }
+        var nativeIndices = new uint[indices.Length];
+        for (int i = 0; i < indices.Length; i++)
+            if (indices[i] < 0 || indices[i] >= vertices.Length) return false;
+            else nativeIndices[i] = (uint)indices[i];
+        var vertexPin = GCHandle.Alloc(vertices, GCHandleType.Pinned);
+        var indexPin = GCHandle.Alloc(nativeIndices, GCHandleType.Pinned);
+        try
+        {
+            Matrix4x4 resolvedMotionObjectToClip = motionObjectToClip ?? objectToClip;
+            Matrix4x4 resolvedPreviousObjectToClip = previousObjectToClip ?? objectToClip;
+            Matrix4x4 rightObjectToClip = stereoRightObjectToClip ?? objectToClip;
+            Matrix4x4 rightMotionObjectToClip = stereoRightMotionObjectToClip ?? resolvedMotionObjectToClip;
+            Matrix4x4 rightPreviousObjectToClip = stereoRightPreviousObjectToClip ?? resolvedPreviousObjectToClip;
+            var desc = new AnityNative.GraphicsCameraMeshDrawDesc
+            {
+                targetId = target is null ? 0UL : unchecked((ulong)(uint)target.GetInstanceID()),
+                targetIsCameraTarget = targetIsCameraTarget ? 1 : 0,
+                blendMode = blendMode,
+                depthWriteEnabled = depthWriteEnabled ? 1 : 0,
+                writeMotionVectors = writeMotionVectors ? 1 : 0,
+                depthSlice = depthSlice,
+                alphaClipEnabled = alphaClipEnabled ? 1 : 0,
+                alphaClipThreshold = alphaClipThreshold,
+                baseTextureId = baseTexture is not null && EnsureTexture(baseTexture)
+                    ? unchecked((ulong)(uint)baseTexture.GetInstanceID()) : 0UL,
+                baseMapST = new[] { (baseMapScale ?? Vector2.one).x, (baseMapScale ?? Vector2.one).y,
+                    (baseMapOffset ?? Vector2.zero).x, (baseMapOffset ?? Vector2.zero).y },
+                normalMapTextureId = normalMap is not null && EnsureTexture(normalMap)
+                    ? unchecked((ulong)(uint)normalMap.GetInstanceID()) : 0UL,
+                vertices = vertexPin.AddrOfPinnedObject(), vertexCount = vertices.Length,
+                indices = indexPin.AddrOfPinnedObject(), indexCount = nativeIndices.Length,
+                // Metal float4x4 constants are column-major; Matrix4x4's
+                // field order is row-major, so transpose at the ABI edge.
+                objectToClip = ToMetalMatrix(objectToClip),
+                motionObjectToClip = ToMetalMatrix(resolvedMotionObjectToClip),
+                previousObjectToClip = ToMetalMatrix(resolvedPreviousObjectToClip),
+                hasPreviousObjectToClip = previousObjectToClip.HasValue ? 1 : 0,
+                stereoInstanceCount = stereoRightObjectToClip.HasValue ? 2 : 1,
+                stereoObjectToClip = CombineMetalMatrices(objectToClip, rightObjectToClip),
+                stereoMotionObjectToClip = CombineMetalMatrices(resolvedMotionObjectToClip, rightMotionObjectToClip),
+                stereoPreviousObjectToClip = CombineMetalMatrices(resolvedPreviousObjectToClip, rightPreviousObjectToClip)
+            };
+            return AnityNative.Graphics_DrawCameraMesh(_handle, ref desc) == AnityNative.Result.Ok;
+        }
+        catch { if (NativeRequired) throw; return false; }
+        finally { indexPin.Free(); vertexPin.Free(); }
+    }
+
+    /// <summary>
+    /// Runs the authoritative native four-weight skinning kernel.  Output stays
+    /// in renderer-local space so the normal mesh submission path can apply the
+    /// renderer's current/previous object transforms consistently.
+    /// </summary>
+    internal static bool TrySkinMeshVertices(Mesh mesh, SkinnedMeshRenderer renderer,
+        out Vector3[] positions, out Vector3[] normals, out Vector4[] tangents)
+    {
+        positions = mesh.vertices; normals = mesh.normals; tangents = mesh.tangents;
+        BoneWeight[] weights = mesh.boneWeights;
+        Matrix4x4[] bindposes = mesh.bindposes;
+        Transform[] bones = renderer.bones;
+        Transform? rendererTransform = renderer.transform;
+        if (!AnityNative.Available || rendererTransform is null || positions.Length == 0 ||
+            weights.Length != positions.Length || bones.Length == 0 || bindposes.Length == 0)
+            return false;
+        int boneCount = Math.Min(bones.Length, bindposes.Length);
+        if (boneCount <= 0) return false;
+        var source = new AnityNative.GraphicsSkinVertex[positions.Length];
+        var nativeWeights = new AnityNative.GraphicsBoneWeight[positions.Length];
+        var matrices = new float[boneCount * 16];
+        var output = new AnityNative.GraphicsSkinVertex[positions.Length];
+        for (int i = 0; i < positions.Length; i++)
+        {
+            Vector3 normal = i < normals.Length ? normals[i] : Vector3.forward;
+            Vector4 tangent = i < tangents.Length ? tangents[i] : new Vector4(1f, 0f, 0f, 1f);
+            Vector3 position = positions[i]; BoneWeight weight = weights[i];
+            source[i] = new AnityNative.GraphicsSkinVertex { px = position.x, py = position.y, pz = position.z,
+                nx = normal.x, ny = normal.y, nz = normal.z, tx = tangent.x, ty = tangent.y, tz = tangent.z, tw = tangent.w };
+            nativeWeights[i] = new AnityNative.GraphicsBoneWeight { w0 = weight.weight0, w1 = weight.weight1,
+                w2 = weight.weight2, w3 = weight.weight3, i0 = weight.boneIndex0, i1 = weight.boneIndex1,
+                i2 = weight.boneIndex2, i3 = weight.boneIndex3 };
+        }
+        if (!TryApplyBlendShapeDeltas(mesh, renderer, source)) return false;
+        bool useVariableInfluences = mesh.TryGetVariableBoneWeights(out var bonesPerVertex, out var allBoneWeights);
+        if (useVariableInfluences && (bonesPerVertex.Length != source.Length || allBoneWeights.Length == 0)) return false;
+        var variableWeights = new AnityNative.GraphicsBoneWeight1[allBoneWeights.Length];
+        for (int i = 0; i < variableWeights.Length; i++)
+            variableWeights[i] = new AnityNative.GraphicsBoneWeight1 { weight = allBoneWeights[i].weight, boneIndex = allBoneWeights[i].boneIndex };
+        Matrix4x4 worldToRenderer = rendererTransform.worldToLocalMatrix;
+        for (int boneIndex = 0; boneIndex < boneCount; boneIndex++)
+        {
+            Transform? bone = bones[boneIndex];
+            if (bone is null) return false;
+            CopyUnityMatrix(worldToRenderer * bone.localToWorldMatrix * bindposes[boneIndex], matrices, boneIndex * 16);
+        }
+        var sourcePin = GCHandle.Alloc(source, GCHandleType.Pinned);
+        var weightsPin = GCHandle.Alloc(nativeWeights, GCHandleType.Pinned);
+        var matricesPin = GCHandle.Alloc(matrices, GCHandleType.Pinned);
+        var outputPin = GCHandle.Alloc(output, GCHandleType.Pinned);
+        var variableCountsPin = useVariableInfluences ? GCHandle.Alloc(bonesPerVertex, GCHandleType.Pinned) : default;
+        var variableWeightsPin = useVariableInfluences ? GCHandle.Alloc(variableWeights, GCHandleType.Pinned) : default;
+        try
+        {
+            var desc = new AnityNative.GraphicsSkinMeshDesc
+            {
+                sourceVertices = sourcePin.AddrOfPinnedObject(), boneWeights = weightsPin.AddrOfPinnedObject(),
+                vertexCount = source.Length, boneMatrices = matricesPin.AddrOfPinnedObject(), boneCount = boneCount,
+                outVertices = outputPin.AddrOfPinnedObject(), outVertexCount = output.Length,
+                bonesPerVertex = useVariableInfluences ? variableCountsPin.AddrOfPinnedObject() : IntPtr.Zero,
+                allBoneWeights = useVariableInfluences ? variableWeightsPin.AddrOfPinnedObject() : IntPtr.Zero,
+                allBoneWeightCount = variableWeights.Length, maxInfluences = ResolveSkinInfluenceLimit(renderer)
+            };
+            if (AnityNative.Graphics_SkinMeshVertices(ref desc) != AnityNative.Result.Ok) return false;
+        }
+        catch { return false; }
+        finally
+        {
+            if (variableWeightsPin.IsAllocated) variableWeightsPin.Free();
+            if (variableCountsPin.IsAllocated) variableCountsPin.Free();
+            outputPin.Free(); matricesPin.Free(); weightsPin.Free(); sourcePin.Free();
+        }
+        normals = new Vector3[output.Length]; tangents = new Vector4[output.Length]; positions = new Vector3[output.Length];
+        for (int i = 0; i < output.Length; i++)
+        {
+            AnityNative.GraphicsSkinVertex vertex = output[i];
+            positions[i] = new Vector3(vertex.px, vertex.py, vertex.pz);
+            normals[i] = new Vector3(vertex.nx, vertex.ny, vertex.nz);
+            tangents[i] = new Vector4(vertex.tx, vertex.ty, vertex.tz, vertex.tw);
+        }
+        return true;
+    }
+
+    private static int ResolveSkinInfluenceLimit(SkinnedMeshRenderer renderer)
+    {
+        if (renderer.skinWeight == SkinQuality.Bone1) return 1;
+        if (renderer.skinWeight == SkinQuality.Bone2) return 2;
+        if (renderer.skinWeight == SkinQuality.Bone4) return 4;
+        return QualitySettings.skinWeights switch
+        {
+            SkinWeights.OneBone => 1,
+            SkinWeights.TwoBones => 2,
+            SkinWeights.FourBones => 4,
+            SkinWeights.None => 1,
+            _ => 8
+        };
+    }
+
+    private static bool TryApplyBlendShapeDeltas(Mesh mesh, SkinnedMeshRenderer renderer,
+        AnityNative.GraphicsSkinVertex[] source)
+    {
+        int totalShapeCount = mesh.blendShapeCount;
+        if (totalShapeCount == 0) return true;
+        var activeDeltas = new List<AnityNative.GraphicsSkinVertex[]>();
+        for (int shapeIndex = 0; shapeIndex < totalShapeCount; shapeIndex++)
+        {
+            float weight = renderer.GetBlendShapeWeight(shapeIndex);
+            if (weight == 0f) continue;
+            if (!mesh.TryEvaluateBlendShape(shapeIndex, weight, out var positionDeltas,
+                    out var normalDeltas, out var tangentDeltas) || positionDeltas.Length != source.Length)
+                return false;
+            var nativeDeltas = new AnityNative.GraphicsSkinVertex[source.Length];
+            for (int vertex = 0; vertex < nativeDeltas.Length; vertex++)
+            {
+                Vector3 position = positionDeltas[vertex];
+                Vector3 normal = vertex < normalDeltas.Length ? normalDeltas[vertex] : Vector3.zero;
+                Vector3 tangent = vertex < tangentDeltas.Length ? tangentDeltas[vertex] : Vector3.zero;
+                nativeDeltas[vertex] = new AnityNative.GraphicsSkinVertex { px = position.x, py = position.y, pz = position.z,
+                    nx = normal.x, ny = normal.y, nz = normal.z, tx = tangent.x, ty = tangent.y, tz = tangent.z, tw = 0f };
+            }
+            activeDeltas.Add(nativeDeltas);
+        }
+        if (activeDeltas.Count == 0) return true;
+        var flattened = new AnityNative.GraphicsSkinVertex[activeDeltas.Count * source.Length];
+        for (int shape = 0; shape < activeDeltas.Count; shape++)
+            Array.Copy(activeDeltas[shape], 0, flattened, shape * source.Length, source.Length);
+        var blended = new AnityNative.GraphicsSkinVertex[source.Length];
+        var sourcePin = GCHandle.Alloc(source, GCHandleType.Pinned);
+        var deltasPin = GCHandle.Alloc(flattened, GCHandleType.Pinned);
+        var outputPin = GCHandle.Alloc(blended, GCHandleType.Pinned);
+        try
+        {
+            var desc = new AnityNative.GraphicsBlendShapeDesc
+            {
+                sourceVertices = sourcePin.AddrOfPinnedObject(), shapeDeltas = deltasPin.AddrOfPinnedObject(),
+                vertexCount = source.Length, shapeCount = activeDeltas.Count,
+                outVertices = outputPin.AddrOfPinnedObject(), outVertexCount = blended.Length
+            };
+            if (AnityNative.Graphics_ApplyBlendShapeDeltas(ref desc) != AnityNative.Result.Ok) return false;
+            Array.Copy(blended, source, source.Length);
+            return true;
+        }
+        catch { return false; }
+        finally { outputPin.Free(); deltasPin.Free(); sourcePin.Free(); }
+    }
+
+    private static void CopyUnityMatrix(Matrix4x4 value, float[] destination, int offset)
+    {
+        destination[offset] = value.m00; destination[offset + 1] = value.m01; destination[offset + 2] = value.m02; destination[offset + 3] = value.m03;
+        destination[offset + 4] = value.m10; destination[offset + 5] = value.m11; destination[offset + 6] = value.m12; destination[offset + 7] = value.m13;
+        destination[offset + 8] = value.m20; destination[offset + 9] = value.m21; destination[offset + 10] = value.m22; destination[offset + 11] = value.m23;
+        destination[offset + 12] = value.m30; destination[offset + 13] = value.m31; destination[offset + 14] = value.m32; destination[offset + 15] = value.m33;
+    }
+
+    private static float[] ToMetalMatrix(Matrix4x4 value) => new[]
+    {
+        value.m00, value.m10, value.m20, value.m30,
+        value.m01, value.m11, value.m21, value.m31,
+        value.m02, value.m12, value.m22, value.m32,
+        value.m03, value.m13, value.m23, value.m33
+    };
+
+    private static float[] CombineMetalMatrices(Matrix4x4 left, Matrix4x4 right)
+    {
+        var result = new float[32];
+        Array.Copy(ToMetalMatrix(left), 0, result, 0, 16);
+        Array.Copy(ToMetalMatrix(right), 0, result, 16, 16);
+        return result;
+    }
+
+    internal static void ReleaseCameraRenderTargetFromAll(RenderTexture target)
+    {
+        NativeGraphicsDevice[] devices;
+        lock (DevicesLock)
+        {
+            devices = new NativeGraphicsDevice[LiveDevices.Count];
+            LiveDevices.CopyTo(devices);
+        }
+        foreach (NativeGraphicsDevice device in devices)
+            device.ReleaseCameraRenderTarget(target);
+    }
+
+    internal bool TryReadbackCameraRenderTargetRGBA8(RenderTexture? target, out byte[] pixels, int depthSlice = 0)
+    {
+        pixels = Array.Empty<byte>();
+        if (target is null || _disposed || _handle == IntPtr.Zero || !AnityNative.Available ||
+            target.width <= 0 || target.height <= 0 || depthSlice < 0 || depthSlice >= Math.Max(1, target.volumeDepth)) return false;
+        try
+        {
+            var result = new byte[checked(target.width * target.height * 4)];
+            AnityNative.Result readbackResult = depthSlice == 0
+                ? AnityNative.Graphics_ReadbackCameraRenderTargetRGBA8(
+                    _handle, unchecked((ulong)(uint)target.GetInstanceID()), result, result.Length, out int written)
+                : AnityNative.Graphics_ReadbackCameraRenderTargetSliceRGBA8(
+                    _handle, unchecked((ulong)(uint)target.GetInstanceID()), depthSlice, result, result.Length, out written);
+            if (readbackResult != AnityNative.Result.Ok ||
+                written != result.Length) return false;
+            pixels = result;
+            return true;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Explicit ACES-to-sRGB readback for a native HDR Camera.targetTexture.</summary>
+    internal bool TryReadbackCameraRenderTargetToneMappedRGBA8(RenderTexture? target, out byte[] pixels)
+        => TryReadbackCameraRenderTargetToneMappedRGBA8(target, out pixels, 0);
+
+    /// <summary>Explicit ACES-to-sRGB readback for one HDR Texture2DArray eye layer.</summary>
+    internal bool TryReadbackCameraRenderTargetToneMappedRGBA8(RenderTexture? target, out byte[] pixels, int depthSlice)
+    {
+        pixels = Array.Empty<byte>();
+        if (target is null || _disposed || _handle == IntPtr.Zero || !AnityNative.Available ||
+            target.width <= 0 || target.height <= 0 || depthSlice < 0 ||
+            depthSlice >= Math.Max(1, target.volumeDepth)) return false;
+        try
+        {
+            var result = new byte[checked(target.width * target.height * 4)];
+            if (AnityNative.Graphics_ReadbackCameraRenderTargetToneMappedSliceRGBA8(
+                    _handle, unchecked((ulong)(uint)target.GetInstanceID()), depthSlice,
+                    result, result.Length, out int written) != AnityNative.Result.Ok ||
+                written != result.Length) return false;
+            pixels = result;
+            return true;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Copies a resolved camera color attachment without a CPU readback.</summary>
+    internal bool TryCopyCameraRenderTargetColor(RenderTexture? source, bool sourceIsCameraTarget, RenderTexture? destination,
+        int sourceSlice = 0, int destinationSlice = 0)
+    {
+        if (destination is null || _disposed || _handle == IntPtr.Zero || !AnityNative.Available ||
+            (!sourceIsCameraTarget && source is null)) return false;
+        try
+        {
+            if (sourceSlice < 0 || destinationSlice < 0 || destinationSlice >= Math.Max(1, destination.volumeDepth) ||
+                (!sourceIsCameraTarget && source is not null && sourceSlice >= Math.Max(1, source.volumeDepth))) return false;
+            ulong sourceId = source is null ? 0UL : unchecked((ulong)(uint)source.GetInstanceID());
+            ulong destinationId = unchecked((ulong)(uint)destination.GetInstanceID());
+            AnityNative.Result result = sourceSlice == 0 && destinationSlice == 0
+                ? AnityNative.Graphics_CopyCameraRenderTargetColor(_handle, sourceId, sourceIsCameraTarget ? 1 : 0, destinationId)
+                : AnityNative.Graphics_CopyCameraRenderTargetColorSlice(_handle, sourceId, sourceIsCameraTarget ? 1 : 0,
+                    sourceSlice, destinationSlice, destinationId);
+            return result == AnityNative.Result.Ok;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Writes native camera depth into the red channel of a color target on the GPU.</summary>
+    internal bool TryCopyCameraRenderTargetDepthToColor(RenderTexture? source, bool sourceIsCameraTarget, RenderTexture? destination,
+        int sourceSlice = 0, int destinationSlice = 0)
+    {
+        if (destination is null || _disposed || _handle == IntPtr.Zero || !AnityNative.Available ||
+            (!sourceIsCameraTarget && source is null)) return false;
+        try
+        {
+            if (sourceSlice < 0 || destinationSlice < 0 || destinationSlice >= Math.Max(1, destination.volumeDepth) ||
+                (!sourceIsCameraTarget && source is not null && sourceSlice >= Math.Max(1, source.volumeDepth))) return false;
+            ulong sourceId = source is null ? 0UL : unchecked((ulong)(uint)source.GetInstanceID());
+            ulong destinationId = unchecked((ulong)(uint)destination.GetInstanceID());
+            AnityNative.Result result = sourceSlice == 0 && destinationSlice == 0
+                ? AnityNative.Graphics_CopyCameraRenderTargetDepthToColor(_handle, sourceId, sourceIsCameraTarget ? 1 : 0, destinationId)
+                : AnityNative.Graphics_CopyCameraRenderTargetDepthToColorSlice(_handle, sourceId, sourceIsCameraTarget ? 1 : 0,
+                    sourceSlice, destinationSlice, destinationId);
+            return result == AnityNative.Result.Ok;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Copies the native mesh-normal attachment to a color target on the GPU.</summary>
+    internal bool TryCopyCameraRenderTargetNormalsToColor(RenderTexture? source, bool sourceIsCameraTarget, RenderTexture? destination,
+        int sourceSlice = 0, int destinationSlice = 0)
+    {
+        if (destination is null || _disposed || _handle == IntPtr.Zero || !AnityNative.Available ||
+            (!sourceIsCameraTarget && source is null)) return false;
+        try
+        {
+            if (sourceSlice < 0 || destinationSlice < 0 || destinationSlice >= Math.Max(1, destination.volumeDepth) ||
+                (!sourceIsCameraTarget && source is not null && sourceSlice >= Math.Max(1, source.volumeDepth))) return false;
+            ulong sourceId = source is null ? 0UL : unchecked((ulong)(uint)source.GetInstanceID());
+            ulong destinationId = unchecked((ulong)(uint)destination.GetInstanceID());
+            AnityNative.Result result = sourceSlice == 0 && destinationSlice == 0
+                ? AnityNative.Graphics_CopyCameraRenderTargetNormalsToColor(_handle, sourceId, sourceIsCameraTarget ? 1 : 0, destinationId)
+                : AnityNative.Graphics_CopyCameraRenderTargetNormalsToColorSlice(_handle, sourceId, sourceIsCameraTarget ? 1 : 0,
+                    sourceSlice, destinationSlice, destinationId);
+            return result == AnityNative.Result.Ok;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Copies the native RG16Float motion attachment to a matching transient target.</summary>
+    internal bool TryCopyCameraRenderTargetMotionToColor(RenderTexture? source, bool sourceIsCameraTarget, RenderTexture? destination,
+        int sourceSlice = 0, int destinationSlice = 0)
+    {
+        if (destination is null || _disposed || _handle == IntPtr.Zero || !AnityNative.Available ||
+            (!sourceIsCameraTarget && source is null)) return false;
+        try
+        {
+            if (sourceSlice < 0 || destinationSlice < 0 || destinationSlice >= Math.Max(1, destination.volumeDepth) ||
+                (!sourceIsCameraTarget && source is not null && sourceSlice >= Math.Max(1, source.volumeDepth))) return false;
+            ulong sourceId = source is null ? 0UL : unchecked((ulong)(uint)source.GetInstanceID());
+            ulong destinationId = unchecked((ulong)(uint)destination.GetInstanceID());
+            AnityNative.Result result = sourceSlice == 0 && destinationSlice == 0
+                ? AnityNative.Graphics_CopyCameraRenderTargetMotionToColor(_handle, sourceId, sourceIsCameraTarget ? 1 : 0, destinationId)
+                : AnityNative.Graphics_CopyCameraRenderTargetMotionToColorSlice(_handle, sourceId, sourceIsCameraTarget ? 1 : 0,
+                    sourceSlice, destinationSlice, destinationId);
+            return result == AnityNative.Result.Ok;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Runs the native backend's final URP HDR grade for a camera render target.</summary>
+    internal bool TryProcessCameraRenderTargetHDR(RenderTexture? target, AnityNative.HDRColorGrade grade)
+    {
+        if (target is null || _disposed || _handle == IntPtr.Zero || !AnityNative.Available)
+            return false;
+        try
+        {
+            return AnityNative.Graphics_ProcessCameraRenderTargetHDR(
+                _handle, unchecked((ulong)(uint)target.GetInstanceID()), ref grade) ==
+                AnityNative.Result.Ok;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    internal bool TryGetHDRPostProcessStats(out AnityNative.GraphicsHDRPostProcessStats stats)
+    {
+        stats = default;
+        return !_disposed && _handle != IntPtr.Zero && AnityNative.Available &&
+               AnityNative.Graphics_GetHDRPostProcessStats(_handle, out stats) ==
+               AnityNative.Result.Ok;
+    }
+
+    private static bool IsHdrRenderTexture(RenderTexture target) => target.format is
+        RenderTextureFormat.DefaultHDR or RenderTextureFormat.ARGBHalf or
+        RenderTextureFormat.ARGBFloat or RenderTextureFormat.RGB111110Float;
+
+    /// <summary>
     /// Attaches a persistent native Canvas queue to this device. The device keeps the managed
     /// canvas alive but does not own or dispose it. Passing null detaches the current queue.
     /// </summary>
@@ -258,7 +815,9 @@ public sealed class NativeGraphicsDevice : IDisposable
                 filterMode = (int)texture.filterMode,
                 wrapU = (int)texture.wrapModeU,
                 wrapV = (int)texture.wrapModeV,
-                linear = texture2D.linear ? 1 : 0
+                linear = texture2D.linear ? 1 : 0,
+                mipMapBias = texture.mipMapBias,
+                anisoLevel = EffectiveAnisoLevel(texture)
             };
             if (AnityNative.Graphics_UploadTextureRGBA8(
                     _handle, ref desc, pixels, pixels.Length) != AnityNative.Result.Ok)
@@ -1575,7 +2134,21 @@ public sealed class NativeGraphicsDevice : IDisposable
         state = Mix(state, unchecked((uint)texture.wrapModeU));
         state = Mix(state, unchecked((uint)texture.wrapModeV));
         state = Mix(state, texture.linear ? 1UL : 0UL);
+        state = Mix(state, unchecked((uint)BitConverter.SingleToInt32Bits(texture.mipMapBias)));
+        state = Mix(state, unchecked((uint)EffectiveAnisoLevel(texture)));
         return state;
+    }
+
+    private static int EffectiveAnisoLevel(Texture texture)
+    {
+        int requested = Math.Clamp(texture.anisoLevel, 1, 16);
+        return QualitySettings.anisotropicFiltering switch
+        {
+            AnisotropicFiltering.Disable => 1,
+            AnisotropicFiltering.ForceEnable => Math.Max(
+                requested, Math.Clamp(QualitySettings.anisotropicFilteringLevel, 1, 16)),
+            _ => requested
+        };
     }
 
     private void RefreshUIUploadStats()
@@ -1664,6 +2237,10 @@ public sealed class NativeGraphicsDevice : IDisposable
             }
         }
 
+        // Native-required gates must distinguish unsupported native surfaces
+        // (for example an invalid MSAA attachment) from a managed fallback.
+        if (NativeRequired) return false;
+
         // Managed headless swapchain (native lib missing or create failed)
         _managedSwapchain = true;
         LastSwapchainResult = AnityNative.Result.Ok;
@@ -1716,6 +2293,45 @@ public sealed class NativeGraphicsDevice : IDisposable
                 written != result.Length) return false;
             pixels = result;
             return true;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Explicit ACES-to-sRGB readback for a headless HDR swapchain.</summary>
+    public bool TryReadbackSwapchainToneMappedRGBA8(out byte[] pixels)
+    {
+        pixels = Array.Empty<byte>();
+        if (_disposed || _swapchain == IntPtr.Zero || !AnityNative.Available ||
+            Width <= 0 || Height <= 0) return false;
+        try
+        {
+            var result = new byte[checked(Width * Height * 4)];
+            LastSwapchainResult = AnityNative.Graphics_ReadbackSwapchainToneMappedRGBA8(
+                _swapchain, result, result.Length, out int written);
+            if (LastSwapchainResult != AnityNative.Result.Ok || written != result.Length)
+                return false;
+            pixels = result;
+            return true;
+        }
+        catch
+        {
+            if (NativeRequired) throw;
+            return false;
+        }
+    }
+
+    /// <summary>Runs the native backend's final URP HDR grade for the active swapchain.</summary>
+    public bool TryProcessSwapchainHDR(AnityNative.HDRColorGrade grade)
+    {
+        if (_disposed || _swapchain == IntPtr.Zero || !AnityNative.Available) return false;
+        try
+        {
+            LastSwapchainResult = AnityNative.Graphics_ProcessSwapchainHDR(_swapchain, ref grade);
+            return LastSwapchainResult == AnityNative.Result.Ok;
         }
         catch
         {

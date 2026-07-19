@@ -67,35 +67,56 @@ public struct RawAvatar
   public bool hasTranslationDoF { get; set; }
 }
 
+[UnityEngine.Bindings.NativeHeader("Modules/Animation/HumanDescription.h")]
+[UnityEngine.Bindings.NativeType(1, "MonoHumanBone")]
+[UnityEngine.Scripting.RequiredByNativeCode]
 public struct HumanBone
 {
   public string boneName { get; set; }
   public string humanName { get; set; }
-  public HumanLimit limit { get; set; }
+  [UnityEngine.Bindings.NativeName("m_Limit")]
+  public HumanLimit limit;
 }
 
+[UnityEngine.Bindings.NativeHeader("Modules/Animation/HumanDescription.h")]
+[UnityEngine.Bindings.NativeType(1, "MonoSkeletonBone")]
+[UnityEngine.Scripting.RequiredByNativeCode]
 public struct SkeletonBone
 {
-  public string name { get; set; }
-  public Vector3 position { get; set; }
-  public Quaternion rotation { get; set; }
-  public Vector3 scale { get; set; }
-  public bool transformModified { get; set; }
+  [UnityEngine.Bindings.NativeName("m_Name")]
+  public string name;
+  [UnityEngine.Bindings.NativeName("m_Position")]
+  public Vector3 position;
+  [UnityEngine.Bindings.NativeName("m_Rotation")]
+  public Quaternion rotation;
+  [UnityEngine.Bindings.NativeName("m_Scale")]
+  public Vector3 scale;
+
+  [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+  [System.Obsolete("transformModified is no longer used and has been deprecated.", true)]
+  public int transformModified { get; set; }
 }
 
+[UnityEngine.Bindings.NativeHeader("Modules/Animation/HumanDescription.h")]
+[UnityEngine.Bindings.NativeHeader("Modules/Animation/ScriptBindings/AvatarBuilder.bindings.h")]
+[UnityEngine.Bindings.NativeType(1, "MonoHumanLimit")]
 public struct HumanLimit
 {
   public bool useDefaultValues { get; set; }
-  public float min { get; set; }
-  public float max { get; set; }
-  public float center { get; set; }
+  public Vector3 min { get; set; }
+  public Vector3 max { get; set; }
+  public Vector3 center { get; set; }
   public float axisLength { get; set; }
 }
 
+[UnityEngine.Bindings.NativeHeader("Modules/Animation/HumanDescription.h")]
+[UnityEngine.Bindings.NativeHeader("Modules/Animation/ScriptBindings/AvatarBuilder.bindings.h")]
 public struct HumanDescription
 {
-  public HumanBone[] human { get; set; }
-  public SkeletonBone[] skeleton { get; set; }
+  [UnityEngine.Bindings.NativeName("m_Human")]
+  public HumanBone[] human;
+  [UnityEngine.Bindings.NativeName("m_Skeleton")]
+  public SkeletonBone[] skeleton;
   public float upperArmTwist { get; set; }
   public float lowerArmTwist { get; set; }
   public float upperLegTwist { get; set; }
@@ -104,21 +125,4 @@ public struct HumanDescription
   public float legStretch { get; set; }
   public float feetSpacing { get; set; }
   public bool hasTranslationDoF { get; set; }
-  public bool extraSkeleton { get; set; }
-  public float armTwist { get; set; }
-  public float forearmTwist { get; set; }
-  public float legTwist { get; set; }
-  public float armLength { get; set; }
-  public float forearmLength { get; set; }
-  public float handLength { get; set; }
-  public float footLength { get; set; }
-  public float fingerLength { get; set; }
-  public float toeLength { get; set; }
-  public float handFingerIK { get; set; }
-  public float footIK { get; set; }
-  public float armIK { get; set; }
-  public float legIK { get; set; }
-  public float bodyYaw { get; set; }
-  public float bodyPitch { get; set; }
-  public float bodyRoll { get; set; }
 }

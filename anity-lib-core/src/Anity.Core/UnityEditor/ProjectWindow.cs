@@ -398,7 +398,7 @@ namespace UnityEditor
     private void SelectAsset(ProjectAsset asset)
     {
       _selectedAsset = asset.InstanceID;
-      var obj = AssetDatabase.LoadAssetAtPath(asset.Path) as UnityEngine.Object;
+      var obj = AssetDatabase.LoadMainAssetAtPath(asset.Path);
       if (obj != null)
       {
         Selection.SetActiveObject(obj);
@@ -440,7 +440,7 @@ namespace UnityEditor
       if (MediaFormatUtility.IsSupportedAudioExtension(ext) ||
           MediaFormatUtility.IsSupportedVideoExtension(ext))
       {
-        var mediaObj = AssetDatabase.LoadAssetAtPath(asset.Path) as UnityEngine.Object;
+        var mediaObj = AssetDatabase.LoadMainAssetAtPath(asset.Path);
         if (mediaObj == null && MediaFormatUtility.IsSupportedAudioExtension(ext))
         {
           mediaObj = AudioClip.CreateFromFile(asset.Path);
@@ -458,7 +458,7 @@ namespace UnityEditor
         return;
       }
 
-      var obj = AssetDatabase.LoadAssetAtPath(asset.Path) as UnityEngine.Object;
+      var obj = AssetDatabase.LoadMainAssetAtPath(asset.Path);
       if (obj != null)
       {
         Selection.SetActiveObject(obj);
@@ -500,7 +500,7 @@ namespace UnityEditor
     {
       string path = Path.Combine(_selectedFolderPath, $"{name}.{extension}").Replace('\\', '/');
       path = AssetDatabase.GenerateUniqueAssetPath(path);
-      AssetDatabase.CreateAsset(null, path);
+      AssetDatabase.CreateAsset(new TextAsset(), path);
       RefreshAssetList();
     }
 
@@ -531,7 +531,7 @@ namespace UnityEditor
 
         var fileName = Path.GetFileName(path);
         var ext = Path.GetExtension(path).ToLowerInvariant();
-        var asset = AssetDatabase.LoadAssetAtPath(path);
+        var asset = AssetDatabase.LoadMainAssetAtPath(path);
 
         if (ext == string.Empty || (asset == null && AssetDatabase.IsValidFolder(path)))
           continue;
@@ -713,7 +713,38 @@ namespace UnityEditor
   {
   }
 
-  internal sealed class MonoScript : UnityEngine.Object
+  [UnityEngine.Bindings.NativeType("Editor/Mono/MonoScript.bindings.h")]
+  [UnityEngine.ExcludeFromPreset]
+  [UnityEngine.NativeClass(null)]
+  public class MonoScript : UnityEngine.TextAsset
   {
+    private static readonly Dictionary<Type, MonoScript> ScriptsByType = new();
+    private static readonly object ScriptsLock = new();
+    private readonly Type? _class;
+
+    public MonoScript() { }
+    private MonoScript(Type scriptClass)
+    {
+      _class = scriptClass;
+      name = scriptClass.Name;
+    }
+
+    public Type? GetClass() => _class;
+
+    public static MonoScript? FromMonoBehaviour(MonoBehaviour behaviour)
+      => behaviour == null ? null : GetOrCreate(behaviour.GetType());
+
+    public static MonoScript? FromScriptableObject(ScriptableObject scriptableObject)
+      => scriptableObject == null ? null : GetOrCreate(scriptableObject.GetType());
+
+    private static MonoScript GetOrCreate(Type scriptClass)
+    {
+      lock (ScriptsLock)
+      {
+        if (!ScriptsByType.TryGetValue(scriptClass, out var script))
+          ScriptsByType.Add(scriptClass, script = new MonoScript(scriptClass));
+        return script;
+      }
+    }
   }
 }

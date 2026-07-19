@@ -18,6 +18,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d11.h>
+#include <d3d11_1.h>
 #include <d3dcompiler.h>
 #include <dxgi.h>
 
@@ -25,6 +26,20 @@ struct D3D11TextureResource {
   ID3D11Texture2D* texture = nullptr;
   ID3D11ShaderResourceView* view = nullptr;
   ID3D11SamplerState* sampler = nullptr;
+};
+
+struct D3D11CameraRenderTarget {
+  int32_t width = 0;
+  int32_t height = 0;
+  int32_t msaaSamples = 1;
+  int32_t hdrEnabled = 0;
+  ID3D11Texture2D* resolveTexture = nullptr;
+  ID3D11RenderTargetView* resolveRtv = nullptr;
+  ID3D11Texture2D* msaaTexture = nullptr;
+  ID3D11RenderTargetView* msaaRtv = nullptr;
+  ID3D11Texture2D* depthTexture = nullptr;
+  ID3D11DepthStencilView* depthDsv = nullptr;
+  ID3D11ShaderResourceView* depthSrv = nullptr;
 };
 
 struct D3D11State {
@@ -53,9 +68,13 @@ struct D3D11State {
   ID3D11BlendState* uiBlendState = nullptr;
   ID3D11RasterizerState* uiRasterizerState = nullptr;
   ID3D11DepthStencilState* uiDepthState = nullptr;
+  ID3D11ComputeShader* depthCopyShader = nullptr;
+  ID3D11ComputeShader* depthCopyMsaaShader = nullptr;
   std::mutex textureMutex;
   std::unordered_map<uint64_t, D3D11TextureResource> textures;
   D3D11TextureResource whiteTexture;
+  std::mutex cameraTargetMutex;
+  std::unordered_map<uint64_t, D3D11CameraRenderTarget> cameraTargets;
 };
 
 static_assert(offsetof(AnityUIPackedVertex, color) == 12,
@@ -72,6 +91,17 @@ static void ReleaseTextureResource(D3D11TextureResource& resource) {
   resource = {};
 }
 
+static void ReleaseCameraRenderTarget(D3D11CameraRenderTarget& target) {
+  if (target.msaaRtv) target.msaaRtv->Release();
+  if (target.msaaTexture) target.msaaTexture->Release();
+  if (target.resolveRtv) target.resolveRtv->Release();
+  if (target.resolveTexture) target.resolveTexture->Release();
+  if (target.depthDsv) target.depthDsv->Release();
+  if (target.depthSrv) target.depthSrv->Release();
+  if (target.depthTexture) target.depthTexture->Release();
+  target = {};
+}
+
 static D3D11_TEXTURE_ADDRESS_MODE ToD3D11AddressMode(int32_t wrapMode) {
   switch (wrapMode) {
     case 1: return D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -81,7 +111,9 @@ static D3D11_TEXTURE_ADDRESS_MODE ToD3D11AddressMode(int32_t wrapMode) {
   }
 }
 
-static D3D11_FILTER ToD3D11Filter(int32_t filterMode) {
+static D3D11_FILTER ToD3D11Filter(int32_t filterMode, int32_t anisoLevel) {
+  if (anisoLevel > 1 && filterMode != 0)
+    return D3D11_FILTER_ANISOTROPIC;
   switch (filterMode) {
     case 0: return D3D11_FILTER_MIN_MAG_MIP_POINT;
     case 2: return D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -126,11 +158,12 @@ static AnityResult CreateTextureResource(
     return ANITY_ERR_OUT_OF_MEMORY;
   }
   D3D11_SAMPLER_DESC samplerDesc{};
-  samplerDesc.Filter = ToD3D11Filter(desc.filterMode);
+  samplerDesc.Filter = ToD3D11Filter(desc.filterMode, desc.anisoLevel);
   samplerDesc.AddressU = ToD3D11AddressMode(desc.wrapU);
   samplerDesc.AddressV = ToD3D11AddressMode(desc.wrapV);
   samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-  samplerDesc.MaxAnisotropy = 1;
+  samplerDesc.MipLODBias = desc.mipMapBias;
+  samplerDesc.MaxAnisotropy = static_cast<UINT>(std::max(1, desc.anisoLevel));
   samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
   samplerDesc.MinLOD = 0.0f;
   samplerDesc.MaxLOD = FLT_MAX;
@@ -217,6 +250,110 @@ static AnityResult EnsureUIRenderTarget(D3D11State* st, UINT width, UINT height,
   return ANITY_OK;
 }
 
+static AnityResult CreateCameraRenderTarget(D3D11State* st,
+    const AnityGraphicsCameraRenderTargetDesc& desc, D3D11CameraRenderTarget& target) {
+  if (!st || !st->device) return ANITY_ERR_INVALID_ARG;
+  const DXGI_FORMAT format = desc.hdrEnabled != 0
+      ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+  D3D11_TEXTURE2D_DESC textureDesc{};
+  textureDesc.Width = static_cast<UINT>(desc.width);
+  textureDesc.Height = static_cast<UINT>(desc.height);
+  textureDesc.MipLevels = 1;
+  textureDesc.ArraySize = 1;
+  textureDesc.Format = format;
+  textureDesc.SampleDesc.Count = 1;
+  textureDesc.Usage = D3D11_USAGE_DEFAULT;
+  textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE |
+      D3D11_BIND_UNORDERED_ACCESS;
+  if (FAILED(st->device->CreateTexture2D(&textureDesc, nullptr, &target.resolveTexture)))
+    return ANITY_ERR_OUT_OF_MEMORY;
+  if (FAILED(st->device->CreateRenderTargetView(target.resolveTexture, nullptr, &target.resolveRtv))) {
+    ReleaseCameraRenderTarget(target);
+    return ANITY_ERR_OUT_OF_MEMORY;
+  }
+  if (desc.msaaSamples > 1) {
+    textureDesc.SampleDesc.Count = static_cast<UINT>(desc.msaaSamples);
+    textureDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    if (FAILED(st->device->CreateTexture2D(&textureDesc, nullptr, &target.msaaTexture)) ||
+        FAILED(st->device->CreateRenderTargetView(target.msaaTexture, nullptr, &target.msaaRtv))) {
+      ReleaseCameraRenderTarget(target);
+      return ANITY_ERR_NOT_SUPPORTED;
+    }
+  }
+  D3D11_TEXTURE2D_DESC depthDesc{};
+  depthDesc.Width = static_cast<UINT>(desc.width);
+  depthDesc.Height = static_cast<UINT>(desc.height);
+  depthDesc.MipLevels = 1;
+  depthDesc.ArraySize = 1;
+  depthDesc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+  depthDesc.SampleDesc.Count = static_cast<UINT>(desc.msaaSamples);
+  depthDesc.Usage = D3D11_USAGE_DEFAULT;
+  depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+  if (FAILED(st->device->CreateTexture2D(&depthDesc, nullptr, &target.depthTexture))) {
+    ReleaseCameraRenderTarget(target);
+    return ANITY_ERR_NOT_SUPPORTED;
+  }
+  D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+  dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+  dsvDesc.ViewDimension = desc.msaaSamples > 1 ? D3D11_DSV_DIMENSION_TEXTURE2DMS :
+      D3D11_DSV_DIMENSION_TEXTURE2D;
+  if (dsvDesc.ViewDimension == D3D11_DSV_DIMENSION_TEXTURE2D)
+    dsvDesc.Texture2D.MipSlice = 0;
+  D3D11_SHADER_RESOURCE_VIEW_DESC depthSrvDesc{};
+  depthSrvDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+  depthSrvDesc.ViewDimension = desc.msaaSamples > 1 ? D3D11_SRV_DIMENSION_TEXTURE2DMS :
+      D3D11_SRV_DIMENSION_TEXTURE2D;
+  if (depthSrvDesc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D) {
+    depthSrvDesc.Texture2D.MostDetailedMip = 0;
+    depthSrvDesc.Texture2D.MipLevels = 1;
+  }
+  if (FAILED(st->device->CreateDepthStencilView(target.depthTexture, &dsvDesc, &target.depthDsv)) ||
+      FAILED(st->device->CreateShaderResourceView(target.depthTexture, &depthSrvDesc, &target.depthSrv))) {
+    ReleaseCameraRenderTarget(target);
+    return ANITY_ERR_NOT_SUPPORTED;
+  }
+  target.width = desc.width;
+  target.height = desc.height;
+  target.msaaSamples = desc.msaaSamples;
+  target.hdrEnabled = desc.hdrEnabled;
+  return ANITY_OK;
+}
+
+static AnityResult CopyRenderTargetRGBA8(D3D11State* st, ID3D11Texture2D* source,
+    int32_t width, int32_t height, uint8_t* pixels, int32_t pixelCapacity,
+    int32_t* outWritten) {
+  if (!st || !source || !outWritten || pixelCapacity < 0) return ANITY_ERR_INVALID_ARG;
+  const uint64_t byteCount = static_cast<uint64_t>(width) * height * 4u;
+  if (byteCount > static_cast<uint64_t>(INT_MAX)) return ANITY_ERR_OUT_OF_MEMORY;
+  const int32_t required = static_cast<int32_t>(byteCount);
+  *outWritten = required;
+  if (pixelCapacity < required || (required > 0 && !pixels)) return ANITY_ERR_INVALID_ARG;
+  D3D11_TEXTURE2D_DESC desc{};
+  source->GetDesc(&desc);
+  if (desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM || desc.SampleDesc.Count != 1)
+    return ANITY_ERR_NOT_SUPPORTED;
+  desc.Usage = D3D11_USAGE_STAGING;
+  desc.BindFlags = 0;
+  desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+  desc.MiscFlags = 0;
+  ID3D11Texture2D* staging = nullptr;
+  if (FAILED(st->device->CreateTexture2D(&desc, nullptr, &staging))) return ANITY_ERR_OUT_OF_MEMORY;
+  st->context->CopyResource(staging, source);
+  D3D11_MAPPED_SUBRESOURCE mapped{};
+  if (FAILED(st->context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) {
+    staging->Release();
+    return ANITY_ERR_DEVICE_LOST;
+  }
+  const size_t rowBytes = static_cast<size_t>(width) * 4u;
+  for (int32_t row = 0; row < height; ++row)
+    std::memcpy(pixels + static_cast<size_t>(row) * rowBytes,
+        static_cast<const uint8_t*>(mapped.pData) + static_cast<size_t>(row) * mapped.RowPitch,
+        rowBytes);
+  st->context->Unmap(staging, 0);
+  staging->Release();
+  return ANITY_OK;
+}
+
 static AnityResult EnsureUIPipeline(D3D11State* st) {
   if (st->uiVertexShader && st->uiPixelShader && st->uiInputLayout)
     return ANITY_OK;
@@ -298,6 +435,58 @@ static AnityResult EnsureUIPipeline(D3D11State* st) {
   depth.StencilEnable = FALSE;
   if (FAILED(st->device->CreateDepthStencilState(&depth, &st->uiDepthState)))
     return ANITY_ERR_OUT_OF_MEMORY;
+  return ANITY_OK;
+}
+
+/* Converts the typeless D24 camera attachment to the URP depth-texture
+ * convention (linear depth in R).  The source variants deliberately use
+ * Load, matching Metal/Vulkan's sample-zero MSAA contract rather than an
+ * implicit resolve. */
+static AnityResult EnsureDepthCopyPipelines(D3D11State* st) {
+  if (!st || !st->device) return ANITY_ERR_INVALID_ARG;
+  if (st->depthCopyShader && st->depthCopyMsaaShader) return ANITY_OK;
+  static const char* singleSource =
+      "Texture2D<float> inputDepth : register(t0);"
+      "RWTexture2D<float4> outputColor : register(u0);"
+      "[numthreads(8,8,1)] void CSMain(uint3 id : SV_DispatchThreadID) {"
+      "uint w,h; outputColor.GetDimensions(w,h); if(id.x>=w||id.y>=h)return;"
+      "float d=inputDepth.Load(int3(id.xy,0)); outputColor[id.xy]=float4(d,0,0,1); }";
+  static const char* msaaSource =
+      "Texture2DMS<float> inputDepth : register(t0);"
+      "RWTexture2D<float4> outputColor : register(u0);"
+      "[numthreads(8,8,1)] void CSMain(uint3 id : SV_DispatchThreadID) {"
+      "uint w,h; outputColor.GetDimensions(w,h); if(id.x>=w||id.y>=h)return;"
+      "float d=inputDepth.Load(id.xy,0); outputColor[id.xy]=float4(d,0,0,1); }";
+  ID3DBlob* singleBlob = nullptr;
+  ID3DBlob* msaaBlob = nullptr;
+  ID3DBlob* errors = nullptr;
+  HRESULT hr = D3DCompile(singleSource, std::strlen(singleSource), "AnityDepthCopy",
+      nullptr, nullptr, "CSMain", "cs_5_0", 0, 0, &singleBlob, &errors);
+  if (errors) errors->Release();
+  if (FAILED(hr) || !singleBlob) return ANITY_ERR_NOT_SUPPORTED;
+  errors = nullptr;
+  hr = D3DCompile(msaaSource, std::strlen(msaaSource), "AnityDepthCopyMSAA",
+      nullptr, nullptr, "CSMain", "cs_5_0", 0, 0, &msaaBlob, &errors);
+  if (errors) errors->Release();
+  if (FAILED(hr) || !msaaBlob) {
+    singleBlob->Release();
+    return ANITY_ERR_NOT_SUPPORTED;
+  }
+  ID3D11ComputeShader* single = nullptr;
+  ID3D11ComputeShader* msaa = nullptr;
+  hr = st->device->CreateComputeShader(singleBlob->GetBufferPointer(),
+      singleBlob->GetBufferSize(), nullptr, &single);
+  if (SUCCEEDED(hr)) hr = st->device->CreateComputeShader(msaaBlob->GetBufferPointer(),
+      msaaBlob->GetBufferSize(), nullptr, &msaa);
+  singleBlob->Release();
+  msaaBlob->Release();
+  if (FAILED(hr) || !single || !msaa) {
+    if (single) single->Release();
+    if (msaa) msaa->Release();
+    return ANITY_ERR_NOT_SUPPORTED;
+  }
+  st->depthCopyShader = single;
+  st->depthCopyMsaaShader = msaa;
   return ANITY_OK;
 }
 
@@ -453,6 +642,199 @@ extern "C" AnityResult AnityGraphics_D3D11_BeginFrame(AnityGraphicsDevice* devic
   return ANITY_OK;
 }
 
+extern "C" AnityResult AnityGraphics_D3D11_EnsureCameraRenderTarget(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraRenderTargetDesc* desc) {
+  auto* st = GetState(device);
+  if (!st || !desc || desc->targetId == 0) return ANITY_ERR_INVALID_ARG;
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  auto existing = st->cameraTargets.find(desc->targetId);
+  if (existing != st->cameraTargets.end() &&
+      existing->second.width == desc->width && existing->second.height == desc->height &&
+      existing->second.msaaSamples == desc->msaaSamples &&
+      existing->second.hdrEnabled == desc->hdrEnabled)
+    return ANITY_OK;
+  D3D11CameraRenderTarget replacement;
+  AnityResult result = CreateCameraRenderTarget(st, *desc, replacement);
+  if (result != ANITY_OK) return result;
+  if (existing != st->cameraTargets.end()) {
+    ReleaseCameraRenderTarget(existing->second);
+    existing->second = replacement;
+  } else {
+    st->cameraTargets.emplace(desc->targetId, replacement);
+  }
+  return ANITY_OK;
+}
+
+extern "C" void AnityGraphics_D3D11_DestroyCameraRenderTarget(
+    AnityGraphicsDevice* device, uint64_t targetId) {
+  auto* st = GetState(device);
+  if (!st || targetId == 0) return;
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  auto existing = st->cameraTargets.find(targetId);
+  if (existing == st->cameraTargets.end()) return;
+  ReleaseCameraRenderTarget(existing->second);
+  st->cameraTargets.erase(existing);
+}
+
+extern "C" AnityResult AnityGraphics_D3D11_ExecuteCameraPass(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraPassDesc* desc) {
+  auto* st = GetState(device);
+  if (!st || !desc) return ANITY_ERR_INVALID_ARG;
+  if ((desc->flags & ANITY_CAMERA_PASS_TARGET_IS_CAMERA_TARGET) != 0)
+    return ANITY_ERR_NOT_SUPPORTED;
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  auto found = st->cameraTargets.find(desc->targetId);
+  if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  D3D11CameraRenderTarget& target = found->second;
+  if (target.width != desc->targetWidth || target.height != desc->targetHeight ||
+      target.msaaSamples != desc->msaaSamples ||
+      (target.hdrEnabled != 0) != ((desc->flags & ANITY_CAMERA_PASS_HDR) != 0))
+    return ANITY_ERR_INVALID_ARG;
+  const bool fullViewport = desc->viewportX == 0.f && desc->viewportY == 0.f &&
+      desc->viewportWidth == static_cast<float>(target.width) &&
+      desc->viewportHeight == static_cast<float>(target.height);
+  if (!fullViewport && (desc->flags & ANITY_CAMERA_PASS_CLEAR_DEPTH) != 0)
+    return ANITY_ERR_NOT_SUPPORTED;
+  ID3D11RenderTargetView* activeTarget = target.msaaRtv ? target.msaaRtv : target.resolveRtv;
+  st->context->OMSetRenderTargets(1, &activeTarget, target.depthDsv);
+  D3D11_VIEWPORT viewport{};
+  viewport.TopLeftX = desc->viewportX;
+  viewport.TopLeftY = desc->viewportY;
+  viewport.Width = desc->viewportWidth;
+  viewport.Height = desc->viewportHeight;
+  viewport.MaxDepth = 1.f;
+  st->context->RSSetViewports(1, &viewport);
+  if ((desc->flags & ANITY_CAMERA_PASS_CLEAR_COLOR) != 0) {
+    const float clear[4] = {desc->clearR, desc->clearG, desc->clearB, desc->clearA};
+    if (fullViewport) {
+      st->context->ClearRenderTargetView(activeTarget, clear);
+    } else {
+      ID3D11DeviceContext1* context1 = nullptr;
+      if (FAILED(st->context->QueryInterface(__uuidof(ID3D11DeviceContext1),
+              reinterpret_cast<void**>(&context1))) || !context1)
+        return ANITY_ERR_NOT_SUPPORTED;
+      D3D11_RECT clearRect{};
+      clearRect.left = std::max<LONG>(0, static_cast<LONG>(std::floor(desc->viewportX)));
+      clearRect.top = std::max<LONG>(0, static_cast<LONG>(std::floor(desc->viewportY)));
+      clearRect.right = std::min<LONG>(target.width,
+          static_cast<LONG>(std::ceil(desc->viewportX + desc->viewportWidth)));
+      clearRect.bottom = std::min<LONG>(target.height,
+          static_cast<LONG>(std::ceil(desc->viewportY + desc->viewportHeight)));
+      if (clearRect.right > clearRect.left && clearRect.bottom > clearRect.top)
+        context1->ClearView(activeTarget, clear, &clearRect, 1);
+      context1->Release();
+    }
+  }
+  if ((desc->flags & ANITY_CAMERA_PASS_CLEAR_DEPTH) != 0)
+    st->context->ClearDepthStencilView(target.depthDsv, D3D11_CLEAR_DEPTH,
+        desc->clearDepth, 0);
+  if (target.msaaTexture && (desc->flags & ANITY_CAMERA_PASS_STORE_COLOR) != 0)
+    st->context->ResolveSubresource(target.resolveTexture, 0, target.msaaTexture, 0,
+        target.hdrEnabled ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM);
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_D3D11_ReadbackCameraRenderTargetRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, uint8_t* pixels,
+    int32_t pixelCapacity, int32_t* outWritten) {
+  auto* st = GetState(device);
+  if (!st || targetId == 0) return ANITY_ERR_INVALID_ARG;
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  auto found = st->cameraTargets.find(targetId);
+  if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  D3D11CameraRenderTarget& target = found->second;
+  return CopyRenderTargetRGBA8(st, target.resolveTexture, target.width, target.height,
+      pixels, pixelCapacity, outWritten);
+}
+
+extern "C" AnityResult AnityGraphics_D3D11_CopyCameraRenderTargetColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId) {
+  auto* st = GetState(device);
+  if (!st || destinationTargetId == 0 ||
+      (sourceIsCameraTarget != 0 && sourceIsCameraTarget != 1) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == 0) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == destinationTargetId))
+    return ANITY_ERR_INVALID_ARG;
+  // D3D's swapchain CameraTarget does not yet have the required shader-copy
+  // control plane. Never silently copy the backbuffer or a stale resource.
+  if (sourceIsCameraTarget != 0) return ANITY_ERR_NOT_SUPPORTED;
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto source = st->cameraTargets.find(sourceTargetId);
+  const auto destination = st->cameraTargets.find(destinationTargetId);
+  if (source == st->cameraTargets.end() || destination == st->cameraTargets.end())
+    return ANITY_ERR_INVALID_ARG;
+  const D3D11CameraRenderTarget& sourceTarget = source->second;
+  const D3D11CameraRenderTarget& destinationTarget = destination->second;
+  if (!sourceTarget.resolveTexture || !destinationTarget.resolveTexture ||
+      sourceTarget.width != destinationTarget.width ||
+      sourceTarget.height != destinationTarget.height ||
+      sourceTarget.hdrEnabled != destinationTarget.hdrEnabled)
+    return ANITY_ERR_NOT_SUPPORTED;
+  D3D11_TEXTURE2D_DESC sourceDesc{};
+  D3D11_TEXTURE2D_DESC destinationDesc{};
+  sourceTarget.resolveTexture->GetDesc(&sourceDesc);
+  destinationTarget.resolveTexture->GetDesc(&destinationDesc);
+  if (sourceDesc.Format != destinationDesc.Format ||
+      sourceDesc.SampleDesc.Count != 1 || destinationDesc.SampleDesc.Count != 1)
+    return ANITY_ERR_NOT_SUPPORTED;
+  st->context->CopyResource(destinationTarget.resolveTexture, sourceTarget.resolveTexture);
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_D3D11_CopyCameraRenderTargetDepthToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId) {
+  auto* st = GetState(device);
+  if (!st || destinationTargetId == 0 ||
+      (sourceIsCameraTarget != 0 && sourceIsCameraTarget != 1) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == 0) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == destinationTargetId))
+    return ANITY_ERR_INVALID_ARG;
+  // Backbuffer depth is not persistently owned by this backend yet. Never
+  // substitute a stale depth resource for Unity's CameraTarget contract.
+  if (sourceIsCameraTarget != 0) return ANITY_ERR_NOT_SUPPORTED;
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto source = st->cameraTargets.find(sourceTargetId);
+  const auto destination = st->cameraTargets.find(destinationTargetId);
+  if (source == st->cameraTargets.end() || destination == st->cameraTargets.end())
+    return ANITY_ERR_INVALID_ARG;
+  const D3D11CameraRenderTarget& sourceTarget = source->second;
+  const D3D11CameraRenderTarget& destinationTarget = destination->second;
+  if (!sourceTarget.depthSrv || !destinationTarget.resolveTexture ||
+      sourceTarget.width != destinationTarget.width ||
+      sourceTarget.height != destinationTarget.height || destinationTarget.hdrEnabled != 0)
+    return ANITY_ERR_NOT_SUPPORTED;
+  D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
+  uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+  uavDesc.Texture2D.MipSlice = 0;
+  ID3D11UnorderedAccessView* output = nullptr;
+  if (FAILED(st->device->CreateUnorderedAccessView(destinationTarget.resolveTexture,
+          &uavDesc, &output)) || !output)
+    return ANITY_ERR_NOT_SUPPORTED;
+  const AnityResult pipelineResult = EnsureDepthCopyPipelines(st);
+  if (pipelineResult != ANITY_OK) {
+    output->Release();
+    return pipelineResult;
+  }
+  ID3D11ShaderResourceView* input = sourceTarget.depthSrv;
+  st->context->CSSetShaderResources(0, 1, &input);
+  UINT initialCount = 0;
+  st->context->CSSetUnorderedAccessViews(0, 1, &output, &initialCount);
+  st->context->CSSetShader(sourceTarget.msaaSamples > 1 ? st->depthCopyMsaaShader :
+      st->depthCopyShader, nullptr, 0);
+  st->context->Dispatch(static_cast<UINT>((sourceTarget.width + 7) / 8),
+      static_cast<UINT>((sourceTarget.height + 7) / 8), 1);
+  ID3D11ShaderResourceView* nullSrv = nullptr;
+  ID3D11UnorderedAccessView* nullUav = nullptr;
+  st->context->CSSetShaderResources(0, 1, &nullSrv);
+  st->context->CSSetUnorderedAccessViews(0, 1, &nullUav, &initialCount);
+  st->context->CSSetShader(nullptr, nullptr, 0);
+  output->Release();
+  return ANITY_OK;
+}
+
 extern "C" AnityResult AnityGraphics_D3D11_Present(AnityGraphicsDevice* device) {
   auto* st = GetState(device);
   if (!st) return ANITY_ERR_INVALID_ARG;
@@ -479,11 +861,18 @@ extern "C" void AnityGraphics_D3D11_Destroy(AnityGraphicsDevice* device) {
   if (st->uiBlendState) st->uiBlendState->Release();
   if (st->uiRasterizerState) st->uiRasterizerState->Release();
   if (st->uiDepthState) st->uiDepthState->Release();
+  if (st->depthCopyShader) st->depthCopyShader->Release();
+  if (st->depthCopyMsaaShader) st->depthCopyMsaaShader->Release();
   {
     std::lock_guard<std::mutex> lock(st->textureMutex);
     for (auto& entry : st->textures) ReleaseTextureResource(entry.second);
     st->textures.clear();
     ReleaseTextureResource(st->whiteTexture);
+  }
+  {
+    std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+    for (auto& entry : st->cameraTargets) ReleaseCameraRenderTarget(entry.second);
+    st->cameraTargets.clear();
   }
   if (st->uiOffscreenRTV) st->uiOffscreenRTV->Release();
   if (st->uiOffscreenTexture) st->uiOffscreenTexture->Release();
@@ -713,6 +1102,18 @@ extern "C" AnityResult AnityGraphics_CreateD3D11(
   return ANITY_ERR_NOT_SUPPORTED;
 }
 extern "C" AnityResult AnityGraphics_D3D11_BeginFrame(AnityGraphicsDevice*) { return ANITY_ERR_NOT_SUPPORTED; }
+extern "C" AnityResult AnityGraphics_D3D11_EnsureCameraRenderTarget(
+    AnityGraphicsDevice*, const AnityGraphicsCameraRenderTargetDesc*) { return ANITY_ERR_NOT_SUPPORTED; }
+extern "C" void AnityGraphics_D3D11_DestroyCameraRenderTarget(
+    AnityGraphicsDevice*, uint64_t) {}
+extern "C" AnityResult AnityGraphics_D3D11_ExecuteCameraPass(
+    AnityGraphicsDevice*, const AnityGraphicsCameraPassDesc*) { return ANITY_ERR_NOT_SUPPORTED; }
+extern "C" AnityResult AnityGraphics_D3D11_ReadbackCameraRenderTargetRGBA8(
+    AnityGraphicsDevice*, uint64_t, uint8_t*, int32_t, int32_t*) { return ANITY_ERR_NOT_SUPPORTED; }
+extern "C" AnityResult AnityGraphics_D3D11_CopyCameraRenderTargetColor(
+    AnityGraphicsDevice*, uint64_t, int32_t, uint64_t) { return ANITY_ERR_NOT_SUPPORTED; }
+extern "C" AnityResult AnityGraphics_D3D11_CopyCameraRenderTargetDepthToColor(
+    AnityGraphicsDevice*, uint64_t, int32_t, uint64_t) { return ANITY_ERR_NOT_SUPPORTED; }
 extern "C" AnityResult AnityGraphics_D3D11_Present(AnityGraphicsDevice*) { return ANITY_ERR_NOT_SUPPORTED; }
 extern "C" void AnityGraphics_D3D11_Destroy(AnityGraphicsDevice*) {}
 extern "C" AnityResult AnityGraphics_D3D11_UploadUI(

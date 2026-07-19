@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Anity.Core.Runtime.Native;
 using Unity.Collections;
 using Unity.Jobs;
 
@@ -410,6 +411,8 @@ public static class Graphics
 
     public static void ExecuteCommandBuffer(CommandBuffer commandBuffer)
     {
+        if (commandBuffer == null) throw new ArgumentNullException(nameof(commandBuffer));
+        commandBuffer.ScheduleFences();
         _drawCommands.Add(new DrawCommand
         {
             type = DrawCommandType.ExecuteCommandBuffer,
@@ -420,6 +423,8 @@ public static class Graphics
 
     public static void ExecuteCommandBufferAsync(CommandBuffer commandBuffer, ComputeQueueType queueType)
     {
+        if (commandBuffer == null) throw new ArgumentNullException(nameof(commandBuffer));
+        commandBuffer.ScheduleFences();
         _drawCommands.Add(new DrawCommand
         {
             type = DrawCommandType.ExecuteCommandBuffer,
@@ -516,6 +521,31 @@ public struct ScriptableRenderContext
     private bool _submitted;
     private CullingResults _cullingResults;
     private bool _hasCullingResults;
+    private Anity.Core.Runtime.Native.NativeGraphicsDevice? _nativeGraphicsDevice;
+    private RenderTexture? _nativeCameraTarget;
+    private int _nativeCameraTargetSlice;
+    private Matrix4x4 _nativeViewProjection;
+    private Matrix4x4 _nativeTransparentViewProjection;
+    private Matrix4x4 _nativeMotionViewProjection;
+    private Matrix4x4 _nativePreviousMotionViewProjection;
+    private Matrix4x4 _nativeStereoRightViewProjection;
+    private Matrix4x4 _nativeStereoRightTransparentViewProjection;
+    private Matrix4x4 _nativeStereoRightMotionViewProjection;
+    private Matrix4x4 _nativeStereoRightPreviousMotionViewProjection;
+    private bool _nativeSinglePassInstanced;
+    private Vector3 _nativeCameraPosition;
+    private int _nativeCameraInstanceId;
+    private long _nativeCameraMotionHistoryKey;
+    private bool _hasNativeCameraMotionHistoryKey;
+    private long _nativeStereoRightCameraMotionHistoryKey;
+    private bool _hasNativeStereoRightCameraMotionHistoryKey;
+    private static readonly object s_MotionHistoryLock = new();
+    // Camera instance alone is not a temporal identity in XR: a multipass
+    // right-eye submission must never replace the left eye's previous VP.
+    private static readonly Dictionary<long, Matrix4x4> s_PreviousCameraViewProjections = new();
+    private static readonly Dictionary<int, Matrix4x4> s_PreviousRendererLocalToWorld = new();
+    private static readonly Dictionary<int, Vector3[]> s_PreviousSkinnedRendererPositions = new();
+    private const int MaxMotionHistoryEntries = 4096;
 
     internal List<CommandBuffer> commandBuffers => _commandBuffers ??= new List<CommandBuffer>();
     internal bool submitted => _submitted;
@@ -523,6 +553,8 @@ public struct ScriptableRenderContext
     public void Submit()
     {
         _submitted = true;
+        if (_commandBuffers != null)
+            foreach (CommandBuffer commandBuffer in _commandBuffers) commandBuffer.ScheduleFences();
         _commandBuffers?.Clear();
         _drawCommands?.Clear();
     }
@@ -548,10 +580,165 @@ public struct ScriptableRenderContext
         _cullingResults = cullingResults;
         _hasCullingResults = true;
         _drawCommands ??= new List<DrawCommand>();
-        _drawCommands.Add(new DrawCommand
+        Renderer[] renderers = cullingResults.visibleRendererSnapshot;
+        if ((drawingSettings.sortingSettings.criteria & SortingCriteria.BackToFront) != 0 && renderers.Length > 1)
         {
-            type = DrawCommandType.DrawMesh
-        });
+            renderers = (Renderer[])renderers.Clone();
+            Vector3 cameraPosition = _nativeCameraPosition;
+            Array.Sort(renderers, (left, right) =>
+            {
+                float leftDistance = (GetWorldBounds(left).center - cameraPosition).sqrMagnitude;
+                float rightDistance = (GetWorldBounds(right).center - cameraPosition).sqrMagnitude;
+                int comparison = rightDistance.CompareTo(leftDistance);
+                return comparison != 0 ? comparison : left.GetInstanceID().CompareTo(right.GetInstanceID());
+            });
+        }
+        foreach (var renderer in renderers)
+        {
+            if (renderer is null || renderer.gameObject is null || !renderer.enabled || !renderer.isVisible)
+                continue;
+            if ((filteringSettings.layerMask & (1u << renderer.gameObject.layer)) == 0u ||
+                (filteringSettings.renderingLayerMask & renderer.renderingLayerMask) == 0u)
+                continue;
+            Mesh? mesh = renderer.gameObject.GetComponent<MeshFilter>()?.sharedMesh ??
+                         renderer.gameObject.GetComponent<MeshFilter>()?.mesh ??
+                         (renderer as SkinnedMeshRenderer)?.sharedMesh;
+            if (mesh is null || mesh.vertexCount == 0)
+                continue;
+            Material[] materials = renderer.sharedMaterials;
+            if (materials.Length == 0 && renderer.sharedMaterial is { } single)
+                materials = new[] { single };
+            Vector3[]? currentSkinnedPositions = null;
+            bool submittedNativeMesh = false;
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                Material? material = materials[materialIndex];
+                if (material is null)
+                    continue;
+                // Unity's -1 sentinel means "inherit shader queue", not an
+                // invalid queue. Resolving it here is essential for default
+                // opaque materials to survive URP's RenderQueueRange filter.
+                int renderQueue = material.renderQueue >= 0
+                    ? material.renderQueue
+                    : material.shader?.renderQueue ?? (int)RenderQueue.Geometry;
+                if (renderQueue < filteringSettings.renderQueueRange.min ||
+                    renderQueue > filteringSettings.renderQueueRange.max)
+                    continue;
+                _drawCommands.Add(new DrawCommand
+                {
+                    type = DrawCommandType.DrawMesh,
+                    mesh = mesh,
+                    matrix = renderer.transform?.localToWorldMatrix ?? Matrix4x4.identity,
+                    material = material,
+                    layer = renderer.gameObject.layer,
+                    submeshIndex = Math.Min(materialIndex, Math.Max(0, mesh.subMeshCount - 1)),
+                    materialIndex = materialIndex,
+                    castShadows = (ShadowCastingMode)(int)renderer.shadowCastingMode,
+                    receiveShadows = renderer.receiveShadows,
+                    probeAnchor = renderer.probeAnchor,
+                    bounds = GetWorldBounds(renderer),
+                    shaderPassName = new ShaderPassName(drawingSettings.GetShaderPassName(0).name)
+                });
+                if (_nativeGraphicsDevice is not null)
+                {
+                    Matrix4x4 localToWorld = renderer.transform?.localToWorldMatrix ?? Matrix4x4.identity;
+                    Matrix4x4 previousLocalToWorld;
+                    lock (s_MotionHistoryLock)
+                    {
+                        previousLocalToWorld = s_PreviousRendererLocalToWorld.TryGetValue(
+                            renderer.GetInstanceID(), out var previous) ? previous : localToWorld;
+                    }
+                    // Unity exposes three distinct motion-generation modes:
+                    // Camera carries only the camera delta, Object carries both
+                    // camera and object deltas, and ForceNoMotion zeros them.
+                    if (renderer.motionVectorGenerationMode != MotionVectorGenerationMode.Object)
+                        previousLocalToWorld = localToWorld;
+                    Vector3[] positions = mesh.vertices;
+                    Vector3[] normals = mesh.normals;
+                    Vector4[] tangents = mesh.tangents;
+                    Vector3[]? previousSkinnedPositions = null;
+                    if (renderer is SkinnedMeshRenderer skinned &&
+                        NativeGraphicsDevice.TrySkinMeshVertices(mesh, skinned, out positions, out normals, out tangents))
+                    {
+                        currentSkinnedPositions = positions;
+                        if (skinned.skinnedMotionVectors && renderer.motionVectorGenerationMode == MotionVectorGenerationMode.Object)
+                        {
+                            lock (s_MotionHistoryLock)
+                                _ = s_PreviousSkinnedRendererPositions.TryGetValue(renderer.GetInstanceID(), out previousSkinnedPositions);
+                            if (previousSkinnedPositions is not null && previousSkinnedPositions.Length != positions.Length)
+                                previousSkinnedPositions = null;
+                        }
+                    }
+                    Color[] colors = mesh.colors;
+                    Color tint = material.mainColor;
+                    if (tint == Color.white) tint = material.color;
+                    if (colors.Length != positions.Length)
+                    {
+                        colors = new Color[positions.Length];
+                        for (int i = 0; i < colors.Length; i++) colors[i] = tint;
+                    }
+                    else
+                    {
+                        for (int i = 0; i < colors.Length; i++)
+                        {
+                            Color vertexColor = colors[i];
+                            colors[i] = new Color(vertexColor.r * tint.r, vertexColor.g * tint.g,
+                                vertexColor.b * tint.b, vertexColor.a * tint.a);
+                        }
+                    }
+                    Matrix4x4 previousObjectToClip = renderer.motionVectorGenerationMode == MotionVectorGenerationMode.ForceNoMotion
+                        ? _nativeMotionViewProjection * localToWorld
+                        : _nativePreviousMotionViewProjection * previousLocalToWorld;
+                    Matrix4x4? stereoRightObjectToClip = null;
+                    Matrix4x4? stereoRightMotionObjectToClip = null;
+                    Matrix4x4? stereoRightPreviousObjectToClip = null;
+                    if (_nativeSinglePassInstanced)
+                    {
+                        Matrix4x4 rightRasterViewProjection = renderQueue >= (int)RenderQueue.Transparent
+                            ? _nativeStereoRightTransparentViewProjection : _nativeStereoRightViewProjection;
+                        stereoRightObjectToClip = rightRasterViewProjection * localToWorld;
+                        stereoRightMotionObjectToClip = _nativeStereoRightMotionViewProjection * localToWorld;
+                        stereoRightPreviousObjectToClip = renderer.motionVectorGenerationMode == MotionVectorGenerationMode.ForceNoMotion
+                            ? _nativeStereoRightMotionViewProjection * localToWorld
+                            : _nativeStereoRightPreviousMotionViewProjection * previousLocalToWorld;
+                    }
+                    GetNativeMeshRasterState(material, renderQueue, out int blendMode,
+                        out bool depthWriteEnabled, out bool alphaClipEnabled, out float alphaClipThreshold);
+                    Texture? baseTexture = material.GetTexture("_BaseMap") ?? material.mainTexture;
+                    string baseMapProperty = material.GetTexture("_BaseMap") is not null ? "_BaseMap" : "_MainTex";
+                    Matrix4x4 rasterViewProjection = renderQueue >= (int)RenderQueue.Transparent
+                        ? _nativeTransparentViewProjection : _nativeViewProjection;
+                    submittedNativeMesh |= _nativeGraphicsDevice.TryDrawCameraMesh(_nativeCameraTarget,
+                        positions, normals, colors, mesh.GetTriangles(Math.Min(materialIndex, Math.Max(0, mesh.subMeshCount - 1))),
+                        rasterViewProjection * localToWorld, localToWorld.inverse.transpose,
+                        previousObjectToClip, tangentObjectToWorld: localToWorld,
+                        motionObjectToClip: _nativeMotionViewProjection * localToWorld,
+                        targetIsCameraTarget: _nativeCameraTarget is null,
+                        blendMode: blendMode, depthWriteEnabled: depthWriteEnabled,
+                        writeMotionVectors: renderQueue <= (int)RenderQueue.GeometryLast,
+                        depthSlice: _nativeCameraTargetSlice,
+                        alphaClipEnabled: alphaClipEnabled, alphaClipThreshold: alphaClipThreshold,
+                        uvs: mesh.uv, baseTexture: baseTexture,
+                        baseMapScale: material.GetTextureScale(baseMapProperty),
+                        baseMapOffset: material.GetTextureOffset(baseMapProperty), tangents: tangents,
+                        normalMap: material.GetTexture("_BumpMap"), previousPositions: previousSkinnedPositions,
+                        stereoRightObjectToClip: stereoRightObjectToClip,
+                        stereoRightMotionObjectToClip: stereoRightMotionObjectToClip,
+                        stereoRightPreviousObjectToClip: stereoRightPreviousObjectToClip);
+                }
+            }
+            if (_nativeGraphicsDevice is not null && submittedNativeMesh)
+            {
+                Matrix4x4 localToWorld = renderer.transform?.localToWorldMatrix ?? Matrix4x4.identity;
+                lock (s_MotionHistoryLock)
+                {
+                    s_PreviousRendererLocalToWorld[renderer.GetInstanceID()] = localToWorld;
+                    if (currentSkinnedPositions is not null)
+                        s_PreviousSkinnedRendererPositions[renderer.GetInstanceID()] = (Vector3[])currentSkinnedPositions.Clone();
+                    TrimRendererMotionHistory();
+                }
+            }
+        }
     }
 
     public void DrawRenderers(CullingResults cullingResults, ref DrawingSettings drawingSettings, ref FilteringSettings filteringSettings, ref RenderStateBlock stateBlock)
@@ -628,18 +815,208 @@ public struct ScriptableRenderContext
     public void SetGlobalTexture(int nameID, RenderTargetIdentifier value) { }
     public void SetGlobalTexture(string name, RenderTargetIdentifier value) { }
 
+    internal void SetNativeCameraDrawState(Anity.Core.Runtime.Native.NativeGraphicsDevice? device,
+        RenderTexture? target, Matrix4x4 viewProjection, Camera? camera = null,
+        Matrix4x4? motionViewProjection = null, int targetSlice = 0,
+        Matrix4x4? stereoRightViewProjection = null, Matrix4x4? stereoRightMotionViewProjection = null)
+    {
+        if (target is null && _hasNativeCameraMotionHistoryKey)
+        {
+            lock (s_MotionHistoryLock)
+            {
+                s_PreviousCameraViewProjections[_nativeCameraMotionHistoryKey] = _nativeMotionViewProjection;
+                TrimCameraMotionHistory();
+            }
+            _nativeCameraInstanceId = 0;
+            _nativeCameraMotionHistoryKey = 0;
+            _hasNativeCameraMotionHistoryKey = false;
+            if (_hasNativeStereoRightCameraMotionHistoryKey)
+            {
+                s_PreviousCameraViewProjections[_nativeStereoRightCameraMotionHistoryKey] = _nativeStereoRightMotionViewProjection;
+                TrimCameraMotionHistory();
+                _nativeStereoRightCameraMotionHistoryKey = 0;
+                _hasNativeStereoRightCameraMotionHistoryKey = false;
+            }
+        }
+        _nativeGraphicsDevice = device;
+        _nativeCameraTarget = target;
+        _nativeCameraTargetSlice = targetSlice;
+        _nativeViewProjection = viewProjection;
+        _nativeMotionViewProjection = motionViewProjection ?? viewProjection;
+        _nativeSinglePassInstanced = stereoRightViewProjection.HasValue;
+        _nativeStereoRightViewProjection = stereoRightViewProjection ?? viewProjection;
+        _nativeStereoRightMotionViewProjection = stereoRightMotionViewProjection ?? _nativeStereoRightViewProjection;
+        _nativeTransparentViewProjection = camera is not null && !camera.useJitteredProjectionMatrixForTransparentRendering
+            ? _nativeMotionViewProjection : viewProjection;
+        _nativeStereoRightTransparentViewProjection = camera is not null && !camera.useJitteredProjectionMatrixForTransparentRendering
+            ? _nativeStereoRightMotionViewProjection : _nativeStereoRightViewProjection;
+        _nativeCameraPosition = camera?.transform?.position ?? Vector3.zero;
+        if (camera is not null)
+        {
+            _nativeCameraInstanceId = camera.GetInstanceID();
+            _nativeCameraMotionHistoryKey = ComposeCameraMotionHistoryKey(_nativeCameraInstanceId, targetSlice);
+            _hasNativeCameraMotionHistoryKey = true;
+            lock (s_MotionHistoryLock)
+                _nativePreviousMotionViewProjection = s_PreviousCameraViewProjections.TryGetValue(
+                    _nativeCameraMotionHistoryKey, out var previous) ? previous : _nativeMotionViewProjection;
+            if (_nativeSinglePassInstanced)
+            {
+                _nativeStereoRightCameraMotionHistoryKey = ComposeCameraMotionHistoryKey(_nativeCameraInstanceId, targetSlice + 1);
+                _hasNativeStereoRightCameraMotionHistoryKey = true;
+                lock (s_MotionHistoryLock)
+                    _nativeStereoRightPreviousMotionViewProjection = s_PreviousCameraViewProjections.TryGetValue(
+                        _nativeStereoRightCameraMotionHistoryKey, out var rightPrevious)
+                        ? rightPrevious : _nativeStereoRightMotionViewProjection;
+            }
+            else
+            {
+                _nativeStereoRightPreviousMotionViewProjection = _nativeStereoRightMotionViewProjection;
+            }
+        }
+        else
+        {
+            _nativePreviousMotionViewProjection = _nativeMotionViewProjection;
+            _nativeStereoRightPreviousMotionViewProjection = _nativeStereoRightMotionViewProjection;
+        }
+    }
+
+    private static long ComposeCameraMotionHistoryKey(int cameraInstanceId, int eyeSlice) =>
+        ((long)cameraInstanceId << 32) | (uint)Math.Max(0, eyeSlice);
+
+    private static void TrimCameraMotionHistory()
+    {
+        while (s_PreviousCameraViewProjections.Count > MaxMotionHistoryEntries)
+        {
+            using var entries = s_PreviousCameraViewProjections.GetEnumerator();
+            if (!entries.MoveNext()) return;
+            s_PreviousCameraViewProjections.Remove(entries.Current.Key);
+        }
+    }
+
+    private static void TrimRendererMotionHistory()
+    {
+        while (s_PreviousRendererLocalToWorld.Count > MaxMotionHistoryEntries)
+        {
+            using var entries = s_PreviousRendererLocalToWorld.GetEnumerator();
+            if (!entries.MoveNext()) return;
+            int rendererId = entries.Current.Key;
+            s_PreviousRendererLocalToWorld.Remove(rendererId);
+            s_PreviousSkinnedRendererPositions.Remove(rendererId);
+        }
+        while (s_PreviousSkinnedRendererPositions.Count > MaxMotionHistoryEntries)
+        {
+            using var entries = s_PreviousSkinnedRendererPositions.GetEnumerator();
+            if (!entries.MoveNext()) return;
+            s_PreviousSkinnedRendererPositions.Remove(entries.Current.Key);
+        }
+    }
+
     public void Cull(ref ScriptableCullingParameters parameters, out CullingResults results)
     {
+        var visible = new List<Renderer>();
+        var camera = parameters.camera;
+        Plane[]? frustum = camera is null ? null : GeometryUtility.CalculateFrustumPlanes(parameters.cullingMatrix);
+        bool needsVelocityRasterization = false;
+        foreach (var renderer in UnityEngine.Object.FindObjectsByType<Renderer>(
+                     FindObjectsInactive.Exclude, FindObjectsSortMode.InstanceID))
+        {
+            if (renderer is null || !renderer.enabled || !renderer.isVisible || renderer.gameObject is null)
+                continue;
+            uint layerBit = 1u << renderer.gameObject.layer;
+            if ((((uint)parameters.cullingMask) & layerBit) == 0u)
+                continue;
+
+            var bounds = GetWorldBounds(renderer);
+            if (parameters.layerCullDistances is { } distances &&
+                renderer.gameObject.layer < distances.Length)
+            {
+                float maxDistance = distances[renderer.gameObject.layer];
+                if (maxDistance > 0f && bounds.SqrDistance(parameters.worldOrigin) > maxDistance * maxDistance)
+                    continue;
+            }
+            if (frustum is not null && !GeometryUtility.TestPlanesAABB(frustum, bounds))
+                continue;
+
+            visible.Add(renderer);
+            needsVelocityRasterization |= renderer.motionVectorGenerationMode == MotionVectorGenerationMode.Object;
+        }
+
         results = new CullingResults
         {
             _visibleLights = new VisibleLight[0],
             _visibleReflectionProbes = new VisibleReflectionProbe[0],
             _lightAndReflectionProbeCount = 0,
             _visibleLightCount = 0,
-            _visibleInstanceCount = 0
+            _visibleInstanceCount = visible.Count,
+            _visibleRenderers = visible.ToArray(),
+            visibleRenderers = new VisibleRendererList { length = visible.Count, nativePointer = IntPtr.Zero },
+            velocityNeedsRasterization = needsVelocityRasterization
         };
         _cullingResults = results;
         _hasCullingResults = true;
+    }
+
+    private static Bounds GetWorldBounds(Renderer renderer)
+    {
+        Bounds local;
+        if (renderer is SkinnedMeshRenderer skinned)
+        {
+            // Unity stores a skinned renderer's culling AABB in renderer-local
+            // space. When an executable native skin stream is available, use
+            // the current deformation so large bone/shape motion cannot be
+            // rejected by the authored fallback AABB.
+            if (skinned.sharedMesh is { } skinnedMesh &&
+                NativeGraphicsDevice.TrySkinMeshVertices(skinnedMesh, skinned,
+                    out var deformedPositions, out _, out _) && deformedPositions.Length != 0)
+            {
+                local = new Bounds(deformedPositions[0], Vector3.zero);
+                for (int vertex = 1; vertex < deformedPositions.Length; vertex++)
+                    local.Encapsulate(deformedPositions[vertex]);
+            }
+            else
+            {
+                // The shared mesh is only the initial default, so do not
+                // substitute MeshFilter bounds once a caller has authored it.
+                local = skinned.localBounds;
+            }
+        }
+        else
+        {
+            var meshFilter = renderer.gameObject?.GetComponent<MeshFilter>();
+            local = meshFilter?.sharedMesh?.bounds ?? meshFilter?.mesh?.bounds ?? renderer.localBounds;
+        }
+        var transform = renderer.transform;
+        if (transform is null) return local;
+        Vector3 min = local.min;
+        Vector3 max = local.max;
+        Vector3[] corners =
+        {
+            new(min.x, min.y, min.z), new(min.x, min.y, max.z),
+            new(min.x, max.y, min.z), new(min.x, max.y, max.z),
+            new(max.x, min.y, min.z), new(max.x, min.y, max.z),
+            new(max.x, max.y, min.z), new(max.x, max.y, max.z)
+        };
+        Bounds world = new(transform.TransformPoint(corners[0]), Vector3.zero);
+        for (int i = 1; i < corners.Length; i++)
+            world.Encapsulate(transform.TransformPoint(corners[i]));
+        return world;
+    }
+
+    private static void GetNativeMeshRasterState(Material material, int renderQueue,
+        out int blendMode, out bool depthWriteEnabled, out bool alphaClipEnabled,
+        out float alphaClipThreshold)
+    {
+        alphaClipEnabled = renderQueue >= (int)RenderQueue.AlphaTest && renderQueue <= (int)RenderQueue.GeometryLast &&
+            (material.IsKeywordEnabled("_ALPHATEST_ON") || material.HasProperty("_Cutoff"));
+        alphaClipThreshold = alphaClipEnabled ? Math.Clamp(material.GetFloat("_Cutoff"), 0f, 1f) : 0f;
+        bool transparent = renderQueue >= (int)RenderQueue.Transparent;
+        int src = material.GetInt("_SrcBlend");
+        int dst = material.GetInt("_DstBlend");
+        blendMode = !transparent ? 0 :
+            src == (int)BlendMode.One && dst == (int)BlendMode.OneMinusSrcAlpha ? 2 :
+            src == (int)BlendMode.SrcAlpha && dst == (int)BlendMode.One ? 3 :
+            src == (int)BlendMode.DstColor && dst == (int)BlendMode.Zero ? 4 : 1;
+        depthWriteEnabled = !transparent || material.GetInt("_ZWrite") != 0;
     }
 }
 
@@ -679,6 +1056,9 @@ public struct CullingResults
     internal int _lightAndReflectionProbeCount;
     internal int _visibleLightCount;
     internal int _visibleInstanceCount;
+    // The managed culling bridge retains the actual renderer snapshot until
+    // native scene ownership takes over; VisibleRendererList remains ABI-shaped.
+    internal Renderer[] _visibleRenderers;
 
     public VisibleLight[] lights => _visibleLights ?? Array.Empty<VisibleLight>();
     public VisibleReflectionProbe[] reflectionProbes => _visibleReflectionProbes ?? Array.Empty<VisibleReflectionProbe>();
@@ -687,6 +1067,7 @@ public struct CullingResults
     public int lightAndReflectionProbeCount => _lightAndReflectionProbeCount;
     public int visibleLightCount => _visibleLightCount;
     public int visibleInstanceCount => _visibleInstanceCount;
+    internal Renderer[] visibleRendererSnapshot => _visibleRenderers ?? Array.Empty<Renderer>();
     public VisibleLight[] visibleLights => _visibleLights ?? Array.Empty<VisibleLight>();
     public VisibleReflectionProbe[] visibleReflectionProbes => _visibleReflectionProbes ?? Array.Empty<VisibleReflectionProbe>();
     public NativeArray<VisibleLight> visibleLightsNativeArray => new NativeArray<VisibleLight>(_visibleLights ?? Array.Empty<VisibleLight>(), Allocator.Invalid);

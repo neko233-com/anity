@@ -1,5 +1,6 @@
 #pragma once
 #include "../anity_core.h"
+#include "anity_hdr.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -28,6 +29,76 @@ typedef struct AnityGraphicsDeviceDesc {
   int32_t vsync;
   void* nativeWindow;
 } AnityGraphicsDeviceDesc;
+
+/* Backend-neutral camera render-pass control plane. The renderer owns the
+ * actual backend encoders; this ABI records the validated target, viewport,
+ * clear/load/store contract in native state so Metal/Vulkan/D3D backends can
+ * consume the exact same pass description. */
+typedef enum AnityGraphicsCameraPassFlags {
+  ANITY_CAMERA_PASS_CLEAR_COLOR = 1 << 0,
+  ANITY_CAMERA_PASS_CLEAR_DEPTH = 1 << 1,
+  ANITY_CAMERA_PASS_STORE_COLOR = 1 << 2,
+  ANITY_CAMERA_PASS_STORE_DEPTH = 1 << 3,
+  ANITY_CAMERA_PASS_FINAL = 1 << 4,
+  ANITY_CAMERA_PASS_HDR = 1 << 5,
+  /* targetId is an object identity and can numerically equal CameraTarget.
+   * Keep attachment ownership explicit rather than inferring it from 2. */
+  ANITY_CAMERA_PASS_TARGET_IS_CAMERA_TARGET = 1 << 6
+} AnityGraphicsCameraPassFlags;
+
+typedef struct AnityGraphicsCameraPassDesc {
+  uint64_t targetId;
+  int32_t targetWidth;
+  int32_t targetHeight;
+  float viewportX;
+  float viewportY;
+  float viewportWidth;
+  float viewportHeight;
+  float clearR;
+  float clearG;
+  float clearB;
+  float clearA;
+  float clearDepth;
+  int32_t msaaSamples;
+  int32_t depthSlice;
+  /* Number of contiguous array layers encoded by this pass.  Unity XR
+   * single-pass instancing uses two layers beginning at depthSlice. */
+  int32_t depthSliceCount;
+  uint32_t flags;
+} AnityGraphicsCameraPassDesc;
+
+typedef struct AnityGraphicsCameraPassInfo {
+  uint64_t frameId;
+  uint64_t sequence;
+  AnityGraphicsCameraPassDesc desc;
+} AnityGraphicsCameraPassInfo;
+
+/* Device-owned offscreen target used by Camera.targetTexture. This is
+ * separate from the sampled Texture registry: render targets have depth and
+ * command-buffer lifetime in addition to a color texture. */
+typedef struct AnityGraphicsCameraRenderTargetDesc {
+  uint64_t targetId;
+  int32_t width;
+  int32_t height;
+  int32_t msaaSamples;
+  int32_t hdrEnabled;
+  /* UnityEngine.Rendering.TextureDimension: Tex2D=2, Tex2DArray=5. */
+  int32_t dimension;
+  int32_t volumeDepth;
+  /* 0 = backend default LDR/HDR color, 1 = RGBA8 signed normalized,
+   * 2 = RG16Float motion vector target. */
+  int32_t colorFormat;
+} AnityGraphicsCameraRenderTargetDesc;
+
+/* Internal evidence for the URP HDR post-process curve resource. This is not
+ * part of Unity's public managed API; it makes native cache behavior testable. */
+typedef struct AnityGraphicsHDRPostProcessStats {
+  int32_t backendKind; /* 0=none, 2=Metal */
+  int32_t curveLutSamplesPerCurve;
+  uint64_t curveLutByteCapacity;
+  uint64_t curveLutUploadCount;
+  uint64_t curveLutCacheHitCount;
+} AnityGraphicsHDRPostProcessStats;
 
 typedef struct AnityGraphicsDevice AnityGraphicsDevice;
 typedef struct AnityUICanvas AnityUICanvas;
@@ -65,6 +136,10 @@ typedef struct AnityGraphicsTextureDesc {
   int32_t wrapU;      /* Unity TextureWrapMode */
   int32_t wrapV;
   int32_t linear;
+  /* Unity Texture.mipMapBias; applied by backend texture sampling paths. */
+  float mipMapBias;
+  /* Effective anisotropy after QualitySettings policy, in [1, 16]. */
+  int32_t anisoLevel;
 } AnityGraphicsTextureDesc;
 
 typedef struct AnityGraphicsTextureInfo {
@@ -639,6 +714,185 @@ ANITY_API AnityGraphicsDeviceType ANITY_CALL AnityGraphics_GetDeviceType(
 
 ANITY_API AnityResult ANITY_CALL AnityGraphics_BeginFrame(AnityGraphicsDevice* device);
 ANITY_API AnityResult ANITY_CALL AnityGraphics_EndFrame(AnityGraphicsDevice* device);
+ANITY_API AnityResult ANITY_CALL AnityGraphics_RecordCameraPass(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraPassDesc* desc,
+    AnityGraphicsCameraPassInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityGraphics_GetLastCameraPass(
+    const AnityGraphicsDevice* device, AnityGraphicsCameraPassInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityGraphics_EnsureCameraRenderTarget(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraRenderTargetDesc* desc);
+ANITY_API AnityResult ANITY_CALL AnityGraphics_DestroyCameraRenderTarget(
+    AnityGraphicsDevice* device, uint64_t targetId);
+/* Writes tightly packed top-to-bottom RGBA8 rows. HDR target readback is not
+ * implicitly tone-mapped and therefore reports NotSupported. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_ReadbackCameraRenderTargetRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, uint8_t* pixels,
+    int32_t pixelCapacity, int32_t* outWritten);
+/* Reads one Tex2DArray layer. The original readback entry point remains an
+ * ABI-stable shorthand for depthSlice=0. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_ReadbackCameraRenderTargetSliceRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, int32_t depthSlice,
+    uint8_t* pixels, int32_t pixelCapacity, int32_t* outWritten);
+/* Explicit ACES-to-sRGB readback for RGBA16Float HDR targets. Raw RGBA8
+ * readback above intentionally never applies an implicit tone map. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_ReadbackCameraRenderTargetToneMappedRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, uint8_t* pixels,
+    int32_t pixelCapacity, int32_t* outWritten);
+/* Slice-aware HDR readback for XR Texture2DArray targets. The legacy entry
+ * point remains an ABI-stable shorthand for depthSlice=0. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_ReadbackCameraRenderTargetToneMappedSliceRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, int32_t depthSlice,
+    uint8_t* pixels, int32_t pixelCapacity, int32_t* outWritten);
+/* GPU-only resolved color copy used by URP _CameraOpaqueTexture. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CopyCameraRenderTargetColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId);
+/* Slice-aware variant used when URP captures an opaque texture from a stereo
+ * Tex2DArray camera target. The legacy entry point remains sourceSlice=0. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CopyCameraRenderTargetColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId);
+/* Converts the camera depth attachment to R in a color target on the GPU. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CopyCameraRenderTargetDepthToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId);
+/* Converts one eye slice of an array depth attachment into the matching color slice. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CopyCameraRenderTargetDepthToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId);
+/* Copies the native mesh-normal attachment to a color target.  The encoded
+ * normals are 0.5 * normalizedNormal + 0.5; unwritten pixels remain zero. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CopyCameraRenderTargetNormalsToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId);
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CopyCameraRenderTargetNormalsToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId);
+/* Copies the native RG16Float motion attachment to a matching target. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CopyCameraRenderTargetMotionToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId);
+ANITY_API AnityResult ANITY_CALL AnityGraphics_CopyCameraRenderTargetMotionToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId);
+/* Native indexed mesh submission for the URP geometry bridge. Positions are
+ * object-space; normals have been inverse-transpose transformed to world space
+ * by the managed renderer. objectToClip is Unity Matrix4x4 field order. */
+typedef struct AnityGraphicsMeshVertex {
+  float position[3];
+  /* Renderer-local vertex position from the prior submitted frame.  Keeping
+   * this per vertex is required for skinned motion vectors: a bone can move
+   * while the renderer's object transform remains unchanged. */
+  float previousPosition[3];
+  float normal[3];
+  float tangent[4];
+  float texcoord[2];
+  float color[4];
+} AnityGraphicsMeshVertex;
+
+typedef struct AnityGraphicsCameraMeshDrawDesc {
+  uint64_t targetId;
+  int32_t targetIsCameraTarget;
+  /* 0=opaque, 1=alpha, 2=premultiplied alpha, 3=additive, 4=multiply. */
+  int32_t blendMode;
+  int32_t depthWriteEnabled;
+  /* URP built-in motion-vector support is opaque-only (including alpha clip).
+   * Transparent forward draws must retain the existing opaque velocity. */
+  int32_t writeMotionVectors;
+  int32_t depthSlice;
+  int32_t alphaClipEnabled;
+  float alphaClipThreshold;
+  uint64_t baseTextureId;
+  float baseMapST[4]; /* xy=scale, zw=offset */
+  uint64_t normalMapTextureId;
+  const AnityGraphicsMeshVertex* vertices;
+  int32_t vertexCount;
+  const uint32_t* indices;
+  int32_t indexCount;
+  float objectToClip[16];
+  float motionObjectToClip[16];
+  float previousObjectToClip[16];
+  int32_t hasPreviousObjectToClip;
+  /* 1=ordinary draw; 2=Metal single-pass instanced stereo. In the latter
+   * case, the two matrix arrays are left/right and the target must be a
+   * two-layer Tex2DArray beginning at depthSlice. */
+  int32_t stereoInstanceCount;
+  float stereoObjectToClip[32];
+  float stereoMotionObjectToClip[32];
+  float stereoPreviousObjectToClip[32];
+} AnityGraphicsCameraMeshDrawDesc;
+
+/* Backend-neutral CPU skinning bridge. The native implementation is the
+ * authoritative deformation path for managed SkinnedMeshRenderer submission;
+ * matrices use Unity Matrix4x4 field (row-major) order. */
+typedef struct AnityGraphicsSkinVertex {
+  float position[3];
+  float normal[3];
+  float tangent[4];
+} AnityGraphicsSkinVertex;
+
+/* Blend-shape deltas are pre-evaluated from Unity's multi-frame shape weights
+ * by the managed Mesh compatibility layer, then composed here in native code
+ * before the skinning kernel consumes the deformed stream. */
+typedef struct AnityGraphicsBlendShapeDesc {
+  const AnityGraphicsSkinVertex* sourceVertices;
+  const AnityGraphicsSkinVertex* shapeDeltas; /* shapeCount * vertexCount */
+  int32_t vertexCount;
+  int32_t shapeCount;
+  AnityGraphicsSkinVertex* outVertices;
+  int32_t outVertexCount;
+} AnityGraphicsBlendShapeDesc;
+
+ANITY_API AnityResult ANITY_CALL AnityGraphics_ApplyBlendShapeDeltas(
+    const AnityGraphicsBlendShapeDesc* desc);
+
+typedef struct AnityGraphicsBoneWeight {
+  float weight[4];
+  int32_t boneIndex[4];
+} AnityGraphicsBoneWeight;
+
+typedef struct AnityGraphicsBoneWeight1 {
+  float weight;
+  int32_t boneIndex;
+} AnityGraphicsBoneWeight1;
+
+typedef struct AnityGraphicsSkinMeshDesc {
+  const AnityGraphicsSkinVertex* sourceVertices;
+  const AnityGraphicsBoneWeight* boneWeights;
+  int32_t vertexCount;
+  const float* boneMatrices; /* boneCount contiguous Unity Matrix4x4 values */
+  int32_t boneCount;
+  AnityGraphicsSkinVertex* outVertices;
+  int32_t outVertexCount;
+  /* Optional Unity 2022 variable-influence stream. When present it supersedes
+   * boneWeights; maxInfluences is clamped by the managed quality policy. */
+  const uint8_t* bonesPerVertex;
+  const AnityGraphicsBoneWeight1* allBoneWeights;
+  int32_t allBoneWeightCount;
+  int32_t maxInfluences;
+} AnityGraphicsSkinMeshDesc;
+
+ANITY_API AnityResult ANITY_CALL AnityGraphics_SkinMeshVertices(
+    const AnityGraphicsSkinMeshDesc* desc);
+
+/* Draws an indexed triangle mesh into an existing camera target. Set
+ * targetIsCameraTarget for the presentation swapchain; otherwise targetId
+ * selects an offscreen RenderTexture-backed target. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_DrawCameraMesh(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraMeshDrawDesc* desc);
+/* Applies the supplied URP HDR grade to an RGBA16Float camera target through
+ * the native backend. The result is display-referred sRGB stored in the HDR
+ * target so the final stack pass has an actual backend execution path. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_ProcessCameraRenderTargetHDR(
+    AnityGraphicsDevice* device, uint64_t targetId,
+    const AnityHDRColorGrade* grade);
+ANITY_API AnityResult ANITY_CALL AnityGraphics_GetHDRPostProcessStats(
+    const AnityGraphicsDevice* device,
+    AnityGraphicsHDRPostProcessStats* outStats);
 ANITY_API AnityResult ANITY_CALL AnityGraphics_Present(AnityGraphicsDevice* device);
 
 /* Non-owning Canvas binding. EndFrame builds and uploads attached Canvas batches. */
@@ -908,6 +1162,12 @@ ANITY_API int32_t ANITY_CALL AnityGraphics_GetSwapchainPresentCount(const AnityS
 ANITY_API AnityResult ANITY_CALL AnityGraphics_ReadbackSwapchainRGBA8(
     AnitySwapchain* swapchain, uint8_t* pixels, int32_t pixelCapacity,
     int32_t* outWritten);
+ANITY_API AnityResult ANITY_CALL AnityGraphics_ReadbackSwapchainToneMappedRGBA8(
+    AnitySwapchain* swapchain, uint8_t* pixels, int32_t pixelCapacity,
+    int32_t* outWritten);
+/* Applies the supplied URP HDR grade to a headless/native HDR swapchain. */
+ANITY_API AnityResult ANITY_CALL AnityGraphics_ProcessSwapchainHDR(
+    AnitySwapchain* swapchain, const AnityHDRColorGrade* grade);
 /* 1 if backend created real VkSurface/CAMetalLayer (may still be offscreen) */
 ANITY_API int32_t ANITY_CALL AnityGraphics_SwapchainHasNativeSurface(const AnitySwapchain* swapchain);
 /* Backend tag: 0=unknown/headless software, 1=Vulkan, 2=Metal, 3=D3D11 */

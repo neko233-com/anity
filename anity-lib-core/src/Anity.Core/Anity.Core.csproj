@@ -3,7 +3,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageId>Anity.Core</PackageId>
     <Authors>Anity Team</Authors>
     <Description>Shared contracts and runtime primitives for Anity.</Description>
@@ -31,8 +31,8 @@
   </ItemGroup>
 
   <Target Name="BuildUnityMetadataFixups"
-          BeforeTargets="CoreCompile"
-          Condition="'$(UseUnityDll)' != 'true'">
+    BeforeTargets="CoreCompile"
+          Condition="'$(UseUnityDll)' != 'true' And '$(SkipUnityMetadataFixups)' != 'true'">
     <Exec Command="dotnet build &quot;$(MSBuildProjectDirectory)/../../../_scripts/Anity.MetadataFixups/Anity.MetadataFixups.csproj&quot; --configuration $(Configuration) --nologo --verbosity quiet" />
   </Target>
 

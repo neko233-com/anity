@@ -101,6 +101,7 @@ public sealed class NativeMetalUITextureTests
                 new Color32(255, 0, 0, 255), new Color32(0, 0, 255, 255)
             }, 2, 1);
             texture.filterMode = FilterMode.Point;
+            texture.anisoLevel = 16;
             Assert.True(device.EnsureTexture(texture));
             Assert.True(canvas.Upsert(Desc(1, texture), Quad(Color.white), QuadIndices));
             byte[] pixels = SubmitAndRead(device, canvas);
@@ -123,6 +124,26 @@ public sealed class NativeMetalUITextureTests
             byte[] pixels = SubmitAndRead(device, canvas);
             AssertPixel(pixels, 16, 32, 255, 0, 0, 255);
             AssertPixel(pixels, 48, 32, 0, 255, 0, 255);
+        });
+
+    [Fact]
+    public void MirrorOnceSamplerReflectsNegativeUvInsteadOfClamping()
+        => WithMetal((device, canvas) =>
+        {
+            Texture2D texture = Texture(new[]
+            {
+                new Color32(255, 0, 0, 255), new Color32(0, 255, 0, 255)
+            }, 2, 1);
+            texture.filterMode = FilterMode.Point;
+            texture.wrapModeU = TextureWrapMode.Clamp;
+            Assert.True(device.EnsureTexture(texture));
+            Assert.True(canvas.Upsert(Desc(1, texture),
+                Quad(Color.white, -0.75f, -0.75f), QuadIndices));
+            AssertPixel(SubmitAndRead(device, canvas), 32, 32, 255, 0, 0, 255);
+
+            texture.wrapModeU = TextureWrapMode.MirrorOnce;
+            Assert.True(device.EnsureTexture(texture));
+            AssertPixel(SubmitAndRead(device, canvas), 32, 32, 0, 255, 0, 255);
         });
 
     [Fact]
@@ -177,6 +198,34 @@ public sealed class NativeMetalUITextureTests
             Assert.True(canvas.Upsert(Desc(1, texture),
                 Quad(Color.white, 0, 1, 28, 28, 36, 36), QuadIndices));
             AssertPixel(SubmitAndRead(device, canvas), 32, 32, 255, 255, 0, 255);
+        });
+
+    [Fact]
+    public void MipMapBiasSelectsTheNextCoarserUploadedMipLevel()
+        => WithMetal((device, canvas) =>
+        {
+            var texture = new Texture2D(64, 64, TextureFormat.RGBA32, true, true)
+            {
+                filterMode = FilterMode.Point,
+                mipMapBias = 1.0f
+            };
+            Color32[] colors =
+            {
+                new(255, 0, 0, 255), new(0, 255, 0, 255), new(0, 0, 255, 255),
+                new(255, 255, 0, 255), new(255, 0, 255, 255), new(0, 255, 255, 255),
+                new(255, 255, 255, 255)
+            };
+            for (int mip = 0; mip < texture.mipmapCount; mip++)
+            {
+                int side = Math.Max(1, 64 >> mip);
+                var level = new Color32[side * side];
+                Array.Fill(level, colors[mip]);
+                texture.SetPixels32(level, mip);
+            }
+            texture.Apply(false, false);
+            Assert.True(canvas.Upsert(Desc(1, texture),
+                Quad(Color.white, 0, 1, 28, 28, 36, 36), QuadIndices));
+            AssertPixel(SubmitAndRead(device, canvas), 32, 32, 255, 0, 255, 255);
         });
 
     private static AnityNative.UIRenderCommandDesc Desc(

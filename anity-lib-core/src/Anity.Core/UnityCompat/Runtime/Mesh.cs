@@ -23,6 +23,9 @@ public partial class Mesh : Object
     private List<Color32> _colors32 = new();
     private List<Matrix4x4> _bindposes = new();
     private List<BoneWeight> _boneWeights = new();
+    private List<byte> _bonesPerVertex = new();
+    private List<BoneWeight1> _allBoneWeights = new();
+    private readonly List<BlendShape> _blendShapes = new();
     private List<int[]> _subMeshIndices = new();
     private List<MeshTopology> _subMeshTopologies = new();
     private Bounds _bounds;
@@ -31,6 +34,28 @@ public partial class Mesh : Object
     private bool _isDynamic;
     private bool _blendShapesDirty;
     private bool _optimized;
+
+    private sealed class BlendShape
+    {
+        internal readonly string name;
+        internal readonly List<BlendShapeFrame> frames = new();
+        internal BlendShape(string name) => this.name = name;
+    }
+
+    private sealed class BlendShapeFrame
+    {
+        internal readonly float weight;
+        internal readonly Vector3[] deltaVertices;
+        internal readonly Vector3[] deltaNormals;
+        internal readonly Vector3[] deltaTangents;
+        internal BlendShapeFrame(float weight, Vector3[] deltaVertices, Vector3[] deltaNormals, Vector3[] deltaTangents)
+        {
+            this.weight = weight;
+            this.deltaVertices = deltaVertices;
+            this.deltaNormals = deltaNormals;
+            this.deltaTangents = deltaTangents;
+        }
+    }
 
     public string name { get; set; } = string.Empty;
     public bool isReadable { get => _isReadable; set => _isReadable = value; }
@@ -129,6 +154,7 @@ public partial class Mesh : Object
     }
 
     public int vertexCount => _vertices.Count;
+    public int blendShapeCount => _blendShapes.Count;
 
     public int indexCount
     {
@@ -170,9 +196,12 @@ public partial class Mesh : Object
 
     public BoneWeight[] boneWeights
     {
-        get => _boneWeights.ToArray();
+        get => _boneWeights.Count != 0 ? _boneWeights.ToArray() : GetLegacyBoneWeights();
         set => SetBoneWeights(value != null ? new List<BoneWeight>(value) : new List<BoneWeight>());
     }
+
+    public NativeArray<byte> GetBonesPerVertex() => new NativeArray<byte>(_bonesPerVertex.ToArray(), Allocator.Temp);
+    public NativeArray<BoneWeight1> GetAllBoneWeights() => new NativeArray<BoneWeight1>(_allBoneWeights.ToArray(), Allocator.Temp);
 
     public MeshTopology GetTopology(int submesh)
         => submesh >= 0 && submesh < _subMeshTopologies.Count
@@ -208,6 +237,9 @@ public partial class Mesh : Object
         _colors32.Clear();
         _bindposes.Clear();
         _boneWeights.Clear();
+        _bonesPerVertex.Clear();
+        _allBoneWeights.Clear();
+        _blendShapes.Clear();
         _subMeshIndices.Clear();
         _subMeshIndices.Add(Array.Empty<int>());
         _subMeshTopologies.Clear();
@@ -217,7 +249,125 @@ public partial class Mesh : Object
         indexBufferSize = 0;
     }
 
-    public void ClearBlendShapes() { _blendShapesDirty = true; }
+    public void ClearBlendShapes()
+    {
+        _blendShapes.Clear();
+        _blendShapesDirty = true;
+    }
+
+    public string GetBlendShapeName(int shapeIndex) => GetBlendShape(shapeIndex).name;
+
+    public int GetBlendShapeFrameCount(int shapeIndex) => GetBlendShape(shapeIndex).frames.Count;
+
+    public float GetBlendShapeFrameWeight(int shapeIndex, int frameIndex)
+        => GetBlendShapeFrame(shapeIndex, frameIndex).weight;
+
+    public void AddBlendShapeFrame(string shapeName, float frameWeight, Vector3[] deltaVertices,
+        Vector3[] deltaNormals, Vector3[] deltaTangents)
+    {
+        if (shapeName is null) throw new ArgumentNullException(nameof(shapeName));
+        if (shapeName.Length == 0) throw new ArgumentException("Blend shape names cannot be empty.", nameof(shapeName));
+        if (!float.IsFinite(frameWeight)) throw new ArgumentOutOfRangeException(nameof(frameWeight));
+        ValidateBlendShapeVectorArray(deltaVertices, nameof(deltaVertices));
+        ValidateBlendShapeVectorArray(deltaNormals, nameof(deltaNormals));
+        ValidateBlendShapeVectorArray(deltaTangents, nameof(deltaTangents));
+        BlendShape? shape = null;
+        for (int i = 0; i < _blendShapes.Count; i++)
+            if (_blendShapes[i].name == shapeName) { shape = _blendShapes[i]; break; }
+        if (shape is null)
+        {
+            shape = new BlendShape(shapeName);
+            _blendShapes.Add(shape);
+        }
+        if (shape.frames.Count != 0 && frameWeight <= shape.frames[shape.frames.Count - 1].weight)
+            throw new ArgumentException("Blend shape frame weights must be strictly increasing.", nameof(frameWeight));
+        shape.frames.Add(new BlendShapeFrame(frameWeight, (Vector3[])deltaVertices.Clone(),
+            (Vector3[])deltaNormals.Clone(), (Vector3[])deltaTangents.Clone()));
+        _blendShapesDirty = true;
+    }
+
+    public void GetBlendShapeFrameVertices(int shapeIndex, int frameIndex, Vector3[] deltaVertices,
+        Vector3[] deltaNormals, Vector3[] deltaTangents)
+    {
+        if (deltaVertices is null) throw new ArgumentNullException(nameof(deltaVertices));
+        if (deltaNormals is null) throw new ArgumentNullException(nameof(deltaNormals));
+        if (deltaTangents is null) throw new ArgumentNullException(nameof(deltaTangents));
+        if (deltaVertices.Length < _vertices.Count || deltaNormals.Length < _vertices.Count || deltaTangents.Length < _vertices.Count)
+            throw new ArgumentException("Blend shape destination arrays must cover every mesh vertex.");
+        BlendShapeFrame frame = GetBlendShapeFrame(shapeIndex, frameIndex);
+        Array.Copy(frame.deltaVertices, deltaVertices, _vertices.Count);
+        Array.Copy(frame.deltaNormals, deltaNormals, _vertices.Count);
+        Array.Copy(frame.deltaTangents, deltaTangents, _vertices.Count);
+    }
+
+    internal bool TryEvaluateBlendShape(int shapeIndex, float weight, out Vector3[] deltaVertices,
+        out Vector3[] deltaNormals, out Vector3[] deltaTangents)
+    {
+        deltaVertices = new Vector3[_vertices.Count];
+        deltaNormals = new Vector3[_vertices.Count];
+        deltaTangents = new Vector3[_vertices.Count];
+        if (!float.IsFinite(weight) || shapeIndex < 0 || shapeIndex >= _blendShapes.Count || _vertices.Count == 0)
+            return false;
+        List<BlendShapeFrame> frames = _blendShapes[shapeIndex].frames;
+        if (frames.Count == 0 || weight == 0f) return true;
+        BlendShapeFrame lower;
+        BlendShapeFrame? upper = null;
+        float interpolation;
+        if (weight <= frames[0].weight)
+        {
+            lower = frames[0];
+            interpolation = Math.Abs(lower.weight) > 1e-8f ? weight / lower.weight : 1f;
+        }
+        else if (weight >= frames[frames.Count - 1].weight)
+        {
+            lower = frames[frames.Count - 1];
+            interpolation = Math.Abs(lower.weight) > 1e-8f ? weight / lower.weight : 1f;
+        }
+        else
+        {
+            int upperIndex = 1;
+            while (upperIndex < frames.Count && weight > frames[upperIndex].weight) upperIndex++;
+            lower = frames[upperIndex - 1];
+            upper = frames[upperIndex];
+            interpolation = (weight - lower.weight) / (upper.weight - lower.weight);
+        }
+        for (int vertex = 0; vertex < _vertices.Count; vertex++)
+        {
+            if (upper is null)
+            {
+                deltaVertices[vertex] = lower.deltaVertices[vertex] * interpolation;
+                deltaNormals[vertex] = lower.deltaNormals[vertex] * interpolation;
+                deltaTangents[vertex] = lower.deltaTangents[vertex] * interpolation;
+            }
+            else
+            {
+                deltaVertices[vertex] = lower.deltaVertices[vertex] + (upper.deltaVertices[vertex] - lower.deltaVertices[vertex]) * interpolation;
+                deltaNormals[vertex] = lower.deltaNormals[vertex] + (upper.deltaNormals[vertex] - lower.deltaNormals[vertex]) * interpolation;
+                deltaTangents[vertex] = lower.deltaTangents[vertex] + (upper.deltaTangents[vertex] - lower.deltaTangents[vertex]) * interpolation;
+            }
+        }
+        return true;
+    }
+
+    private BlendShape GetBlendShape(int shapeIndex)
+    {
+        if (shapeIndex < 0 || shapeIndex >= _blendShapes.Count) throw new IndexOutOfRangeException();
+        return _blendShapes[shapeIndex];
+    }
+
+    private BlendShapeFrame GetBlendShapeFrame(int shapeIndex, int frameIndex)
+    {
+        BlendShape shape = GetBlendShape(shapeIndex);
+        if (frameIndex < 0 || frameIndex >= shape.frames.Count) throw new IndexOutOfRangeException();
+        return shape.frames[frameIndex];
+    }
+
+    private void ValidateBlendShapeVectorArray(Vector3[]? values, string parameterName)
+    {
+        if (values is null) throw new ArgumentNullException(parameterName);
+        if (values.Length != _vertices.Count)
+            throw new ArgumentException("Blend shape arrays must match mesh vertex count.", parameterName);
+    }
 
     public void MarkDynamic() { _isDynamic = true; }
 
@@ -536,6 +686,78 @@ public partial class Mesh : Object
     public void SetBoneWeights(List<BoneWeight> inBoneWeights)
     {
         _boneWeights = inBoneWeights ?? new List<BoneWeight>();
+        _bonesPerVertex.Clear();
+        _allBoneWeights.Clear();
+        for (int vertex = 0; vertex < _boneWeights.Count; vertex++)
+        {
+            BoneWeight weight = _boneWeights[vertex];
+            int count = 0;
+            AddLegacyInfluence(weight.weight0, weight.boneIndex0, ref count);
+            AddLegacyInfluence(weight.weight1, weight.boneIndex1, ref count);
+            AddLegacyInfluence(weight.weight2, weight.boneIndex2, ref count);
+            AddLegacyInfluence(weight.weight3, weight.boneIndex3, ref count);
+            _bonesPerVertex.Add((byte)count);
+        }
+    }
+
+    public void SetBoneWeights(NativeArray<byte> bonesPerVertex, NativeArray<BoneWeight1> allBoneWeights)
+    {
+        if (!bonesPerVertex.IsCreated) throw new ArgumentException("bonesPerVertex must be created.", nameof(bonesPerVertex));
+        if (!allBoneWeights.IsCreated) throw new ArgumentException("allBoneWeights must be created.", nameof(allBoneWeights));
+        if (bonesPerVertex.Length != _vertices.Count) throw new ArgumentException("A bone count is required for every vertex.", nameof(bonesPerVertex));
+        int total = 0;
+        for (int vertex = 0; vertex < bonesPerVertex.Length; vertex++)
+        {
+            if (bonesPerVertex[vertex] > 8) throw new ArgumentOutOfRangeException(nameof(bonesPerVertex), "Anity's current native skin stream supports at most eight influences.");
+            total += bonesPerVertex[vertex];
+        }
+        if (total != allBoneWeights.Length) throw new ArgumentException("Influence counts must match allBoneWeights.", nameof(allBoneWeights));
+        var counts = new List<byte>(bonesPerVertex.Length); var weights = new List<BoneWeight1>(allBoneWeights.Length);
+        for (int i = 0; i < bonesPerVertex.Length; i++) counts.Add(bonesPerVertex[i]);
+        for (int i = 0; i < allBoneWeights.Length; i++)
+        {
+            BoneWeight1 weight = allBoneWeights[i];
+            if (!float.IsFinite(weight.weight) || weight.weight < 0f || weight.boneIndex < 0)
+                throw new ArgumentOutOfRangeException(nameof(allBoneWeights));
+            weights.Add(weight);
+        }
+        _bonesPerVertex = counts; _allBoneWeights = weights; _boneWeights.Clear();
+    }
+
+    internal bool TryGetVariableBoneWeights(out byte[] bonesPerVertex, out BoneWeight1[] allBoneWeights)
+    {
+        bonesPerVertex = _bonesPerVertex.ToArray(); allBoneWeights = _allBoneWeights.ToArray();
+        return bonesPerVertex.Length == _vertices.Count && bonesPerVertex.Length != 0;
+    }
+
+    private BoneWeight[] GetLegacyBoneWeights()
+    {
+        if (_bonesPerVertex.Count != _vertices.Count) return Array.Empty<BoneWeight>();
+        var result = new BoneWeight[_bonesPerVertex.Count]; int offset = 0;
+        for (int vertex = 0; vertex < result.Length; vertex++)
+        {
+            BoneWeight legacy = default; int count = _bonesPerVertex[vertex];
+            for (int influence = 0; influence < count; influence++)
+            {
+                BoneWeight1 value = _allBoneWeights[offset++];
+                switch (influence)
+                {
+                    case 0: legacy.weight0 = value.weight; legacy.boneIndex0 = value.boneIndex; break;
+                    case 1: legacy.weight1 = value.weight; legacy.boneIndex1 = value.boneIndex; break;
+                    case 2: legacy.weight2 = value.weight; legacy.boneIndex2 = value.boneIndex; break;
+                    case 3: legacy.weight3 = value.weight; legacy.boneIndex3 = value.boneIndex; break;
+                }
+            }
+            result[vertex] = legacy;
+        }
+        return result;
+    }
+
+    private void AddLegacyInfluence(float weight, int boneIndex, ref int count)
+    {
+        if (weight <= 0f) return;
+        _allBoneWeights.Add(new BoneWeight1 { weight = weight, boneIndex = boneIndex });
+        count++;
     }
 
     public void GetBoneWeights(List<BoneWeight> boneWeights)
@@ -667,6 +889,12 @@ public struct BoneWeight
     public int boneIndex1 { get; set; }
     public int boneIndex2 { get; set; }
     public int boneIndex3 { get; set; }
+}
+
+public struct BoneWeight1
+{
+    public float weight { get; set; }
+    public int boneIndex { get; set; }
 }
 
 public enum MeshTopology

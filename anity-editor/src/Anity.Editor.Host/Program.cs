@@ -1,6 +1,17 @@
 using System.Text.Json;
 using System.Linq;
+using Anity.Cli;
 using Anity.Editor.Host.Services;
+
+// The app bundle is also a Unity-compatible editor executable.  Keep the
+// interactive host verbs below, but forward Unity-style switches to the
+// single CLI implementation so `Anity.app/.../Anity.Editor.Host -batchmode`
+// has the same behavior as the standalone `anity` executable.
+if (args.Length > 0 && args[0] is not "--help" and not "-h" && args[0].StartsWith("-", StringComparison.Ordinal))
+{
+  Environment.ExitCode = new CliHost().Run(args);
+  return;
+}
 
 if (args.Length == 0 || args[0] == "--help" || args[0] == "-h")
 {

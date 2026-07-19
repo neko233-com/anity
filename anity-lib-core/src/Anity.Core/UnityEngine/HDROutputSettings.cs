@@ -227,12 +227,70 @@ public static class HDRUtilities
         var grade = new AnityNative.HDRColorGrade
         {
             postExposure = postExposure,
+            colorFilterR = 1f,
+            colorFilterG = 1f,
+            colorFilterB = 1f,
+            mixerRedR = 1f,
+            mixerGreenG = 1f,
+            mixerBlueB = 1f,
+            curveLut = UnityEngine.Rendering.Universal.PostProcessRuntime.CreateIdentityCurveLut(),
             bloomThreshold = 0.9f,
             bloomIntensity = bloomIntensity,
+            bloomScatter = 0.7f,
+            bloomMaxIterations = 6,
+            bloomDownscale = 1,
+            bloomHighQualityFiltering = 1,
+            bloomTintR = 1f,
+            bloomTintG = 1f,
+            bloomTintB = 1f,
             tonemapMode = tonemapMode
         };
         return AnityNative.HDR_ProcessFrame(rgbaHdr, width, height, ref grade, rgbaOut, outputHdr10 ? 1 : 0)
                == AnityNative.Result.Ok;
+    }
+
+    // The regular public helper mirrors Unity's display-facing API surface.
+    // URP's native fallback can use this internal overload when a Bloom Volume
+    // has a Texture2D Lens Dirt input; it deliberately returns false instead
+    // of silently dropping Dirt on a managed-only runtime.
+    internal static bool ProcessFrameWithBloomLensDirt(float[] rgbaHdr, int width, int height,
+        float postExposure, float bloomIntensity, int tonemapMode,
+        Texture2D dirtTexture, float dirtIntensity, float[] rgbaOut, bool outputHdr10 = false)
+    {
+        if (rgbaHdr == null || rgbaOut == null || dirtTexture == null || width <= 0 || height <= 0 ||
+            dirtIntensity <= 0f || !AnityNative.Available) return false;
+        byte[] nativePixels = dirtTexture.GetNativeRgba32();
+        if (nativePixels.Length == 0) return false;
+
+        var grade = new AnityNative.HDRColorGrade
+        {
+            postExposure = postExposure,
+            colorFilterR = 1f,
+            colorFilterG = 1f,
+            colorFilterB = 1f,
+            mixerRedR = 1f,
+            mixerGreenG = 1f,
+            mixerBlueB = 1f,
+            curveLut = UnityEngine.Rendering.Universal.PostProcessRuntime.CreateIdentityCurveLut(),
+            bloomThreshold = 0.9f,
+            bloomIntensity = bloomIntensity,
+            bloomScatter = 0.7f,
+            bloomMaxIterations = 6,
+            bloomDownscale = 1,
+            bloomHighQualityFiltering = 1,
+            bloomTintR = 1f,
+            bloomTintG = 1f,
+            bloomTintB = 1f,
+            bloomDirtIntensity = dirtIntensity,
+            tonemapMode = tonemapMode
+        };
+        return AnityNative.HDR_ProcessFrameWithLensDirtRGBA8MipsBias(
+                   rgbaHdr, width, height, ref grade, nativePixels,
+                   dirtTexture.width, dirtTexture.height, dirtTexture.mipmapCount,
+                   (int)dirtTexture.filterMode,
+                   (int)dirtTexture.wrapModeU, (int)dirtTexture.wrapModeV,
+                   dirtTexture.linear ? 1 : 0, dirtTexture.mipMapBias, nativePixels.Length,
+                   rgbaOut, outputHdr10 ? 1 : 0) == AnityNative.Result.Ok;
     }
 
     private static float Aces(float x)

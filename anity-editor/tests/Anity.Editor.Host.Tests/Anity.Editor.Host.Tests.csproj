@@ -20,4 +20,19 @@
     <ProjectReference Include="..\..\..\anity-agent\src\Anity.Agent\Anity.Agent.csproj"
                       AdditionalProperties="GeneratePackageOnBuild=false" />
   </ItemGroup>
+  <ItemGroup Condition="'$(AnityRequireNative)' == 'true'">
+    <None Include="..\..\..\anity-native\build\libanity_native*.dylib"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\..\anity-native\build\libanity_native*.so*"
+          Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\..\anity-native\build\anity_native.dll"
+          Condition="Exists('..\..\..\anity-native\build\anity_native.dll')"
+          Link="anity_native.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

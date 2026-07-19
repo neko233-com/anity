@@ -11,6 +11,8 @@ public sealed class AgentEditorTests : IDisposable
   private readonly string _projectPath = Path.Combine(
     Path.GetTempPath(), "anity-agent-editor-tests-" + Guid.NewGuid().ToString("N"));
 
+  public AgentEditorTests() => Directory.CreateDirectory(_projectPath);
+
   [Fact]
   public void MissingSettingsReturnsSecureDefaults()
   {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Linq;
 
 namespace UnityEngine;
@@ -963,5 +964,19 @@ public enum AvatarTarget
 
 public abstract class RuntimeAnimatorController : Object
 {
-    public abstract AnimationClip[] animationClips { get; }
+    private static readonly ConditionalWeakTable<RuntimeAnimatorController, AnimationClipProvider> ClipProviders = new();
+    public virtual AnimationClip[] animationClips => ClipProviders.TryGetValue(this, out var provider) ? provider.GetClips() : Array.Empty<AnimationClip>();
+
+    internal static void SetAnimationClipProvider(RuntimeAnimatorController controller, Func<AnimationClip[]> getClips)
+    {
+        ClipProviders.Remove(controller);
+        ClipProviders.Add(controller, new AnimationClipProvider(getClips));
+    }
+
+    private sealed class AnimationClipProvider
+    {
+        private readonly Func<AnimationClip[]> _getClips;
+        public AnimationClipProvider(Func<AnimationClip[]> getClips) => _getClips = getClips;
+        public AnimationClip[] GetClips() => _getClips();
+    }
 }

@@ -131,12 +131,14 @@ public class TextureImporter : AssetImporter
     _platformSettings.Remove(platform);
   }
 
+  internal IEnumerable<TextureImporterPlatformSettings> GetConfiguredPlatformTextureSettings() => _platformSettings.Values;
+
   public bool DoesSourceTextureHaveAlpha() { return false; }
   public TextureImporterFormat GetDefaultTextureFormat() { return textureFormat; }
 
   public static new TextureImporter GetAtPath(string path)
   {
-    return new TextureImporter { assetPath = path };
+    return AssetDatabase.GetImporterAtPath(path) as TextureImporter ?? new TextureImporter { assetPath = path, importSettingsMissing = true };
   }
 }
 

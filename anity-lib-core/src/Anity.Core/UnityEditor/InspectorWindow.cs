@@ -11,6 +11,7 @@ namespace UnityEditor
     private Vector2 _scrollPosition;
     private UnityEngine.Object? _selectedObject;
     private Editor? _activeEditor;
+    private ActiveEditorTracker? _editorTracker;
     private bool _locked;
     private readonly HashSet<int> _expandedComponents = new();
     private bool _showAddComponentMenu;
@@ -23,7 +24,15 @@ namespace UnityEditor
     public bool isLocked
     {
       get => _locked;
-      set => _locked = value;
+      set
+      {
+        if (_locked == value) return;
+        _locked = value;
+        if (_editorTracker != null)
+          _editorTracker.isLocked = value;
+        if (!_locked)
+          RefreshActiveEditorFromTracker(clearExpandedComponents: true);
+      }
     }
 
     static InspectorWindow()
@@ -48,26 +57,32 @@ namespace UnityEditor
     protected override void OnEnable()
     {
       base.OnEnable();
+      _editorTracker ??= new ActiveEditorTracker();
+      _editorTracker.isLocked = _locked;
       Selection.selectionChanged += OnSelectionChanged;
+      RefreshActiveEditorFromTracker(clearExpandedComponents: false);
     }
 
     protected override void OnDisable()
     {
       base.OnDisable();
       Selection.selectionChanged -= OnSelectionChanged;
+      _editorTracker?.Destroy();
+      _editorTracker = null;
     }
 
     protected override void OnSelectionChange()
     {
       if (!_locked)
       {
-        _selectedObject = Selection.activeObject;
-        _activeEditor = _selectedObject != null ? Editor.CreateEditor(_selectedObject) : null;
+        RefreshActiveEditorFromTracker(clearExpandedComponents: true);
       }
     }
 
     protected override void OnInspectorUpdate()
     {
+      if (!_locked && _editorTracker?.isDirty == true)
+        RefreshActiveEditorFromTracker(clearExpandedComponents: false);
       Repaint();
     }
 
@@ -544,12 +559,20 @@ namespace UnityEditor
     {
       if (!_locked)
       {
-        _selectedObject = Selection.activeObject;
-        _activeEditor = _selectedObject != null ? Editor.CreateEditor(_selectedObject) : null;
-        _expandedComponents.Clear();
-        _expandedComponents.Add(0);
+        RefreshActiveEditorFromTracker(clearExpandedComponents: true);
         Repaint();
       }
+    }
+
+    private void RefreshActiveEditorFromTracker(bool clearExpandedComponents)
+    {
+      _editorTracker ??= new ActiveEditorTracker();
+      _editorTracker.RebuildIfNecessary();
+      _activeEditor = _editorTracker.activeEditors.FirstOrDefault();
+      _selectedObject = _activeEditor?.target as UnityEngine.Object;
+      if (!clearExpandedComponents) return;
+      _expandedComponents.Clear();
+      if (_selectedObject != null) _expandedComponents.Add(0);
     }
 
     [MenuItem("Window/General/Inspector")]

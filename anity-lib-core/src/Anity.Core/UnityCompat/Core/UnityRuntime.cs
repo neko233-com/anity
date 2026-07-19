@@ -16,6 +16,7 @@ public static class UnityRuntime
   public static void Tick(float deltaTime)
   {
     Time.Tick(deltaTime);
+    UnityEngine.Rendering.GraphicsFenceScheduler.ProcessFrame();
 
     AsyncOperation.ProcessPendingOperations();
     AsyncInstantiateOperation.ProcessPendingOperations();
@@ -74,6 +75,7 @@ public static class UnityRuntime
     try
     {
       Camera.RenderAll();
+      UnityEngine.Rendering.AsyncGPUReadback.ProcessPlayerLoopUpdate();
     }
     finally
     {

@@ -47,8 +47,34 @@ typedef struct AnityHDRColorGrade {
   float saturation;     /* -100..100 */
   float temperature;    /* -100..100 */
   float tint;           /* -100..100 */
+  float hueShift;       /* -180..180 degrees */
+  float colorFilterR;   /* linear RGB multiplier */
+  float colorFilterG;
+  float colorFilterB;
+  /* Output rows of the linear RGB channel mixer. */
+  float mixerRedR;
+  float mixerRedG;
+  float mixerRedB;
+  float mixerGreenR;
+  float mixerGreenG;
+  float mixerGreenB;
+  float mixerBlueR;
+  float mixerBlueG;
+  float mixerBlueB;
+  /* Eight baked 128-sample curves: master/R/G/B plus HSV/Luma variants. */
+  int32_t curveEnabled;
+  float curveLut[1024];
   float bloomThreshold;
   float bloomIntensity;
+  float bloomScatter;
+  int32_t bloomMaxIterations;
+  int32_t bloomDownscale; /* 0=half, 1=quarter */
+  int32_t bloomHighQualityFiltering;
+  float bloomTintR;
+  float bloomTintG;
+  float bloomTintB;
+  uint64_t bloomDirtTextureId;
+  float bloomDirtIntensity;
   AnityTonemappingMode tonemapMode;
 } AnityHDRColorGrade;
 
@@ -63,6 +89,40 @@ ANITY_API AnityResult ANITY_CALL AnityHDR_ProcessFrame(
     const AnityHDRColorGrade* grade,
     float* rgbaOut,
     int32_t outHdr10);
+
+/* CPU reference variant for URP Bloom Lens Dirt. Pixels are a tightly packed
+ * base RGBA8 level; filter and wrap values use Unity's FilterMode and
+ * TextureWrapMode integer values, and linear is 1 for linear texture data. */
+ANITY_API AnityResult ANITY_CALL AnityHDR_ProcessFrameWithLensDirtRGBA8(
+    const float* rgbaHdr, int32_t width, int32_t height,
+    const AnityHDRColorGrade* grade,
+    const uint8_t* dirtRgba8, int32_t dirtWidth, int32_t dirtHeight,
+    int32_t dirtFilterMode, int32_t dirtWrapU, int32_t dirtWrapV,
+    int32_t dirtLinear, int32_t dirtByteCount,
+    float* rgbaOut,
+    int32_t outHdr10);
+
+/* Mip-aware CPU Lens Dirt path. dirtRgba8 packs mip 0 through dirtMipCount-1
+ * consecutively; each level uses max(1, baseDimension >> level). Point and
+ * Bilinear choose the derivative-selected level, while Trilinear blends the
+ * adjacent levels. */
+ANITY_API AnityResult ANITY_CALL AnityHDR_ProcessFrameWithLensDirtRGBA8Mips(
+    const float* rgbaHdr, int32_t width, int32_t height,
+    const AnityHDRColorGrade* grade,
+    const uint8_t* dirtRgba8, int32_t dirtWidth, int32_t dirtHeight,
+    int32_t dirtMipCount, int32_t dirtFilterMode, int32_t dirtWrapU,
+    int32_t dirtWrapV, int32_t dirtLinear, int32_t dirtByteCount,
+    float* rgbaOut, int32_t outHdr10);
+
+/* Same packed-mip path with Unity Texture.mipMapBias applied to the
+ * derivative-selected level before Point/Bilinear/Trilinear sampling. */
+ANITY_API AnityResult ANITY_CALL AnityHDR_ProcessFrameWithLensDirtRGBA8MipsBias(
+    const float* rgbaHdr, int32_t width, int32_t height,
+    const AnityHDRColorGrade* grade,
+    const uint8_t* dirtRgba8, int32_t dirtWidth, int32_t dirtHeight,
+    int32_t dirtMipCount, int32_t dirtFilterMode, int32_t dirtWrapU,
+    int32_t dirtWrapV, int32_t dirtLinear, float dirtMipBias,
+    int32_t dirtByteCount, float* rgbaOut, int32_t outHdr10);
 
 /* Linear <-> sRGB (Unity Color/Mathf aligned) */
 ANITY_API float ANITY_CALL AnityHDR_LinearToGammaSpace(float value);

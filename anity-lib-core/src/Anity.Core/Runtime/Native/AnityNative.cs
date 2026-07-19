@@ -128,6 +128,149 @@ public static class AnityNative
         public IntPtr nativeWindow;
     }
 
+    [Flags]
+    public enum GraphicsCameraPassFlags : uint
+    {
+        ClearColor = 1 << 0,
+        ClearDepth = 1 << 1,
+        StoreColor = 1 << 2,
+        StoreDepth = 1 << 3,
+        Final = 1 << 4,
+        Hdr = 1 << 5,
+        TargetIsCameraTarget = 1 << 6
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsCameraPassDesc
+    {
+        public ulong targetId;
+        public int targetWidth;
+        public int targetHeight;
+        public float viewportX;
+        public float viewportY;
+        public float viewportWidth;
+        public float viewportHeight;
+        public float clearR;
+        public float clearG;
+        public float clearB;
+        public float clearA;
+        public float clearDepth;
+        public int msaaSamples;
+        public int depthSlice;
+        public int depthSliceCount;
+        public GraphicsCameraPassFlags flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsCameraPassInfo
+    {
+        public ulong frameId;
+        public ulong sequence;
+        public GraphicsCameraPassDesc desc;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsCameraRenderTargetDesc
+    {
+        public ulong targetId;
+        public int width;
+        public int height;
+        public int msaaSamples;
+        public int hdrEnabled;
+        public int dimension;
+        public int volumeDepth;
+        /// <summary>0=default target, 1=R8G8B8A8 SNorm, 2=R16G16 SFloat.</summary>
+        public int colorFormat;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsMeshVertex
+    {
+        public float px, py, pz;
+        public float ppx, ppy, ppz;
+        public float nx, ny, nz;
+        public float tx, ty, tz, tw;
+        public float u, v;
+        public float r, g, b, a;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsCameraMeshDrawDesc
+    {
+        public ulong targetId;
+        public int targetIsCameraTarget;
+        public int blendMode;
+        public int depthWriteEnabled;
+        public int writeMotionVectors;
+        public int depthSlice;
+        public int alphaClipEnabled;
+        public float alphaClipThreshold;
+        public ulong baseTextureId;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)] public float[] baseMapST;
+        public ulong normalMapTextureId;
+        public IntPtr vertices;
+        public int vertexCount;
+        public IntPtr indices;
+        public int indexCount;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public float[] objectToClip;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public float[] motionObjectToClip;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public float[] previousObjectToClip;
+        public int hasPreviousObjectToClip;
+        public int stereoInstanceCount;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public float[] stereoObjectToClip;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public float[] stereoMotionObjectToClip;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public float[] stereoPreviousObjectToClip;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsSkinVertex
+    {
+        public float px, py, pz;
+        public float nx, ny, nz;
+        public float tx, ty, tz, tw;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsBlendShapeDesc
+    {
+        public IntPtr sourceVertices;
+        public IntPtr shapeDeltas;
+        public int vertexCount;
+        public int shapeCount;
+        public IntPtr outVertices;
+        public int outVertexCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsBoneWeight
+    {
+        public float w0, w1, w2, w3;
+        public int i0, i1, i2, i3;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsBoneWeight1
+    {
+        public float weight;
+        public int boneIndex;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsSkinMeshDesc
+    {
+        public IntPtr sourceVertices;
+        public IntPtr boneWeights;
+        public int vertexCount;
+        public IntPtr boneMatrices;
+        public int boneCount;
+        public IntPtr outVertices;
+        public int outVertexCount;
+        public IntPtr bonesPerVertex;
+        public IntPtr allBoneWeights;
+        public int allBoneWeightCount;
+        public int maxInfluences;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct GraphicsUIUploadStats
     {
@@ -157,6 +300,8 @@ public static class AnityNative
         public int wrapU;
         public int wrapV;
         public int linear;
+        public float mipMapBias;
+        public int anisoLevel;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -748,6 +893,91 @@ public static class AnityNative
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_EndFrame")]
     public static extern Result Graphics_EndFrame(IntPtr device);
 
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_RecordCameraPass")]
+    public static extern Result Graphics_RecordCameraPass(
+        IntPtr device, ref GraphicsCameraPassDesc desc, out GraphicsCameraPassInfo info);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetLastCameraPass")]
+    public static extern Result Graphics_GetLastCameraPass(
+        IntPtr device, out GraphicsCameraPassInfo info);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_EnsureCameraRenderTarget")]
+    public static extern Result Graphics_EnsureCameraRenderTarget(
+        IntPtr device, ref GraphicsCameraRenderTargetDesc desc);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_DestroyCameraRenderTarget")]
+    public static extern Result Graphics_DestroyCameraRenderTarget(IntPtr device, ulong targetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_ReadbackCameraRenderTargetRGBA8")]
+    public static extern Result Graphics_ReadbackCameraRenderTargetRGBA8(
+        IntPtr device, ulong targetId, [Out] byte[] pixels, int pixelCapacity, out int written);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_ReadbackCameraRenderTargetSliceRGBA8")]
+    public static extern Result Graphics_ReadbackCameraRenderTargetSliceRGBA8(
+        IntPtr device, ulong targetId, int depthSlice, [Out] byte[] pixels, int pixelCapacity, out int written);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_ReadbackCameraRenderTargetToneMappedRGBA8")]
+    public static extern Result Graphics_ReadbackCameraRenderTargetToneMappedRGBA8(
+        IntPtr device, ulong targetId, [Out] byte[] pixels, int pixelCapacity, out int written);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_ReadbackCameraRenderTargetToneMappedSliceRGBA8")]
+    public static extern Result Graphics_ReadbackCameraRenderTargetToneMappedSliceRGBA8(
+        IntPtr device, ulong targetId, int depthSlice, [Out] byte[] pixels, int pixelCapacity, out int written);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CopyCameraRenderTargetColor")]
+    public static extern Result Graphics_CopyCameraRenderTargetColor(
+        IntPtr device, ulong sourceTargetId, int sourceIsCameraTarget, ulong destinationTargetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CopyCameraRenderTargetColorSlice")]
+    public static extern Result Graphics_CopyCameraRenderTargetColorSlice(
+        IntPtr device, ulong sourceTargetId, int sourceIsCameraTarget, int sourceSlice, int destinationSlice,
+        ulong destinationTargetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CopyCameraRenderTargetDepthToColor")]
+    public static extern Result Graphics_CopyCameraRenderTargetDepthToColor(
+        IntPtr device, ulong sourceTargetId, int sourceIsCameraTarget, ulong destinationTargetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CopyCameraRenderTargetDepthToColorSlice")]
+    public static extern Result Graphics_CopyCameraRenderTargetDepthToColorSlice(
+        IntPtr device, ulong sourceTargetId, int sourceIsCameraTarget, int sourceSlice, int destinationSlice,
+        ulong destinationTargetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CopyCameraRenderTargetNormalsToColor")]
+    public static extern Result Graphics_CopyCameraRenderTargetNormalsToColor(
+        IntPtr device, ulong sourceTargetId, int sourceIsCameraTarget, ulong destinationTargetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CopyCameraRenderTargetNormalsToColorSlice")]
+    public static extern Result Graphics_CopyCameraRenderTargetNormalsToColorSlice(
+        IntPtr device, ulong sourceTargetId, int sourceIsCameraTarget, int sourceSlice, int destinationSlice,
+        ulong destinationTargetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CopyCameraRenderTargetMotionToColor")]
+    public static extern Result Graphics_CopyCameraRenderTargetMotionToColor(
+        IntPtr device, ulong sourceTargetId, int sourceIsCameraTarget, ulong destinationTargetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_CopyCameraRenderTargetMotionToColorSlice")]
+    public static extern Result Graphics_CopyCameraRenderTargetMotionToColorSlice(
+        IntPtr device, ulong sourceTargetId, int sourceIsCameraTarget, int sourceSlice, int destinationSlice,
+        ulong destinationTargetId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_DrawCameraMesh")]
+    public static extern Result Graphics_DrawCameraMesh(
+        IntPtr device, ref GraphicsCameraMeshDrawDesc desc);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_SkinMeshVertices")]
+    public static extern Result Graphics_SkinMeshVertices(ref GraphicsSkinMeshDesc desc);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_ApplyBlendShapeDeltas")]
+    public static extern Result Graphics_ApplyBlendShapeDeltas(ref GraphicsBlendShapeDesc desc);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_ProcessCameraRenderTargetHDR")]
+    public static extern Result Graphics_ProcessCameraRenderTargetHDR(
+        IntPtr device, ulong targetId, ref HDRColorGrade grade);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_GetHDRPostProcessStats")]
+    public static extern Result Graphics_GetHDRPostProcessStats(
+        IntPtr device, out GraphicsHDRPostProcessStats stats);
+
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_SetUICanvas")]
     public static extern Result Graphics_SetUICanvas(IntPtr device, IntPtr canvas);
 
@@ -1129,6 +1359,13 @@ public static class AnityNative
     public static extern Result Graphics_ReadbackSwapchainRGBA8(
         IntPtr swapchain, [Out] byte[] pixels, int pixelCapacity, out int written);
 
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_ReadbackSwapchainToneMappedRGBA8")]
+    public static extern Result Graphics_ReadbackSwapchainToneMappedRGBA8(
+        IntPtr swapchain, [Out] byte[] pixels, int pixelCapacity, out int written);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_ProcessSwapchainHDR")]
+    public static extern Result Graphics_ProcessSwapchainHDR(IntPtr swapchain, ref HDRColorGrade grade);
+
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityGraphics_SwapchainHasNativeSurface")]
     public static extern int Graphics_SwapchainHasNativeSurface(IntPtr swapchain);
 
@@ -1166,9 +1403,44 @@ public static class AnityNative
         public float saturation;
         public float temperature;
         public float tint;
+        public float hueShift;
+        public float colorFilterR;
+        public float colorFilterG;
+        public float colorFilterB;
+        public float mixerRedR;
+        public float mixerRedG;
+        public float mixerRedB;
+        public float mixerGreenR;
+        public float mixerGreenG;
+        public float mixerGreenB;
+        public float mixerBlueR;
+        public float mixerBlueG;
+        public float mixerBlueB;
+        public int curveEnabled;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1024)]
+        public float[] curveLut;
         public float bloomThreshold;
         public float bloomIntensity;
+        public float bloomScatter;
+        public int bloomMaxIterations;
+        public int bloomDownscale;
+        public int bloomHighQualityFiltering;
+        public float bloomTintR;
+        public float bloomTintG;
+        public float bloomTintB;
+        public ulong bloomDirtTextureId;
+        public float bloomDirtIntensity;
         public int tonemapMode;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GraphicsHDRPostProcessStats
+    {
+        public int backendKind;
+        public int curveLutSamplesPerCurve;
+        public ulong curveLutByteCapacity;
+        public ulong curveLutUploadCount;
+        public ulong curveLutCacheHitCount;
     }
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHDR_QueryDisplay")]
@@ -1193,6 +1465,36 @@ public static class AnityNative
     public static extern Result HDR_ProcessFrame(
         float[] rgbaHdr, int width, int height,
         ref HDRColorGrade grade,
+        float[] rgbaOut,
+        int outHdr10);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHDR_ProcessFrameWithLensDirtRGBA8")]
+    public static extern Result HDR_ProcessFrameWithLensDirtRGBA8(
+        float[] rgbaHdr, int width, int height,
+        ref HDRColorGrade grade,
+        byte[] dirtRgba8, int dirtWidth, int dirtHeight,
+        int dirtFilterMode, int dirtWrapU, int dirtWrapV,
+        int dirtLinear, int dirtByteCount,
+        float[] rgbaOut,
+        int outHdr10);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHDR_ProcessFrameWithLensDirtRGBA8Mips")]
+    public static extern Result HDR_ProcessFrameWithLensDirtRGBA8Mips(
+        float[] rgbaHdr, int width, int height,
+        ref HDRColorGrade grade,
+        byte[] dirtRgba8, int dirtWidth, int dirtHeight,
+        int dirtMipCount, int dirtFilterMode, int dirtWrapU, int dirtWrapV,
+        int dirtLinear, int dirtByteCount,
+        float[] rgbaOut,
+        int outHdr10);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHDR_ProcessFrameWithLensDirtRGBA8MipsBias")]
+    public static extern Result HDR_ProcessFrameWithLensDirtRGBA8MipsBias(
+        float[] rgbaHdr, int width, int height,
+        ref HDRColorGrade grade,
+        byte[] dirtRgba8, int dirtWidth, int dirtHeight,
+        int dirtMipCount, int dirtFilterMode, int dirtWrapU, int dirtWrapV,
+        int dirtLinear, float dirtMipBias, int dirtByteCount,
         float[] rgbaOut,
         int outHdr10);
 

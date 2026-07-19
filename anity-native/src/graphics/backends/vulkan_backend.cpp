@@ -16,6 +16,9 @@
 #if defined(ANITY_HAS_VULKAN)
 #include <vulkan/vulkan.h>
 #include "../shaders/anity_ui_spirv.h"
+#include "../shaders/anity_camera_mesh_spirv.h"
+#include "../shaders/anity_depth_copy_spirv.h"
+#include "../shaders/anity_depth_copy_msaa_spirv.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -84,6 +87,42 @@ struct VkTextureResource {
   VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 };
 
+/* Camera.targetTexture owns a color attachment, a depth attachment, and (when
+ * requested) a separate multisample color attachment resolved into color.  It
+ * deliberately does not reuse the sampled-texture registry: render targets
+ * have attachment layouts and command lifetime that texture uploads do not. */
+struct VkCameraRenderTarget {
+  int32_t width = 0;
+  int32_t height = 0;
+  int32_t volumeDepth = 1;
+  int32_t msaaSamples = 1;
+  int32_t hdrEnabled = 0;
+  VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+  VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+  VkImage colorImage = VK_NULL_HANDLE;
+  VkDeviceMemory colorMemory = VK_NULL_HANDLE;
+  std::vector<VkImageView> colorViews;
+  VkImage msaaImage = VK_NULL_HANDLE;
+  VkDeviceMemory msaaMemory = VK_NULL_HANDLE;
+  std::vector<VkImageView> msaaViews;
+  VkImage depthImage = VK_NULL_HANDLE;
+  VkDeviceMemory depthMemory = VK_NULL_HANDLE;
+  std::vector<VkImageView> depthViews;
+  VkImage normalImage = VK_NULL_HANDLE;
+  VkDeviceMemory normalMemory = VK_NULL_HANDLE;
+  std::vector<VkImageView> normalViews;
+  VkImage normalMsaaImage = VK_NULL_HANDLE;
+  VkDeviceMemory normalMsaaMemory = VK_NULL_HANDLE;
+  std::vector<VkImageView> normalMsaaViews;
+  VkRenderPass renderPass = VK_NULL_HANDLE;
+  VkRenderPass clearRenderPass = VK_NULL_HANDLE;
+  VkPipelineLayout meshPipelineLayout = VK_NULL_HANDLE;
+  VkPipeline meshPipelines[5][2]{}; // [Unity blend mode][depth write disabled/enabled]
+  std::vector<VkFramebuffer> framebuffers;
+  bool colorLayoutInitialized = false;
+  bool depthLayoutInitialized = false;
+};
+
 struct VkState {
   VkInstance instance = VK_NULL_HANDLE;
   VkPhysicalDevice phys = VK_NULL_HANDLE;
@@ -97,6 +136,9 @@ struct VkState {
   bool hasAndroidSurfaceExt = false;
   bool hasXlibSurfaceExt = false;
   bool hasWaylandSurfaceExt = false;
+  bool hasPortabilityEnumerationExt = false;
+  bool supportsSamplerAnisotropy = false;
+  bool supportsMirrorClampToEdge = false;
   VkUIBuffer uiVertexBuffers[3];
   VkUIBuffer uiIndexBuffers[3];
   VkDeviceSize uiVertexLengths[3] = {0, 0, 0};
@@ -110,6 +152,14 @@ struct VkState {
   std::mutex textureMutex;
   std::unordered_map<uint64_t, std::unique_ptr<VkTextureResource>> textures;
   VkTextureResource whiteTexture;
+  std::mutex cameraTargetMutex;
+  std::unordered_map<uint64_t, std::unique_ptr<VkCameraRenderTarget>> cameraTargets;
+  VkDescriptorSetLayout depthCopySetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool depthCopyDescriptorPool = VK_NULL_HANDLE;
+  VkPipelineLayout depthCopyPipelineLayout = VK_NULL_HANDLE;
+  VkPipeline depthCopyPipeline = VK_NULL_HANDLE;
+  VkPipeline depthCopyMsaaPipeline = VK_NULL_HANDLE;
+  VkSampler depthCopySampler = VK_NULL_HANDLE;
 };
 
 static_assert(offsetof(AnityUIPackedVertex, color) == 12,
@@ -203,10 +253,13 @@ static AnityResult UploadUIBuffer(VkState* st, VkUIBuffer* buffer,
 }
 
 static AnityResult CreateImage(VkState* st, int32_t width, int32_t height,
-                               uint32_t mipLevels, VkFormat format, VkImageUsageFlags usage,
-                               VkImage* outImage, VkDeviceMemory* outMemory) {
+                               uint32_t mipLevels, VkFormat format, VkSampleCountFlagBits samples,
+                               VkImageUsageFlags usage,
+                               VkImage* outImage, VkDeviceMemory* outMemory,
+                               uint32_t arrayLayers = 1) {
   if (!st || width <= 0 || height <= 0 || mipLevels == 0 || !outImage || !outMemory)
     return ANITY_ERR_INVALID_ARG;
+  if (arrayLayers == 0) return ANITY_ERR_INVALID_ARG;
   *outImage = VK_NULL_HANDLE;
   *outMemory = VK_NULL_HANDLE;
   VkImageCreateInfo imageInfo{};
@@ -215,8 +268,8 @@ static AnityResult CreateImage(VkState* st, int32_t width, int32_t height,
   imageInfo.format = format;
   imageInfo.extent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1};
   imageInfo.mipLevels = mipLevels;
-  imageInfo.arrayLayers = 1;
-  imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+  imageInfo.arrayLayers = arrayLayers;
+  imageInfo.samples = samples;
   imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
   imageInfo.usage = usage;
   imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -264,10 +317,302 @@ static void DestroyTextureResource(VkState* st, VkTextureResource* texture) {
   *texture = {};
 }
 
-static VkSamplerAddressMode ToVkAddressMode(int32_t mode) {
+static VkSampleCountFlagBits ToVkSampleCount(int32_t samples) {
+  switch (samples) {
+    case 2: return VK_SAMPLE_COUNT_2_BIT;
+    case 4: return VK_SAMPLE_COUNT_4_BIT;
+    case 8: return VK_SAMPLE_COUNT_8_BIT;
+    default: return VK_SAMPLE_COUNT_1_BIT;
+  }
+}
+
+static bool SupportsFormat(VkState* st, VkFormat format,
+                           VkFormatFeatureFlags required) {
+  VkFormatProperties properties{};
+  vkGetPhysicalDeviceFormatProperties(st->phys, format, &properties);
+  return (properties.optimalTilingFeatures & required) == required;
+}
+
+static VkFormat FindDepthFormat(VkState* st) {
+  const VkFormat candidates[] = {
+      VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM};
+  for (VkFormat candidate : candidates) {
+    if (SupportsFormat(st, candidate, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+      return candidate;
+  }
+  return VK_FORMAT_UNDEFINED;
+}
+
+static AnityResult CreateImageView(VkState* st, VkImage image, VkFormat format,
+                                   VkImageAspectFlags aspect, VkImageView* outView,
+                                   uint32_t arrayLayers = 1, uint32_t baseArrayLayer = 0) {
+  if (!st || !image || !outView) return ANITY_ERR_INVALID_ARG;
+  if (arrayLayers == 0) return ANITY_ERR_INVALID_ARG;
+  *outView = VK_NULL_HANDLE;
+  VkImageViewCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  info.image = image;
+  info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  info.format = format;
+  info.subresourceRange.aspectMask = aspect;
+  info.subresourceRange.levelCount = 1;
+  info.subresourceRange.baseArrayLayer = baseArrayLayer;
+  info.subresourceRange.layerCount = 1;
+  return vkCreateImageView(st->device, &info, nullptr, outView) == VK_SUCCESS
+      ? ANITY_OK : ANITY_ERR_DEVICE_LOST;
+}
+
+static void DestroyCameraRenderTarget(VkState* st, VkCameraRenderTarget* target) {
+  if (!st || !target || !st->device) return;
+  for (auto& blendPipelines : target->meshPipelines)
+    for (VkPipeline pipeline : blendPipelines)
+      if (pipeline) vkDestroyPipeline(st->device, pipeline, nullptr);
+  if (target->meshPipelineLayout)
+    vkDestroyPipelineLayout(st->device, target->meshPipelineLayout, nullptr);
+  for (VkFramebuffer framebuffer : target->framebuffers)
+    if (framebuffer) vkDestroyFramebuffer(st->device, framebuffer, nullptr);
+  if (target->clearRenderPass) vkDestroyRenderPass(st->device, target->clearRenderPass, nullptr);
+  if (target->renderPass) vkDestroyRenderPass(st->device, target->renderPass, nullptr);
+  for (VkImageView view : target->depthViews)
+    if (view) vkDestroyImageView(st->device, view, nullptr);
+  if (target->depthImage) vkDestroyImage(st->device, target->depthImage, nullptr);
+  if (target->depthMemory) vkFreeMemory(st->device, target->depthMemory, nullptr);
+  for (VkImageView view : target->normalMsaaViews)
+    if (view) vkDestroyImageView(st->device, view, nullptr);
+  if (target->normalMsaaImage) vkDestroyImage(st->device, target->normalMsaaImage, nullptr);
+  if (target->normalMsaaMemory) vkFreeMemory(st->device, target->normalMsaaMemory, nullptr);
+  for (VkImageView view : target->normalViews)
+    if (view) vkDestroyImageView(st->device, view, nullptr);
+  if (target->normalImage) vkDestroyImage(st->device, target->normalImage, nullptr);
+  if (target->normalMemory) vkFreeMemory(st->device, target->normalMemory, nullptr);
+  for (VkImageView view : target->msaaViews)
+    if (view) vkDestroyImageView(st->device, view, nullptr);
+  if (target->msaaImage) vkDestroyImage(st->device, target->msaaImage, nullptr);
+  if (target->msaaMemory) vkFreeMemory(st->device, target->msaaMemory, nullptr);
+  for (VkImageView view : target->colorViews)
+    if (view) vkDestroyImageView(st->device, view, nullptr);
+  if (target->colorImage) vkDestroyImage(st->device, target->colorImage, nullptr);
+  if (target->colorMemory) vkFreeMemory(st->device, target->colorMemory, nullptr);
+  *target = {};
+}
+
+static AnityResult CreateCameraRenderTarget(
+    VkState* st, const AnityGraphicsCameraRenderTargetDesc& desc,
+    VkCameraRenderTarget* outTarget) {
+  if (!st || !outTarget) return ANITY_ERR_INVALID_ARG;
+  *outTarget = {};
+  VkCameraRenderTarget target{};
+  target.width = desc.width;
+  target.height = desc.height;
+  target.volumeDepth = std::max(1, desc.volumeDepth);
+  target.msaaSamples = desc.msaaSamples;
+  target.hdrEnabled = desc.hdrEnabled;
+  target.colorFormat = desc.hdrEnabled != 0
+      ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
+  target.depthFormat = FindDepthFormat(st);
+  const VkSampleCountFlagBits samples = ToVkSampleCount(desc.msaaSamples);
+  if (target.depthFormat == VK_FORMAT_UNDEFINED ||
+      !SupportsFormat(st, target.colorFormat, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+    return ANITY_ERR_NOT_SUPPORTED;
+
+  AnityResult result = CreateImage(st, desc.width, desc.height, 1, target.colorFormat,
+      VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+      VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+      &target.colorImage, &target.colorMemory, static_cast<uint32_t>(target.volumeDepth));
+  if (result != ANITY_OK) return result;
+  target.colorViews.resize(static_cast<size_t>(target.volumeDepth));
+  for (int32_t slice = 0; slice < target.volumeDepth; ++slice) {
+    result = CreateImageView(st, target.colorImage, target.colorFormat,
+        VK_IMAGE_ASPECT_COLOR_BIT, &target.colorViews[static_cast<size_t>(slice)], 1,
+        static_cast<uint32_t>(slice));
+    if (result != ANITY_OK) { DestroyCameraRenderTarget(st, &target); return result; }
+  }
+  if (samples != VK_SAMPLE_COUNT_1_BIT) {
+    result = CreateImage(st, desc.width, desc.height, 1, target.colorFormat, samples,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+        &target.msaaImage, &target.msaaMemory, static_cast<uint32_t>(target.volumeDepth));
+    target.msaaViews.resize(static_cast<size_t>(target.volumeDepth));
+    for (int32_t slice = 0; result == ANITY_OK && slice < target.volumeDepth; ++slice)
+      result = CreateImageView(st, target.msaaImage, target.colorFormat,
+          VK_IMAGE_ASPECT_COLOR_BIT, &target.msaaViews[static_cast<size_t>(slice)], 1,
+          static_cast<uint32_t>(slice));
+    if (result != ANITY_OK) {
+      DestroyCameraRenderTarget(st, &target);
+      return result;
+    }
+  }
+  result = CreateImage(st, desc.width, desc.height, 1, target.depthFormat, samples,
+      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+      &target.depthImage, &target.depthMemory, static_cast<uint32_t>(target.volumeDepth));
+  target.depthViews.resize(static_cast<size_t>(target.volumeDepth));
+  for (int32_t slice = 0; result == ANITY_OK && slice < target.volumeDepth; ++slice)
+    result = CreateImageView(st, target.depthImage, target.depthFormat,
+        VK_IMAGE_ASPECT_DEPTH_BIT, &target.depthViews[static_cast<size_t>(slice)], 1,
+        static_cast<uint32_t>(slice));
+  if (result != ANITY_OK) {
+    DestroyCameraRenderTarget(st, &target);
+    return result;
+  }
+  constexpr VkFormat normalFormat = VK_FORMAT_R8G8B8A8_UNORM;
+  result = CreateImage(st, desc.width, desc.height, 1, normalFormat,
+      VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+      VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      &target.normalImage, &target.normalMemory, static_cast<uint32_t>(target.volumeDepth));
+  target.normalViews.resize(static_cast<size_t>(target.volumeDepth));
+  for (int32_t slice = 0; result == ANITY_OK && slice < target.volumeDepth; ++slice)
+    result = CreateImageView(st, target.normalImage, normalFormat,
+        VK_IMAGE_ASPECT_COLOR_BIT, &target.normalViews[static_cast<size_t>(slice)], 1,
+        static_cast<uint32_t>(slice));
+  if (result != ANITY_OK) {
+    DestroyCameraRenderTarget(st, &target);
+    return result;
+  }
+  if (samples != VK_SAMPLE_COUNT_1_BIT) {
+    result = CreateImage(st, desc.width, desc.height, 1, normalFormat, samples,
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+        &target.normalMsaaImage, &target.normalMsaaMemory,
+        static_cast<uint32_t>(target.volumeDepth));
+    target.normalMsaaViews.resize(static_cast<size_t>(target.volumeDepth));
+    for (int32_t slice = 0; result == ANITY_OK && slice < target.volumeDepth; ++slice)
+      result = CreateImageView(st, target.normalMsaaImage, normalFormat,
+          VK_IMAGE_ASPECT_COLOR_BIT, &target.normalMsaaViews[static_cast<size_t>(slice)], 1,
+          static_cast<uint32_t>(slice));
+    if (result != ANITY_OK) {
+      DestroyCameraRenderTarget(st, &target);
+      return result;
+    }
+  }
+
+  VkAttachmentDescription attachments[5]{};
+  const bool multisampled = samples != VK_SAMPLE_COUNT_1_BIT;
+  const uint32_t colorAttachment = 0;
+  const uint32_t resolveAttachment = multisampled ? 1u : 0u;
+  const uint32_t depthAttachment = multisampled ? 2u : 1u;
+  const uint32_t normalAttachment = multisampled ? 3u : 2u;
+  const uint32_t normalResolveAttachment = multisampled ? 4u : 2u;
+  attachments[colorAttachment].format = target.colorFormat;
+  attachments[colorAttachment].samples = samples;
+  attachments[colorAttachment].loadOp = multisampled
+      ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
+  attachments[colorAttachment].storeOp = multisampled
+      ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
+  attachments[colorAttachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  attachments[colorAttachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  attachments[colorAttachment].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  attachments[colorAttachment].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  if (multisampled) {
+    attachments[resolveAttachment] = attachments[colorAttachment];
+    attachments[resolveAttachment].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[resolveAttachment].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[resolveAttachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  }
+  attachments[depthAttachment].format = target.depthFormat;
+  attachments[depthAttachment].samples = samples;
+  attachments[depthAttachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+  attachments[depthAttachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  attachments[depthAttachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  attachments[depthAttachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  attachments[depthAttachment].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  attachments[depthAttachment].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  attachments[normalAttachment].format = normalFormat;
+  attachments[normalAttachment].samples = samples;
+  attachments[normalAttachment].loadOp = multisampled
+      ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
+  attachments[normalAttachment].storeOp = multisampled
+      ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
+  attachments[normalAttachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  attachments[normalAttachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  attachments[normalAttachment].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  attachments[normalAttachment].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  if (multisampled) {
+    attachments[normalResolveAttachment] = attachments[normalAttachment];
+    attachments[normalResolveAttachment].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[normalResolveAttachment].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[normalResolveAttachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  }
+  VkAttachmentReference colorRefs[2] = {
+      {colorAttachment, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+      {normalAttachment, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
+  VkAttachmentReference depthRef{depthAttachment, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+  VkAttachmentReference resolveRefs[2] = {
+      {resolveAttachment, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+      {normalResolveAttachment, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
+  VkSubpassDescription subpass{};
+  subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  subpass.colorAttachmentCount = 2;
+  subpass.pColorAttachments = colorRefs;
+  subpass.pResolveAttachments = multisampled ? resolveRefs : nullptr;
+  subpass.pDepthStencilAttachment = &depthRef;
+  VkSubpassDependency dependency{};
+  dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+  dependency.dstSubpass = 0;
+  dependency.srcStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+  dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+      VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+  dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  VkRenderPassCreateInfo passInfo{};
+  passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+  passInfo.attachmentCount = multisampled ? 5u : 3u;
+  passInfo.pAttachments = attachments;
+  passInfo.subpassCount = 1;
+  passInfo.pSubpasses = &subpass;
+  passInfo.dependencyCount = 1;
+  passInfo.pDependencies = &dependency;
+  if (vkCreateRenderPass(st->device, &passInfo, nullptr, &target.renderPass) != VK_SUCCESS) {
+    DestroyCameraRenderTarget(st, &target);
+    return ANITY_ERR_DEVICE_LOST;
+  }
+  // A newly allocated eye slice has undefined contents. Base passes which
+  // explicitly clear both attachments must not enter a LOAD render pass;
+  // keep the original load pass for overlays and create a compatible discard
+  // variant for the full-clear path.
+  attachments[colorAttachment].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  attachments[depthAttachment].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  attachments[normalAttachment].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  if (vkCreateRenderPass(st->device, &passInfo, nullptr, &target.clearRenderPass) != VK_SUCCESS) {
+    DestroyCameraRenderTarget(st, &target);
+    return ANITY_ERR_DEVICE_LOST;
+  }
+  target.framebuffers.resize(static_cast<size_t>(target.volumeDepth));
+  for (int32_t slice = 0; slice < target.volumeDepth; ++slice) {
+    VkImageView views[5] = {target.colorViews[static_cast<size_t>(slice)],
+        target.depthViews[static_cast<size_t>(slice)], target.normalViews[static_cast<size_t>(slice)],
+        VK_NULL_HANDLE, VK_NULL_HANDLE};
+    if (multisampled) {
+      views[0] = target.msaaViews[static_cast<size_t>(slice)];
+      views[1] = target.colorViews[static_cast<size_t>(slice)];
+      views[2] = target.depthViews[static_cast<size_t>(slice)];
+      views[3] = target.normalMsaaViews[static_cast<size_t>(slice)];
+      views[4] = target.normalViews[static_cast<size_t>(slice)];
+    }
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = target.renderPass;
+    framebufferInfo.attachmentCount = multisampled ? 5u : 3u;
+    framebufferInfo.pAttachments = views;
+    framebufferInfo.width = static_cast<uint32_t>(target.width);
+    framebufferInfo.height = static_cast<uint32_t>(target.height);
+    framebufferInfo.layers = 1;
+    if (vkCreateFramebuffer(st->device, &framebufferInfo, nullptr,
+        &target.framebuffers[static_cast<size_t>(slice)]) != VK_SUCCESS) {
+      DestroyCameraRenderTarget(st, &target);
+      return ANITY_ERR_DEVICE_LOST;
+    }
+  }
+  *outTarget = target;
+  return ANITY_OK;
+}
+
+static VkSamplerAddressMode ToVkAddressMode(int32_t mode, bool supportsMirrorClampToEdge) {
   switch (mode) {
     case 0: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
     case 2: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+    case 3: return supportsMirrorClampToEdge
+        ? VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE
+        : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     default: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   }
 }
@@ -284,6 +629,7 @@ static AnityResult CreateTextureResource(
       ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB;
   AnityResult result = CreateImage(st, desc.width, desc.height,
       static_cast<uint32_t>(desc.mipCount), format,
+      VK_SAMPLE_COUNT_1_BIT,
       VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
       &texture.image, &texture.memory);
   if (result != ANITY_OK) return result;
@@ -307,11 +653,16 @@ static AnityResult CreateTextureResource(
   samplerInfo.minFilter = desc.filterMode == 0 ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
   samplerInfo.mipmapMode = desc.filterMode == 2
       ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
-  samplerInfo.addressModeU = ToVkAddressMode(desc.wrapU);
-  samplerInfo.addressModeV = ToVkAddressMode(desc.wrapV);
+  samplerInfo.addressModeU = ToVkAddressMode(desc.wrapU, st->supportsMirrorClampToEdge);
+  samplerInfo.addressModeV = ToVkAddressMode(desc.wrapV, st->supportsMirrorClampToEdge);
   samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   samplerInfo.minLod = 0.f;
   samplerInfo.maxLod = static_cast<float>(std::max(0, desc.mipCount - 1));
+  samplerInfo.mipLodBias = desc.mipMapBias;
+  if (desc.filterMode != 0 && desc.anisoLevel > 1 && st->supportsSamplerAnisotropy) {
+    samplerInfo.anisotropyEnable = VK_TRUE;
+    samplerInfo.maxAnisotropy = static_cast<float>(desc.anisoLevel);
+  }
   if (vkCreateSampler(st->device, &samplerInfo, nullptr, &texture.sampler) != VK_SUCCESS) {
     DestroyTextureResource(st, &texture);
     return ANITY_ERR_DEVICE_LOST;
@@ -464,6 +815,283 @@ static VkShaderModule CreateShaderModule(VkState* st, const uint32_t* words,
   VkShaderModule module = VK_NULL_HANDLE;
   return vkCreateShaderModule(st->device, &info, nullptr, &module) == VK_SUCCESS
       ? module : VK_NULL_HANDLE;
+}
+
+/* The first Vulkan URP geometry path is deliberately a real graphics
+ * pipeline, not a CPU fallback: it consumes the shared camera mesh ABI,
+ * writes the camera color/depth attachments and resolves through the target's
+ * existing MSAA render pass. Basic _BaseMap sampling and its ST transform are
+ * bound through the shared texture registry/push-constant ABI; the remaining
+ * material variants are added incrementally. */
+static AnityResult EnsureCameraMeshPipeline(VkState* st, VkCameraRenderTarget* target,
+                                            int32_t blendMode, bool depthWriteEnabled,
+                                            VkPipeline* outPipeline) {
+  if (outPipeline) *outPipeline = VK_NULL_HANDLE;
+  if (!st || !target || !st->device || !target->renderPass) return ANITY_ERR_INVALID_ARG;
+  if (blendMode < 0 || blendMode > 4 || !outPipeline) return ANITY_ERR_INVALID_ARG;
+  const int depthWriteIndex = depthWriteEnabled ? 1 : 0;
+  if (target->meshPipelineLayout && target->meshPipelines[blendMode][depthWriteIndex]) {
+    *outPipeline = target->meshPipelines[blendMode][depthWriteIndex];
+    return ANITY_OK;
+  }
+
+  VkShaderModule vertex = CreateShaderModule(
+      st, kAnityCameraMeshVertexSpirv, sizeof(kAnityCameraMeshVertexSpirv));
+  VkShaderModule fragment = CreateShaderModule(
+      st, kAnityCameraMeshFragmentSpirv, sizeof(kAnityCameraMeshFragmentSpirv));
+  if (!vertex || !fragment) {
+    if (vertex) vkDestroyShaderModule(st->device, vertex, nullptr);
+    if (fragment) vkDestroyShaderModule(st->device, fragment, nullptr);
+    return ANITY_ERR_NOT_SUPPORTED;
+  }
+
+  if (!target->meshPipelineLayout) {
+    VkPushConstantRange matrixRange{};
+    matrixRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    matrixRange.size = sizeof(float) * 24;
+    VkPipelineLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts = &st->uiTextureSetLayout;
+    layoutInfo.pushConstantRangeCount = 1;
+    layoutInfo.pPushConstantRanges = &matrixRange;
+    if (vkCreatePipelineLayout(st->device, &layoutInfo, nullptr,
+                               &target->meshPipelineLayout) != VK_SUCCESS) {
+      vkDestroyShaderModule(st->device, vertex, nullptr);
+      vkDestroyShaderModule(st->device, fragment, nullptr);
+      return ANITY_ERR_DEVICE_LOST;
+    }
+  }
+
+  VkPipelineShaderStageCreateInfo stages[2]{};
+  stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stages[0].module = vertex;
+  stages[0].pName = "main";
+  stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  stages[1].module = fragment;
+  stages[1].pName = "main";
+
+  VkVertexInputBindingDescription binding{};
+  binding.binding = 0;
+  binding.stride = sizeof(AnityGraphicsMeshVertex);
+  binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+  VkVertexInputAttributeDescription attributes[5]{};
+  attributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                   static_cast<uint32_t>(offsetof(AnityGraphicsMeshVertex, position))};
+  attributes[1] = {1, 0, VK_FORMAT_R32G32_SFLOAT,
+                   static_cast<uint32_t>(offsetof(AnityGraphicsMeshVertex, texcoord))};
+  attributes[2] = {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT,
+                   static_cast<uint32_t>(offsetof(AnityGraphicsMeshVertex, color))};
+  attributes[3] = {3, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                   static_cast<uint32_t>(offsetof(AnityGraphicsMeshVertex, normal))};
+  attributes[4] = {4, 0, VK_FORMAT_R32G32B32A32_SFLOAT,
+                   static_cast<uint32_t>(offsetof(AnityGraphicsMeshVertex, tangent))};
+  VkPipelineVertexInputStateCreateInfo vertexInput{};
+  vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  vertexInput.vertexBindingDescriptionCount = 1;
+  vertexInput.pVertexBindingDescriptions = &binding;
+  vertexInput.vertexAttributeDescriptionCount = 5;
+  vertexInput.pVertexAttributeDescriptions = attributes;
+  VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+  inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  VkPipelineViewportStateCreateInfo viewportState{};
+  viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  viewportState.viewportCount = 1;
+  viewportState.scissorCount = 1;
+  VkPipelineRasterizationStateCreateInfo rasterizer{};
+  rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+  rasterizer.cullMode = VK_CULL_MODE_NONE;
+  rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  rasterizer.lineWidth = 1.f;
+  VkPipelineMultisampleStateCreateInfo multisample{};
+  multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  multisample.rasterizationSamples = ToVkSampleCount(target->msaaSamples);
+  VkPipelineDepthStencilStateCreateInfo depthStencil{};
+  depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  depthStencil.depthTestEnable = VK_TRUE;
+  depthStencil.depthWriteEnable = depthWriteEnabled ? VK_TRUE : VK_FALSE;
+  depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+  VkPipelineColorBlendAttachmentState blendAttachment{};
+  blendAttachment.blendEnable = blendMode == 0 ? VK_FALSE : VK_TRUE;
+  if (blendMode != 0) {
+    switch (blendMode) {
+      case 1:
+        blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        break;
+      case 2:
+        blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        break;
+      case 3:
+        blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        break;
+      default:
+        blendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
+        blendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+        break;
+    }
+    blendAttachment.srcAlphaBlendFactor = blendAttachment.srcColorBlendFactor;
+    blendAttachment.dstAlphaBlendFactor = blendAttachment.dstColorBlendFactor;
+    blendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    blendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+  }
+  blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  VkPipelineColorBlendAttachmentState blendAttachments[2] = {blendAttachment, {}};
+  blendAttachments[1].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  VkPipelineColorBlendStateCreateInfo blend{};
+  blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  blend.attachmentCount = 2;
+  blend.pAttachments = blendAttachments;
+  VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dynamic{};
+  dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamic.dynamicStateCount = 2;
+  dynamic.pDynamicStates = dynamicStates;
+  VkGraphicsPipelineCreateInfo pipelineInfo{};
+  pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipelineInfo.stageCount = 2;
+  pipelineInfo.pStages = stages;
+  pipelineInfo.pVertexInputState = &vertexInput;
+  pipelineInfo.pInputAssemblyState = &inputAssembly;
+  pipelineInfo.pViewportState = &viewportState;
+  pipelineInfo.pRasterizationState = &rasterizer;
+  pipelineInfo.pMultisampleState = &multisample;
+  pipelineInfo.pDepthStencilState = &depthStencil;
+  pipelineInfo.pColorBlendState = &blend;
+  pipelineInfo.pDynamicState = &dynamic;
+  pipelineInfo.layout = target->meshPipelineLayout;
+  pipelineInfo.renderPass = target->renderPass;
+  VkPipeline pipeline = VK_NULL_HANDLE;
+  const VkResult result = vkCreateGraphicsPipelines(st->device, VK_NULL_HANDLE, 1,
+      &pipelineInfo, nullptr, &pipeline);
+  vkDestroyShaderModule(st->device, vertex, nullptr);
+  vkDestroyShaderModule(st->device, fragment, nullptr);
+  if (result == VK_SUCCESS) {
+    target->meshPipelines[blendMode][depthWriteIndex] = pipeline;
+    *outPipeline = pipeline;
+    return ANITY_OK;
+  }
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+
+static void DestroyDepthCopyResources(VkState* st) {
+  if (!st || !st->device) return;
+  if (st->depthCopyPipeline) vkDestroyPipeline(st->device, st->depthCopyPipeline, nullptr);
+  if (st->depthCopyMsaaPipeline)
+    vkDestroyPipeline(st->device, st->depthCopyMsaaPipeline, nullptr);
+  if (st->depthCopyPipelineLayout)
+    vkDestroyPipelineLayout(st->device, st->depthCopyPipelineLayout, nullptr);
+  if (st->depthCopyDescriptorPool)
+    vkDestroyDescriptorPool(st->device, st->depthCopyDescriptorPool, nullptr);
+  if (st->depthCopySetLayout)
+    vkDestroyDescriptorSetLayout(st->device, st->depthCopySetLayout, nullptr);
+  if (st->depthCopySampler) vkDestroySampler(st->device, st->depthCopySampler, nullptr);
+  st->depthCopyPipeline = VK_NULL_HANDLE;
+  st->depthCopyMsaaPipeline = VK_NULL_HANDLE;
+  st->depthCopyPipelineLayout = VK_NULL_HANDLE;
+  st->depthCopyDescriptorPool = VK_NULL_HANDLE;
+  st->depthCopySetLayout = VK_NULL_HANDLE;
+  st->depthCopySampler = VK_NULL_HANDLE;
+}
+
+static AnityResult EnsureDepthCopyResources(VkState* st) {
+  if (!st || !st->device) return ANITY_ERR_INVALID_ARG;
+  if (st->depthCopyPipeline && st->depthCopyMsaaPipeline &&
+      st->depthCopyPipelineLayout && st->depthCopySetLayout &&
+      st->depthCopyDescriptorPool && st->depthCopySampler)
+    return ANITY_OK;
+  DestroyDepthCopyResources(st);
+  VkDescriptorSetLayoutBinding bindings[2]{};
+  bindings[0].binding = 0;
+  bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  bindings[0].descriptorCount = 1;
+  bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  bindings[1].binding = 1;
+  bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  bindings[1].descriptorCount = 1;
+  bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+  VkDescriptorSetLayoutCreateInfo setInfo{};
+  setInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  setInfo.bindingCount = 2;
+  setInfo.pBindings = bindings;
+  if (vkCreateDescriptorSetLayout(st->device, &setInfo, nullptr,
+                                  &st->depthCopySetLayout) != VK_SUCCESS) {
+    DestroyDepthCopyResources(st);
+    return ANITY_ERR_DEVICE_LOST;
+  }
+  VkDescriptorPoolSize poolSizes[2]{};
+  poolSizes[0] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 64};
+  poolSizes[1] = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 64};
+  VkDescriptorPoolCreateInfo poolInfo{};
+  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  poolInfo.maxSets = 64;
+  poolInfo.poolSizeCount = 2;
+  poolInfo.pPoolSizes = poolSizes;
+  if (vkCreateDescriptorPool(st->device, &poolInfo, nullptr,
+                             &st->depthCopyDescriptorPool) != VK_SUCCESS) {
+    DestroyDepthCopyResources(st);
+    return ANITY_ERR_OUT_OF_MEMORY;
+  }
+  VkPipelineLayoutCreateInfo layoutInfo{};
+  layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  layoutInfo.setLayoutCount = 1;
+  layoutInfo.pSetLayouts = &st->depthCopySetLayout;
+  if (vkCreatePipelineLayout(st->device, &layoutInfo, nullptr,
+                             &st->depthCopyPipelineLayout) != VK_SUCCESS) {
+    DestroyDepthCopyResources(st);
+    return ANITY_ERR_DEVICE_LOST;
+  }
+  VkSamplerCreateInfo samplerInfo{};
+  samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  samplerInfo.magFilter = VK_FILTER_NEAREST;
+  samplerInfo.minFilter = VK_FILTER_NEAREST;
+  samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+  samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  samplerInfo.maxLod = 0.f;
+  if (vkCreateSampler(st->device, &samplerInfo, nullptr, &st->depthCopySampler) != VK_SUCCESS) {
+    DestroyDepthCopyResources(st);
+    return ANITY_ERR_DEVICE_LOST;
+  }
+  const uint32_t* words[] = {kAnityDepthCopyComputeSpirv,
+                             kAnityDepthCopyMsaaComputeSpirv};
+  const size_t sizes[] = {sizeof(kAnityDepthCopyComputeSpirv),
+                          sizeof(kAnityDepthCopyMsaaComputeSpirv)};
+  VkPipeline* pipelines[] = {&st->depthCopyPipeline, &st->depthCopyMsaaPipeline};
+  for (int index = 0; index < 2; ++index) {
+    VkShaderModule shader = CreateShaderModule(st, words[index], sizes[index]);
+    if (!shader) {
+      DestroyDepthCopyResources(st);
+      return ANITY_ERR_NOT_SUPPORTED;
+    }
+    VkPipelineShaderStageCreateInfo stage{};
+    stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage.module = shader;
+    stage.pName = "main";
+    VkComputePipelineCreateInfo pipelineInfo{};
+    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipelineInfo.stage = stage;
+    pipelineInfo.layout = st->depthCopyPipelineLayout;
+    const VkResult result = vkCreateComputePipelines(st->device, VK_NULL_HANDLE, 1,
+        &pipelineInfo, nullptr, pipelines[index]);
+    vkDestroyShaderModule(st->device, shader, nullptr);
+    if (result != VK_SUCCESS) {
+      DestroyDepthCopyResources(st);
+      return ANITY_ERR_NOT_SUPPORTED;
+    }
+  }
+  return ANITY_OK;
 }
 
 static AnityResult CreateUIRenderResources(VkState* st, VkSwapchainState* vst) {
@@ -665,6 +1293,12 @@ extern "C" AnityResult AnityGraphics_CreateVulkan(
     enabledInst.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
     st->hasSurfaceExt = true;
   }
+#if defined(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)
+  if (HasExtension(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, instExts)) {
+    enabledInst.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    st->hasPortabilityEnumerationExt = true;
+  }
+#endif
 #if defined(_WIN32)
   if (HasExtension(VK_KHR_WIN32_SURFACE_EXTENSION_NAME, instExts)) {
     enabledInst.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
@@ -703,6 +1337,8 @@ extern "C" AnityResult AnityGraphics_CreateVulkan(
   ici.pApplicationInfo = &app;
   ici.enabledExtensionCount = (uint32_t)enabledInst.size();
   ici.ppEnabledExtensionNames = enabledInst.empty() ? nullptr : enabledInst.data();
+  if (st->hasPortabilityEnumerationExt)
+    ici.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 
   VkResult vr = vkCreateInstance(&ici, nullptr, &st->instance);
   if (vr != VK_SUCCESS) {
@@ -746,6 +1382,20 @@ extern "C" AnityResult AnityGraphics_CreateVulkan(
     enabledDev.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     st->hasSwapchainExt = true;
   }
+#if defined(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)
+  if (HasExtension(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME, devExts))
+    enabledDev.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+#endif
+  if (HasExtension(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME, devExts)) {
+    enabledDev.push_back(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME);
+    st->supportsMirrorClampToEdge = true;
+  }
+
+  VkPhysicalDeviceFeatures supportedFeatures{};
+  vkGetPhysicalDeviceFeatures(st->phys, &supportedFeatures);
+  st->supportsSamplerAnisotropy = supportedFeatures.samplerAnisotropy == VK_TRUE;
+  VkPhysicalDeviceFeatures enabledFeatures{};
+  enabledFeatures.samplerAnisotropy = st->supportsSamplerAnisotropy ? VK_TRUE : VK_FALSE;
 
   float prio = 1.f;
   VkDeviceQueueCreateInfo qci{};
@@ -760,6 +1410,7 @@ extern "C" AnityResult AnityGraphics_CreateVulkan(
   dci.pQueueCreateInfos = &qci;
   dci.enabledExtensionCount = (uint32_t)enabledDev.size();
   dci.ppEnabledExtensionNames = enabledDev.empty() ? nullptr : enabledDev.data();
+  dci.pEnabledFeatures = &enabledFeatures;
 
   vr = vkCreateDevice(st->phys, &dci, nullptr, &st->device);
   if (vr != VK_SUCCESS) {
@@ -928,6 +1579,13 @@ extern "C" void AnityGraphics_Vulkan_Destroy(AnityGraphicsDevice* device) {
       if (st->uiSlotFences[i])
         vkDestroyFence(st->device, st->uiSlotFences[i], nullptr);
     }
+    {
+      std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+      for (auto& entry : st->cameraTargets)
+        DestroyCameraRenderTarget(st, entry.second.get());
+      st->cameraTargets.clear();
+    }
+    DestroyDepthCopyResources(st);
     DestroyTextureInfrastructure(st);
     if (st->commandPool) vkDestroyCommandPool(st->device, st->commandPool, nullptr);
     if (st->uiPipelineLayout)
@@ -937,6 +1595,734 @@ extern "C" void AnityGraphics_Vulkan_Destroy(AnityGraphicsDevice* device) {
   if (st->instance) vkDestroyInstance(st->instance, nullptr);
   delete st;
   device->backend = nullptr;
+}
+
+static AnityResult SubmitCameraCommand(VkState* st, VkCommandBuffer command) {
+  VkFenceCreateInfo fenceInfo{};
+  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  VkFence fence = VK_NULL_HANDLE;
+  VkSubmitInfo submit{};
+  submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &command;
+  const VkResult createResult = vkCreateFence(st->device, &fenceInfo, nullptr, &fence);
+  const VkResult submitResult = createResult == VK_SUCCESS
+      ? vkQueueSubmit(st->queue, 1, &submit, fence) : VK_ERROR_DEVICE_LOST;
+  const VkResult waitResult = submitResult == VK_SUCCESS
+      ? vkWaitForFences(st->device, 1, &fence, VK_TRUE, UINT64_MAX) : VK_ERROR_DEVICE_LOST;
+  if (fence) vkDestroyFence(st->device, fence, nullptr);
+  return waitResult == VK_SUCCESS ? ANITY_OK : ANITY_ERR_DEVICE_LOST;
+}
+
+static AnityResult AllocateCameraCommand(VkState* st, VkCommandBuffer* outCommand) {
+  if (!st || !outCommand) return ANITY_ERR_INVALID_ARG;
+  *outCommand = VK_NULL_HANDLE;
+  VkCommandBufferAllocateInfo allocation{};
+  allocation.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocation.commandPool = st->commandPool;
+  allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocation.commandBufferCount = 1;
+  if (vkAllocateCommandBuffers(st->device, &allocation, outCommand) != VK_SUCCESS)
+    return ANITY_ERR_DEVICE_LOST;
+  VkCommandBufferBeginInfo begin{};
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  if (vkBeginCommandBuffer(*outCommand, &begin) != VK_SUCCESS) {
+    vkFreeCommandBuffers(st->device, st->commandPool, 1, outCommand);
+    *outCommand = VK_NULL_HANDLE;
+    return ANITY_ERR_DEVICE_LOST;
+  }
+  return ANITY_OK;
+}
+
+static void TransitionCameraAttachment(VkCommandBuffer command, VkImage image,
+                                       VkImageAspectFlags aspect,
+                                       VkImageLayout oldLayout,
+                                       VkImageLayout newLayout,
+                                       uint32_t arrayLayers = 1) {
+  VkImageMemoryBarrier barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.srcAccessMask = 0;
+  barrier.dstAccessMask = aspect == VK_IMAGE_ASPECT_COLOR_BIT
+      ? VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+      : VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  barrier.oldLayout = oldLayout;
+  barrier.newLayout = newLayout;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image = image;
+  barrier.subresourceRange.aspectMask = aspect;
+  barrier.subresourceRange.levelCount = 1;
+  barrier.subresourceRange.layerCount = arrayLayers;
+  vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+      aspect == VK_IMAGE_ASPECT_COLOR_BIT ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          : VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+      0, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_EnsureCameraRenderTarget(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraRenderTargetDesc* desc) {
+  if (!device || !device->backend || !desc || desc->targetId == 0) return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<VkState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto existing = st->cameraTargets.find(desc->targetId);
+  if (existing != st->cameraTargets.end() &&
+      existing->second->width == desc->width && existing->second->height == desc->height &&
+      existing->second->msaaSamples == desc->msaaSamples &&
+      existing->second->hdrEnabled == desc->hdrEnabled &&
+      existing->second->volumeDepth == std::max(1, desc->volumeDepth))
+    return ANITY_OK;
+  VkCameraRenderTarget replacement{};
+  const AnityResult result = CreateCameraRenderTarget(st, *desc, &replacement);
+  if (result != ANITY_OK) return result;
+  if (existing != st->cameraTargets.end()) {
+    vkDeviceWaitIdle(st->device);
+    DestroyCameraRenderTarget(st, existing->second.get());
+    existing->second = std::make_unique<VkCameraRenderTarget>(replacement);
+  } else {
+    st->cameraTargets.emplace(desc->targetId,
+                              std::make_unique<VkCameraRenderTarget>(replacement));
+  }
+  return ANITY_OK;
+}
+
+extern "C" void AnityGraphics_Vulkan_DestroyCameraRenderTarget(
+    AnityGraphicsDevice* device, uint64_t targetId) {
+  if (!device || !device->backend || targetId == 0) return;
+  auto* st = reinterpret_cast<VkState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto found = st->cameraTargets.find(targetId);
+  if (found == st->cameraTargets.end()) return;
+  vkDeviceWaitIdle(st->device);
+  DestroyCameraRenderTarget(st, found->second.get());
+  st->cameraTargets.erase(found);
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_ExecuteCameraPass(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraPassDesc* desc) {
+  if (!device || !device->backend || !desc) return ANITY_ERR_INVALID_ARG;
+  if ((desc->flags & ANITY_CAMERA_PASS_TARGET_IS_CAMERA_TARGET) != 0)
+    return ANITY_ERR_NOT_SUPPORTED;
+  auto* st = reinterpret_cast<VkState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto found = st->cameraTargets.find(desc->targetId);
+  if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  VkCameraRenderTarget& target = *found->second;
+  if (target.width != desc->targetWidth || target.height != desc->targetHeight ||
+      target.msaaSamples != desc->msaaSamples ||
+      (target.hdrEnabled != 0) != ((desc->flags & ANITY_CAMERA_PASS_HDR) != 0))
+    return ANITY_ERR_INVALID_ARG;
+  if (desc->depthSlice < 0 || desc->depthSliceCount <= 0 ||
+      desc->depthSlice > target.volumeDepth - desc->depthSliceCount)
+    return ANITY_ERR_INVALID_ARG;
+  if (desc->viewportWidth <= 0.f || desc->viewportHeight <= 0.f)
+    return ANITY_ERR_INVALID_ARG;
+
+  VkCommandBuffer command = VK_NULL_HANDLE;
+  AnityResult result = AllocateCameraCommand(st, &command);
+  if (result != ANITY_OK) return result;
+  if (!target.colorLayoutInitialized) {
+    TransitionCameraAttachment(command, target.colorImage, VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        static_cast<uint32_t>(target.volumeDepth));
+    if (target.msaaImage)
+      TransitionCameraAttachment(command, target.msaaImage, VK_IMAGE_ASPECT_COLOR_BIT,
+          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+          static_cast<uint32_t>(target.volumeDepth));
+    TransitionCameraAttachment(command, target.normalImage, VK_IMAGE_ASPECT_COLOR_BIT,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        static_cast<uint32_t>(target.volumeDepth));
+    if (target.normalMsaaImage)
+      TransitionCameraAttachment(command, target.normalMsaaImage, VK_IMAGE_ASPECT_COLOR_BIT,
+          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+          static_cast<uint32_t>(target.volumeDepth));
+  }
+  if (!target.depthLayoutInitialized)
+    TransitionCameraAttachment(command, target.depthImage, VK_IMAGE_ASPECT_DEPTH_BIT,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        static_cast<uint32_t>(target.volumeDepth));
+
+  const int32_t minX = std::max(0, static_cast<int32_t>(std::floor(desc->viewportX)));
+  const int32_t minY = std::max(0, static_cast<int32_t>(std::floor(desc->viewportY)));
+  const int32_t maxX = std::min(target.width,
+      static_cast<int32_t>(std::ceil(desc->viewportX + desc->viewportWidth)));
+  const int32_t maxY = std::min(target.height,
+      static_cast<int32_t>(std::ceil(desc->viewportY + desc->viewportHeight)));
+  for (int32_t slice = desc->depthSlice;
+       slice < desc->depthSlice + desc->depthSliceCount; ++slice) {
+    VkRenderPassBeginInfo pass{};
+    pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    const bool clearsColorAndDepth =
+        (desc->flags & (ANITY_CAMERA_PASS_CLEAR_COLOR | ANITY_CAMERA_PASS_CLEAR_DEPTH)) ==
+        (ANITY_CAMERA_PASS_CLEAR_COLOR | ANITY_CAMERA_PASS_CLEAR_DEPTH);
+    pass.renderPass = clearsColorAndDepth ? target.clearRenderPass : target.renderPass;
+    pass.framebuffer = target.framebuffers[static_cast<size_t>(slice)];
+    pass.renderArea.extent = {static_cast<uint32_t>(target.width),
+                              static_cast<uint32_t>(target.height)};
+    vkCmdBeginRenderPass(command, &pass, VK_SUBPASS_CONTENTS_INLINE);
+    if (maxX > minX && maxY > minY &&
+        (desc->flags & (ANITY_CAMERA_PASS_CLEAR_COLOR | ANITY_CAMERA_PASS_CLEAR_DEPTH)) != 0) {
+      VkClearAttachment clears[2]{};
+      uint32_t clearCount = 0;
+      if ((desc->flags & ANITY_CAMERA_PASS_CLEAR_COLOR) != 0) {
+        clears[clearCount].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        clears[clearCount].colorAttachment = 0;
+        clears[clearCount].clearValue.color = {{desc->clearR, desc->clearG,
+                                                 desc->clearB, desc->clearA}};
+        ++clearCount;
+      }
+      if ((desc->flags & ANITY_CAMERA_PASS_CLEAR_DEPTH) != 0) {
+        clears[clearCount].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        clears[clearCount].clearValue.depthStencil.depth = desc->clearDepth;
+        ++clearCount;
+      }
+      VkClearRect rect{};
+      rect.rect.offset = {minX, minY};
+      rect.rect.extent = {static_cast<uint32_t>(maxX - minX),
+                          static_cast<uint32_t>(maxY - minY)};
+      rect.layerCount = 1;
+      vkCmdClearAttachments(command, clearCount, clears, 1, &rect);
+    }
+    vkCmdEndRenderPass(command);
+  }
+  if (vkEndCommandBuffer(command) != VK_SUCCESS) {
+    vkFreeCommandBuffers(st->device, st->commandPool, 1, &command);
+    return ANITY_ERR_DEVICE_LOST;
+  }
+  result = SubmitCameraCommand(st, command);
+  vkFreeCommandBuffers(st->device, st->commandPool, 1, &command);
+  if (result == ANITY_OK) {
+    target.colorLayoutInitialized = true;
+    target.depthLayoutInitialized = true;
+  }
+  return result;
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_DrawCameraMesh(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraMeshDrawDesc* desc) {
+  if (!device || !device->backend || !desc) return ANITY_ERR_INVALID_ARG;
+  if (desc->targetIsCameraTarget != 0 || desc->targetId == 0 ||
+      desc->blendMode < 0 || desc->blendMode > 4 ||
+      (desc->depthWriteEnabled != 0 && desc->depthWriteEnabled != 1) ||
+      (desc->alphaClipEnabled != 0 && desc->alphaClipEnabled != 1) ||
+      !std::isfinite(desc->alphaClipThreshold) || desc->normalMapTextureId != 0 ||
+      desc->stereoInstanceCount != 1)
+    return ANITY_ERR_NOT_SUPPORTED;
+  if (!desc->vertices || !desc->indices || desc->vertexCount <= 0 ||
+      desc->indexCount <= 0 || (desc->indexCount % 3) != 0)
+    return ANITY_ERR_INVALID_ARG;
+  for (int32_t index = 0; index < desc->indexCount; ++index)
+    if (desc->indices[index] >= static_cast<uint32_t>(desc->vertexCount))
+      return ANITY_ERR_INVALID_ARG;
+
+  auto* st = reinterpret_cast<VkState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto found = st->cameraTargets.find(desc->targetId);
+  if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  VkCameraRenderTarget& target = *found->second;
+  if (!target.colorLayoutInitialized || !target.depthLayoutInitialized ||
+      desc->depthSlice < 0 || desc->depthSlice >= target.volumeDepth)
+    return ANITY_ERR_INVALID_ARG;
+  VkPipeline meshPipeline = VK_NULL_HANDLE;
+  AnityResult result = EnsureCameraMeshPipeline(st, &target, desc->blendMode,
+      desc->depthWriteEnabled != 0, &meshPipeline);
+  if (result != ANITY_OK) return result;
+  std::lock_guard<std::mutex> textureLock(st->textureMutex);
+  VkDescriptorSet textureSet = st->whiteTexture.descriptorSet;
+  if (desc->baseTextureId != 0) {
+    const auto texture = st->textures.find(desc->baseTextureId);
+    if (texture == st->textures.end() || !texture->second->descriptorSet)
+      return ANITY_ERR_INVALID_ARG;
+    textureSet = texture->second->descriptorSet;
+  }
+  if (!textureSet) return ANITY_ERR_DEVICE_LOST;
+
+  VkUIBuffer vertexBuffer{};
+  VkUIBuffer indexBuffer{};
+  const uint64_t vertexBytes64 = static_cast<uint64_t>(desc->vertexCount) *
+      static_cast<uint64_t>(sizeof(AnityGraphicsMeshVertex));
+  const uint64_t indexBytes64 = static_cast<uint64_t>(desc->indexCount) * sizeof(uint32_t);
+  if (vertexBytes64 > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) ||
+      indexBytes64 > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
+    return ANITY_ERR_OUT_OF_MEMORY;
+  result = UploadUIBuffer(st, &vertexBuffer, desc->vertices,
+      static_cast<int32_t>(vertexBytes64), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+  if (result == ANITY_OK)
+    result = UploadUIBuffer(st, &indexBuffer, desc->indices,
+        static_cast<int32_t>(indexBytes64), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+  if (result != ANITY_OK) {
+    DestroyUIBuffer(st, &vertexBuffer);
+    DestroyUIBuffer(st, &indexBuffer);
+    return result;
+  }
+
+  VkCommandBuffer command = VK_NULL_HANDLE;
+  result = AllocateCameraCommand(st, &command);
+  if (result == ANITY_OK) {
+    VkRenderPassBeginInfo pass{};
+    pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    pass.renderPass = target.renderPass;
+    pass.framebuffer = target.framebuffers[static_cast<size_t>(desc->depthSlice)];
+    pass.renderArea.extent = {static_cast<uint32_t>(target.width),
+                              static_cast<uint32_t>(target.height)};
+    vkCmdBeginRenderPass(command, &pass, VK_SUBPASS_CONTENTS_INLINE);
+    VkViewport viewport{};
+    viewport.width = static_cast<float>(target.width);
+    viewport.height = static_cast<float>(target.height);
+    viewport.minDepth = 0.f;
+    viewport.maxDepth = 1.f;
+    VkRect2D scissor{};
+    scissor.extent = {static_cast<uint32_t>(target.width),
+                      static_cast<uint32_t>(target.height)};
+    vkCmdSetViewport(command, 0, 1, &viewport);
+    vkCmdSetScissor(command, 0, 1, &scissor);
+    vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+    vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        target.meshPipelineLayout, 0, 1, &textureSet, 0, nullptr);
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(command, 0, 1, &vertexBuffer.buffer, &offset);
+    vkCmdBindIndexBuffer(command, indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdPushConstants(command, target.meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+        0, sizeof(float) * 16, desc->objectToClip);
+    vkCmdPushConstants(command, target.meshPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+        sizeof(float) * 16, sizeof(desc->baseMapST), desc->baseMapST);
+    const float materialConstants[4] = {desc->alphaClipThreshold,
+        static_cast<float>(desc->alphaClipEnabled), 0.f, 0.f};
+    vkCmdPushConstants(command, target.meshPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+        sizeof(float) * 20, sizeof(materialConstants), materialConstants);
+    vkCmdDrawIndexed(command, static_cast<uint32_t>(desc->indexCount), 1, 0, 0, 0);
+    vkCmdEndRenderPass(command);
+    if (vkEndCommandBuffer(command) != VK_SUCCESS)
+      result = ANITY_ERR_DEVICE_LOST;
+    else
+      result = SubmitCameraCommand(st, command);
+    vkFreeCommandBuffers(st->device, st->commandPool, 1, &command);
+  }
+  DestroyUIBuffer(st, &vertexBuffer);
+  DestroyUIBuffer(st, &indexBuffer);
+  return result;
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_ReadbackCameraRenderTargetSliceRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, int32_t depthSlice,
+    uint8_t* pixels, int32_t pixelCapacity, int32_t* outWritten) {
+  if (!device || !device->backend || targetId == 0 || depthSlice < 0 || pixelCapacity < 0 || !outWritten)
+    return ANITY_ERR_INVALID_ARG;
+  *outWritten = 0;
+  auto* st = reinterpret_cast<VkState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto found = st->cameraTargets.find(targetId);
+  if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  VkCameraRenderTarget& target = *found->second;
+  if (depthSlice >= target.volumeDepth) return ANITY_ERR_INVALID_ARG;
+  if (target.hdrEnabled || !target.colorLayoutInitialized) return ANITY_ERR_NOT_SUPPORTED;
+  const uint64_t required64 = static_cast<uint64_t>(target.width) *
+      static_cast<uint64_t>(target.height) * 4u;
+  if (required64 > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
+    return ANITY_ERR_OUT_OF_MEMORY;
+  const int32_t required = static_cast<int32_t>(required64);
+  *outWritten = required;
+  if (!pixels || pixelCapacity < required) return ANITY_ERR_INVALID_ARG;
+
+  VkBuffer buffer = VK_NULL_HANDLE;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+  VkBufferCreateInfo bufferInfo{};
+  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.size = static_cast<VkDeviceSize>(required);
+  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  if (vkCreateBuffer(st->device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
+    return ANITY_ERR_OUT_OF_MEMORY;
+  VkMemoryRequirements requirements{};
+  vkGetBufferMemoryRequirements(st->device, buffer, &requirements);
+  uint32_t memoryType = 0;
+  if (!FindMemoryType(st, requirements.memoryTypeBits,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &memoryType)) {
+    vkDestroyBuffer(st->device, buffer, nullptr);
+    return ANITY_ERR_NOT_SUPPORTED;
+  }
+  VkMemoryAllocateInfo allocation{};
+  allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocation.allocationSize = requirements.size;
+  allocation.memoryTypeIndex = memoryType;
+  if (vkAllocateMemory(st->device, &allocation, nullptr, &memory) != VK_SUCCESS ||
+      vkBindBufferMemory(st->device, buffer, memory, 0) != VK_SUCCESS) {
+    if (memory) vkFreeMemory(st->device, memory, nullptr);
+    vkDestroyBuffer(st->device, buffer, nullptr);
+    return ANITY_ERR_OUT_OF_MEMORY;
+  }
+  VkCommandBuffer command = VK_NULL_HANDLE;
+  AnityResult result = AllocateCameraCommand(st, &command);
+  if (result == ANITY_OK) {
+    VkImageMemoryBarrier toCopy{};
+    toCopy.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toCopy.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    toCopy.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    toCopy.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    toCopy.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    toCopy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toCopy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toCopy.image = target.colorImage;
+    toCopy.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    toCopy.subresourceRange.levelCount = 1;
+    toCopy.subresourceRange.baseArrayLayer = static_cast<uint32_t>(depthSlice);
+    toCopy.subresourceRange.layerCount = 1;
+    VkImageMemoryBarrier restore = toCopy;
+    restore.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    restore.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    restore.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    restore.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toCopy);
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.baseArrayLayer = static_cast<uint32_t>(depthSlice);
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {static_cast<uint32_t>(target.width),
+                        static_cast<uint32_t>(target.height), 1};
+    vkCmdCopyImageToBuffer(command, target.colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        buffer, 1, &copy);
+    vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &restore);
+    if (vkEndCommandBuffer(command) != VK_SUCCESS)
+      result = ANITY_ERR_DEVICE_LOST;
+    else
+      result = SubmitCameraCommand(st, command);
+    vkFreeCommandBuffers(st->device, st->commandPool, 1, &command);
+  }
+  if (result == ANITY_OK) {
+    void* mapped = nullptr;
+    if (vkMapMemory(st->device, memory, 0, static_cast<VkDeviceSize>(required), 0,
+                    &mapped) != VK_SUCCESS)
+      result = ANITY_ERR_DEVICE_LOST;
+    else {
+      std::memcpy(pixels, mapped, static_cast<size_t>(required));
+      vkUnmapMemory(st->device, memory);
+    }
+  }
+  vkFreeMemory(st->device, memory, nullptr);
+  vkDestroyBuffer(st->device, buffer, nullptr);
+  return result;
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_ReadbackCameraRenderTargetRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, uint8_t* pixels,
+    int32_t pixelCapacity, int32_t* outWritten) {
+  return AnityGraphics_Vulkan_ReadbackCameraRenderTargetSliceRGBA8(
+      device, targetId, 0, pixels, pixelCapacity, outWritten);
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_CopyCameraRenderTargetColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId) {
+  if (!device || !device->backend || destinationTargetId == 0 ||
+      sourceSlice < 0 || destinationSlice < 0 ||
+      (sourceIsCameraTarget != 0 && sourceIsCameraTarget != 1) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == 0) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == destinationTargetId))
+    return ANITY_ERR_INVALID_ARG;
+  // A swapchain camera target is a distinct presentation resource. Until that
+  // ownership path exists, reject it rather than copying a stale image.
+  if (sourceIsCameraTarget != 0) return ANITY_ERR_NOT_SUPPORTED;
+  auto* st = reinterpret_cast<VkState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto sourceFound = st->cameraTargets.find(sourceTargetId);
+  const auto destinationFound = st->cameraTargets.find(destinationTargetId);
+  if (sourceFound == st->cameraTargets.end() || destinationFound == st->cameraTargets.end())
+    return ANITY_ERR_INVALID_ARG;
+  VkCameraRenderTarget& source = *sourceFound->second;
+  VkCameraRenderTarget& destination = *destinationFound->second;
+  if (!source.colorLayoutInitialized || source.width != destination.width ||
+      source.height != destination.height || source.colorFormat != destination.colorFormat ||
+      sourceSlice >= source.volumeDepth || destinationSlice >= destination.volumeDepth)
+    return ANITY_ERR_NOT_SUPPORTED;
+  VkCommandBuffer command = VK_NULL_HANDLE;
+  AnityResult result = AllocateCameraCommand(st, &command);
+  if (result != ANITY_OK) return result;
+  VkImageMemoryBarrier sourceToCopy{};
+  sourceToCopy.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  sourceToCopy.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  sourceToCopy.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  sourceToCopy.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  sourceToCopy.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  sourceToCopy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  sourceToCopy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  sourceToCopy.image = source.colorImage;
+  sourceToCopy.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  sourceToCopy.subresourceRange.levelCount = 1;
+  sourceToCopy.subresourceRange.baseArrayLayer = static_cast<uint32_t>(sourceSlice);
+  sourceToCopy.subresourceRange.layerCount = 1;
+  VkImageMemoryBarrier destinationToCopy = sourceToCopy;
+  destinationToCopy.srcAccessMask = 0;
+  destinationToCopy.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  destinationToCopy.oldLayout = destination.colorLayoutInitialized
+      ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
+  destinationToCopy.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  destinationToCopy.image = destination.colorImage;
+  destinationToCopy.subresourceRange.baseArrayLayer = static_cast<uint32_t>(destinationSlice);
+  VkImageMemoryBarrier initialBarriers[] = {sourceToCopy, destinationToCopy};
+  vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, initialBarriers);
+  VkImageCopy copy{};
+  copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  copy.srcSubresource.baseArrayLayer = static_cast<uint32_t>(sourceSlice);
+  copy.srcSubresource.layerCount = 1;
+  copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  copy.dstSubresource.baseArrayLayer = static_cast<uint32_t>(destinationSlice);
+  copy.dstSubresource.layerCount = 1;
+  copy.extent = {static_cast<uint32_t>(source.width),
+                 static_cast<uint32_t>(source.height), 1};
+  vkCmdCopyImage(command, source.colorImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      destination.colorImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+  VkImageMemoryBarrier sourceRestore = sourceToCopy;
+  sourceRestore.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  sourceRestore.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  sourceRestore.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  sourceRestore.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkImageMemoryBarrier destinationRestore = destinationToCopy;
+  destinationRestore.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  destinationRestore.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  destinationRestore.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  destinationRestore.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkImageMemoryBarrier restoreBarriers[] = {sourceRestore, destinationRestore};
+  vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr,
+      2, restoreBarriers);
+  if (vkEndCommandBuffer(command) != VK_SUCCESS)
+    result = ANITY_ERR_DEVICE_LOST;
+  else
+    result = SubmitCameraCommand(st, command);
+  vkFreeCommandBuffers(st->device, st->commandPool, 1, &command);
+  if (result == ANITY_OK) destination.colorLayoutInitialized = true;
+  return result;
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_CopyCameraRenderTargetColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId) {
+  return AnityGraphics_Vulkan_CopyCameraRenderTargetColorSlice(
+      device, sourceTargetId, sourceIsCameraTarget, 0, 0, destinationTargetId);
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_CopyCameraRenderTargetNormalsToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId, int32_t sourceIsCameraTarget,
+    int32_t sourceSlice, int32_t destinationSlice, uint64_t destinationTargetId) {
+  if (!device || !device->backend || sourceIsCameraTarget != 0 || destinationTargetId == 0 ||
+      sourceTargetId == 0 || sourceTargetId == destinationTargetId || sourceSlice < 0 || destinationSlice < 0)
+    return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<VkState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto sourceFound = st->cameraTargets.find(sourceTargetId);
+  const auto destinationFound = st->cameraTargets.find(destinationTargetId);
+  if (sourceFound == st->cameraTargets.end() || destinationFound == st->cameraTargets.end())
+    return ANITY_ERR_INVALID_ARG;
+  VkCameraRenderTarget& source = *sourceFound->second;
+  VkCameraRenderTarget& destination = *destinationFound->second;
+  if (!source.colorLayoutInitialized || source.width != destination.width ||
+      source.height != destination.height || sourceSlice >= source.volumeDepth ||
+      destinationSlice >= destination.volumeDepth)
+    return ANITY_ERR_NOT_SUPPORTED;
+  VkCommandBuffer command = VK_NULL_HANDLE;
+  AnityResult result = AllocateCameraCommand(st, &command);
+  if (result != ANITY_OK) return result;
+  VkImageMemoryBarrier sourceBarrier{};
+  sourceBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  sourceBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  sourceBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  sourceBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  sourceBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  sourceBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  sourceBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  sourceBarrier.image = source.normalImage;
+  sourceBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  sourceBarrier.subresourceRange.levelCount = 1;
+  sourceBarrier.subresourceRange.baseArrayLayer = static_cast<uint32_t>(sourceSlice);
+  sourceBarrier.subresourceRange.layerCount = 1;
+  VkImageMemoryBarrier destinationBarrier = sourceBarrier;
+  destinationBarrier.srcAccessMask = 0;
+  destinationBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  destinationBarrier.oldLayout = destination.colorLayoutInitialized ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
+  destinationBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  destinationBarrier.image = destination.colorImage;
+  destinationBarrier.subresourceRange.baseArrayLayer = static_cast<uint32_t>(destinationSlice);
+  VkImageMemoryBarrier initial[] = {sourceBarrier, destinationBarrier};
+  vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      0, 0, nullptr, 0, nullptr, 2, initial);
+  VkImageCopy copy{};
+  copy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  copy.srcSubresource.baseArrayLayer = static_cast<uint32_t>(sourceSlice);
+  copy.srcSubresource.layerCount = 1;
+  copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  copy.dstSubresource.baseArrayLayer = static_cast<uint32_t>(destinationSlice);
+  copy.dstSubresource.layerCount = 1;
+  copy.extent = {static_cast<uint32_t>(source.width), static_cast<uint32_t>(source.height), 1};
+  vkCmdCopyImage(command, source.normalImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      destination.colorImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+  sourceBarrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  sourceBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  sourceBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  sourceBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  destinationBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  destinationBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  destinationBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  destinationBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkImageMemoryBarrier restore[] = {sourceBarrier, destinationBarrier};
+  vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      0, 0, nullptr, 0, nullptr, 2, restore);
+  if (vkEndCommandBuffer(command) != VK_SUCCESS) result = ANITY_ERR_DEVICE_LOST;
+  else result = SubmitCameraCommand(st, command);
+  vkFreeCommandBuffers(st->device, st->commandPool, 1, &command);
+  if (result == ANITY_OK) destination.colorLayoutInitialized = true;
+  return result;
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_CopyCameraRenderTargetNormalsToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId, int32_t sourceIsCameraTarget,
+    uint64_t destinationTargetId) {
+  return AnityGraphics_Vulkan_CopyCameraRenderTargetNormalsToColorSlice(
+      device, sourceTargetId, sourceIsCameraTarget, 0, 0, destinationTargetId);
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_CopyCameraRenderTargetDepthToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId) {
+  if (!device || !device->backend || destinationTargetId == 0 ||
+      sourceSlice < 0 || destinationSlice < 0 ||
+      (sourceIsCameraTarget != 0 && sourceIsCameraTarget != 1) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == 0) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == destinationTargetId))
+    return ANITY_ERR_INVALID_ARG;
+  // As with the opaque path, a presentation image is not an owned sampled
+  // attachment yet. Do not substitute an arbitrary swapchain depth resource.
+  if (sourceIsCameraTarget != 0) return ANITY_ERR_NOT_SUPPORTED;
+  auto* st = reinterpret_cast<VkState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto sourceFound = st->cameraTargets.find(sourceTargetId);
+  const auto destinationFound = st->cameraTargets.find(destinationTargetId);
+  if (sourceFound == st->cameraTargets.end() || destinationFound == st->cameraTargets.end())
+    return ANITY_ERR_INVALID_ARG;
+  VkCameraRenderTarget& source = *sourceFound->second;
+  VkCameraRenderTarget& destination = *destinationFound->second;
+  if (!source.depthLayoutInitialized || source.width != destination.width ||
+      source.height != destination.height || destination.hdrEnabled != 0 ||
+      destination.colorFormat != VK_FORMAT_R8G8B8A8_UNORM ||
+      sourceSlice >= source.volumeDepth || destinationSlice >= destination.volumeDepth)
+    return ANITY_ERR_NOT_SUPPORTED;
+  AnityResult result = EnsureDepthCopyResources(st);
+  if (result != ANITY_OK) return result;
+
+  VkDescriptorSetAllocateInfo descriptorAllocation{};
+  descriptorAllocation.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  descriptorAllocation.descriptorPool = st->depthCopyDescriptorPool;
+  descriptorAllocation.descriptorSetCount = 1;
+  descriptorAllocation.pSetLayouts = &st->depthCopySetLayout;
+  VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+  if (vkAllocateDescriptorSets(st->device, &descriptorAllocation, &descriptorSet) != VK_SUCCESS)
+    return ANITY_ERR_OUT_OF_MEMORY;
+  VkDescriptorImageInfo sourceInfo{};
+  sourceInfo.sampler = st->depthCopySampler;
+  sourceInfo.imageView = source.depthViews[static_cast<size_t>(sourceSlice)];
+  sourceInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+  VkDescriptorImageInfo destinationInfo{};
+  destinationInfo.imageView = destination.colorViews[static_cast<size_t>(destinationSlice)];
+  destinationInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+  VkWriteDescriptorSet writes[2]{};
+  writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[0].dstSet = descriptorSet;
+  writes[0].dstBinding = 0;
+  writes[0].descriptorCount = 1;
+  writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  writes[0].pImageInfo = &sourceInfo;
+  writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[1].dstSet = descriptorSet;
+  writes[1].dstBinding = 1;
+  writes[1].descriptorCount = 1;
+  writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  writes[1].pImageInfo = &destinationInfo;
+  vkUpdateDescriptorSets(st->device, 2, writes, 0, nullptr);
+
+  VkCommandBuffer command = VK_NULL_HANDLE;
+  result = AllocateCameraCommand(st, &command);
+  if (result != ANITY_OK) {
+    vkFreeDescriptorSets(st->device, st->depthCopyDescriptorPool, 1, &descriptorSet);
+    return result;
+  }
+  VkImageMemoryBarrier depthToRead{};
+  depthToRead.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  depthToRead.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  depthToRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  depthToRead.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  depthToRead.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+  depthToRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  depthToRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  depthToRead.image = source.depthImage;
+  depthToRead.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+  depthToRead.subresourceRange.levelCount = 1;
+  depthToRead.subresourceRange.baseArrayLayer = static_cast<uint32_t>(sourceSlice);
+  depthToRead.subresourceRange.layerCount = 1;
+  VkImageMemoryBarrier destinationToWrite{};
+  destinationToWrite.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  destinationToWrite.srcAccessMask = destination.colorLayoutInitialized
+      ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT : 0;
+  destinationToWrite.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  destinationToWrite.oldLayout = destination.colorLayoutInitialized
+      ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
+  destinationToWrite.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+  destinationToWrite.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  destinationToWrite.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  destinationToWrite.image = destination.colorImage;
+  destinationToWrite.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  destinationToWrite.subresourceRange.levelCount = 1;
+  destinationToWrite.subresourceRange.baseArrayLayer = static_cast<uint32_t>(destinationSlice);
+  destinationToWrite.subresourceRange.layerCount = 1;
+  VkImageMemoryBarrier beginBarriers[] = {depthToRead, destinationToWrite};
+  vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+      0, 0, nullptr, 0, nullptr, 2, beginBarriers);
+  const VkPipeline pipeline = source.msaaSamples == 1
+      ? st->depthCopyPipeline : st->depthCopyMsaaPipeline;
+  vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE,
+      st->depthCopyPipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+  vkCmdDispatch(command, static_cast<uint32_t>((source.width + 7) / 8),
+      static_cast<uint32_t>((source.height + 7) / 8), 1);
+  VkImageMemoryBarrier depthRestore = depthToRead;
+  depthRestore.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  depthRestore.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+      VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+  depthRestore.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+  depthRestore.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  VkImageMemoryBarrier destinationRestore = destinationToWrite;
+  destinationRestore.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  destinationRestore.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+      VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  destinationRestore.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+  destinationRestore.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkImageMemoryBarrier restoreBarriers[] = {depthRestore, destinationRestore};
+  vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+      VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      0, 0, nullptr, 0, nullptr, 2, restoreBarriers);
+  if (vkEndCommandBuffer(command) != VK_SUCCESS)
+    result = ANITY_ERR_DEVICE_LOST;
+  else
+    result = SubmitCameraCommand(st, command);
+  vkFreeCommandBuffers(st->device, st->commandPool, 1, &command);
+  vkFreeDescriptorSets(st->device, st->depthCopyDescriptorPool, 1, &descriptorSet);
+  if (result == ANITY_OK) destination.colorLayoutInitialized = true;
+  return result;
+}
+
+extern "C" AnityResult AnityGraphics_Vulkan_CopyCameraRenderTargetDepthToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId) {
+  return AnityGraphics_Vulkan_CopyCameraRenderTargetDepthToColorSlice(
+      device, sourceTargetId, sourceIsCameraTarget, 0, 0, destinationTargetId);
 }
 
 extern "C" AnityResult AnityGraphics_Vulkan_UploadUI(
@@ -1383,6 +2769,7 @@ extern "C" AnityResult AnityGraphics_Vulkan_CreateSwapchain(
     vst->ownsImages = true;
     for (int32_t index = 0; index < sc->imageCount; ++index) {
       AnityResult imageResult = CreateImage(st, sc->width, sc->height, 1, vst->format,
+          VK_SAMPLE_COUNT_1_BIT,
           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
           &vst->images[static_cast<size_t>(index)],
           &vst->imageMemories[static_cast<size_t>(index)]);

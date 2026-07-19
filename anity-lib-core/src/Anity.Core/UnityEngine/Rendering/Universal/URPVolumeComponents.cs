@@ -75,12 +75,23 @@ namespace UnityEngine.Rendering.Universal
   [Serializable, VolumeComponentMenu("Post-processing/Color Curves")]
   public sealed class ColorCurves : VolumeComponent, IPostProcessComponent
   {
-    public ColorCurveParameter master = new ColorCurveParameter(new Vector2(0f, 0f));
-    public ColorCurveParameter red = new ColorCurveParameter(new Vector2(0f, 0f));
-    public ColorCurveParameter green = new ColorCurveParameter(new Vector2(0f, 0f));
-    public ColorCurveParameter blue = new ColorCurveParameter(new Vector2(0f, 0f));
+    public TextureCurveParameter master = new TextureCurveParameter(TextureCurve.Identity(Color.white));
+    public TextureCurveParameter red = new TextureCurveParameter(TextureCurve.Identity(Color.red));
+    public TextureCurveParameter green = new TextureCurveParameter(TextureCurve.Identity(Color.green));
+    public TextureCurveParameter blue = new TextureCurveParameter(TextureCurve.Identity(Color.blue));
+    public TextureCurveParameter hueVsHue = new TextureCurveParameter(TextureCurve.Identity(Color.red));
+    public TextureCurveParameter hueVsSat = new TextureCurveParameter(TextureCurve.ModifierIdentity(Color.green));
+    public TextureCurveParameter satVsSat = new TextureCurveParameter(TextureCurve.ModifierIdentity(Color.blue));
+    public TextureCurveParameter lumVsSat = new TextureCurveParameter(TextureCurve.ModifierIdentity(Color.white));
 
-    public bool IsActive() => true;
+    public bool IsActive() => !(master.value?.IsIdentity() ?? true) ||
+                              !(red.value?.IsIdentity() ?? true) ||
+                              !(green.value?.IsIdentity() ?? true) ||
+                              !(blue.value?.IsIdentity() ?? true) ||
+                              !(hueVsHue.value?.IsIdentity() ?? true) ||
+                              !(hueVsSat.value?.IsModifierIdentity() ?? true) ||
+                              !(satVsSat.value?.IsModifierIdentity() ?? true) ||
+                              !(lumVsSat.value?.IsModifierIdentity() ?? true);
     public bool IsTileCompatible() => true;
   }
 

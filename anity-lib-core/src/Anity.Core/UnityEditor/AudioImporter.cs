@@ -99,7 +99,7 @@ public class AudioImporter : AssetImporter
 
   public static new AudioImporter GetAtPath(string path)
   {
-    return new AudioImporter { assetPath = path };
+    return AssetDatabase.GetImporterAtPath(path) as AudioImporter ?? new AudioImporter { assetPath = path, importSettingsMissing = true };
   }
 }
 

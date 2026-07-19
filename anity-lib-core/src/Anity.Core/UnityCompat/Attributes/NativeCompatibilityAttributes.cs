@@ -41,6 +41,21 @@ namespace UnityEngine.Bindings
   {
   }
 
+  [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
+  internal sealed class PreventExecutionInStateAttribute : Attribute
+  {
+    public PreventExecutionInStateAttribute(int state, int severity, string message)
+    {
+      State = state;
+      Severity = severity;
+      Message = message;
+    }
+
+    public int State { get; }
+    public int Severity { get; }
+    public string Message { get; }
+  }
+
   internal enum StaticAccessorType
   {
     Dot = 0,
@@ -113,11 +128,35 @@ namespace UnityEngine.Bindings
   [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct)]
   internal sealed class NativeTypeAttribute : Attribute
   {
+    public NativeTypeAttribute()
+    {
+    }
+
+    public NativeTypeAttribute(int targetType, string name)
+    {
+      TargetType = targetType;
+      Name = name;
+    }
+
+    public NativeTypeAttribute(string header) => Header = header;
+
+    public int TargetType { get; }
+    public string? Name { get; }
     public string? Header { get; set; }
+  }
+
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct)]
+  internal sealed class NativeAsStructAttribute : Attribute
+  {
   }
 
   [AttributeUsage(AttributeTargets.Method)]
   internal sealed class ThreadSafeAttribute : Attribute
+  {
+  }
+
+  [AttributeUsage(AttributeTargets.Parameter)]
+  internal sealed class UnmarshalledAttribute : Attribute
   {
   }
 }

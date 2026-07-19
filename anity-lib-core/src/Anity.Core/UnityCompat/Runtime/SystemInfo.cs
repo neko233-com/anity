@@ -65,6 +65,7 @@ public static class SystemInfo
     public static bool supportsComputeShaders => true;
     public static bool supportsInstancing => true;
     public static bool supportsAsyncCompute => true;
+    public static bool supportsAsyncGPUReadback => true;
     public static bool supportsGeometryShaders => true;
     public static bool supportsTessellationShaders => true;
     public static bool supportsRayTracing => false;

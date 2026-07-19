@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Anity.Core.Tests;
 
+[Collection(ComponentAttributeBehaviorCollection.Name)]
 public sealed class NativeGraphicsUIUploadTests
 {
     [Fact]

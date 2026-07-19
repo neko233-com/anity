@@ -481,10 +481,10 @@ namespace UnityEditor
           string lineStr = location.Substring(colon + 1);
           if (int.TryParse(lineStr, out int lineNumber))
           {
-            var asset = AssetDatabase.LoadAssetAtPath(filePath);
+            var asset = AssetDatabase.LoadMainAssetAtPath(filePath);
             if (asset != null)
             {
-              Selection.activeObject = asset as UnityEngine.Object;
+              Selection.activeObject = asset;
               if (ProjectWindow.instance != null)
                 ProjectWindow.instance.Repaint();
             }

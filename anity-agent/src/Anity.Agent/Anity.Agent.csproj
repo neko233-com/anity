@@ -4,7 +4,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageId>Anity.Agent</PackageId>
     <Authors>Anity Team</Authors>
     <Description>Official Anity Agent extension (independent, UGUI-style package). Not part of engine Core.</Description>

@@ -36,6 +36,56 @@ extern "C" AnityResult AnityGraphics_Metal_ReadbackSwapchainRGBA8(
     AnitySwapchain*, uint8_t*, int32_t, int32_t*) {
   return ANITY_ERR_NOT_SUPPORTED;
 }
+extern "C" AnityResult AnityGraphics_Metal_ReadbackSwapchainToneMappedRGBA8(
+    AnitySwapchain*, uint8_t*, int32_t, int32_t*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_ExecuteCameraPass(
+    AnityGraphicsDevice*, const AnityGraphicsCameraPassDesc*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_EnsureCameraRenderTarget(
+    AnityGraphicsDevice*, const AnityGraphicsCameraRenderTargetDesc*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" void AnityGraphics_Metal_DestroyCameraRenderTarget(
+    AnityGraphicsDevice*, uint64_t) {}
+extern "C" AnityResult AnityGraphics_Metal_ReadbackCameraRenderTargetRGBA8(
+    AnityGraphicsDevice*, uint64_t, uint8_t*, int32_t, int32_t*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_ReadbackCameraRenderTargetSliceRGBA8(
+    AnityGraphicsDevice*, uint64_t, int32_t, uint8_t*, int32_t, int32_t*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_ReadbackCameraRenderTargetToneMappedRGBA8(
+    AnityGraphicsDevice*, uint64_t, uint8_t*, int32_t, int32_t*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetColor(
+    AnityGraphicsDevice*, uint64_t, int32_t, uint64_t) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetColorSlice(
+    AnityGraphicsDevice*, uint64_t, int32_t, int32_t, int32_t, uint64_t) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetDepthToColor(
+    AnityGraphicsDevice*, uint64_t, int32_t, uint64_t) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_ProcessCameraRenderTargetHDR(
+    AnityGraphicsDevice*, uint64_t, const AnityHDRColorGrade*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_GetHDRPostProcessStats(
+    const AnityGraphicsDevice*, AnityGraphicsHDRPostProcessStats*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
+extern "C" AnityResult AnityGraphics_Metal_ProcessSwapchainHDR(
+    AnitySwapchain*, const AnityHDRColorGrade*) {
+  return ANITY_ERR_NOT_SUPPORTED;
+}
 extern "C" AnityResult AnityGraphics_Metal_SyncTexture(
     AnityGraphicsDevice*, uint64_t) {
   return ANITY_ERR_NOT_SUPPORTED;

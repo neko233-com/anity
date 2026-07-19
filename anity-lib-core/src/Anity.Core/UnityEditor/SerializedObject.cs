@@ -8,9 +8,7 @@ public enum InspectorMode
 {
   Normal,
   Debug,
-  DebugInternal,
-  DebugNormal,
-  Verbose
+  DebugInternal
 }
 
 public sealed class SerializedObject : IDisposable

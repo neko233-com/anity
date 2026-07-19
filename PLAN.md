@@ -1,5 +1,366 @@
 # PLAN
 
+## 2026-07-18 — UnityEditor.AssetDatabase package import lifecycle
+
+### 已完成
+- 将 `AssetDatabase` 从不兼容的 static type 修正为官方同形的可构造 sealed facade，并补齐 Unity 2022 绑定 metadata、`ImportPackageCallback` / `ImportPackageFailedCallback`、`RefreshImportMode`、package import start/completed/cancelled/failed 回调和 `onImportPackageItemsCompleted` 字段。
+- 将高频 `CreateAsset(UnityEngine.Object, string)` 与 `AddObjectToAsset(UnityEngine.Object, string)` 修正为 Unity 的 `void`/`Object` 合约，保留 native throw/null metadata；本机 2022.3.51f1 预备反射对这两个成员已无差异，Project Window 也不再以 null 伪造资产。
+- `LoadAssetAtPath<T>` 现采用官方 `UnityEngine.Object` 泛型约束，typed load、main/all/representation asset load 与 `GetAssetPath(Object)` 均移除错误的 `object` 公开面并补齐防导入期执行 metadata；新增 11 个定向测试，连同 package lifecycle 和资产管线共 60/60 通过。本机 2022.3.51f1 的这组 load API 预备反射无差异。
+- `ImportPackage` 现可实际读取 Unity `.unitypackage` 的 gzip/tar 条目，将 `guid/{pathname,asset,asset.meta}` 作为原子事务导入内存资源索引，保留包内 GUID、拒绝不安全路径且不会部分提交；另有 10 个 archive 测试覆盖单/多资源、GUID、回调、空归档、非法路径和重导入。该阶段仍缺真实项目目录写入、二进制 importer、postprocessor 与取消 UI。
+- Editor session 与 CLI 的 `-projectPath` 现均经 `EditorApplication.OpenProject` 配置同一内部 AssetDatabase project root；package 导入会先落到 `Library/AnityPackageStaging`，再提交 asset/meta 文件，已有文件在失败时从 backup 恢复。落盘使用独立临时项目验证，archive+load+callback 33 个定向用例通过。
+- `AssetPostprocessor` 已由声明型 API 接入真实 import dispatch：所有可实例化 processor 按 order/type 顺序在提交前逐 asset 执行 `OnPreprocessAsset`，提交后一次执行 `OnPostprocessAllAssets`；preprocess 异常会阻止落盘并触发 import failure，postprocess 异常记录错误但不破坏已提交事务。专项回归增至 35/35。
+- package importer 现按常见扩展构建资源对象：PNG/JPEG/TGA 走 `Texture2D.LoadImage`，音频走 native/platform `AudioClip.CreateFromFile`，视频走 `VideoClip.CreateFromFile`，材质与文本保留对应对象；PNG archive fixture 验证导入结果为 `Texture2D`，专项回归 14/14。
+- AssetDatabase 现维护 path→importer 稳定 registry；package/CreateAsset 后会按资源对象建立 Texture/Audio/base importer，`GetImporters`、typed GetImporters 与各 GetAtPath 可复用同一设置对象。10 个定向用例覆盖类型、稳定 identity、设置保持、缺失设置和 path。
+- `UnityEngine.AssetImporter.SaveAndReimport()` 已接入磁盘 refresh：读取 project root 内 asset/meta、运行 preprocess/postprocess、重建内存对象并保留 registry importer；外部改写已导入文本后的重新导入回归通过。
+- `StartAssetEditing` / `StopAssetEditing` 现在是可嵌套的资源导入事务：编辑期间将 `ImportAsset`（含 options）及 `Refresh` 收集进按 canonical path 去重、稳定排序的队列，仅由最外层 `StopAssetEditing` 执行磁盘 reimport；10 个 xUnit 用例覆盖延迟、嵌套、去重、Refresh、缺失文件、options 与 callback 顺序，AssetDatabase 聚焦回归 46/46 通过。
+- `AssetImporter.SaveSettings` / `SaveAndReimport` 已实际写入 asset `.meta` 并在新 project session 后恢复：基础 importer 数据、Texture 的类型/mipmap/readability/compression/sampling/尺寸、Audio 的加载与 sample settings 均走 UTF-8 base64 JSON 注释 payload，原有 Unity YAML 完整保留；切换 project root 会清空项目级 index/registry，随后可从磁盘重新识别 importer。10 个跨 session 测试与既有资源管线组合回归共 56/56 通过。
+- `DeleteAsset` / `MoveAsset` / `CopyAsset` 不再只改内存：对 project `Assets/` 内的已导入或尚未索引文件同步处理 asset/meta，移动保留 GUID 与 importer identity，复制生成全新 GUID 并改写副本 meta；路径逃逸和已有 destination 被拒绝。11 个真实磁盘回归覆盖删除、移动、复制、GUID、meta、registry 与 collision，资源管线组合回归增至 67/67。
+- 磁盘 `ImportAsset` 和 `SaveSettings` 现读取/保留 `.meta` 中合法的 Unity 32 位十六进制 `guid:`，大小写统一；缺失或非法 GUID 会生成标准新 GUID，`GUIDToAssetPath` 可反查。文件操作 suite 增加 meta GUID/规范化/无效拒绝/自动写入测试，资源管线组合回归 71/71 通过。
+- `Refresh` 现扫描 project root 的 `Assets/` 文件系统：发现外部新增的文本/纹理与 meta GUID、刷新已有文件，并在文件消失时撤销内存 index/importer；`.meta`、`.DS_Store`、`Library/` 均不会被误导入。扫描仍服从嵌套 `StartAssetEditing` 的队列，10 个回归覆盖 discovery/update/delete/options/batch，组合回归 81/81 通过。
+- `GetDependencies(path, recursive)` 现从磁盘 asset 与 `.meta` 文本提取合法 32 位十六进制 `guid:` 引用，经 GUID registry 解析为路径；直接与递归模式均保留 source、按稳定路径排序，并对循环、未知及非法 GUID 安全收敛。10 个真实磁盘回归覆盖空输入、direct/recursive、排序、循环、meta 与异常引用，连同既有 AssetDatabase 管线组合回归 91/91 通过。
+- `AddObjectToAsset` 不再覆盖主资产：已形成 main/sub-asset 关系，`LoadAllAssetsAtPath` 返回 main 后接 sub-assets，`LoadAllAssetRepresentationsAtPath` 仅返回 sub-assets，且 `Contains`、`GetAssetPath`、`IsSubAsset`、GUID 查询、Move/Delete 与 root reset 均保留或清理对应关系。13 个定向用例覆盖公开 overload、排序、去重、异常、移动/删除及替换，资源管线组合回归增至 104/104；sub-asset 尚未持久序列化，重启项目后仍需 native YAML/type tree 实现。
+- `GetAssetDependencyHash` 已移除不稳定的 CLR string hash，改为对资产字节、`.meta`、排序后的直接/递归 GUID dependencies 计算稳定 SHA-256 前 128 位，并以 recursion stack 收敛真正循环；source/meta/direct/transitive 变更均会失效，无关资产不影响结果。10 个真实项目文件用例通过，AssetDatabase 组合回归增至 114/114。该摘要尚未与 Unity 的内部 artifact/importer hash 做 2022.3.61f1 A/B，不能宣称字节值一致。
+- `MoveAsset(string[] paths, string destinationFolder)` 已从空壳落为批量事务：预检 destination、重复/缺失 source、碰撞与递归移动；随后逐项复用磁盘 asset/meta 与 GUID/importer/sub-asset 保持路径，任一执行失败会逆序回滚已完成项。11 项覆盖单/多项、GUID、importer、sub-asset、磁盘 meta 和拒绝路径，AssetDatabase 组合回归增至 125/125。
+- 本机 Unity 2022.3.51f1 反射核对后，`ExportPackage` 已补齐官方 4 个 string/string[] overload 与顶级 `[Flags] ExportPackageOptions`（Default=0、Interactive=1、Recurse=2、IncludeDependencies=4、IncludeLibraryAssets=8）。实现输出真实 gzip/ustar `guid/{pathname,asset,asset.meta}` 归档，写入 staging 后才替换目标文件；Recurse 展开磁盘 folder、IncludeDependencies 递归纳入 GUID dependencies，并可独立 project round-trip 保持内容与 meta GUID。19 项覆盖反射值、overload、递归、依赖、异常和既有归档路径，AssetDatabase 组合回归增至 144/144。当前只导出已落盘文件；`IncludeLibraryAssets` 明确抛出 NotSupported、Interactive 还没有 Unity 选择 UI，仍待完成。
+- `AssetImporter.assetBundleName` / `assetBundleVariant` 和 AssetDatabase 的 bundle registry 已落地：完整名遵循 `name.variant`，支持按 bundle / scene bundle 查询、稳定排序的 all/unused name 查询与清理，移动、删除和 project session reset 同步维护登记；SaveSettings 会将 name/variant 随现有 importer payload 跨 session 恢复。11 项 xUnit 覆盖路径/对象 overload、variant、scene filter、unused cleanup、move/delete 和磁盘 meta session 恢复。
+- `GetImplicitAssetBundleName` / `GetImplicitAssetBundleVariantName` 现按官方的“资产显式分配优先，否则逐级父文件夹直到 Assets”规则执行；默认 `BuildAssetBundles(output, options, target)` 用该结果稳定分组为真实 `AssetBundleBuild`，使 folder assignment 进入 bundle/variant/manifest writer。20 项用例覆盖 direct、variant、parent/nearest/override/fallback、无分配，以及 folder-inherited/default build 的单/多 bundle 路径。跨资产依赖图与 Unity 原生 importer YAML 仍未完成，不能把此项视为完整 AssetBundle dependency system。
+- `BuildPipeline.GetDirectDependencies` / `GetAllDependencies` 现复用 `AssetDatabase` 的 GUID 依赖解析，去除 source、去重并稳定排序；AssetBundle writer 随之将仅由不同 bundle 承载的直接 asset 引用写入 manifest，显式 build 与默认（含 folder-inherited）build 均已覆盖。新增 10 项用例覆盖空输入、direct/transitive/cycle、排序、同 bundle 排除和两种 manifest 路径；AssetDatabase/AssetBundle 聚焦回归 **185/185** 通过。
+- `AssetBundleBuild.assetBundleVariant` 已从错误的 `string[]` 修正为 Unity 2022 的单个 `string` field；writer 以完整逻辑名 `name.variant` 建立 catalog、hash 文件名和 path→bundle map，使跨 bundle manifest dependency 不会丢失 dependency 的 variant，DryRun 同步保留 variant 元数据。新增 10 项变体用例覆盖反射 field type、显式/默认 build、qualified 文件名、AppendHash、同/跨 bundle dependency 与 DryRun；本轮资源管线聚焦回归 **195/195** 通过。`GetAllAssetBundles` 对 variant base/qualified name 的最终枚举细节仍需 Unity 2022.3.61f1 A/B。
+- 补齐 `AssetBundleBuild.addressableNames` 官方 `string[]` field，并作为 bundle 内 asset 的实际加载键：数组按 index 与 `assetNames` 配对，空项回退 asset path，长度不等时拒绝构建；address alias 也进入 content hash。`BuildAssetBundles` 同时不再擅自创建输出目录，而是要求 caller 先建目录，空 output 仍保持既有空 manifest 行为。地址别名与输出目录各新增 10 项端到端用例；本轮 AssetDatabase/AssetBundle 聚焦回归 **215/215** 通过。完整 UnityFS/serialized object、Scene address key 和 Unity 2022.3.61f1 A/B 仍待完成。
+- `BuildAssetBundleExplicitAssetNames` 的 Unity 2022 legacy 两个 `BuildTarget` overload 已恢复并标记 `[Obsolete]`：以 `Object[]` / custom name 一一写出单文件 bundle，可返回最终 CRC；空或不等长数组、null asset、空 custom name、无效 parent 均不落盘并返回 false。新增 10 项用例覆盖公开返回类型、写出/加载、多 asset mapping、CRC 及全部拒绝分支；AssetDatabase/AssetBundle 聚焦回归 **225/225** 通过。其余 legacy `BuildAssetBundle`/streamed-scene overload 和 Unity 2022.3.61f1 A/B 仍待完成。
+- `BuildAssetBundle` 的 Unity 2022 legacy 两个 `BuildTarget` overload 亦已恢复并标记 `[Obsolete]`：主 asset 与 additional assets 走单文件 bundle writer，优先使用 `AssetDatabase.GetAssetPath`，未注册对象回退 object name，支持 CRC；null/重复加载名/无效 parent 安全失败。新增 10 项定向用例；AssetDatabase/AssetBundle 聚焦回归 **235/235** 通过。streamed-scene、parameters build 和 Unity 2022.3.61f1 A/B 仍待完成。
+- `BuildAssetBundlesParameters` 及其推荐的 `BuildAssetBundles(parameters)` overload 已补齐：`outputPath`、`bundleDefinitions`、`options`、`targetPlatform`、`subtarget`、`extraScriptingDefines` 进入公开面；definitions 未指定时复用 importer assignment，指定时复用 build-map writer。新增 10 项用例通过；仍需最终 Unity 2022.3.61f1 A/B。
+- importer 的 `assetBundleName` / `assetBundleVariant` 现写入并读取 Unity 实际的 `*Importer` YAML 块（`TextureImporter` / `AudioImporter` / `DefaultImporter`）；旧 Anity 根字段仍可读以完成迁移。YAML-only meta、CRLF、quoted scalar、空/过期字段、跨 session 和损坏旧 payload 均有回归，且当迁移期 Anity 兼容注释同存时以 Unity YAML 为准。Texture/Audio 常用层级字段（mipmap、sampling、sprite、normal、audio sample/flags）已按本机 Unity 2022.3.51f1 样本读取，并仅在既有 Unity importer 块中原位写回，保留未知 YAML 字段；缺失字段及剩余 importer/platform overrides 仍暂存兼容 payload，尚非完整 Unity importer YAML serializer。
+- `.fbx` / `.obj` / `.dae` / `.blend` / `.3ds` / `.dxf` 现会稳定登记为 `ModelImporter`，`ModelImporter.GetAtPath` 返回 registry identity；按本机 Unity 2022.3.51f1 ModelImporter 样本接通 materials、animations、meshes、tangent space、animation type 与 userData 的原位 YAML 读写。`DefaultImporter.userData` 也直接读写 YAML，所有上述路径保留未知字段。11 项 Model/Default 专项用例通过；material remapping、platform-specific model settings 和 Unity 2022.3.61f1 A/B 仍待完成。
+- `ModelImporter.animations.clipAnimations` 现可读取 Unity YAML 的空列表或常用 scalar clip 字段（name/take、frame range、loop、root locks、mirror、wrap、offset、original transforms、additive pose），并对已有 YAML clip 项原位写回而保留未知字段；新增 clip 会追加标准 v16 项，`clipAnimations: []` 会在首次新增时转为块列表，缩短 array 会删除尾部 YAML clip 块。10 组参数化 fixture 与写回/追加/空列表/删除回归使 Model YAML suite 达 25/25。mask/reference pose/humanDescription 与 Unity 2022.3.61f1 A/B 仍待完成。
+- `ModelImporter.humanDescription` 已补进公开 API，并将 Unity YAML 的 `armTwist`/`foreArmTwist`/`legTwist` 正确映射到官方 `upperArmTwist`/`lowerArmTwist`/`lowerLegTwist`，同时接通 stretch、feet spacing 与 translation DoF。YAML 内部 `hasExtraRoot` 会原样保留但不再伪造成 Unity 不存在的公共属性。SkeletonBone 映射数组、root-motion bone、avatar remapping 与 Unity 2022.3.61f1 A/B 仍待完成。
+- `ModelImporter.avatarSetup` 已按本机 Unity 2022.3.51f1 的官方名称和 `NoAvatar` / `CreateFromThisModel` / `CopyFromOther` 枚举值接通，并将 `autoGenerateAvatarMappingIfUnspecified` 与两项设置一同原位读写 ModelImporter YAML；历史误名 `avatarDefinition` 仅保留 obsolete 转发。新增读写回归后 Model YAML suite 为 **29/29**。Avatar source/remapping、完整 humanoid arrays 与 Unity 2022.3.61f1 A/B 仍待完成。
+- 本机 Unity 2022.3.51f1 反射已核验 `importMaterials` 为由 `materialImportMode` 派生的只读属性；Anity 现同步公开 `ModelImporterMaterialImportMode`（None/ImportStandard/ImportViaMaterialDescription 及官方别名）、`materialImportMode`、`materialLocation` 和 `useSRGBMaterialColor`，并实际读写 Unity ModelImporter 的 `materials.materialImportMode`/`materialLocation` 与 `meshes.useSRGBMaterialColor`。旧 `materials.importMaterials` 仅作为兼容输入迁移为 mode，新的保存不会再生成它。3+3+2+2 个模式/位置/sRGB 测试与既有 suite 合计 **39/39** 通过；外部 material remap、material extraction 与 Unity 2022.3.61f1 A/B 仍待完成。
+- `ModelImporter` 已继续接通 Unity YAML 的 `bakeIK`、`removeConstantScaleCurves`、`importAnimatedCustomProperties`、`importConstraints`、`importPhysicalCameras`、`sortHierarchyByName`、`bakeAxisConversion`、`preserveHierarchy`、`strictVertexDataChecks` 和 `importBlendShapeDeformPercent`；每个字段均有读写反转回归。HumanBone humanoid mapping 列表现已支持读取、原位写回、空列表、新增、缩短、null、跨 project session 重载、YAML 转义与未知字段保留；10 组读取和 10 组写入参数矩阵连同边界用例使 Model YAML suite 增至 **77/77**。
+- 本机 Unity 2022.3.51f1 预备反射确认 `HumanDescription`、`HumanBone`、`HumanLimit`、`SkeletonBone` 四个类型的字段/属性、obsolete metadata、NativeHeader/NativeType/NativeName/RequiredByNativeCode 已逐项完全一致；移除了错误公共别名并将 serialized members 恢复为官方 public fields。31 项公开面门禁加 Model YAML 共 **108/108**，AssetDatabase/importer 聚焦回归 **308/308**。目标 2022.3.61f1 未安装，因此这仍不是最终 Pro 证据。
+- TextureImporter `platformSettings` 的 Unity YAML 列表现会实际解析为 `TextureImporterPlatformSettings`：Default/Standalone/Android/iPhone/WebGL 等 target 的 size、format、compression、quality、override、crunch、alpha split 和 Android ETC2 fallback 已由 10 个平台配置用例覆盖。已存在平台项可原位写回并保留未知字段/列表顺序，缺失平台可追加标准 version-3 条目，Clear 会将既有项的 `overridden` 清零；复杂平台字段、Unity 2022.3.61f1 A/B 和序列化排序细节仍待完成。
+- `ImportPackage(path, interactive)` 现在执行可观察的事务生命周期：先通知开始，拒绝空路径和不存在的 package 并报告绝对路径错误；有效文件会报告规范化的绝对 package item path 后完成。11 个 xUnit 用例覆盖成功、失败、回调顺序、路径、订阅解除、多个订阅者与 interactive 两条调用路径。
+- 本机 Unity 2022.3.51f1 的**预备**反射审计当前为 types present **989/4117**、exact **460**，members present **9242/37164**、exact **6973**；四个 humanoid description 类型已从 mismatch 转为 exact。2022.3.61f1 尚未安装，不能作为最终 Pro 验收。
+- 本轮统一 Release 门禁已在 native-required 模式下完成：`_scripts/build-native.sh Release` 构建通过，`_scripts/run-tests.sh Release` 覆盖 Core 2843、Agent 91、Editor 164、Shader Graph 198、VFX Graph 490、CLI 16、Unity API parity 17 与 A/B compare 22，合计 **3841/3841**、0 失败、0 跳过。Editor 测试工程现会在 native-required 时复制平台原生库，测试临时 project root 也会在 fixture 初始化时创建，统一入口不再依赖手工准备。
+
+### 尚未完成
+- `.unitypackage` 的 gzip/tar asset/meta 解包、指定已落盘 asset 的导出（含 Recurse/IncludeDependencies）、磁盘 meta GUID、Refresh discovery、基础 importer settings/文件操作、单/批量 Move、显式/文件夹继承 AssetBundle name/variant registry、默认 BuildPipeline bundle 分组、基于文本 YAML GUID 的跨 bundle 直接依赖图、确定性 dependency invalidation hash 与内存 main/sub-asset 关系已实现；但 export 的 IncludeLibraryAssets 与 Interactive UI 尚未实现，bundle 依赖尚未做 Unity 2022.3.61f1 A/B，且 dependency lookup 仍是文本 GUID 提取，sub-asset 尚未持久序列化，hash 未与 Unity artifact/importer hash A/B，均不是 Unity 完整序列化 type tree/fileID 语义，settings storage 也仍是 Anity 注释 payload，尚不是 Unity 原生 importer YAML serializer。跨 asset YAML GUID/fileID 引用重写、scripted/model/font 等完整 importer、platform override、import worker/后台时序、取消 UI、cache server 和其余大量 AssetDatabase API 尚未完成；本项保持 🟡，不得以当前事务闭环冒充完整资源导入。
+
+### 下一优先项
+1. 用 Unity 2022.3.61f1 Pro 做显式/隐式 bundle name、variant、跨 bundle dependency 和默认 BuildPipeline A/B，并按差异补齐 variant resolution 与 build-map 语义。
+2. 继续完成 `humanDescription.skeleton`、root-motion bone、Avatar source/material remap 与 ModelImporter 剩余官方公开面，并保持每批预备反射差异单调下降。
+3. 将 current Anity importer-settings payload 逐字段迁移为 Unity 原生 YAML（含 Texture/Audio platform override）、实现 YAML GUID/fileID 引用重写与 scripted/model/font importer，再补 importer/postprocessor 行为 A/B。
+
+## 2026-07-18 — UnityEngine.Rendering.AsyncGPUReadback 真实异步读回
+
+### 已完成
+- 删除错误位于 `UnityEngine` 的即时完成占位类，按 Unity 2022 公开面建立 `UnityEngine.Rendering.AsyncGPUReadback` 与 sequential value-type `AsyncGPUReadbackRequest`；反射已核对全部 `Request`、`RequestIntoNativeArray`、`RequestIntoNativeSlice`、`WaitAllRequests`、请求属性和 `GetData<T>` 签名。
+- Request 现在由 PlayerLoop 在 camera render 后完成，`Update` / `WaitForCompletion` 可显式等待；回调只触发一次。`Texture2D` 支持全纹理、mip 和二维区域的 RGBA8 真数据，ComputeBuffer/GraphicsBuffer 支持 byte-range 真拷贝，RenderTexture 在已有 native device/camera target 上走原生 RGBA8 readback。
+- `NativeArray`/`NativeSlice` destination 写入、错误状态、typed data、layer/size dimensions 与 `SystemInfo.supportsAsyncGPUReadback` 已接通；全资源请求现覆盖 `Texture2DArray`、`Texture3D`、Cubemap、CubemapArray 与 native RenderTexture 的每层数据，`GetData<T>(layer)` 严格返回单层 byte window。19 个 xUnit 用例覆盖 deferred/callback/data/region/mip/error/buffer/container/wait/force-player-loop 与多层 z/layer 映射。
+- 按 Unity 2022.3.51f1 本机预备基线收紧公开面：callback/mip 的 optional metadata、泛型约束和 `StaticAccessor` 类特性均匹配；移除了 Unity 未公开的两个完整区域 NativeArray/NativeSlice 重载。该项仅为 2022.3.61f1 到位前的预检，不能替代最终版本 A/B。
+
+### 尚未完成
+- 全部格式转换、每个平台原生 asynchronous fence/readback、mipmapped 3D/array/cube texture 和 Unity 2022.3.61f1 官方 Player A/B 仍未完成；必须完成这些验证后才可将该模块改为 ✅。
+
+### 下一优先项
+1. 在目标 Unity 2022.3.61f1 对照实际 request 生命周期、invalid range 和 RenderTexture 读回时序。
+2. 为 Metal/Vulkan/D3D 后端接入非阻塞原生 fence，并补齐 mipmapped volume/cube 与 format conversion。
+
+## 2026-07-18 — UnityEngine.Rendering GraphicsFence / GPUFence 提交语义
+
+### 已完成
+- 补齐 `GraphicsFence`、`GPUFence`、`GraphicsFenceType`、`SynchronisationStage`、`SynchronisationStageFlags` 的 Unity 2022 公开反射面，以及 CommandBuffer 的 Create/Wait 全部 fence overload。
+- fence 不再是即时成功标志：它绑定 CommandBuffer，只有通过 `Graphics.ExecuteCommandBuffer`、async queue 或 `ScriptableRenderContext.Submit` 提交后，才在下一 PlayerLoop frame retirement；等待 fence 会建立跨 command-buffer dependency。
+- 11 个 xUnit 用例验证 pending/submit/async/CPU sync/GPU fence/dependency/invalid/stage/context submit；与 Unity 2022.3.51f1 预备反射的类型、枚举值与方法签名一致。
+
+### 尚未完成
+- 目前 fence retirement 对齐 Anity managed command-buffer scheduler；尚未将 Metal shared-event、Vulkan timeline semaphore、D3D11 query/fence 直接接入 native backend，因此此模块保持 🟡。
+
+### 下一优先项
+1. 在三条 native backend 上将实际 queue completion 连接为 GraphicsFence retirement source。
+2. 用 Unity 2022.3.61f1 对照 CPU-sync property blocking 与 cross-queue timing。
+
+## 2026-07-18 — macOS Editor Host Unity CLI forwarding
+
+### 已完成
+- `Anity.app/Contents/MacOS/Anity.Editor.Host` 现将以 `-` 开头的 Unity 兼容参数转发给唯一的 `Anity.Cli.CliHost` 实现；因此 `-batchmode -quit`、`-nographics`、`-projectPath`、build/test/IL2CPP 等不再被 Host 误报为 unknown command，同时保留 `start`、`menu`、`window`、`sample` 等交互 Host 子命令。
+- CLI 16 项和 Editor Host 39 项 xUnit 已通过；最终 app-bundle ARM64 端到端启动将与本轮重装一起验证。
+
+### 下一优先项
+1. 在 app bundle 中补齐 Unity 2022.3.61f1 的真实 project open、executeMethod、build/test 生命周期 A/B。
+
+## 2026-07-18 — UnityEditor.AnimatedValues Inspector 动画值
+
+### 已完成
+- 实现 `BaseAnimValue<T>`、`BaseAnimValueNonAlloc<T>`、`AnimBool`、`AnimFloat`、`AnimVector3`、`AnimQuaternion`：严格采用 Unity `value/target/isAnimating`、`speed/valueChanged`、序列化回调、插值/停止语义，并通过 `EditorApplication.update` 真实驱动 Inspector 与 EditorWindow 的重绘动画。
+- `AnimBool.faded/Fade`、float/vector 线性插值和 quaternion 球面插值均已覆盖；10 个 xUnit 用例覆盖初始状态、target 生命周期、取消、回调、四种值类型和 non-alloc 基类。对 Unity 2022.3.51f1 的类型/成员反射预检无该模块差异。
+
+### 尚未完成
+- `AnimationMode`、`AnimationUtility`、`UnityEditor.Animations` graph authoring 与目标 Unity 2022.3.61f1 行为 A/B 仍待实现，不能将编辑器动画系统标为完整。
+
+## 2026-07-18 — UnityEditor.AnimationMode 编辑器预览事务
+
+### 已完成
+- 补齐 `EditorCurveBinding`、`PropertyModification`、`AnimationModeDriver` 与 `AnimationMode` 的 Unity 2022 表面及绑定特性；curve binding 的 float/PPtr/discrete/serialize-reference 类型、等值比较和 property modification 都可实际使用。
+- Animation Mode 支持 default/driver 会话、balanced sampling、AnimationClip 与 PlayableGraph 采样、动画属性登记及属性修改。预览中会捕获 Transform 树和公共对象字段，StopAnimationMode 后恢复原状态，避免 Animation Window/Inspector 预览污染场景。
+- 11 个 xUnit 用例覆盖绑定类型、会话、采样范围、Clip/PlayableGraph、修改应用及恢复；Unity 2022.3.51f1 预检无该四类型差异。
+
+### 尚未完成
+- Animation Window 轨道编辑、Animator Controller graph authoring 及 Unity 2022.3.61f1 的逐帧 A/B 仍待实现；`AnimationUtility` 的公开反射面已在本机 2022.3.51f1 完成预备对照，不得以此替代目标版本验收。
+
+## 2026-07-18 — UnityEditor.AnimationUtility 曲线与剪辑编辑
+
+### 已完成
+- 实现 AnimationUtility 的曲线/绑定、clip settings、animation event、object-reference curve、tangent metadata、transform path、Animation 组件 clips、motion curves 和 AnimationMode 入口；曲线操作直接驱动现有 AnimationClip 数据，不是签名占位。
+- 新增 AnimationClipCurveData、AnimationClipSettings、ObjectReferenceKeyframe 与切线/修改回调嵌套类型；10 个 xUnit 用例覆盖读写、事件、对象引用、切线、层级绑定与设置。
+- 对 Unity 2022.3.51f1 的预备反射对照已无 `AnimationUtility`/clip-settings/keyframe 类型差异：弃用消息、`NativeThrows`、`ThreadSafe`、`NotNull`、`Unmarshalled` 及默认值均逐项一致；该结果只证明可用的非目标本机版本，不能替代 Unity 2022.3.61f1 Pro 验收。
+
+### 尚未完成
+- Animation Window 轨道编辑和 Unity 2022.3.61f1 逐帧 A/B 仍待实现；本项保持 🟡。
+
+## 2026-07-18 — Animator Window 真实 Controller 图绑定
+
+### 已完成
+- `AnimatorWindow` 不再展示硬编码的 Idle/Walk/Run 示例图；现在绑定选中 `Animator` 的实际 controller，按 active layer 从真实 `AnimatorStateMachine.states` 重建 Entry/Any State/Exit/state 节点，并保留状态位置与默认状态标识。
+- 窗口的状态、参数、层操作均写入同一 controller 图模型：支持新增状态、切换 active layer、新增唯一参数、新增 layer；未含 Animator 的选中对象会清除窗口绑定，避免继续编辑旧资产。
+- 新增 10 个 xUnit 回归，覆盖绑定、状态位置/default-state、空名称、layer 激活/非法 index、唯一参数、GameObject Animator 同步和选择清空。
+
+### 尚未完成
+- 此项复用现有可执行图模型，但正式 `UnityEditor.Animations.AnimatorController`、`AnimatorStateMachine`、transition 等官方命名空间/API 面尚未迁移，且缺完整拖拽、transition 条件编辑、序列化/importer 与 Unity 2022.3.61f1 A/B；不得将此项标记完成。
+
+## 2026-07-18 — UnityEditor.Animations Controller 图与 GameObjectRecorder
+
+### 已完成
+- 正式实现 `UnityEditor.Animations` 的 `AnimatorController`、layer/state/state-machine/transition/condition/child-node、`BlendTree`、`GameObjectRecorder` 与 `CurveFilterOptions`；Controller 图支持层/参数唯一命名、状态与子状态机、任意/入口/嵌套转场、条件、有效 motion/behaviour 覆盖、BlendTree clip 递归收集和 `Animator.runtimeAnimatorController` 绑定。
+- Animator Window 已改绑正式 `UnityEditor.Animations.AnimatorController`，编辑和展示同一份 layer/state/parameter 数据，不再依赖错误的运行时命名空间图模型。
+- `GameObjectRecorder` 实现 binding、递归 Transform/Component 收集、快照、曲线写回、线性 key reduction、reset 和参数校验；34 个 xUnit 定向用例（Controller 图 12、Window 10、Recorder 12）通过。
+- 本机 Unity 2022.3.51f1 的预备反射对照中，全部 `UnityEditor.Animations` 差异已清零；结果只作为可用非目标版本的结构预检，不能代替 Unity 2022.3.61f1 Pro A/B。
+
+### 尚未完成
+- Animator Window 的节点拖拽/选中/转场条件 Inspector、资产序列化/importer、Animation Window 轨道交互、动画运行时逐帧语义和 Unity 2022.3.61f1 Pro 官方 A/B 都仍未完成；整体 Unity API 覆盖也远未完成。
+
+## 2026-07-18 — Animator Window transition/condition 图编辑
+
+### 已完成
+- Animator Window 现从正式 `UnityEditor.Animations` state-machine 重建 source、Any State、Entry 和 Exit transition 边；边携带真实 transition 对象，窗口选择状态/transition 与模型一致。
+- 实现状态间/Any State/Entry/Exit transition 的创建和删除、参数校验后的条件增删、默认状态切换、状态节点移动、跨 layer 图隔离和刷新后的选择保持；节点/边是内部实现，不新增非 Unity 公共 API。
+- 新增 13 个 xUnit 用例，覆盖上述正常、无效状态、无参数、跨 layer、删除和选择持久化路径；与既有窗口用例合计 23 项通过。
+
+### 尚未完成
+- 仍缺实际 pointer 拖拽/框选/连线命中、transition condition Inspector 的完整 IMGUI/UIToolkit 控件、Undo/SerializedObject/资产 importer 持久化、nested state-machine 导航和 Unity 2022.3.61f1 Pro 图编辑 A/B。
+
+## 2026-07-18 — Animator Window 画布命中、拖拽与嵌套 State Machine 导航
+
+### 已完成
+- Animator 图画布现在按实际 `GUILayout` canvas rect 命中节点与 transition：单击选择 state/transition，拖动 state 会写回正式 `AnimatorStateMachine.states[].position`，空白点击清空选择，Delete 删除所选 transition；命中算法以边的画布锚点及线段距离为准，避免特殊 Entry/Any State/Exit 节点误吸附普通 state 的 transition。
+- graph 支持 child `AnimatorStateMachine` 节点、双击进入、返回父层/根层、在当前层新增 state/state machine；layer 切换会重置路径，避免编辑到上一层的图。state-machine→state-machine 与 state-machine→Exit transition 也会进入边模型并可删除。
+- 新增 12 个 xUnit 用例，覆盖 child-node、进入/返回/重置导航、nested add、pointer double-click/click/drag/blank/edge hit、Delete 和 state-machine transition 生命周期；窗口 transition suite 达 25 项，连同 Controller 图与窗口绑定为 47 项聚焦回归。
+
+### 尚未完成
+- 框选、多选、拖拽连线创建、右键上下文菜单、条件 Inspector 的完整编辑控件、Undo/SerializedObject/Controller importer 持久化、真实 IMGUI renderer 的 Bezier raster 与 Unity 2022.3.61f1 Pro 图编辑 A/B 仍待完成；不可因此认定 Animator Window 已完全对齐。
+
+## 2026-07-18 — UnityEditor.MonoScript 资产类型与脚本反查
+
+### 已完成
+- `MonoScript` 已从错误的 sealed `Object` 修正为 Unity 2022 相同的可继承 `TextAsset`，并补齐 `NativeType`、`ExcludeFromPreset`、`NativeClass` metadata、无参构造、`GetClass()`、`FromMonoBehaviour()` 和 `FromScriptableObject()`。
+- 行为层为同一托管脚本类型缓存稳定 MonoScript asset：可从组件或 ScriptableObject 反查准确 Type 和名称，null 输入安全返回空；新增 12 个 xUnit 用例覆盖 concrete type、稳定 identity、类型隔离、asset name、继承、构造和 null。
+- 本机 Unity 2022.3.51f1 预备反射中，`UnityEditor.MonoScript` 与 `UnityEditor.Animations.*` 均无差异，原先 4 个 MonoScript regression 已归零。
+
+### 尚未完成
+- `.cs` importer 到 source/assembly/class 的真实导入管线、partial/namespace/编译错误 script 的 Unity 语义、GUID/fileID 序列化及 Unity 2022.3.61f1 Pro A/B 仍未完成。
+
+## 2026-07-18 — UnityEditor.ActiveEditorTracker Inspector 编辑器生命周期
+
+### 已完成
+- 新增正式 `ActiveEditorTracker` 与 `DataMode`。Tracker 会跟随 `Selection` 重建 active Editor、支持锁定对象快照、可见性、dirty/rebuild 延迟、unsaved-change、Inspector/Data Mode 和 shared tracker；对 Inspector 多对象不可编辑状态会按 Editor 的 multi-edit 能力计算。
+- `InspectorWindow` 现由 tracker 驱动 selection rebuild 与 lock/unlock 生命周期：窗口启用创建 tracker、选择变化从 activeEditors 同步 target、解锁立刻恢复 live selection、关闭时释放订阅，避免旧 editor/selection 残留。
+- 精确区分 Unity 的公开与内部编辑器 API：锁定对象、重建事件、data mode、unsaved state 与全局 rebuild 保持 internal；公开面保留 active editors、dirty/lock/visibility/rebuild、factory、custom-editor 查询、equality/hash 与官方 metadata。
+- 13 个 xUnit 用例覆盖 selection rebuild/dirty、锁定/解锁、对象导入导出、可见性、unsaved state、延迟刷新、mode、rebuild event、shared tracker；本机 Unity 2022.3.51f1 的 `ActiveEditorTracker`、`DataMode` 与 `InspectorMode` 预备反射差异为 0。
+
+### 尚未完成
+- Unity 原生 inspector 的 per-component editor 发现、domain reload/native pointer 生命周期、Prefab override/Undo、Debug/Runtime data mode 与 Unity 2022.3.61f1 Pro A/B 仍待实现；本项不能替代完整 Inspector 对齐。
+
+## 2026-07-18 — UnityEditor.AssemblyReloadEvents 脚本重载生命周期
+
+### 已完成
+- 实现正式 `AssemblyReloadEvents` 与嵌套 `AssemblyReloadCallback`：`beforeAssemblyReload`、`afterAssemblyReload` 保持 Unity 公开 delegate event；native 触发入口保持 internal，避免额外公开 API。
+- `InternalEditorUtility.ReloadAssemblies` 现按 before → `scriptReloaded` → after 的顺序运行，并以 finally 保证脚本回调异常后依然结束 reloading 状态且发送 after；`RequestScriptReload` 和 `EditorUtility.RequestScriptReload` 都走同一生命周期。
+- 10 个 xUnit 用例覆盖事件触发/顺序、recompiling 时段、异常 finally、两个 request 入口、订阅解除与多订阅顺序；本机 Unity 2022.3.51f1 预备反射无该模块差异。
+
+### 尚未完成
+- 真正的 managed domain unload/reload、静态字段重建、程序集编译队列、脚本序列化恢复与 Unity 2022.3.61f1 Pro A/B 仍需 native/editor-host 支持。
+
+## 2026-07-18 — Anity 品牌图标、macOS ARM64 安装与 Metal XR 门禁修复
+
+### 已完成
+- Anity 应用标记现重新设计为三块蓝/青/石墨几何构件、中心珊瑚色 core 的简洁 A 轮廓，避免与 Unity 图标混淆；`assets/macos/AnityIcon-1024.png` 已规范为 1024px alpha PNG，并由全尺寸 iconset 重建 `AnityIcon.icns`。
+- 新增 `assets/macos/Info.plist` 和 `_scripts/install-macos-arm64.sh`。该安装入口强制要求 Darwin/原生 `arm64`，发布 self-contained `osx-arm64` Editor Host、随 bundle 部署 `libanity_native.dylib`、进行 ad-hoc codesign，并安装至 `/Applications/Anity.app`（可用 `ANITY_MACOS_INSTALL_DIR` 覆盖）。
+- 安装门禁实际验证 host 架构、native dylib 架构、plist bundle identifier/icon、签名、Editor `--help` 与 `menu list`；本机 Apple Silicon 已通过，应用路径为 `/Applications/Anity.app`。
+- 最新 Release 已在本机原生 ARM64 重新发布并原子替换 `/Applications/Anity.app`：bundle 内 `Anity.Editor.Host` 与 `libanity_native.dylib` 均为 arm64，ad-hoc `codesign --verify --deep --strict`、图标资源与 `assets/macos/AnityIcon.icns` byte-for-byte 一致、以及 `-batchmode -quit -nographics` 均通过。
+- 安装 staging 复制现采用 APFS clone-copy（`cp -c` / `cp -cR`），保持原子签名/切换事务的同时避免为 self-contained runtime 额外占用完整副本；在本机仅约 178 MiB 可用空间的压力下，重新发布、签名、安装和 `-batchmode -quit -nographics` 已通过。
+- 修复 Metal XR single-pass-instanced 管线：vertex shader 写 `render_target_array_index` 时，pipeline 现声明 `inputPrimitiveTopology = MTLPrimitiveTopologyClassTriangle`；此前 Metal 会拒绝创建此 pipeline。双眼 `Tex2DArray` 的 1x/2x MSAA 共 10 组 native 像素门禁已恢复通过。
+- Unity API parity 与官方 VFX spawner probe 的默认目标现固定为 **Unity 2022.3.61f1**，且 API parity 会拒绝把其他编辑器目录伪作最终证据；本机仅有 2022.3.51f1/Unity 6，所以此 gate 目前以明确的“缺少目标 Editor”失败，未再错误采用 2022.3.51f1。
+
+### 测试与门禁
+- `bash _scripts/build-all.sh Release`：通过，所有 native 与 managed 工程 0 error。
+- `bash _scripts/run-tests.sh Release`：**3,234/3,234** 通过，0 failure、0 skipped；其中 Core native-required **2,361/2,361**，含 XR single-pass 双眼像素 **10/10**。
+- 修复后重新执行 `_scripts/install-macos-arm64.sh Release`：通过，`/Applications/Anity.app` 是签名的 native ARM64 self-contained app bundle。
+
+### 尚未完成
+- `.app` 当前封装的是可启动的 Editor Host；完整 Unity 风格桌面编辑器 UI、正式 Developer ID/notarization、Windows/Linux/Android/iOS Player、Unity 2022.3.61f1 官方 A/B 均仍待完成，不能将本项视为 Unity 2022 Pro 全面对齐。
+
+### 下一优先项
+1. 将官方 Unity 2022.3.61f1 安装/fixture 引入 API 审计与 URP XR 图像 A/B 门禁。
+2. 将 Metal 双眼 ABI 移植到 Android Vulkan 和 Windows D3D11，并在实体设备执行像素验证。
+3. 继续闭合 Editor 的 Scene/Game/Inspector/Prefab/Quick Search 真实 UI 与交互路径。
+
+## 2026-07-18 — Metal URP XR Single-Pass Instanced 双眼阵列路径
+
+### 已完成
+- 扩展 `AnityGraphicsCameraPassDesc` 为 `depthSlice + depthSliceCount` 合约；Metal 对双眼 `Tex2DArray` pass 配置 `renderTargetArrayLength=2`，原生验证连续 layer 范围，颜色、深度、normal 与 motion attachment 以同一 array pass 清除/保存。
+- `AnityGraphicsCameraMeshDrawDesc` 现携带左右眼三组 object-to-clip / motion / previous matrices。Metal vertex 以 `instance_id` 选择 eye matrix，并通过 `render_target_array_index` 把同一次 indexed draw 写入对应 layer；不是托管端连续提交两次 draw。
+- URP 仅在 **Metal + 双眼启用 + `Tex2DArray`/至少两层目标** 上选择 single-pass instanced；一次 camera render 使用 left/right raster、non-jittered motion 与独立 per-eye history。其他 backend、单眼或非数组目标严格保留已验证的 left/right multipass 路径。
+- single-pass culling 现在分别用左右眼 frustum 执行并按 stable renderer instance-id 取并集；因此仅右眼可见的 renderer 不会因左眼剔除而漏掉，同时仍只执行一次 instanced draw。
+- Opaque、Depth、Normals、Motion 四个 `AfterRenderingOpaques` transient 在 single-pass 模式也分配双层 `Tex2DArray`，逐眼 GPU copy，避免后处理 global texture 丢失右眼。
+- Metal 最终 HDR grade 对 `Tex2DArray` 不再把 array 直接交给 `texture2d` compute kernel：逐 layer 建立 2D texture view，并在同一 command queue 中依次处理每只眼。新增 slice-aware HDR tone-mapped readback ABI，10 组双色/不同强度 native-required 像素用例确认左右 layer 都实际完成色调映射，而非仅处理 layer 0。
+- 新增 `UnityEngine.XR.XRDisplaySubsystem` / `XRSettings` provider frame-layout：启动的 provider 会实际配置/复用 `Tex2DArray + volumeDepth=2 + VRTextureUsage.TwoEyes` 目标，绑定 camera，发布含 left/right projection/view 与 array slice 0/1 的单一 `XRRenderPass`；该 target 被既有 URP Metal single-pass-instanced 路径直接消费，而非建立托管双眼旁路。
+- XR provider 现有受边界约束的 dynamic-resolution multiplier（默认 0.5–1.5）：与 viewport scale 相乘后才计算有效尺寸；下一帧仅在有效尺寸/格式/MSAA 改变时重建双眼 target，并同步刷新 `XRRenderPass` descriptor 与 viewport。10 组 0.5–1.5 scale 重建门禁覆盖 array/TwoEyes/slice 合约与非法值拒绝。
+- `XRDisplaySubsystem.AttachOverlayCamera` 现把 overlay 绑定到 provider 当前双眼 target，设置 `StereoTargetEyeMask.Both`，标记为 URP Overlay 并去重注册到 base stack；URP stack 已以 base target 执行 overlay，因此两个 array layer 保持同一 native frame 且 overlay 不清 color。10 组 MSAA/dynamic-scale 组合验证该契约。
+- provider-owned 双眼 target 现向 URP 暴露每帧调度语义：`singlePassRenderingDisabled` 在 Metal 上会强制逐眼 multipass，恢复后重新启用 native single-pass instanced；普通 `Tex2DArray` 目标保持既有形状推断，不会被 provider 配置误伤。
+- multipass stereo 的 final stack 处理现严格延后至右眼：左眼不入队 post-process，右眼完成后只调用一次既有 native array HDR grade（逐 layer），避免每只眼重复处理整个双眼 target。
+- `RenderTextureDescriptor.useDynamicScale` 与 `RenderTexture.useDynamicScale` 已进入兼容层；XR provider target 显式启用该状态。URP 现优先传递外部 target 的真实 descriptor，使单通道和强制 multipass 的 renderer feature 都能看到 `Tex2DArray`、双层、TwoEyes、MSAA 和动态尺度，而不是虚构的单层默认 descriptor。
+- XR display provider 现补齐 Unity XR 的 out-parameter render-pass API：`GetRenderPass(int, out XRRenderPass)` 返回 `RenderTargetIdentifier`，`XRRenderPass.GetRenderParameter(Camera, int, out ...)` 保留 camera/pass 校验；`GetCullingParameters(Camera, int, out ScriptableCullingParameters)` 输出左眼矩阵、world origin 与 stereo-culling 状态。URP `RenderCamera` 已优先消费 provider-owned target 的该 culling contract，再在 native single-pass 时合并右眼 frustum，不是脱离渲染的 facade。
+- Vulkan camera target 现将 `Tex2DArray` 分配为两层 image，并为每个 layer 建立独立 color/MSAA/depth/normal view 与 framebuffer；normal 同样拥有 MSAA resolve attachment。通用层已解锁 Vulkan array target；10 组 native-required 双色像素门禁确认右眼不会坍缩至 layer 0。native indexed mesh pipeline 真实执行 MVP、vertex color、基础 `_BaseMap`/ST、alpha clip、五类 Unity blend、ZWrite、color/depth/normal MRT 与 MSAA resolve。`AnityGraphics_CopyCameraRenderTargetColorSlice`、Depth-to-Color compute slice 与 Normals-to-Color slice 均在 Vulkan 选择 source/destination array view 和 subresource barrier；10 组世界法线方向像素门禁确认 normal attachment 经 URP transient copy 后的 RGB 值正确。当前支持 resolved color/depth/normal copy；normal map、motion transient、single-pass instanced 仍未完成。
+- 新增 `_scripts/build-vulkan.sh`：使用隔离 `build-vulkan/` 显式启用 Vulkan，部署 matching versioned dylib 到 Core 测试输出，并以 `ANITY_REQUIRE_VULKAN=1` 强制运行 Vulkan Camera 门禁；它与默认 Metal 构建刻意分离，防止平台 runtime 依赖混入产品 dylib。
+
+### 测试与门禁
+- 10 组 1x/2x native pixel cases 证明单一 camera pass (`depthSliceCount=2`) 加单次 instanced mesh draw 分别在左右 layer 的不同像素写入，交叉像素保持 clear；另 10 组 URP scheduling cases 证明 Metal target 只生成一条 left-eye camera record 且 native pass 明确记录两层。
+- `bash _scripts/build-native.sh Release`、Core 编译、single-pass/multipass XR 定向 **50/50** 通过；新增 10 组 right-eye-only frustum fixture；HDR 双眼 array post-process native-required **10/10** 通过。
+- `XRDisplaySubsystemTests` 的 10 组尺寸/scale/MSAA frame-layout、10 组 dynamic-resolution 重建、10 组 overlay stack binding，以及 lifecycle/invalid-argument 门禁共 **32/32** 通过；另有 10 组 native Metal provider 调度切换门禁，验证单 pass → 显式 multipass → 单 pass 的 `depthSliceCount`、左右 layer 顺序及每个完整双眼 frame 仅一次 final post-process。
+- `bash _scripts/build-vulkan.sh Release` 在显式 `ANITY_REQUIRE_VULKAN=1` 下成功编译 MoltenVK backend，并运行 **70/70** Vulkan camera native-required 门禁；双眼 array slice、mesh/opaque/depth-copy、`_BaseMap`、`_BaseMap_ST`、blend/alpha-clip/ZWrite，以及 normal MRT/transient copy 各为 **10/10**。`git diff --check` 通过。
+
+### 尚未完成
+- XR provider 的 frame-layout、dynamic-resolution target policy 与 base/overlay binding 已完成；Vulkan 已验证离屏 array clear/readback、vertex-color/`_BaseMap`/`_BaseMap_ST` mesh、alpha clip、五类 blend、resolved opaque slice copy 及 depth transient slice copy，但缺 normal-map、normal/motion transient、single-pass instanced 与 Android 实机，故不能视为 Vulkan XR 可用。multiview、D3D11 single-pass、正式 Unity 2022.3.61f1 Player render/image A/B 仍未完成。
+
+### 下一优先项
+1. 将 XR provider frame-layout 扩展到 post-process stereo sampling 与 multiview。
+2. 将 array-layer instanced ABI 移植到 Vulkan/D3D11，并以 Android Vulkan / Windows WARP 确认真实像素。
+3. 以 Unity 2022.3.61f1 URP XR sample 建立双眼 color/depth/normal/motion A/B fixtures。
+
+## 2026-07-18 — URP Color Curves LUT 与可配置 Bloom 金字塔
+
+### 已完成
+- `ColorCurves` 已由不具备曲线语义的 `Vector2` 占位参数升级为 `TextureCurve` / `TextureCurveParameter`；标准 master/red/green/blue 及 hue-vs-hue、hue-vs-sat、sat-vs-sat、lum-vs-sat Volume 字段均已存在，默认 identity 不会错误触发后处理。
+- 八条 `AnimationCurve` 均会烘焙成固定 **128-sample** LUT，随 `HDRColorGrade` 下发。native CPU 与 Metal 都执行 master → R/G/B → Hue-vs-Hue → Hue-vs-Sat → Sat-vs-Sat → Lum-vs-Sat，位于 Channel Mixer 之后、Contrast 之前；前三类 saturation modifier 的默认值为 1，而 Hue-vs-Hue 保持 identity ramp，避免未覆盖的 Volume 改变色相。
+- Metal final pass 将曲线从每帧 `setBytes` grade 拆为每 device 的 4 KiB `MTLBuffer`。只有 LUT 内容变更才复制到 GPU；未变的 Volume 会命中缓存。专用 native stats 返回样本数、容量、upload/hit，且测试验证第二个相同 grade 不触发 upload。
+- 托管端以 `ConditionalWeakTable<ColorCurves,...>` 保留已烘焙 LUT；缓存快照逐项比较 curve keys（含 tangent/weight/mode）、loop、zero-value 与 wrap mode，公开可变字段变更时精确重烘焙，未变时复用同一数组。
+- Metal HDR 后处理已从固定两级 Bloom 升级为单次 command-buffer 内创建的至多 **8** 层 `RGBA16Float` 私有 mip 金字塔；`maxIterations`、half/quarter `downscale`、`highQualityFiltering`、`scatter`、`intensity` 与 RGB `tint` 均由 `Bloom` Volume 传到 native ABI 并参与执行。每层先以阈值预过滤，再按低 mip 下采样，最终按 scatter 权重累加后与 HDR 原图合成；未使用的 texture slot 只作安全别名，不会参与取样。
+- `Bloom.dirtTexture`（当前支持原生 `Texture2D`）及 `dirtIntensity` 已接入既有 device-owned 纹理注册表；最终 Metal compute pass 绑定上传纹理及其 sampler，并将其 RGB 贡献添加到 Bloom。缺少、已释放或不受支持的纹理安全退化为普通 Bloom，不会把白色 fallback 当作 Dirt。
+- `AnityHDR_ProcessFrame` CPU reference 不再使用逐像素阈值加亮：现以同样的 unexposed HDR prefilter、half/quarter downsample、normal/high-quality box filter、至多 8 层 mip 与 scatter/tint 合成顺序执行。它与 Metal 的四组 1/2/6/8 mip、downscale/filter/scatter fixture 在四个空间采样点的 RGB 误差均不超过 **2/255**。
+- CPU Lens Dirt 现通过显式 `AnityHDR_ProcessFrameWithLensDirtRGBA8MipsBias` C-ABI 传递完整 `Texture2D` RGBA8 mip chain、尺寸、mip count、FilterMode、U/V wrap、linear、`mipMapBias` 和精确字节数；native 会拒绝截断或尺寸不一致的输入。Bilinear 使用全屏 UV 导数加 mip bias 选取 mip，Trilinear 混合相邻 mip；`HDRUtilities` 会保留实际 `Texture2D` 的完整 mip chain 和 mipMapBias，不再截断为 base mip。CPU 仍按与 Metal 相同的 `bloom += bloom * dirt.rgb * dirtIntensity` 顺序在 tonemap 前合成。
+- GPU texture registry 的 `AnityGraphicsTextureDesc` 现明确承载 `mipMapBias` 与 QualitySettings 解析后的 `anisoLevel`（1–16）。缓存状态将二者纳入 hash，修改后会重新上传；D3D11 sampler 使用 `MipLODBias` / anisotropic filter，Vulkan 会在 physical-device feature 可用时启用 sampler anisotropy 并下发 `mipLodBias`，Metal sampler 使用 `maxAnisotropy`，其 UI fragment 为 main/alpha texture 显式传递 `sample(..., bias(...))`。旧 ABI 调用留下的 aniso=0 会安全规范为 Unity 默认 1；NaN/Infinity mip bias 及非法各向异性会被原生层拒绝。
+- Point filter 是各向异性例外：D3D11 早已选择 point filter，现将 Metal `maxAnisotropy` 与 Vulkan `anisotropyEnable` 同步固定为 1/false，避免把 `Texture.anisoLevel=16` 错误施加到 nearest sampling。Metal UI 在 `FilterMode.Point` + aniso 16 的真实 GPU texel 门禁保持精确 nearest 输出。
+- `TextureWrapMode.MirrorOnce` 不再在 Metal 后端退化为 Clamp：Metal sampler 现使用 `MTLSamplerAddressModeMirrorClampToEdge`，对负 UV 做一次镜像再夹边；Vulkan 在 `VK_KHR_sampler_mirror_clamp_to_edge` 可用时启用同等 address mode，并在扩展缺失时显式安全降级为 Clamp。Metal 真实 UI readback 以同一 `u=-0.75` 对照 Clamp/red 与 MirrorOnce/green，验证 sampler 行为而非只检查描述符。
+- Metal HDR Lens Dirt compute pass 现在也从已上传的 texture entry 读取 `mipMapBias`，作为独立后处理参数使用 `dirtTexture.sample(dirtSampler, uv, bias(...))`；它不再依赖 sampler clamp 近似。native-required 像素测试以 red mip 0 与 green mip 1 对照，证明 `+1` bias 会实际切换到下一粗 mip。
+- `ScriptableRenderPassInput` 已补齐 Unity URP 的 `None/Depth/Normal/Color/Motion` flags、只读 `input` 与受保护的 `ConfigureInput`。`ScriptableRenderer` 在 feature 的 `AddRenderPasses`/`SetupRenderPasses` 之后聚合所有 pass 请求；`UniversalAdditionalCameraData` 和 `UniversalRendererData` 的 depth/opaque 默认值也进入同一个 `CameraData` 合约。custom renderer feature、camera override 与 renderer asset 不再各自丢失资源请求；`UrpRendererLifecycleTests` 新增 11 个用例，定向结果为 **22/22**。
+- `ScriptableRenderPassInput.Color` 现在会在 `AfterRenderingOpaques` 注入 `CameraOpaqueTexturePass`：它创建相同格式、单采样的临时 `RenderTexture`，经新的 `AnityGraphics_CopyCameraRenderTargetColor` C-ABI 从 resolved `Camera.targetTexture` 或 active `CameraTarget` 直接 GPU blit，并且只在成功时发布 `_CameraOpaqueTexture`；cleanup 解除全局绑定并释放 transient target，绝不以空纹理代替场景颜色。Metal 覆盖离屏/CameraTarget、RGBA8 通道、源/目标 MSAA resolve、尺寸/HDR mismatch、自拷贝、release 和 pass cleanup 的 **10** 项 native-required 像素/生命周期门禁；`NativeCameraPassTests` 现为 **210/210**。
+- `ScriptableRenderPassInput.Depth` 现在同样会在 `AfterRenderingOpaques` 注入 `CameraDepthTexturePass`。Metal camera depth attachment 已声明 shader-read；新的 `AnityGraphics_CopyCameraRenderTargetDepthToColor` 以 dedicated compute pipeline 将 `Depth32Float` 的每个 depth 值写入 transient color target 的 R 通道，分别覆盖 single-sample sampler 和 MSAA sample 0 read，并发布 `_CameraDepthTexture`。clear depth 0.25/0.5/0.75 的 native readback、CameraTarget、源/目标 MSAA、尺寸/self/released/unregistered 拒绝及 pass cleanup 共 **10** 项门禁通过，`NativeCameraPassTests` 现为 **220/220**。
+- D3D11 的 `AnityGraphics_CopyCameraRenderTargetColor` 已有真实 GPU `ID3D11DeviceContext::CopyResource` 实现：只接受已 resolve 的离屏 Camera RenderTexture、相同尺寸/格式且单采样资源，任何 CameraTarget、未知目标、格式或尺寸不匹配均明确失败，不会偷拷贝 backbuffer。此路径仅在 macOS 交叉的 stub 编译通过，仍需 Windows WARP/硬件像素门禁后才能作为已验证后端能力。
+- Vulkan 已补齐与 Metal/D3D 独立的 `CameraRenderTarget` registry：每个离屏目标拥有 LDR `RGBA8` 或 HDR `RGBA16Float` resolved color、可选 2/4/8x MSAA color attachment、depth attachment、render pass/framebuffer、布局生命周期与安全销毁；backend-neutral `Ensure/Destroy/Record/Readback` ABI 已分发到该实现。相机 pass 执行真实 attachment clear、depth clear 与 MSAA resolve，`AnityGraphics_CopyCameraRenderTargetColor` 以 `vkCmdCopyImage` 在相同尺寸/格式的 resolved 离屏目标之间复制并恢复 attachment layout。swapchain `CameraTarget` 仍显式返回 NotSupported，绝不读取陈旧的 presentation image。macOS 已安装 Vulkan headers/loader/MoltenVK，并用 `ANITY_ENABLE_VULKAN=ON` 的独立 CMake build 成功编译整个真实 Vulkan backend；Android 设备像素门禁尚未运行。
+- Vulkan 的 `AnityGraphics_CopyCameraRenderTargetDepthToColor` 已新增 true GPU compute path：single-sample shader 以 `sampler2D` 读取 depth，MSAA shader 以 `sampler2DMS` 读取 sample 0，均写入 RGBA8 transient 的 R 通道；descriptor/pipeline、depth-read/storage-image layout barrier、descriptor 生命周期和恢复 attachment layout 均在 native。`CameraDepthTexturePass` 现在强制使用单采样 RGBA8 writable transient，避免 HDR target 不能作为 portable storage image。MoltenVK 的 portability-enumeration/subset 已显式启用，10 项 native-required 门禁实跑通过，覆盖 depth 1/0.75/0.5/0.25、2x/4x MSAA、opaque `vkCmdCopyImage`、无效 source/self/HDR/dimension 拒绝和 pass global bind/cleanup；Android 实机仍待验证。
+- D3D11 的同一 depth-to-color ABI 已实现 native compute 版本：camera depth 资源改用 `R24G8_TYPELESS`，并分别创建 D24S8 DSV 与 R24 depth SRV；单采样与 MSAA shader 用 `Load` / `Load(..., 0)` 写入 RGBA8 UAV 的 R 通道，严格拒绝 HDR destination、尺寸不一致和 CameraTarget。该 Windows-only 分支在 macOS 默认 stub 与 Vulkan C++ 构建均不受影响，但尚无 Windows SDK/WARP 或硬件像素验证，因此不能视作已验证后端能力。
+- `ScriptableRenderContext.Cull` 不再总是返回空 scene：现以稳定 instance-id 快照收集 active renderer，执行 enabled/isVisible、camera cullingMask、world-transformed eight-corner mesh bounds frustum、per-layer cull distance 和 object motion-vector 需求判定；`DrawRenderers` 以这个 snapshot 记录每个有效 mesh/material/submesh 的真实绘制命令及 transform/bounds/filter 状态，且会将 Unity `Material.renderQueue=-1` 正确解释为 shader 的默认 queue。URP camera 不再用仅设置 `camera` 字段的零初始化参数，而是保留 camera-derived culling matrix/mask/origin。除命令记录外，Metal path 已提交 opaque mesh 到 native raster；仍缺 shader/material、透明排序、skinning、阴影和非 Metal backend，不能把 managed snapshot 视为完整渲染。
+- `AnityGraphics_DrawCameraMesh` C-ABI 与 C# pinned bridge 现明确区分离屏 `Camera.targetTexture` 与 presentation `CameraTarget`。Metal swapchain 也拥有 color/depth/`RGBA8Snorm` normal/`RG16Float` motion resolved attachment（MSAA 时各自 resolve），默认 CameraTarget 与离屏 target 都可在原生层 upload 40-byte packed indexed vertex/index buffers、执行 depth test/write 和 indexed triangle raster；C# ABI edge 会转置 Unity `Matrix4x4` 以匹配 Metal column-major constant。`DrawRenderers` 现在无论是否设置 `Camera.targetTexture` 都提交 mesh/material/submesh，且显式传递 target lifetime 语义。
+- Metal normal MRT 写 signed world-space normal；managed bridge 对 renderer `localToWorld` 使用 inverse-transpose 后才上传，`CameraNormalsTexturePass` 以 `R8G8B8A8_SNorm` 发布 `_CameraNormalsTexture`。`AnityGraphics_CopyCameraRenderTargetNormalsToColor` 现同时支持离屏源与 CameraTarget source 的 GPU blit。新增 10 个 native-required CameraTarget 网格/normal/motion 像素门禁与既有 13 项离屏 mesh/normal/URP lifecycle 门禁均实跑通过。材质 `_BumpMap` 现按 Linear 数据读取，10 项 native-required 像素门禁验证 TBN 的 X/Y/Z 方向、正反 tangent handedness 与 Z 反向；另 10 项覆盖 non-uniform 及镜像 scale 下 inverse-transpose normal、object-to-world tangent、正交化和 handedness 翻转；再 10 项验证 CameraTarget 的 1×/2×/4× MSAA resolve。仍缺完整 DepthNormals shader pass、Vulkan/D3D11 与 Unity 2022.3.61f1 A/B，因此不得称为完整 URP DepthNormals。
+- Metal motion MRT 使用 `RG16Float`（MSAA resolve）。C# 侧按 camera instance 保存上一帧 VP、按 renderer instance 保存上一帧 local-to-world，且对启用 `skinnedMotionVectors` 的 `SkinnedMeshRenderer` 保留上一帧 renderer-local C++ skinning 输出；first frame 稳定回退到当前矩阵，后续 GPU vertex stage 以 `(currentNdc - previousNdc) * 0.5` 写每像素 velocity。`MotionVectorGenerationMode.Object` 使用 camera+object history，`Camera` 仅用 camera history，`ForceNoMotion` 强制 current=current previous；同一 renderer 的历史在所有材质 pass 提交后才更新，避免多材质首 pass 覆盖。CameraTarget 与离屏源都能发布 `RGHalf`/`R16G16_SFloat` `_MotionVectorTexture`。新增 10 组 native-required 前帧顶点位移像素回读，连同对象矩阵 motion 与四权重 skinning 定向套件 **24/24** 通过。仍缺 transparent motion、blendshape/8-weight/GPU deformation、jitter/XR、history eviction、Vulkan/D3D11 与官方 2022.3.61f1 A/B，不能标完整 Motion Vectors。
+- `AnityGraphicsCameraMeshDrawDesc` 现携带显式 blend、ZWrite 与 alpha-clip contract。`DrawRenderers` 从 Unity 材质 queue / `_SrcBlend` / `_DstBlend` / `_ZWrite` / `_Cutoff` 解析 opaque、alpha、premultiplied、additive、multiply 与 cutout；Metal pipeline 把该状态真正写入 color attachment、depth stencil 与 fragment discard，而非把透明对象当作 opaque。`CommonTransparent` 也依相机位置进行 back-to-front 排序并稳定以 instance-id 打破并列。新增 10 个 native-required 门禁以真实像素验证五种 blend、`alpha < cutoff` discard、`alpha == cutoff` 保留与非法 blend/NaN cutoff 拒绝。当前仍仅支持 vertex color，缺 `_BaseMap`、Shader Graph fragment、blend op/color mask、transparent normal/motion semantics 与 Unity Player A/B。
+- Mesh vertex ABI 现由 position/normal/color 扩展为 position/normal/UV/color；`DrawRenderers` 会上传 `Mesh.uv`，并将 material `_BaseMap`（回退 `mainTexture`）通过既有 native texture registry 同步。Metal mesh fragment 实际按 texture 的 sampler/mip bias 采样后再做 color、blend 与 alpha-clip；无 `_BaseMap` 时原生入口显式确保 Unity-white fallback，不能依赖此前 UI/texture submission 的副作用。10 项 native-required 像素门禁已验证 1×1 RGB 调制、2×1 Point+Repeat UV 采样和纹理 alpha 对 cutoff 的影响。Metal 已具备 ST transform；Vulkan 现具备基础 `_BaseMap`/ST 采样，仍缺 normal map、Shader Graph fragment、完整材质 variants 与 D3D11 像素后端，不能标为材质路径完成。
+- `_BaseMap_ST` 等价的 scale/offset 已由 `Material.GetTextureScale/GetTextureOffset` 进入 mesh C ABI，Metal fragment 在采样前执行 `uv * scale + offset`。10 项 native-required 像素门禁覆盖 0.5×/1×/2×/3× scale、0/.5/.99/1/1.2 offset、Point 2×1 texel selection 与 Repeat 回绕；另有 10 项验证 mesh fragment 实际复用 texture registry 的 Clamp、Repeat、Mirror、MirrorOnce address modes，以及 10 项 Bilinear/Trilinear 的 2×1 texel-center/edge interpolation。C++/C# 构建均通过。normal map、Shader Graph fragment 和非 Metal backend 仍待实现或验证。
+- Mesh submission 现始终将 vertex color 与材质 tint 相乘；优先使用显式 URP `_BaseColor`，但默认白色 BaseColor 会回退 legacy `Material.color/_Color`，避免默认值吞掉显式 legacy tint。C# 编译通过；完整 Lit color-property/Shader Graph A/B 仍待覆盖。
+- Metal native mesh ABI 现传递 world-space tangent/handedness 与 `_BumpMap` registry ID。fragment 对 normal map 以 Linear 数据解码 `2*rgb-1`，用 `TBN` 转换为 world-space normal 并写入已有 `RGBA8Snorm` normal attachment；无 normal map 时保持 vertex normal。10 项 native-required 离屏像素门禁覆盖 TBN X/Y/Z、正反 tangent handedness 与 Z 反向，另 10 项确认 non-uniform / mirrored transform 的 Unity 风格 normal、tangent、odd-negative-scale 语义，再 10 项验证 CameraTarget 1×/2×/4× MSAA resolve。native 与 C# 构建通过；仍待 Shader Graph normal slot、skinned motion/blendshape/GPU skinning 与非 Metal backend，不能标为完整 URP Lit normal-map。
+- `AnityGraphics_SkinMeshVertices` 已在 `anity-native` 执行 position/normal/tangent 混合：除兼容旧 `BoneWeight` 四通道外，`Mesh.GetBonesPerVertex/GetAllBoneWeights/SetBoneWeights(NativeArray<byte>, NativeArray<BoneWeight1>)` 已构成 Unity 2022 variable-influence stream，C++ ABI 直接消费最多 **8** 个 influence。`SkinnedMeshRenderer.skinWeight` 的 Bone1/2/4 与 Auto→`QualitySettings.skinWeights`（Unlimited=8）实际限制 kernel 参与的权重并重新归一；20 项 native-required 验证覆盖 1/2/4/8 influence 与 output 数值。`Mesh` 已具备 `blendShapeCount`、frame name/count/weight/vertices 查询、`AddBlendShapeFrame` 与 `ClearBlendShapes`，`SkinnedMeshRenderer` 具备严格索引/有限值检查的 `Get/SetBlendShapeWeight`。多 frame 形态键在 managed compatibility layer 按 Unity weight timeline 插值或外推，position/normal/tangent delta 的多 shape 合成实际由新的 `AnityGraphics_ApplyBlendShapeDeltas` C++ ABI 完成，再进入 native skin kernel；21 项定向门禁覆盖两帧插值、负/超范围权重、多 shape 叠加、BakeMesh、复制和非法契约。`DrawRenderers` 在 `SkinnedMeshRenderer` 上调用该链，`BakeMesh` 不再清空目标而会复制形变后 geometry、UV/color/submesh topology（并应用 `useScale`，零轴 scale 不会产生 NaN/Infinity）。previous-position mesh ABI 与 renderer-local skin history 已让相同物体矩阵下的骨骼与 shape deformation 产生真实 motion vector。`sharedMesh` 会初始化 skinned local bounds，显式 `localBounds` 会在 SRP 中优先经八角变换后参与 frustum culling；当 native skin stream 可用时，Cull 实际从当前 bone/shape deformation 重建 renderer-local AABB，再经八角 world transform 参与剔除，10 组动态位移的 near/frustum-edge/outside 门禁通过。仍缺 GPU compute/vertex skinning 和 Unity 2022.3.61f1 A/B，不能称完整 Unity skinning。
+- `NativeCameraPassTests` 现为 **200/200**：曲线的 134 项之外，新增 66 个 Bloom/Lens Dirt 像素发现项，覆盖 1/2/4/6/8 mip、half/quarter、normal/high-quality filtering、三种 RGB tint、scatter 对低 mip 贡献、Lens Dirt 的零强度/RGB/white/0.125–2.0 通道调制、CPU ABI 截断和越过 1×1 尾级的拒绝、Point/Bilinear、Repeat/Clamp/Mirror/MirrorOnce、sRGB 解码、Trilinear 相邻 mip 混合、CPU/Metal 的 `mipMapBias`、完整 mip chain 的 `Texture2D` helper 和四组 CPU↔Metal 数值门禁。加 URP stack/lifecycle 为 **224**。
+- `bash _scripts/build-native.sh Release`、`bash _scripts/build-all.sh Release` 已通过；强制 native 的 **200/200** 定向像素测试已通过。本次 texture sampling registry **26/26**、跨 backend UI 纹理定向 **61/61**，Metal 真实像素门禁 **14/14**，包含 UI 与 HDR Lens Dirt 的 `mipMapBias=+1` 切换至下一粗 mip。
+- Motion-vector mesh ABI 现独立携带 raster `objectToClip` 与 velocity `motionObjectToClip`：URP 以 `Camera.projectionMatrix` 继续 raster，同时以新增 `Camera.nonJitteredProjectionMatrix` 保存 current/previous motion history；Metal vertex stage 因此用 non-jittered NDC 计算 velocity，不将 TAA jitter 伪写为物体速度。`ResetProjectionMatrix` 会同步解除 non-jittered override；camera、renderer 与 skinned history 均限制为 **4096** 项，超限同步裁剪。`Camera.useJitteredProjectionMatrixForTransparentRendering` 默认保持 transparent 的 jittered raster，关闭时 `ScriptableRenderContext` 选择 non-jittered VP；`CopyFrom` 同步此设置。`AnityGraphicsCameraMeshDrawDesc.writeMotionVectors` 把 Unity 2022 URP 的 opaque-only 契约带到 Metal MRT：alpha-clip 仍写 velocity，transparent 的颜色混合仍执行但 attachment-2 write mask 关闭，不能覆盖已经写入的不透明 motion。10 个 raster-jitter native 像素、10 个 projection override/reset、10 个 transparent-raster matrix、10 个 history-boundary 与 10 个 transparent-preserve-opaque-motion 门禁已进入 `ScriptableCullingTests`，定向套件 **234/234** 通过。
+- `Camera.StereoscopicEye` / `MonoOrStereoscopicEye`、`stereoSeparation`、`stereoConvergence`、`GetStereoProjectionMatrix`、`GetStereoNonJitteredProjectionMatrix`、`GetStereoViewMatrix`、per-eye `SetStereoProjectionMatrix` / `SetStereoViewMatrix` 及对应 reset 已具备可执行 fallback：默认双眼以 convergence 生成 opposite off-axis projection，并在 calculated 或 custom world-to-camera view 后应用 local-X eye offset；custom eye matrices 严格优先并可 reset，`CopyFrom` 同步全部 stereo 状态。10 个 eye separation、non-jittered、custom override/reset 的回归进入 `ScriptableCullingTests`，定向套件 **244/244** 通过；native array target 已在下一项接通，但尚不能声称完整 XR multipass/single-pass 输出完成。
+- 原生 Camera target ABI 现增加 `dimension`、`volumeDepth` 与 `depthSlice`；Metal 将 `Tex2DArray` 分配为 `MTLTextureType2DArray`（MSAA 为 `MTLTextureType2DMultisampleArray`），并把 color/depth/normal/motion attachment 和 resolve binding 到指定 layer。`ScriptableRenderContext` 将 `RenderTargetIdentifier.m_DepthSlice` 传入 native pass/draw；新增 slice readback ABI 只供内部像素门禁逐眼验证，原 layer-0 readback 保持兼容。color/depth/normal/motion 的 slice-copy ABI 都从当前 eye layer 复制到相同 destination layer，而非固定 layer 0；depth 使用 Metal `depth2d_array` / `depth2d_ms_array` compute kernel 采样/写入指定 slice。10 项 native-required 测试在 1×/2× MSAA 下分别写左/右 layer、逐层回读，并通过 opaque/depth/normal/motion 四个 URP pass 将 slice 1 复制到各自 XR transient 的 slice 1，验证实际 color、0.75 depth、right-normal、motion 像素，全部通过。Vulkan 现已验证 array target 的 per-layer clear/readback、vertex-color/`_BaseMap`/ST indexed mesh raster、alpha clip、opaque/alpha/premultiplied/additive/multiply、resolved opaque slice copy 和 depth-to-color compute slice；normal map、normal/motion transient 与 single-pass instanced 仍未实现；D3D11 仍明确 `NotSupported`。真正 XR runtime 的 multipass/single-pass instanced 调度、per-eye culling/history 和 Player A/B 仍未完成。
+- URP camera stack 现以 `Tex2DArray + VRTextureUsage.TwoEyes + Camera.stereoTargetEye` 激活 managed stereo multipass：base 和每个 overlay 按 left slice 0、right slice 1 完整渲染，`CameraData` 显式携带 `isStereoEnabled/stereoEye/xrDepthSlice`，每眼 culling matrix/origin 与 native raster/non-jittered VP 都采用 `GetStereo*` 矩阵。`CameraOpaqueTexturePass` 同时把 `xrDepthSlice` 传给 native resolved-color copy，因此每眼的 `_CameraOpaqueTexture` 不会读到左眼。`StereoTargetEyeMask` 与只读 `stereoEnabled` 已加入 Camera compatibility surface，`CopyFrom` 保留 mask。camera motion history key 现为 `(camera instance, eye slice)`，因此右眼提交不会覆盖左眼 previous VP；10 项 URP stack 与 10 项每眼 history 回归均通过。仍缺 XR SDK display/provider、single-pass instanced/multiview shader variants 及 Metal Player/XR hardware A/B；Vulkan 现有离屏 array clear/readback、opaque `_BaseMap`/ST mesh 与逐 slice opaque/depth copy，但尚未接入 XR single-pass/normal/motion；D3D11 array target 仍明确不支持。
+
+### 尚未完成
+- Motion-vector 的 XR native eye-slice/multipass/single-pass 输出、GPU deformation、Vulkan/D3D11 后端与 Unity 2022.3.61f1 官方 Player A/B 仍待完成。
+- CPU Lens Dirt 已具备完整 `Texture2D` mip chain、Point/Bilinear/Trilinear、Repeat/Clamp/Mirror/MirrorOnce、sRGB 与 mipMapBias 的可执行 ABI 路径；Metal Lens Dirt compute 已执行 mip bias，UI texture registry 已把 mip bias 与各向异性下发 Metal/Vulkan/D3D sampler，但 Unity 2022.3.61f1 Player A/B、Vulkan/D3D 实机像素门禁，以及 Lens Dirt compute sampler 的各向异性仍未完成。非 `Texture2D` Lens Dirt 也仍待 native texture registry 扩展。
+- Metal 已将 `requiresOpaqueTexture`、`requiresDepthTexture`、`requiresNormalsTexture` 与 `requiresMotionVectors` 变成同帧真实 GPU resource；normal/motion 采用 world-space normal 与 RG16 velocity，并覆盖离屏及 CameraTarget source。Vulkan 仍只具备离屏 color/depth attachment、MSAA resolve、opaque/depth transient copy，CameraTarget/normal/motion 与 Android 实机像素门禁仍缺；D3D11 normal/motion 也未实现，不能把跨后端的 `CameraData` flag 当作资源已生成。
+- D3D11 已开始消费 backend-neutral camera ABI：离屏 `Camera.targetTexture` 可在 Windows native path 创建/重建/释放，具有同尺寸/MSAA 的 D24S8 depth attachment，执行 color/depth clear/load、D3D11.1 `ClearView` 局部 viewport color clear、可选 MSAA resolve 与 LDR staging readback；LDR target 的 tone-mapped readback 复用同一 RGBA8 存储，HDR target 仍严格拒绝。无 D3D11.1 的局部 color clear、或任何局部 depth clear 均严格返回未支持，绝不扩大为全 attachment clear。`CameraTarget`、局部 depth clear、HDR post/Bloom 和 Windows WARP/硬件像素门禁仍未完成，且本机没有 Windows D3D 工具链，不能将源码路径视为验证完成。
+- 曲线 LUT 尚未提供 256+ 分辨率或 Unity 2022.3.61f1 Player 颜色/Bloom A/B fixture；本机仅有 2022.3.51f1 与 Unity 6，不能替代目标版本。
+
+### 下一优先项
+1. 在实体 Android Vulkan device 上验证 camera clear/MSAA/opaque/depth copy/readback；在 Windows WARP/硬件上验证 D3D11 depth-to-color compute 的 single/MSAA 像素结果。
+2. 扩展 Metal native mesh path 至 GPU compute/vertex skinning、jitter/XR 与 history eviction；随后将同一 attachment/copy contract 落地 Vulkan 与 D3D11。
+3. 以 Unity 2022.3.61f1 Player fixture 验证 UI 与 Lens Dirt 的 mipMapBias/各向异性；在 Windows/D3D11 与 Android/Vulkan 实机复测 sampler 和多 mip pixel fixture。
+
+## 2026-07-18 — URP camera pass native control-plane ABI
+
+### 已完成
+- 在 `anity-native` 建立 `AnityGraphicsCameraPassDesc/Info` 与 `AnityGraphics_RecordCameraPass`/`GetLastCameraPass` C-ABI。原生层验证 target 尺寸、viewport 有限性与范围、Unity MSAA 采样数，并以 device/frame/sequence 保存 target、viewport、clear、store、HDR、final-pass 合约。
+- `NativeGraphicsDevice.TryRecordCameraPass` 已完成 P/Invoke 对齐，`UniversalRenderPipeline` 每台 Base/Overlay Camera 在 `SetRenderTarget`/`SetViewport` 后把真实 stack pass 记录到当前 native device；native 不可用时保持托管路径，不会伪造成功。
+- Metal backend 现在对 swapchain `CameraTarget` 与 `Camera.targetTexture` 的独立原生目标注册表创建真实 `MTLRenderPassDescriptor`：Base color/depth clear → Overlay color load/depth clear/load → store，编码真实 `MTLViewport`。CameraTarget 和 RenderTexture 的 2x/4x（以及设备支持时的 8x）均采用 persistent multisample color/depth attachment + single-sample resolve texture，跨 Overlay 保留 MSAA attachment 并每 pass resolve；partial viewport clear 走专用 Metal clear draw pipeline（color/depth/color+depth 三种 write mask）而非扩大为 attachment clear。LDR resolve target 保持 raw RGBA8 readback；HDR RGBA16Float target 除显式 ACES→sRGB readback 外，现有真实 Metal compute final-pass：先做两级 Bloom prefilter/downsample（half 与 quarter resolution），再在 resolved attachment 合并 exposure、Bloom、temperature/tint 白平衡、Color Filter、Channel Mixer、contrast、Hue Shift、saturation、ACES/Neutral，且最终 Base/Overlay stack 的 `PostProcessPass` 会调用该路径。CPU `AnityHDR_ProcessFrame` 与 Metal 都固定采用 `white balance → color filter → channel mixer → contrast → hue shift → saturation → non-negative clamp → tonemap` 次序；`WhiteBalance` Volume 与 `ColorAdjustments` 的 temperature/tint 会合并并 clamp，ColorAdjustments 的 Hue Shift/Color Filter 和 `ChannelMixer` 3×3 输出矩阵都会下发到最终 native grade。CameraTarget、RenderTexture、MSAA resolve 与 Overlay load 均使用同一条 native execution chain。建立/尺寸或采样数重建/释放均管理原生资源与 command-buffer 生命周期；unsupported sample count 返回失败而不触发 Metal 断言。native-required 模式下已禁止 swapchain 创建错误退化为托管成功。target identity 不再通过数值 `2` 猜测，避免与 `BuiltinRenderTextureType.CameraTarget` 冲突。
+- `NativeCameraPassTests` 现有 **106/106** 个强制 native 用例：原 control-plane 断言外，新增 Metal RenderTexture 与 CameraTarget 的 clear/readback、Overlay load、partial viewport、跨目标隔离、resize recreate、Release、targetId=2 消歧，以及 2x/4x/设备能力 8x MSAA resolve、overlay/partial/跨帧/invalid sample/mismatch 边界；HDR 覆盖 raw readback 拒绝、显式 ACES/sRGB readback、black/primary/highlight、MSAA resolve/overlay、LDR 拒绝和 headless CameraTarget 2x/4x 像素门禁，并新增实际 compute post 的 ACES/Neutral、exposure、两级 Bloom intensity/threshold/空间扩散、saturation、warm/cool temperature、green/magenta tint、Color Filter RGB/负值 clamp、Hue Shift 正/负/180/full-turn、Channel Mixer 矩阵路由/正负系数/alpha、CPU/Metal 参考一致性、MSAA、Overlay、CameraTarget 像素门禁。与 URP stack/lifecycle 用例合计 **130** 项。
+
+### 测试与门禁
+- `bash _scripts/build-native.sh Release` 与 `bash _scripts/build-all.sh Release` 通过；`ANITY_REQUIRE_NATIVE=1` 下 native camera pass 定向 **106/106**、URP stack/lifecycle **24/24** 通过；`git diff --check` 通过。
+
+### 尚未完成
+- Metal 已消费 `CameraTarget` 与单采样/设备支持 MSAA LDR/HDR `Camera.targetTexture` 的全/partial viewport clear/load/store 路径，并具备显式 ACES HDR readback、两级 compute Bloom/final post、ColorAdjustments 的 hue/color filter/saturation/contrast 与 temperature/tint 白平衡，以及 Channel Mixer 3×3 矩阵；Vulkan/D3D attachment、更高层级的 Bloom blur、完整 Color Curves/LUT 与 HDR10 显示输出仍是下一实际渲染阶段。
+
+### 下一优先项
+1. 将目前两级 compute Bloom 扩展为 URP 14 的可配置更多 mip/blur、完整 Color Curves/LUT，并补 mip generation/aliasing 与 renderer resource allocation。
+2. 同步完成 Vulkan/D3D11 的 attachment/load-store 语义和 native target registry，再实现 MSAA resolve。
+3. 以 Unity 2022.3.61f1 URP 14 Player fixture 对照多 stack、viewport、HDR、Bloom、阴影和 XR。
+
+## 2026-07-18 — URP 14.x Base/Overlay camera stack composition
+
+### 已完成
+- 新增 `UniversalAdditionalCameraData` 与 URP `CameraExtensions.GetUniversalAdditionalCameraData`：支持 `renderType`、`cameraStack`、`rendererIndex`、`renderPostProcessing`、`clearDepth`、depth/color texture 请求等每相机状态；未挂载 Component 的兼容 Camera 也有稳定的附加数据实例。
+- `UniversalRenderPipeline` 现在按 Base 相机拥有 stack：过滤 null/self/disabled/重复项及非 Overlay 相机，将合格 Overlay 依声明顺序合成至 Base 的同一 render target，并只在整栈结束后提交。直接渲染孤立 Overlay 不会错误清除或提交。
+- 相机 stack 共享 Base 的 `targetTexture` 和 descriptor；Overlay 不拥有 color clear，depth clear 遵循其 `clearDepth`。URP 接管通用 SRP 清屏，以避免通用 render loop 在 stack 合成前破坏共享目标。
+- stack 现在也会以共享 target 尺寸换算每台 Camera 的 `rect`，将 stack-relative `pixelRect` 写入 `CameraData` 并在清除前调用 `CommandBuffer.SetViewport`；因此多个 Base stack 或 Overlay 可以在同一输出目标的不同区域合成。
+- 引入按 `rendererIndex` 缓存和选择的 renderer 实例，非法/空 index 严格回退到 asset 的 `defaultRendererIndex`；修复 `CreatePipeline` 曾将配置好的默认 renderer index 重置为 0 的问题。
+- 后处理仅在 stack 的末相机执行，防止逐 Overlay 重复 tonemap；保留独立 renderer 调用的既有后处理行为。默认 target identifier 也会正确回退到 `BuiltinRenderTextureType.CameraTarget`。
+- 新增 `UrpCameraStackTests` 13 个用例，连同 `UrpRendererLifecycleTests` 11 个用例，共 **24/24**：附加数据稳定性、Base/Overlay 顺序、孤立 Overlay、非法 stack 项过滤、最终后处理、depth ownership、共享 RT/descriptor/viewport、CameraTarget、renderer 选择与非法 index 回退。
+
+### 测试与门禁
+- Release URP 定向（camera stack + renderer lifecycle）：**24/24** 通过。
+- `bash _scripts/build-all.sh Release` 通过：native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与 URP3DDemo 均 0 error。
+- `bash _scripts/run-tests.sh Release` 通过：强制 native 的完整 Release 矩阵 **2,561/2,561**、0 失败、0 跳过；其中 Core **1,688/1,688**（本项新增 13 个 camera-stack 用例）。
+
+### 尚未完成
+- 本项只完成 URP Base/Overlay 的 managed 控制面。render graph、load/store action、camera depth/opaque texture 的原生 allocation、XR multipass/single-pass、deferred/GBuffer、真实 GPU HDR/MSAA resolve、阴影/光照及 Unity 2022.3.61f1 官方 Player 图像 A/B 仍未实现。
+
+### 下一优先项
+1. 将 stack 的 depth/color texture 请求、load/store、viewport 和 final resolve 落入 `anity-native` Metal/Vulkan/D3D backend，并以 native readback 证明 Overlay 不重清 color。
+2. 完成 URP deferred/GBuffer 与真实 HDR/MSAA resolve，再补 Bloom/Tonemap fullscreen GPU pass。
+3. 建立 Unity 2022.3.61f1 URP 14.x 官方 Player fixture，对 camera stack、HDR、Bloom、透明排序、阴影和 XR 做截图/数值 A/B。
+
+## 2026-07-18 — URP 14.x renderer per-camera lifecycle and pass ordering
+
+### 已完成
+- 修复 `UniversalRenderer` 与 `Renderer2D` 的 renderer reuse 缺陷：默认 opaque/transparent/sprite pass 不再只在构造期入队；每台 Camera 的 `Setup` 都会重建其默认 pass。此前第一台相机执行后队列被清空，后续相机可能只保留 post process pass。
+- `ScriptableRenderer` 现在明确以 per-camera queue 工作：`Setup` 先隔离上台相机状态，feature 依次运行 `AddRenderPasses` 与 `SetupRenderPasses`；执行时按 `RenderPassEvent` 稳定排序，同一事件保持入队顺序。
+- 所有 pass 走 `Configure → OnCameraSetup → Execute`，并在成功或异常时逆序 `OnCameraCleanup`，feature camera hook 也保证成对清理；队列在 finally 中清空，防止异常污染下一台 Camera。
+- 新增 `UrpRendererLifecycleTests` 11 个用例：跨相机重建、同事件稳定排序、pass/feature 生命周期、执行或 setup 异常 cleanup、Forward/2D renderer 重用与 setup 幂等性。
+
+### 测试与门禁
+- URP 定向：**11/11** 通过；Core 强制 native：**1,675/1,675**；完整 Release 强制 native 矩阵：**2,548/2,548**，0 失败、0 跳过。
+- `bash _scripts/build-all.sh Release` 通过：native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与 URP3DDemo 均 0 error。
+
+### 尚未完成
+- 这次仅闭合 URP renderer queue/lifecycle；不代表完整 Unity 2022.3.61f1 Pro 或完整 URP 14.x。URP camera stack/overlay 合成、XR multipass/single-pass、deferred/GBuffer、renderer feature resource allocation、native GPU post-processing、阴影/光照、真实 HDR/MSAA resolve、以及 Unity Player 截图与数值 A/B 仍缺。
+
+### 下一优先项
+1. 实现并验证 Base/Overlay camera stack：clear/load/store、viewport、post-process final target 与 renderer index 选择，至少 10 个含异常与多相机用例。
+2. 把 HDR Bloom/Tonemap 从 globals/CPU fallback 推进到 Metal/Vulkan/D3D 的真实 render target 与 fullscreen pass，补 HDR/MSAA/resize/device-loss 像素门禁。
+3. 建立 Unity 2022.3.61f1 URP 14.x 官方 Player fixture，对 camera stack、HDR、Bloom、tonemap、透明排序、阴影和 XR 逐场景截图/数值 A/B。
+
 ## 2026-07-17ag — Anity.Agent 0.6.0 工具审计、完整终态与usage保存
 
 ### 已完成

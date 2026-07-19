@@ -100,6 +100,8 @@ public class CommandBuffer : IDisposable
     private string _name = string.Empty;
     private bool _disposed;
     private readonly List<CommandBufferCommand> _commands = new();
+    private readonly List<GraphicsFenceState> _graphicsFences = new();
+    private readonly List<GPUFenceState> _gpuFences = new();
 
     public CommandBuffer() { }
 
@@ -130,8 +132,56 @@ public class CommandBuffer : IDisposable
     public void Release()
     {
         _commands.Clear();
+        _graphicsFences.Clear();
+        _gpuFences.Clear();
         _disposed = true;
     }
+
+    public GraphicsFence CreateAsyncGraphicsFence()
+        => CreateAsyncGraphicsFence(SynchronisationStage.PixelProcessing);
+
+    public GraphicsFence CreateAsyncGraphicsFence(SynchronisationStage stage)
+        => CreateGraphicsFence(GraphicsFenceType.AsyncQueueSynchronisation, (SynchronisationStageFlags)(1 << (int)stage));
+
+    public GPUFence CreateGPUFence()
+        => CreateGPUFence(SynchronisationStage.PixelProcessing);
+
+    public GPUFence CreateGPUFence(SynchronisationStage stage)
+    {
+        var state = new GPUFenceState((SynchronisationStageFlags)(1 << (int)stage));
+        _gpuFences.Add(state);
+        return new GPUFence(state);
+    }
+
+    public GraphicsFence CreateGraphicsFence(GraphicsFenceType fenceType, SynchronisationStageFlags stage)
+    {
+        if (stage == 0 || (stage & ~SynchronisationStageFlags.AllGPUOperations) != 0)
+            throw new ArgumentOutOfRangeException(nameof(stage));
+        var state = new GraphicsFenceState(fenceType, stage);
+        _graphicsFences.Add(state);
+        return new GraphicsFence(state);
+    }
+
+    public void WaitOnAsyncGraphicsFence(GraphicsFence fence)
+        => WaitOnAsyncGraphicsFence(fence, SynchronisationStageFlags.AllGPUOperations);
+
+    public void WaitOnAsyncGraphicsFence(GraphicsFence fence, SynchronisationStage stage)
+        => WaitOnAsyncGraphicsFence(fence, (SynchronisationStageFlags)(1 << (int)stage));
+
+    public void WaitOnAsyncGraphicsFence(GraphicsFence fence, SynchronisationStageFlags stage)
+    {
+        if (stage == 0 || (stage & ~SynchronisationStageFlags.AllGPUOperations) != 0)
+            throw new ArgumentOutOfRangeException(nameof(stage));
+        GraphicsFenceScheduler.AddDependency(_graphicsFences, fence);
+    }
+
+    public void WaitOnGPUFence(GPUFence fence)
+        => WaitOnGPUFence(fence, SynchronisationStage.PixelProcessing);
+
+    public void WaitOnGPUFence(GPUFence fence, SynchronisationStage stage)
+        => GraphicsFenceScheduler.AddDependency(_gpuFences, fence);
+
+    internal void ScheduleFences() => GraphicsFenceScheduler.Schedule(_graphicsFences, _gpuFences);
 
     public void Dispose()
     {

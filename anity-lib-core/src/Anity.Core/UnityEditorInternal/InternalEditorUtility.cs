@@ -39,8 +39,16 @@ public static class InternalEditorUtility
   public static void ReloadAssemblies()
   {
     _reloading = true;
-    scriptReloaded?.Invoke();
-    _reloading = false;
+    UnityEditor.AssemblyReloadEvents.OnBeforeAssemblyReload();
+    try
+    {
+      scriptReloaded?.Invoke();
+    }
+    finally
+    {
+      _reloading = false;
+      UnityEditor.AssemblyReloadEvents.OnAfterAssemblyReload();
+    }
   }
 
   public static void RequestScriptReload()

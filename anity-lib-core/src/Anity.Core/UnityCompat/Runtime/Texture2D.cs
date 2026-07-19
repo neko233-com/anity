@@ -150,7 +150,7 @@ public partial class Texture2D : Texture
         {
             if (_normalTexture == null)
             {
-                _normalTexture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                _normalTexture = new Texture2D(1, 1, TextureFormat.RGBA32, false, true);
                 _normalTexture.SetPixel(0, 0, new Color(0.5f, 0.5f, 1f, 1f));
                 _normalTexture.Apply(false, true);
             }

@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <DefineConstants>UNITY_ENGINE</DefineConstants>
     
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageId>Anity.Core.Unity</PackageId>
     <Authors>Anity Team</Authors>
     <Description>Unity 2022 official DLL reference wrapper for behavior comparison.</Description>

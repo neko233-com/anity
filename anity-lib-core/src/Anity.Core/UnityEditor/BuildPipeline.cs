@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
@@ -342,49 +343,55 @@ public static class BuildPipeline
     var manifest = new AssetBundleManifest { name = "AssetBundleManifest" };
     if (string.IsNullOrWhiteSpace(outputPath))
       return manifest;
+    if (!Directory.Exists(outputPath))
+      throw new ArgumentException("outputPath must name an existing directory.", nameof(outputPath));
+    builds ??= Array.Empty<AssetBundleBuild>();
+    ValidateBuildMap(builds);
 
     if ((assetBundleOptions & BuildAssetBundleOptions.DryRunBuild) != 0)
     {
-      if (builds != null)
+      foreach (var build in builds)
       {
-        foreach (var build in builds)
+        if (!string.IsNullOrEmpty(build.assetBundleName))
         {
-          if (!string.IsNullOrEmpty(build.assetBundleName))
-            manifest.AddBundle(build.assetBundleName, default, Array.Empty<string>());
+          var bundleManifestName = GetBundleManifestName(build);
+          if (!string.IsNullOrEmpty(build.assetBundleVariant))
+            manifest.AddBundleWithVariant(build.assetBundleName, build.assetBundleVariant, default);
+          manifest.AddBundle(bundleManifestName, default, Array.Empty<string>());
         }
       }
       return manifest;
     }
 
-    Directory.CreateDirectory(outputPath);
-    builds ??= Array.Empty<AssetBundleBuild>();
-
-    // Pass 1: collect names for dependency graph (path prefix → bundle)
+    // Pass 1: map every asset to the manifest name of the bundle that contains it.
     var pathToBundle = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     foreach (var build in builds)
     {
       if (string.IsNullOrEmpty(build.assetBundleName) || build.assetNames == null) continue;
+      var bundleManifestName = GetBundleManifestName(build);
       foreach (var assetPath in build.assetNames)
       {
         if (!string.IsNullOrEmpty(assetPath))
-          pathToBundle[assetPath] = build.assetBundleName;
+          pathToBundle[assetPath] = bundleManifestName;
       }
     }
 
     foreach (var build in builds)
     {
       if (string.IsNullOrEmpty(build.assetBundleName)) continue;
+      var bundleManifestName = GetBundleManifestName(build);
 
       var catalog = new AssetBundleFormat.BundleCatalog
       {
-        bundleName = build.assetBundleName
+        bundleName = bundleManifestName
       };
 
       var names = build.assetNames ?? Array.Empty<string>();
       var depSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-      foreach (var assetPath in names)
+      for (var assetIndex = 0; assetIndex < names.Length; assetIndex++)
       {
+        var assetPath = names[assetIndex];
         if (string.IsNullOrEmpty(assetPath)) continue;
 
         // Scene assets
@@ -404,40 +411,34 @@ public static class BuildPipeline
           asset.name = Path.GetFileNameWithoutExtension(assetPath);
         }
 
-        catalog.assets.Add(AssetBundleFormat.SerializeAsset(assetPath, asset));
+        catalog.assets.Add(AssetBundleFormat.SerializeAsset(GetAddressableName(build, assetIndex, assetPath), asset));
 
         // Direct dependencies via BuildPipeline.GetDirectDependencies if available
         foreach (var depPath in GetDirectDependencies(assetPath))
         {
           if (pathToBundle.TryGetValue(depPath, out var depBundle) &&
-              !string.Equals(depBundle, build.assetBundleName, StringComparison.OrdinalIgnoreCase))
+              !string.Equals(depBundle, bundleManifestName, StringComparison.OrdinalIgnoreCase))
             depSet.Add(depBundle);
         }
       }
 
-      catalog.dependencies.AddRange(depSet);
-      catalog.hash = AssetBundleFormat.ComputeContentHash(names);
+      catalog.dependencies.AddRange(depSet.OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
+      catalog.hash = AssetBundleFormat.ComputeContentHash(catalog.assets.Select(asset => asset.name).Concat(catalog.scenes));
       catalog.crc = (uint)(catalog.hash.u32_0 ^ catalog.hash.u32_1);
 
-      string fileName = build.assetBundleName;
+      string fileName = bundleManifestName;
       if ((assetBundleOptions & BuildAssetBundleOptions.AppendHashToAssetBundleName) != 0)
-        fileName = $"{build.assetBundleName}_{catalog.hash}";
+        fileName = $"{bundleManifestName}_{catalog.hash}";
 
-      if (build.assetBundleVariant != null && build.assetBundleVariant.Length > 0)
+      if (!string.IsNullOrEmpty(build.assetBundleVariant))
       {
-        foreach (var variant in build.assetBundleVariant)
-        {
-          if (string.IsNullOrEmpty(variant)) continue;
-          string variantName = $"{build.assetBundleName}.{variant}";
-          catalog.bundleName = variantName;
-          var bytesV = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
-          catalog.crc = AssetBundleFormat.ComputeCrc(bytesV);
-          bytesV = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
-          bytesV = AssetBundleCompression.MaybeCompress(bytesV, assetBundleOptions);
-          File.WriteAllBytes(Path.Combine(outputPath, variantName), bytesV);
-          manifest.AddBundleWithVariant(build.assetBundleName, variant, catalog.hash);
-          manifest.AddBundle(variantName, catalog.hash, catalog.dependencies.ToArray());
-        }
+        var bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+        catalog.crc = AssetBundleFormat.ComputeCrc(bytes);
+        bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+        bytes = AssetBundleCompression.MaybeCompress(bytes, assetBundleOptions);
+        File.WriteAllBytes(Path.Combine(outputPath, fileName), bytes);
+        manifest.AddBundleWithVariant(build.assetBundleName, build.assetBundleVariant, catalog.hash);
+        manifest.AddBundle(bundleManifestName, catalog.hash, catalog.dependencies.ToArray());
       }
       else
       {
@@ -446,7 +447,7 @@ public static class BuildPipeline
         bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
         bytes = AssetBundleCompression.MaybeCompress(bytes, assetBundleOptions);
         File.WriteAllBytes(Path.Combine(outputPath, fileName), bytes);
-        manifest.AddBundle(build.assetBundleName, catalog.hash, catalog.dependencies.ToArray());
+        manifest.AddBundle(bundleManifestName, catalog.hash, catalog.dependencies.ToArray());
       }
     }
 
@@ -470,10 +471,52 @@ public static class BuildPipeline
     return manifest;
   }
 
-  /// <summary>Build all asset bundles from AssetDatabase labels (empty builds → no-op directory create).</summary>
+  [Obsolete("BuildAssetBundleExplicitAssetNames is obsolete. Use BuildAssetBundles instead.")]
+  public static bool BuildAssetBundleExplicitAssetNames(Object[] assets, string[] assetNames, string pathName, BuildAssetBundleOptions assetBundleOptions, BuildTarget targetPlatform)
+  {
+    return BuildAssetBundleExplicitAssetNamesCore(assets, assetNames, pathName, assetBundleOptions, targetPlatform, out _);
+  }
+
+  [Obsolete("BuildAssetBundleExplicitAssetNames is obsolete. Use BuildAssetBundles instead.")]
+  public static bool BuildAssetBundleExplicitAssetNames(Object[] assets, string[] assetNames, string pathName, out uint crc, BuildAssetBundleOptions assetBundleOptions, BuildTarget targetPlatform)
+  {
+    return BuildAssetBundleExplicitAssetNamesCore(assets, assetNames, pathName, assetBundleOptions, targetPlatform, out crc);
+  }
+
+  [Obsolete("BuildAssetBundle is obsolete. Use BuildAssetBundles instead.")]
+  public static bool BuildAssetBundle(Object mainAsset, Object[] assets, string pathName, BuildAssetBundleOptions assetBundleOptions, BuildTarget targetPlatform)
+  {
+    return BuildAssetBundleCore(mainAsset, assets, pathName, assetBundleOptions, targetPlatform, out _);
+  }
+
+  [Obsolete("BuildAssetBundle is obsolete. Use BuildAssetBundles instead.")]
+  public static bool BuildAssetBundle(Object mainAsset, Object[] assets, string pathName, out uint crc, BuildAssetBundleOptions assetBundleOptions, BuildTarget targetPlatform)
+  {
+    return BuildAssetBundleCore(mainAsset, assets, pathName, assetBundleOptions, targetPlatform, out crc);
+  }
+
+  /// <summary>Build all bundles explicitly assigned through AssetImporter bundle name and variant settings.</summary>
   public static AssetBundleManifest BuildAssetBundles(string outputPath, BuildAssetBundleOptions assetBundleOptions, BuildTarget targetPlatform)
   {
-    return BuildAssetBundles(outputPath, Array.Empty<AssetBundleBuild>(), assetBundleOptions, targetPlatform);
+    var builds = new List<AssetBundleBuild>();
+    foreach (var assignment in AssetDatabase.GetExplicitAssetBundleBuilds())
+    {
+      builds.Add(new AssetBundleBuild
+      {
+        assetBundleName = assignment.Name,
+        assetNames = assignment.AssetPaths,
+        assetBundleVariant = assignment.Variant,
+      });
+    }
+    return BuildAssetBundles(outputPath, builds.ToArray(), assetBundleOptions, targetPlatform);
+  }
+
+  public static AssetBundleManifest BuildAssetBundles(BuildAssetBundlesParameters buildParameters)
+  {
+    var target = buildParameters.targetPlatform == 0 ? EditorUserBuildSettings.activeBuildTarget : buildParameters.targetPlatform;
+    return buildParameters.bundleDefinitions == null
+      ? BuildAssetBundles(buildParameters.outputPath, buildParameters.options, target)
+      : BuildAssetBundles(buildParameters.outputPath, buildParameters.bundleDefinitions, buildParameters.options, target);
   }
 
   public static BuildPlayerWindow BuildPlayerWindow => new BuildPlayerWindow();
@@ -528,21 +571,158 @@ public static class BuildPipeline
 
   public static string[] GetDirectDependencies(string assetPath)
   {
-    _ = assetPath;
-    return Array.Empty<string>();
+    return GetDependencies(assetPath, recursive: false);
   }
 
   public static string[] GetAllDependencies(string assetPath)
   {
-    _ = assetPath;
-    return Array.Empty<string>();
+    return GetDependencies(assetPath, recursive: true);
+  }
+
+  private static string[] GetDependencies(string assetPath, bool recursive)
+  {
+    if (string.IsNullOrWhiteSpace(assetPath)) return Array.Empty<string>();
+    return AssetDatabase.GetDependencies(assetPath, recursive)
+      .Where(path => !string.Equals(path, assetPath, StringComparison.OrdinalIgnoreCase))
+      .Distinct(StringComparer.OrdinalIgnoreCase)
+      .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+      .ToArray();
+  }
+
+  private static string GetBundleManifestName(AssetBundleBuild build)
+  {
+    return string.IsNullOrEmpty(build.assetBundleVariant)
+      ? build.assetBundleName
+      : $"{build.assetBundleName}.{build.assetBundleVariant}";
+  }
+
+  private static bool BuildAssetBundleExplicitAssetNamesCore(Object[]? assets, string[]? assetNames, string? pathName, BuildAssetBundleOptions assetBundleOptions, BuildTarget targetPlatform, out uint crc)
+  {
+    _ = targetPlatform;
+    crc = 0;
+    if (assets == null || assetNames == null || assets.Length == 0 || assets.Length != assetNames.Length || string.IsNullOrWhiteSpace(pathName))
+      return false;
+
+    var outputDirectory = Path.GetDirectoryName(pathName);
+    if (string.IsNullOrEmpty(outputDirectory) || !Directory.Exists(outputDirectory))
+      return false;
+
+    try
+    {
+      var catalog = new AssetBundleFormat.BundleCatalog { bundleName = Path.GetFileName(pathName) };
+      for (var index = 0; index < assets.Length; index++)
+      {
+        if (assets[index] == null || string.IsNullOrEmpty(assetNames[index])) return false;
+        catalog.assets.Add(AssetBundleFormat.SerializeAsset(assetNames[index], assets[index]));
+      }
+
+      catalog.hash = AssetBundleFormat.ComputeContentHash(catalog.assets.Select(asset => asset.name));
+      var bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+      catalog.crc = AssetBundleFormat.ComputeCrc(bytes);
+      bytes = AssetBundleFormat.WriteBundle(catalog, assetBundleOptions);
+      bytes = AssetBundleCompression.MaybeCompress(bytes, assetBundleOptions);
+      File.WriteAllBytes(pathName, bytes);
+      crc = AssetBundleFormat.ComputeCrc(bytes);
+      return true;
+    }
+    catch (IOException)
+    {
+      return false;
+    }
+    catch (UnauthorizedAccessException)
+    {
+      return false;
+    }
+  }
+
+  private static bool BuildAssetBundleCore(Object? mainAsset, Object[]? assets, string? pathName, BuildAssetBundleOptions assetBundleOptions, BuildTarget targetPlatform, out uint crc)
+  {
+    crc = 0;
+    if (mainAsset == null) return false;
+
+    var sourceAssets = new List<Object> { mainAsset };
+    if (assets != null) sourceAssets.AddRange(assets);
+    if (sourceAssets.Any(asset => asset == null)) return false;
+
+    var assetNames = new string[sourceAssets.Count];
+    var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    for (var index = 0; index < sourceAssets.Count; index++)
+    {
+      var assetPath = AssetDatabase.GetAssetPath(sourceAssets[index]);
+      assetNames[index] = string.IsNullOrEmpty(assetPath) ? sourceAssets[index].name : assetPath;
+      if (string.IsNullOrEmpty(assetNames[index]) || !usedNames.Add(assetNames[index])) return false;
+    }
+
+    return BuildAssetBundleExplicitAssetNamesCore(sourceAssets.ToArray(), assetNames, pathName, assetBundleOptions, targetPlatform, out crc);
+  }
+
+  private static string GetAddressableName(AssetBundleBuild build, int assetIndex, string assetPath)
+  {
+    var addressableName = build.addressableNames?[assetIndex];
+    return string.IsNullOrEmpty(addressableName) ? assetPath : addressableName;
+  }
+
+  private static void ValidateBuildMap(AssetBundleBuild[] builds)
+  {
+    foreach (var build in builds)
+    {
+      if (build.addressableNames != null && build.addressableNames.Length != (build.assetNames?.Length ?? 0))
+        throw new ArgumentException("addressableNames must contain exactly one entry for each assetNames entry.", nameof(builds));
+    }
   }
 
   public static bool IsBuildTargetSupported(BuildTarget target, BuildTargetGroup targetGroup)
   {
-    _ = target;
-    _ = targetGroup;
-    return true;
+    return IsBuildTargetSupported(targetGroup, target);
+  }
+
+  public static bool IsBuildTargetSupported(BuildTargetGroup targetGroup, BuildTarget target)
+  {
+    return targetGroup != BuildTargetGroup.Unknown && EditorUserBuildSettings.BuildTargetToBuildTargetGroup(target) == targetGroup;
+  }
+
+  public static bool GetCRCForAssetBundle(string pathName, out uint crc)
+  {
+    crc = 0;
+    if (string.IsNullOrWhiteSpace(pathName) || !File.Exists(pathName)) return false;
+    try
+    {
+      crc = AssetBundleFormat.ComputeCrc(File.ReadAllBytes(pathName));
+      return true;
+    }
+    catch (IOException) { return false; }
+    catch (UnauthorizedAccessException) { return false; }
+  }
+
+  public static bool GetHashForAssetBundle(string pathName, out Hash128 hash)
+  {
+    hash = default;
+    if (string.IsNullOrWhiteSpace(pathName) || !File.Exists(pathName)) return false;
+    try
+    {
+      var bytes = File.ReadAllBytes(pathName);
+      if (!AssetBundleFormat.TryReadBundle(bytes, out var catalog)) return false;
+      hash = catalog.hash;
+      return true;
+    }
+    catch (IOException) { return false; }
+    catch (UnauthorizedAccessException) { return false; }
+  }
+
+  [Obsolete("BuildStreamedSceneAssetBundle is obsolete. Use BuildAssetBundles instead.")]
+  public static bool BuildStreamedSceneAssetBundle(string[] levels, string pathName, BuildTarget targetPlatform) => BuildStreamedSceneAssetBundleCore(levels, pathName, targetPlatform, out _);
+  [Obsolete("BuildStreamedSceneAssetBundle is obsolete. Use BuildAssetBundles instead.")]
+  public static bool BuildStreamedSceneAssetBundle(string[] levels, string pathName, BuildTarget targetPlatform, out uint crc) => BuildStreamedSceneAssetBundleCore(levels, pathName, targetPlatform, out crc);
+  [Obsolete("BuildStreamedSceneAssetBundle is obsolete. Use BuildAssetBundles instead.")]
+  public static bool BuildStreamedSceneAssetBundle(string[] levels, string pathName, BuildTarget targetPlatform, BuildOptions options) => BuildStreamedSceneAssetBundleCore(levels, pathName, targetPlatform, out _);
+  [Obsolete("BuildStreamedSceneAssetBundle is obsolete. Use BuildAssetBundles instead.")]
+  public static bool BuildStreamedSceneAssetBundle(string[] levels, string pathName, BuildTarget targetPlatform, out uint crc, BuildOptions options) => BuildStreamedSceneAssetBundleCore(levels, pathName, targetPlatform, out crc);
+  private static bool BuildStreamedSceneAssetBundleCore(string[]? levels, string? pathName, BuildTarget targetPlatform, out uint crc)
+  {
+    _ = targetPlatform; crc = 0;
+    if (levels == null || levels.Length == 0 || levels.Any(level => string.IsNullOrWhiteSpace(level) || !level.EndsWith(".unity", StringComparison.OrdinalIgnoreCase)) || string.IsNullOrWhiteSpace(pathName) || !Directory.Exists(Path.GetDirectoryName(pathName))) return false;
+    var catalog = new AssetBundleFormat.BundleCatalog { bundleName = Path.GetFileName(pathName) }; catalog.scenes.AddRange(levels); catalog.hash = AssetBundleFormat.ComputeContentHash(levels);
+    var bytes = AssetBundleFormat.WriteBundle(catalog, BuildAssetBundleOptions.None); catalog.crc = AssetBundleFormat.ComputeCrc(bytes); bytes = AssetBundleFormat.WriteBundle(catalog, BuildAssetBundleOptions.None); File.WriteAllBytes(pathName, bytes); crc = AssetBundleFormat.ComputeCrc(bytes); return true;
   }
 
   public static bool IsSceneInBuildSettings(string scenePath)
@@ -573,6 +753,14 @@ public static class BuildPipeline
     var group = EditorUserBuildSettings.BuildTargetToBuildTargetGroup(target);
     return (int)group;
   }
+
+  public static string GetBuildTargetName(BuildTarget target) => target switch
+  {
+    BuildTarget.iPhone => "iOS",
+    BuildTarget.StandaloneOSXIntel or BuildTarget.StandaloneOSXUniversal => "StandaloneOSX",
+    BuildTarget.MetroPlayer => "WSAPlayer",
+    _ => target.ToString()
+  };
 
   private static string NormalizePath(string path)
   {
@@ -607,11 +795,22 @@ public struct BuildPlayerOptions
   public bool? disableOldInputManagerSupport;
 }
 
+public struct BuildAssetBundlesParameters
+{
+  public string outputPath;
+  public AssetBundleBuild[]? bundleDefinitions;
+  public BuildAssetBundleOptions options;
+  public BuildTarget targetPlatform;
+  public int subtarget;
+  public string[]? extraScriptingDefines;
+}
+
 public struct AssetBundleBuild
 {
   public string assetBundleName;
   public string[]? assetNames;
-  public string[]? assetBundleVariant;
+  public string assetBundleVariant;
+  public string[]? addressableNames;
 }
 
 public enum BuildTarget

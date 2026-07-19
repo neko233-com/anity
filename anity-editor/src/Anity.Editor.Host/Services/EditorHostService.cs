@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using System.Text.Json;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -31,6 +32,7 @@ public sealed class EditorHost
 
   public Task<EditorSession> StartSessionAsync(string projectPath)
   {
+    EditorApplication.OpenProject(projectPath);
     var sessionId = Guid.NewGuid().ToString("N");
     var opened = new Dictionary<string, EditorWindow>(StringComparer.OrdinalIgnoreCase);
 
@@ -140,7 +142,9 @@ public sealed class EditorHost
 
   public async Task RunCompatibilityDemoAsync(int ticks = 60, int fps = 30)
   {
-    var host = await StartSessionAsync("compat-sample");
+    var compatibilityProject = Path.Combine(Path.GetTempPath(), "anity-compat-sample");
+    Directory.CreateDirectory(compatibilityProject);
+    var host = await StartSessionAsync(compatibilityProject);
     var marker = new GameObject("compat-marker");
     marker.AddComponent<MonoBehaviour>();
 

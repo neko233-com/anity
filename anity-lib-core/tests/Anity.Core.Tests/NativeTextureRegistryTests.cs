@@ -101,6 +101,154 @@ public sealed class NativeTextureRegistryTests : IDisposable
     }
 
     [Fact]
+    public void UploadPreservesMipBiasAndAnisoSamplingState()
+    {
+        if (!Ready) return;
+        Texture2D texture = Solid(4, 4, Color.white);
+        texture.mipMapBias = -0.75f;
+        texture.anisoLevel = 8;
+        Assert.True(_device.EnsureTexture(texture));
+        Assert.True(_device.TryGetTextureInfo(texture, out var info));
+        Assert.Equal(-0.75f, info.desc.mipMapBias);
+        Assert.Equal(8, info.desc.anisoLevel);
+    }
+
+    [Fact]
+    public void MipBiasChangeInvalidatesCachedUpload()
+    {
+        if (!Ready) return;
+        Texture2D texture = Solid(4, 4, Color.white);
+        Assert.True(_device.TryGetTextureInfo(texture, out var first));
+        texture.mipMapBias = 1.25f;
+        Assert.True(_device.EnsureTexture(texture));
+        Assert.True(_device.TryGetTextureInfo(texture, out var second));
+        Assert.True(second.uploadGeneration > first.uploadGeneration);
+        Assert.Equal(1.25f, second.desc.mipMapBias);
+    }
+
+    [Fact]
+    public void AnisoChangeInvalidatesCachedUpload()
+    {
+        if (!Ready) return;
+        Texture2D texture = Solid(4, 4, Color.white);
+        Assert.True(_device.TryGetTextureInfo(texture, out var first));
+        texture.anisoLevel = 12;
+        Assert.True(_device.EnsureTexture(texture));
+        Assert.True(_device.TryGetTextureInfo(texture, out var second));
+        Assert.True(second.uploadGeneration > first.uploadGeneration);
+        Assert.Equal(12, second.desc.anisoLevel);
+    }
+
+    [Fact]
+    public void QualityDisableDisablesTextureAnisotropy()
+    {
+        WithAnisotropicPolicy(AnisotropicFiltering.Disable, 16, () =>
+        {
+            if (!Ready) return;
+            Texture2D texture = Solid(4, 4, Color.white);
+            texture.anisoLevel = 16;
+            Assert.True(_device.EnsureTexture(texture));
+            Assert.True(_device.TryGetTextureInfo(texture, out var info));
+            Assert.Equal(1, info.desc.anisoLevel);
+        });
+    }
+
+    [Fact]
+    public void QualityEnableRetainsTextureAnisotropy()
+    {
+        WithAnisotropicPolicy(AnisotropicFiltering.Enable, 16, () =>
+        {
+            if (!Ready) return;
+            Texture2D texture = Solid(4, 4, Color.white);
+            texture.anisoLevel = 4;
+            Assert.True(_device.EnsureTexture(texture));
+            Assert.True(_device.TryGetTextureInfo(texture, out var info));
+            Assert.Equal(4, info.desc.anisoLevel);
+        });
+    }
+
+    [Fact]
+    public void QualityForceEnableRaisesTextureAnisotropyToGlobalLevel()
+    {
+        WithAnisotropicPolicy(AnisotropicFiltering.ForceEnable, 8, () =>
+        {
+            if (!Ready) return;
+            Texture2D texture = Solid(4, 4, Color.white);
+            texture.anisoLevel = 1;
+            Assert.True(_device.EnsureTexture(texture));
+            Assert.True(_device.TryGetTextureInfo(texture, out var info));
+            Assert.Equal(8, info.desc.anisoLevel);
+        });
+    }
+
+    [Fact]
+    public void NativeAbiNormalizesLegacyZeroAnisotropyToUnityDefault()
+    {
+        if (!Ready) return;
+        var desc = ValidDesc(9201);
+        Assert.Equal(AnityNative.Result.Ok, AnityNative.Graphics_UploadTextureRGBA8(
+            _device.Handle, ref desc, new byte[4], 4));
+        Assert.Equal(AnityNative.Result.Ok, AnityNative.Graphics_GetTextureInfo(
+            _device.Handle, desc.textureId, out var info));
+        Assert.Equal(1, info.desc.anisoLevel);
+    }
+
+    [Fact]
+    public void NativeAbiRejectsNanMipBias()
+    {
+        if (!Ready) return;
+        var desc = ValidDesc(9202);
+        desc.mipMapBias = float.NaN;
+        Assert.Equal(AnityNative.Result.InvalidArg, AnityNative.Graphics_UploadTextureRGBA8(
+            _device.Handle, ref desc, new byte[4], 4));
+    }
+
+    [Fact]
+    public void NativeAbiRejectsInfiniteMipBias()
+    {
+        if (!Ready) return;
+        var desc = ValidDesc(9203);
+        desc.mipMapBias = float.PositiveInfinity;
+        Assert.Equal(AnityNative.Result.InvalidArg, AnityNative.Graphics_UploadTextureRGBA8(
+            _device.Handle, ref desc, new byte[4], 4));
+    }
+
+    [Fact]
+    public void NativeAbiRejectsNegativeAnisotropy()
+    {
+        if (!Ready) return;
+        var desc = ValidDesc(9204);
+        desc.anisoLevel = -1;
+        Assert.Equal(AnityNative.Result.InvalidArg, AnityNative.Graphics_UploadTextureRGBA8(
+            _device.Handle, ref desc, new byte[4], 4));
+    }
+
+    [Fact]
+    public void NativeAbiRejectsAnisotropyAboveHardwareContract()
+    {
+        if (!Ready) return;
+        var desc = ValidDesc(9205);
+        desc.anisoLevel = 17;
+        Assert.Equal(AnityNative.Result.InvalidArg, AnityNative.Graphics_UploadTextureRGBA8(
+            _device.Handle, ref desc, new byte[4], 4));
+    }
+
+    [Fact]
+    public void NativeAbiAcceptsNegativeMipBias()
+    {
+        if (!Ready) return;
+        var desc = ValidDesc(9206);
+        desc.mipMapBias = -2.0f;
+        desc.anisoLevel = 16;
+        Assert.Equal(AnityNative.Result.Ok, AnityNative.Graphics_UploadTextureRGBA8(
+            _device.Handle, ref desc, new byte[4], 4));
+        Assert.Equal(AnityNative.Result.Ok, AnityNative.Graphics_GetTextureInfo(
+            _device.Handle, desc.textureId, out var info));
+        Assert.Equal(-2.0f, info.desc.mipMapBias);
+        Assert.Equal(16, info.desc.anisoLevel);
+    }
+
+    [Fact]
     public void NonReadableApplyStillUploadsBeforeCpuReadabilityIsDropped()
     {
         if (!Ready) return;
@@ -241,6 +389,37 @@ public sealed class NativeTextureRegistryTests : IDisposable
         texture.SetPixels(pixels);
         texture.Apply(false, false);
         return texture;
+    }
+
+    private static AnityNative.GraphicsTextureDesc ValidDesc(ulong textureId) => new()
+    {
+        textureId = textureId,
+        revision = 1,
+        width = 1,
+        height = 1,
+        mipCount = 1,
+        filterMode = (int)FilterMode.Bilinear,
+        wrapU = (int)TextureWrapMode.Repeat,
+        wrapV = (int)TextureWrapMode.Repeat,
+        linear = 1
+    };
+
+    private static void WithAnisotropicPolicy(
+        AnisotropicFiltering policy, int level, Action action)
+    {
+        AnisotropicFiltering oldPolicy = QualitySettings.anisotropicFiltering;
+        int oldLevel = QualitySettings.anisotropicFilteringLevel;
+        try
+        {
+            QualitySettings.anisotropicFiltering = policy;
+            QualitySettings.anisotropicFilteringLevel = level;
+            action();
+        }
+        finally
+        {
+            QualitySettings.anisotropicFiltering = oldPolicy;
+            QualitySettings.anisotropicFilteringLevel = oldLevel;
+        }
     }
 
     private static Mesh Triangle()

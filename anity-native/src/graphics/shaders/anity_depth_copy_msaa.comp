@@ -1,0 +1,19 @@
+#version 450
+
+// Unity's depth texture resolves camera MSAA depth by selecting sample zero,
+// matching the established Metal transient resource behavior.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2DMS anityDepthSource;
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D anityDepthOutput;
+
+void main()
+{
+    ivec2 coordinate = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 extent = imageSize(anityDepthOutput);
+    if (coordinate.x >= extent.x || coordinate.y >= extent.y)
+        return;
+
+    float depth = texelFetch(anityDepthSource, coordinate, 0).r;
+    imageStore(anityDepthOutput, coordinate, vec4(depth, 0.0, 0.0, 1.0));
+}

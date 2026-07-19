@@ -13,9 +13,17 @@ public class ModelImporter : AssetImporter
   public bool importLights { get; set; } = true;
   public bool importAnimation { get; set; } = true;
   public bool importAnimations { get; set; } = true;
-  public bool importMaterials { get; set; } = true;
+  private ModelImporterMaterialImportMode _materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
+  public bool importMaterials => materialImportMode != ModelImporterMaterialImportMode.None;
+  public ModelImporterMaterialImportMode materialImportMode { get => _materialImportMode; set => _materialImportMode = value; }
+  public ModelImporterMaterialLocation materialLocation { get; set; } = ModelImporterMaterialLocation.External;
+  public bool useSRGBMaterialColor { get; set; } = true;
   public ModelImporterAnimationType animationType { get; set; } = ModelImporterAnimationType.Generic;
-  public ModelImporterAvatarSetup avatarDefinition { get; set; } = ModelImporterAvatarSetup.CreateFromThisModel;
+  private ModelImporterAvatarSetup _avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+  public ModelImporterAvatarSetup avatarSetup { get => _avatarSetup; set => _avatarSetup = value; }
+  [Obsolete("Use avatarSetup instead.")]
+  public ModelImporterAvatarSetup avatarDefinition { get => avatarSetup; set => avatarSetup = value; }
+  public bool autoGenerateAvatarMappingIfUnspecified { get; set; } = true;
   public bool isReadable { get; set; }
   public float globalScale { get; set; } = 1f;
   public bool useFileScale { get; set; } = true;
@@ -39,6 +47,15 @@ public class ModelImporter : AssetImporter
   public bool resampleCurves { get; set; } = true;
   public ModelImporterClipAnimation[] clipAnimations { get; set; }
   public bool bakeSimulation { get; set; }
+  public bool bakeIK { get; set; }
+  public bool removeConstantScaleCurves { get; set; }
+  public bool importAnimatedCustomProperties { get; set; }
+  public bool importBlendShapeDeformPercent { get; set; } = true;
+  public bool bakeAxisConversion { get; set; }
+  public bool preserveHierarchy { get; set; }
+  public bool strictVertexDataChecks { get; set; }
+  public bool importPhysicalCameras { get; set; } = true;
+  public HumanDescription humanDescription { get; set; }
   public bool isHuman { get; set; }
   public string sourceAvatar { get; set; } = string.Empty;
   public Avatar avatar { get; set; }
@@ -58,7 +75,7 @@ public class ModelImporter : AssetImporter
 
   public static new ModelImporter GetAtPath(string path)
   {
-    return new ModelImporter { assetPath = path };
+    return AssetDatabase.GetImporterAtPath(path) as ModelImporter ?? new ModelImporter { assetPath = path, importSettingsMissing = true };
   }
 }
 
@@ -106,6 +123,21 @@ public enum ModelImporterMaterialSearch
   Local,
   RecursiveUp,
   Everywhere
+}
+
+public enum ModelImporterMaterialImportMode
+{
+  None = 0,
+  ImportStandard = 1,
+  LegacyImport = ImportStandard,
+  ImportViaMaterialDescription = 2,
+  Import = ImportViaMaterialDescription,
+}
+
+public enum ModelImporterMaterialLocation
+{
+  External = 0,
+  InPrefab = 1,
 }
 
 public enum ModelImporterMaterialName

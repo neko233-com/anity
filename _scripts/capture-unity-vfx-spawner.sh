@@ -3,10 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT="$ROOT/_scripts/unity-vfx-spawner-probe"
-UNITY="${UNITY_EDITOR_PATH:-/Applications/Unity/Hub/Editor/2022.3.51f1/Unity.app/Contents/MacOS/Unity}"
-OUTPUT="${1:-$ROOT/parity-evidence/unity-vfx-spawner-2022.3.51f1.json}"
-EDITOR_LOG="${2:-$ROOT/parity-evidence/unity-vfx-spawner-2022.3.51f1-editor.log}"
-PLAYER_LOG="${3:-$ROOT/parity-evidence/unity-vfx-spawner-2022.3.51f1-player.log}"
+UNITY_VERSION="${UNITY_EDITOR_VERSION:-2022.3.61f1}"
+UNITY="${UNITY_EDITOR_PATH:-/Applications/Unity/Hub/Editor/$UNITY_VERSION/Unity.app/Contents/MacOS/Unity}"
+OUTPUT="${1:-$ROOT/parity-evidence/unity-vfx-spawner-$UNITY_VERSION.json}"
+EDITOR_LOG="${2:-$ROOT/parity-evidence/unity-vfx-spawner-$UNITY_VERSION-editor.log}"
+PLAYER_LOG="${3:-$ROOT/parity-evidence/unity-vfx-spawner-$UNITY_VERSION-player.log}"
 BUILD="$PROJECT/Build/AnityVFXSpawnerProbe.app"
 
 test -x "$UNITY" || { echo "Unity Editor is unavailable: $UNITY" >&2; exit 1; }
@@ -32,8 +33,8 @@ rm -f "$OUTPUT"
 
 test -s "$OUTPUT" || { echo "Unity VFX Spawner probe did not produce $OUTPUT" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required to validate Unity VFX Spawner evidence" >&2; exit 1; }
-jq -e '
-  .editorVersion == "2022.3.51f1" and
+jq -e --arg unityVersion "$UNITY_VERSION" '
+  .editorVersion == $unityVersion and
   .visualEffectGraphVersion == "14.0.11" and
   .graphicsDevice == "Metal" and
   .resetSeedOnPlay == false and

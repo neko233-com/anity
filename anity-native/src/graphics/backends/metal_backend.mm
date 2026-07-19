@@ -1,6 +1,7 @@
 #define ANITY_NATIVE_BUILD
 #include "../anity_graphics_device.h"
 #include "../anity_graphics_texture_internal.h"
+#include "anity/graphics/anity_hdr.h"
 #include "../../ui/anity_ui_renderer_internal.h"
 #include <new>
 #include <cstring>
@@ -28,6 +29,30 @@ struct MetalTextureEntry {
   id<MTLTexture> texture = nil;
   id<MTLSamplerState> sampler = nil;
   uint64_t revision = 0;
+  float mipMapBias = 0.0f;
+};
+
+struct MetalCameraRenderTarget {
+  int32_t width = 0;
+  int32_t height = 0;
+  int32_t msaaSamples = 1;
+  int32_t hdrEnabled = 0;
+  int32_t colorFormat = 0;
+  int32_t dimension = 2;
+  int32_t volumeDepth = 1;
+  /* Single-sample resolve/readback texture remains stable across passes. */
+  id<MTLTexture> colorTexture = nil;
+  id<MTLTexture> msaaColorTexture = nil;
+  id<MTLTexture> depthTexture = nil;
+  id<MTLTexture> normalTexture = nil;
+  id<MTLTexture> msaaNormalTexture = nil;
+  id<MTLTexture> motionTexture = nil;
+  id<MTLTexture> msaaMotionTexture = nil;
+  id<MTLCommandBuffer> lastCameraPass = nil;
+  bool depthInitialized = false;
+  bool normalsInitialized = false;
+  bool motionInitialized = false;
+  bool postProcessedToSrgb = false;
 };
 
 struct MetalVFXParticleKey {
@@ -384,9 +409,169 @@ struct MetalState {
   uint64_t vfxPlanarLastEvictedSubmissionId = 0;
   std::mutex textureMutex;
   std::unordered_map<uint64_t, MetalTextureEntry> textures;
+  std::mutex cameraTargetMutex;
+  std::unordered_map<uint64_t, MetalCameraRenderTarget> cameraTargets;
   id<MTLTexture> whiteTexture = nil;
   id<MTLSamplerState> defaultSampler = nil;
+  id<MTLLibrary> cameraClearLibrary = nil;
+  id<MTLRenderPipelineState> cameraClearPipelines[2][3] = {};
+  id<MTLDepthStencilState> cameraClearDepthStates[2] = {};
+  std::mutex transientResourceMutex;
+  id<MTLLibrary> transientResourceLibrary = nil;
+  id<MTLComputePipelineState> cameraDepthCopyPipeline = nil;
+  id<MTLComputePipelineState> cameraDepthCopyMsaaPipeline = nil;
+  id<MTLComputePipelineState> cameraDepthCopyArrayPipeline = nil;
+  id<MTLComputePipelineState> cameraDepthCopyMsaaArrayPipeline = nil;
+  std::mutex postProcessMutex;
+  id<MTLComputePipelineState> hdrPostProcessPipeline = nil;
+  id<MTLComputePipelineState> hdrBloomPrefilterPipeline = nil;
+  id<MTLComputePipelineState> hdrBloomDownsamplePipeline = nil;
+  // The eight baked curves are immutable for most frames. Keep them in a
+  // device-owned buffer rather than copying the 2 KiB LUT through setBytes
+  // for every final post pass.
+  id<MTLBuffer> hdrCurveLutBuffer = nil;
+  bool hdrCurveLutValid = false;
+  uint64_t hdrCurveLutUploadCount = 0;
+  uint64_t hdrCurveLutCacheHitCount = 0;
 };
+
+enum MetalCameraClearMode {
+  METAL_CAMERA_CLEAR_COLOR = 0,
+  METAL_CAMERA_CLEAR_DEPTH = 1,
+  METAL_CAMERA_CLEAR_COLOR_DEPTH = 2
+};
+
+static int32_t MetalCameraClearFormatIndex(MTLPixelFormat pixelFormat) {
+  if (pixelFormat == MTLPixelFormatBGRA8Unorm) return 0;
+  if (pixelFormat == MTLPixelFormatRGBA16Float) return 1;
+  return -1;
+}
+
+static bool EnsureMetalCameraClearPipeline(
+    MetalState* st, MTLPixelFormat pixelFormat, int32_t mode) {
+  const int32_t formatIndex = MetalCameraClearFormatIndex(pixelFormat);
+  if (!st || !st->device || mode < 0 || mode > 2 || formatIndex < 0)
+    return false;
+  if (st->cameraClearPipelines[formatIndex][mode]) return true;
+  static NSString* source = @
+      "#include <metal_stdlib>\n"
+      "using namespace metal;\n"
+      "vertex float4 anity_camera_clear_vs(uint vertexId [[vertex_id]]) {\n"
+      "  constexpr float2 positions[4] = { float2(-1.0, -1.0), float2(1.0, -1.0), float2(-1.0, 1.0), float2(1.0, 1.0) };\n"
+      "  return float4(positions[vertexId], 0.0, 1.0);\n"
+      "}\n"
+      "fragment float4 anity_camera_clear_fs(constant float4& color [[buffer(0)]]) { return color; }\n";
+  NSError* error = nil;
+  if (!st->cameraClearLibrary) {
+    st->cameraClearLibrary = [st->device newLibraryWithSource:source
+        options:nil error:&error];
+    if (!st->cameraClearLibrary) return false;
+  }
+  id<MTLFunction> vertex = [st->cameraClearLibrary
+      newFunctionWithName:@"anity_camera_clear_vs"];
+  id<MTLFunction> fragment = [st->cameraClearLibrary
+      newFunctionWithName:@"anity_camera_clear_fs"];
+  if (!vertex || !fragment) {
+    [vertex release];
+    [fragment release];
+    return false;
+  }
+  MTLRenderPipelineDescriptor* descriptor = [MTLRenderPipelineDescriptor new];
+  descriptor.vertexFunction = vertex;
+  descriptor.fragmentFunction = fragment;
+  descriptor.colorAttachments[0].pixelFormat = pixelFormat;
+  descriptor.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+  descriptor.colorAttachments[0].writeMask =
+      mode == METAL_CAMERA_CLEAR_DEPTH ? MTLColorWriteMaskNone : MTLColorWriteMaskAll;
+  id<MTLRenderPipelineState> pipeline = [st->device
+      newRenderPipelineStateWithDescriptor:descriptor error:&error];
+  [vertex release];
+  [fragment release];
+  [descriptor release];
+  if (!pipeline) return false;
+  MTLDepthStencilDescriptor* depthDescriptor = [MTLDepthStencilDescriptor new];
+  depthDescriptor.depthCompareFunction = MTLCompareFunctionAlways;
+  depthDescriptor.depthWriteEnabled = mode != METAL_CAMERA_CLEAR_COLOR;
+  id<MTLDepthStencilState> depthState = [st->device
+      newDepthStencilStateWithDescriptor:depthDescriptor];
+  [depthDescriptor release];
+  if (!depthState) {
+    [pipeline release];
+    return false;
+  }
+  st->cameraClearPipelines[formatIndex][mode] = pipeline;
+  st->cameraClearDepthStates[mode == METAL_CAMERA_CLEAR_COLOR ? 0 : 1] = depthState;
+  return true;
+}
+
+static bool EnsureMetalCameraDepthCopyPipelines(
+    MetalState* st, id<MTLComputePipelineState>* outSingle,
+    id<MTLComputePipelineState>* outMsaa, id<MTLComputePipelineState>* outArray,
+    id<MTLComputePipelineState>* outMsaaArray) {
+  if (!st || !st->device || !outSingle || !outMsaa || !outArray || !outMsaaArray) return false;
+  std::lock_guard<std::mutex> lock(st->transientResourceMutex);
+  if (st->cameraDepthCopyPipeline && st->cameraDepthCopyMsaaPipeline &&
+      st->cameraDepthCopyArrayPipeline && st->cameraDepthCopyMsaaArrayPipeline) {
+    *outSingle = st->cameraDepthCopyPipeline;
+    *outMsaa = st->cameraDepthCopyMsaaPipeline;
+    *outArray = st->cameraDepthCopyArrayPipeline;
+    *outMsaaArray = st->cameraDepthCopyMsaaArrayPipeline;
+    return true;
+  }
+  static NSString* source = @
+      "#include <metal_stdlib>\n"
+      "using namespace metal;\n"
+      "kernel void anity_urp_depth_copy(depth2d<float, access::sample> source [[texture(0)]], texture2d<half, access::write> destination [[texture(1)]], sampler sourceSampler [[sampler(0)]], uint2 gid [[thread_position_in_grid]]) { if (gid.x >= destination.get_width() || gid.y >= destination.get_height()) return; float2 uv = (float2(gid) + 0.5f) / float2(destination.get_width(), destination.get_height()); float depth = source.sample(sourceSampler, uv); destination.write(half4(half(depth), half(0.0f), half(0.0f), half(1.0f)), gid); }\n"
+      "kernel void anity_urp_depth_copy_msaa(depth2d_ms<float, access::read> source [[texture(0)]], texture2d<half, access::write> destination [[texture(1)]], uint2 gid [[thread_position_in_grid]]) { if (gid.x >= destination.get_width() || gid.y >= destination.get_height()) return; float depth = source.read(gid, 0); destination.write(half4(half(depth), half(0.0f), half(0.0f), half(1.0f)), gid); }\n"
+      "kernel void anity_urp_depth_copy_array(depth2d_array<float, access::sample> source [[texture(0)]], texture2d_array<half, access::write> destination [[texture(1)]], sampler sourceSampler [[sampler(0)]], constant uint2& slices [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) { if (gid.x >= destination.get_width() || gid.y >= destination.get_height()) return; float2 uv = (float2(gid) + 0.5f) / float2(destination.get_width(), destination.get_height()); float depth = source.sample(sourceSampler, uv, slices.x); destination.write(half4(half(depth), half(0.0f), half(0.0f), half(1.0f)), gid, slices.y); }\n"
+      "kernel void anity_urp_depth_copy_msaa_array(depth2d_ms_array<float, access::read> source [[texture(0)]], texture2d_array<half, access::write> destination [[texture(1)]], constant uint2& slices [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) { if (gid.x >= destination.get_width() || gid.y >= destination.get_height()) return; float depth = source.read(gid, slices.x, 0); destination.write(half4(half(depth), half(0.0f), half(0.0f), half(1.0f)), gid, slices.y); }\n";
+  NSError* error = nil;
+  if (!st->transientResourceLibrary) {
+    st->transientResourceLibrary = [st->device newLibraryWithSource:source
+        options:nil error:&error];
+    if (!st->transientResourceLibrary) return false;
+  }
+  id<MTLFunction> single = [st->transientResourceLibrary
+      newFunctionWithName:@"anity_urp_depth_copy"];
+  id<MTLFunction> msaa = [st->transientResourceLibrary
+      newFunctionWithName:@"anity_urp_depth_copy_msaa"];
+  id<MTLFunction> array = [st->transientResourceLibrary
+      newFunctionWithName:@"anity_urp_depth_copy_array"];
+  id<MTLFunction> msaaArray = [st->transientResourceLibrary
+      newFunctionWithName:@"anity_urp_depth_copy_msaa_array"];
+  if (!single || !msaa || !array || !msaaArray) {
+    [single release];
+    [msaa release];
+    [array release];
+    [msaaArray release];
+    return false;
+  }
+  st->cameraDepthCopyPipeline = [st->device
+      newComputePipelineStateWithFunction:single error:&error];
+  st->cameraDepthCopyMsaaPipeline = [st->device
+      newComputePipelineStateWithFunction:msaa error:&error];
+  st->cameraDepthCopyArrayPipeline = [st->device
+      newComputePipelineStateWithFunction:array error:&error];
+  st->cameraDepthCopyMsaaArrayPipeline = [st->device
+      newComputePipelineStateWithFunction:msaaArray error:&error];
+  [single release];
+  [msaa release];
+  [array release];
+  [msaaArray release];
+  if (!st->cameraDepthCopyPipeline || !st->cameraDepthCopyMsaaPipeline ||
+      !st->cameraDepthCopyArrayPipeline || !st->cameraDepthCopyMsaaArrayPipeline) {
+    [st->cameraDepthCopyPipeline release]; st->cameraDepthCopyPipeline = nil;
+    [st->cameraDepthCopyMsaaPipeline release]; st->cameraDepthCopyMsaaPipeline = nil;
+    [st->cameraDepthCopyArrayPipeline release]; st->cameraDepthCopyArrayPipeline = nil;
+    [st->cameraDepthCopyMsaaArrayPipeline release]; st->cameraDepthCopyMsaaArrayPipeline = nil;
+    return false;
+  }
+  *outSingle = st->cameraDepthCopyPipeline;
+  *outMsaa = st->cameraDepthCopyMsaaPipeline;
+  *outArray = st->cameraDepthCopyArrayPipeline;
+  *outMsaaArray = st->cameraDepthCopyMsaaArrayPipeline;
+  return true;
+}
 
 static bool IsMetalDeviceLost(const MetalState* st) {
   return st && st->deviceLost.load(std::memory_order_acquire) != 0;
@@ -406,6 +591,380 @@ static void ObserveMetalDeviceLoss(
   if (injectedDeviceRemoval ||
       (commandBuffer && IsTerminalMetalDeviceError(commandBuffer.error)))
     st->deviceLost.store(1, std::memory_order_release);
+}
+
+static void ReleaseMetalCameraRenderTarget(
+    MetalState* st, MetalCameraRenderTarget* target) {
+  if (!target) return;
+  if (target->lastCameraPass) {
+    [target->lastCameraPass waitUntilCompleted];
+    ObserveMetalDeviceLoss(st, target->lastCameraPass);
+  }
+  [target->lastCameraPass release];
+  [target->colorTexture release];
+  [target->msaaColorTexture release];
+  [target->depthTexture release];
+  [target->normalTexture release];
+  [target->msaaNormalTexture release];
+  [target->motionTexture release];
+  [target->msaaMotionTexture release];
+  *target = {};
+}
+
+static bool IsCameraTargetDescriptorEqual(
+    const MetalCameraRenderTarget& target,
+    const AnityGraphicsCameraRenderTargetDesc& desc) {
+  return target.width == desc.width && target.height == desc.height &&
+      target.msaaSamples == desc.msaaSamples &&
+      target.hdrEnabled == desc.hdrEnabled && target.colorFormat == desc.colorFormat &&
+      target.dimension == desc.dimension && target.volumeDepth == desc.volumeDepth && target.colorTexture &&
+      target.depthTexture && target.normalTexture &&
+      target.motionTexture &&
+      (desc.msaaSamples == 1 || (target.msaaColorTexture && target.msaaNormalTexture && target.msaaMotionTexture));
+}
+
+static float MetalHalfToFloat(uint16_t bits) {
+  const uint32_t sign = static_cast<uint32_t>(bits & 0x8000u) << 16;
+  int32_t exponent = static_cast<int32_t>((bits >> 10) & 0x1fu);
+  uint32_t mantissa = bits & 0x03ffu;
+  uint32_t value = 0;
+  if (exponent == 0) {
+    if (mantissa != 0) {
+      exponent = 1;
+      while ((mantissa & 0x0400u) == 0) {
+        mantissa <<= 1;
+        --exponent;
+      }
+      mantissa &= 0x03ffu;
+      value = sign | (static_cast<uint32_t>(exponent + 112) << 23) | (mantissa << 13);
+    } else {
+      value = sign;
+    }
+  } else if (exponent == 31) {
+    value = sign | 0x7f800000u | (mantissa << 13);
+  } else {
+    value = sign | (static_cast<uint32_t>(exponent + 112) << 23) | (mantissa << 13);
+  }
+  float result = 0.0f;
+  std::memcpy(&result, &value, sizeof(result));
+  return result;
+}
+
+static AnityResult ReadbackMetalHdrTextureToneMappedRGBA8(
+    id<MTLTexture> texture, int32_t width, int32_t height, uint8_t* pixels,
+    int32_t pixelCapacity, int32_t* outWritten, bool alreadySrgb = false) {
+  if (!texture || texture.pixelFormat != MTLPixelFormatRGBA16Float ||
+      width <= 0 || height <= 0 || pixelCapacity < 0 || !outWritten)
+    return ANITY_ERR_NOT_SUPPORTED;
+  const uint64_t pixelCount = static_cast<uint64_t>(width) * height;
+  const uint64_t required64 = pixelCount * 4u;
+  if (required64 > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
+    return ANITY_ERR_OUT_OF_MEMORY;
+  const int32_t required = static_cast<int32_t>(required64);
+  *outWritten = required;
+  if (pixelCapacity < required || (required > 0 && !pixels)) return ANITY_ERR_INVALID_ARG;
+  std::vector<uint16_t> rgba16(static_cast<size_t>(pixelCount) * 4u);
+  [texture getBytes:rgba16.data()
+      bytesPerRow:static_cast<NSUInteger>(width) * 8u
+      fromRegion:MTLRegionMake2D(0, 0, width, height) mipmapLevel:0];
+  std::vector<float> linear(static_cast<size_t>(pixelCount) * 4u);
+  for (size_t index = 0; index < linear.size(); ++index)
+    linear[index] = MetalHalfToFloat(rgba16[index]);
+  std::vector<float> mapped(linear.size());
+  if (alreadySrgb) {
+    mapped = std::move(linear);
+  } else {
+    AnityHDRColorGrade grade{};
+    grade.tonemapMode = ANITY_TONEMAP_ACES;
+    grade.colorFilterR = 1.f;
+    grade.colorFilterG = 1.f;
+    grade.colorFilterB = 1.f;
+    grade.mixerRedR = 1.f;
+    grade.mixerGreenG = 1.f;
+    grade.mixerBlueB = 1.f;
+    if (AnityHDR_ProcessFrame(linear.data(), width, height, &grade,
+        mapped.data(), 0) != ANITY_OK) return ANITY_ERR_INVALID_ARG;
+  }
+  for (int32_t offset = 0; offset < required; ++offset) {
+    const float component = std::max(0.0f, std::min(1.0f, mapped[offset]));
+    pixels[offset] = static_cast<uint8_t>(std::lround(component * 255.0f));
+  }
+  return ANITY_OK;
+}
+
+struct MetalHDRPostGrade {
+  float postExposure;
+  float contrast;
+  float saturation;
+  float temperature;
+  float tint;
+  float hueShift;
+  float colorFilterR;
+  float colorFilterG;
+  float colorFilterB;
+  float mixerRedR;
+  float mixerRedG;
+  float mixerRedB;
+  float mixerGreenR;
+  float mixerGreenG;
+  float mixerGreenB;
+  float mixerBlueR;
+  float mixerBlueG;
+  float mixerBlueB;
+  int32_t curveEnabled;
+  float bloomThreshold;
+  float bloomIntensity;
+  float bloomScatter;
+  int32_t bloomMaxIterations;
+  int32_t bloomDownscale;
+  int32_t bloomHighQualityFiltering;
+  float bloomTintR;
+  float bloomTintG;
+  float bloomTintB;
+  float bloomDirtIntensity;
+  float bloomDirtMipBias;
+  int32_t tonemapMode;
+};
+
+static bool EnsureWhiteTexture(MetalState* st);
+
+static id<MTLBuffer> GetMetalHDRCurveLutBuffer(
+    MetalState* st, const AnityHDRColorGrade* grade) {
+  if (!st || !st->device || !grade) return nil;
+  constexpr NSUInteger kCurveLutBytes = sizeof(grade->curveLut);
+  std::lock_guard<std::mutex> lock(st->postProcessMutex);
+  if (!st->hdrCurveLutBuffer) {
+    st->hdrCurveLutBuffer = [st->device newBufferWithLength:kCurveLutBytes
+        options:MTLResourceStorageModeShared];
+    st->hdrCurveLutValid = false;
+  }
+  if (!st->hdrCurveLutBuffer || !st->hdrCurveLutBuffer.contents) return nil;
+  void* contents = st->hdrCurveLutBuffer.contents;
+  if (!st->hdrCurveLutValid ||
+      std::memcmp(contents, grade->curveLut, kCurveLutBytes) != 0) {
+    std::memcpy(contents, grade->curveLut, kCurveLutBytes);
+    st->hdrCurveLutValid = true;
+    ++st->hdrCurveLutUploadCount;
+  } else {
+    ++st->hdrCurveLutCacheHitCount;
+  }
+  return st->hdrCurveLutBuffer;
+}
+
+static bool GetMetalHDRPostProcessPipelines(MetalState* st,
+    id<MTLComputePipelineState>* outPrefilter,
+    id<MTLComputePipelineState>* outDownsample,
+    id<MTLComputePipelineState>* outCombine) {
+  if (!st || !st->device || !outPrefilter || !outDownsample || !outCombine) return false;
+  std::lock_guard<std::mutex> lock(st->postProcessMutex);
+  if (st->hdrPostProcessPipeline && st->hdrBloomPrefilterPipeline &&
+      st->hdrBloomDownsamplePipeline) {
+    *outPrefilter = st->hdrBloomPrefilterPipeline;
+    *outDownsample = st->hdrBloomDownsamplePipeline;
+    *outCombine = st->hdrPostProcessPipeline;
+    return true;
+  }
+  static NSString* source = @
+      "#include <metal_stdlib>\n"
+      "using namespace metal;\n"
+      "struct Grade { float postExposure; float contrast; float saturation; float temperature; float tint; float hueShift; float colorFilterR; float colorFilterG; float colorFilterB; float mixerRedR; float mixerRedG; float mixerRedB; float mixerGreenR; float mixerGreenG; float mixerGreenB; float mixerBlueR; float mixerBlueG; float mixerBlueB; int curveEnabled; float bloomThreshold; float bloomIntensity; float bloomScatter; int bloomMaxIterations; int bloomDownscale; int bloomHighQualityFiltering; float bloomTintR; float bloomTintG; float bloomTintB; float bloomDirtIntensity; float bloomDirtMipBias; int tonemapMode; };\n"
+      "float clamp01(float x) { return clamp(x, 0.0f, 1.0f); }\n"
+      "float aces(float x) { return clamp01((x * (2.51f * x + 0.03f)) / (x * (2.43f * x + 0.59f) + 0.14f)); }\n"
+      "float neutral(float x) { return clamp01(x / (x + 0.187f) * 1.035f); }\n"
+      "float srgb(float x) { return x <= 0.0031308f ? 12.92f * x : 1.055f * pow(x, 1.0f / 2.4f) - 0.055f; }\n"
+      "float3 whiteBalance(float3 c, float temperature, float tint) { float warm = clamp(temperature / 100.0f, -1.0f, 1.0f); float magenta = clamp(tint / 100.0f, -1.0f, 1.0f); c.r *= 1.0f + warm * 0.25f; c.b *= 1.0f - warm * 0.25f; c.g *= 1.0f - magenta * 0.15f; return c; }\n"
+      "float3 saturation(float3 c, float value) { float amount = max(0.0f, 1.0f + value / 100.0f); float lum = dot(c, float3(0.2126f, 0.7152f, 0.0722f)); return float3(lum) + (c - float3(lum)) * amount; }\n"
+      "float3 channelMixer(float3 c, constant Grade& grade) { return float3(dot(c, float3(grade.mixerRedR, grade.mixerRedG, grade.mixerRedB)), dot(c, float3(grade.mixerGreenR, grade.mixerGreenG, grade.mixerGreenB)), dot(c, float3(grade.mixerBlueR, grade.mixerBlueG, grade.mixerBlueB))); }\n"
+      "float sampleCurve(constant float* samples, float value) { float p = clamp(value, 0.0f, 1.0f) * 127.0f; uint i = uint(p); uint next = min(i + 1u, 127u); return mix(samples[i], samples[next], p - float(i)); }\n"
+      "float3 colorCurves(float3 c, constant Grade& grade, constant float* curveLut) { if (grade.curveEnabled == 0) return c; float3 master = float3(sampleCurve(curveLut, c.r), sampleCurve(curveLut, c.g), sampleCurve(curveLut, c.b)); c = float3(sampleCurve(curveLut + 128, master.r), sampleCurve(curveLut + 256, master.g), sampleCurve(curveLut + 384, master.b)); float maxv = max(c.r, max(c.g, c.b)); float minv = min(c.r, min(c.g, c.b)); float delta = maxv - minv; float hue = delta <= 0.000001f ? 0.0f : (maxv == c.r ? fmod((c.g - c.b) / delta, 6.0f) : (maxv == c.g ? (c.b - c.r) / delta + 2.0f : (c.r - c.g) / delta + 4.0f)) / 6.0f; hue = fract(hue + 1.0f); float sat = maxv <= 0.000001f ? 0.0f : delta / maxv; float lum = clamp(dot(c, float3(0.2126f, 0.7152f, 0.0722f)), 0.0f, 1.0f); hue = sampleCurve(curveLut + 512, hue); sat *= max(0.0f, sampleCurve(curveLut + 640, hue)); sat *= max(0.0f, sampleCurve(curveLut + 768, sat)); sat *= max(0.0f, sampleCurve(curveLut + 896, lum)); sat = clamp(sat, 0.0f, 1.0f); hue = fract(hue + 1.0f); float section = hue * 6.0f; float chroma = maxv * sat; float x = chroma * (1.0f - abs(fmod(section, 2.0f) - 1.0f)); float3 rgb = section < 1.0f ? float3(chroma, x, 0.0f) : (section < 2.0f ? float3(x, chroma, 0.0f) : (section < 3.0f ? float3(0.0f, chroma, x) : (section < 4.0f ? float3(0.0f, x, chroma) : (section < 5.0f ? float3(x, 0.0f, chroma) : float3(chroma, 0.0f, x))))); return rgb + float3(maxv - chroma); }\n"
+      "float3 hueShift(float3 c, float degrees) { float maxv = max(c.r, max(c.g, c.b)); float minv = min(c.r, min(c.g, c.b)); float delta = maxv - minv; if (delta <= 0.000001f) return c; float hue = maxv == c.r ? fmod((c.g - c.b) / delta, 6.0f) : (maxv == c.g ? (c.b - c.r) / delta + 2.0f : (c.r - c.g) / delta + 4.0f); hue = fract(hue / 6.0f + degrees / 360.0f + 1.0f); float section = hue * 6.0f; float x = delta * (1.0f - abs(fmod(section, 2.0f) - 1.0f)); float3 rgb = section < 1.0f ? float3(delta, x, 0.0f) : (section < 2.0f ? float3(x, delta, 0.0f) : (section < 3.0f ? float3(0.0f, delta, x) : (section < 4.0f ? float3(0.0f, x, delta) : (section < 5.0f ? float3(x, 0.0f, delta) : float3(delta, 0.0f, x))))); return rgb + float3(minv); }\n"
+      "float3 avgBox(texture2d<half, access::read> source, uint2 base, uint box) { uint w = source.get_width(), h = source.get_height(); float3 sum = float3(0.0f); for (uint y = 0; y < box; ++y) for (uint x = 0; x < box; ++x) sum += float3(source.read(min(base + uint2(x, y), uint2(w - 1, h - 1))).rgb); return sum / float(box * box); }\n"
+      "float3 bloomAt(texture2d<half, access::read> source, uint2 gid, uint fullW, uint fullH) { uint2 p = min(uint2((gid.x * source.get_width()) / max(fullW, 1u), (gid.y * source.get_height()) / max(fullH, 1u)), uint2(source.get_width() - 1, source.get_height() - 1)); return float3(source.read(p).rgb); }\n"
+      "kernel void anity_urp_bloom_prefilter(texture2d<half, access::read> source [[texture(0)]], texture2d<half, access::write> output [[texture(1)]], constant Grade& grade [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) { if (gid.x >= output.get_width() || gid.y >= output.get_height()) return; uint scale = grade.bloomDownscale == 0 ? 2u : 4u; uint box = grade.bloomHighQualityFiltering != 0 ? scale * 2u : scale; float3 c = avgBox(source, gid * scale, box); float lum = dot(c, float3(0.2126f, 0.7152f, 0.0722f)); c = lum > grade.bloomThreshold ? c * ((lum - grade.bloomThreshold) / max(lum, 0.0001f)) : float3(0.0f); output.write(half4(half3(c), half(1.0f)), gid); }\n"
+      "kernel void anity_urp_bloom_downsample(texture2d<half, access::read> source [[texture(0)]], texture2d<half, access::write> output [[texture(1)]], constant Grade& grade [[buffer(0)]], uint2 gid [[thread_position_in_grid]]) { if (gid.x >= output.get_width() || gid.y >= output.get_height()) return; uint box = grade.bloomHighQualityFiltering != 0 ? 4u : 2u; output.write(half4(half3(avgBox(source, gid * 2u, box)), half(1.0f)), gid); }\n"
+      "kernel void anity_urp_hdr_post(texture2d<half, access::read_write> target [[texture(0)]], texture2d<half, access::read> bloom0 [[texture(1)]], texture2d<half, access::read> bloom1 [[texture(2)]], texture2d<half, access::read> bloom2 [[texture(3)]], texture2d<half, access::read> bloom3 [[texture(4)]], texture2d<half, access::read> bloom4 [[texture(5)]], texture2d<half, access::read> bloom5 [[texture(6)]], texture2d<half, access::read> bloom6 [[texture(7)]], texture2d<half, access::read> bloom7 [[texture(8)]], texture2d<half, access::sample> dirtTexture [[texture(9)]], sampler dirtSampler [[sampler(0)]], constant Grade& grade [[buffer(0)]], constant float* curveLut [[buffer(1)]], uint2 gid [[thread_position_in_grid]]) {\n"
+      " if (gid.x >= target.get_width() || gid.y >= target.get_height()) return;\n"
+      " float4 p = float4(target.read(gid)); float3 c = p.rgb * exp2(grade.postExposure);\n"
+      " float scatter = clamp(grade.bloomScatter, 0.0f, 1.0f); uint fullW = target.get_width(), fullH = target.get_height(); float3 bloom = bloomAt(bloom0, gid, fullW, fullH); float weight = scatter; if (grade.bloomMaxIterations > 1) bloom += bloomAt(bloom1, gid, fullW, fullH) * weight; weight *= scatter; if (grade.bloomMaxIterations > 2) bloom += bloomAt(bloom2, gid, fullW, fullH) * weight; weight *= scatter; if (grade.bloomMaxIterations > 3) bloom += bloomAt(bloom3, gid, fullW, fullH) * weight; weight *= scatter; if (grade.bloomMaxIterations > 4) bloom += bloomAt(bloom4, gid, fullW, fullH) * weight; weight *= scatter; if (grade.bloomMaxIterations > 5) bloom += bloomAt(bloom5, gid, fullW, fullH) * weight; weight *= scatter; if (grade.bloomMaxIterations > 6) bloom += bloomAt(bloom6, gid, fullW, fullH) * weight; weight *= scatter; if (grade.bloomMaxIterations > 7) bloom += bloomAt(bloom7, gid, fullW, fullH) * weight; float2 uv = (float2(gid) + 0.5f) / float2(fullW, fullH); bloom += bloom * float3(dirtTexture.sample(dirtSampler, uv, bias(grade.bloomDirtMipBias)).rgb) * max(grade.bloomDirtIntensity, 0.0f); c += bloom * grade.bloomIntensity * max(float3(0.0f), float3(grade.bloomTintR, grade.bloomTintG, grade.bloomTintB));\n"
+      " c = channelMixer(whiteBalance(c, grade.temperature, grade.tint) * max(float3(0.0f), float3(grade.colorFilterR, grade.colorFilterG, grade.colorFilterB)), grade);\n"
+      " c = colorCurves(c, grade, curveLut);\n"
+      " c = (c - 0.18f) * (1.0f + grade.contrast / 100.0f) + 0.18f;\n"
+      " c = saturation(hueShift(c, grade.hueShift), grade.saturation);\n"
+      " c = max(c, float3(0.0f));\n"
+      " if (grade.tonemapMode == 2) c = float3(aces(c.r), aces(c.g), aces(c.b));\n"
+      " else if (grade.tonemapMode == 1) c = float3(neutral(c.r), neutral(c.g), neutral(c.b));\n"
+      " else c = clamp(c, 0.0f, 1.0f);\n"
+      " target.write(half4(half3(srgb(c.r), srgb(c.g), srgb(c.b)), half(p.a)), gid);\n"
+      "}\n";
+  NSError* error = nil;
+  id<MTLLibrary> library = [st->device newLibraryWithSource:source options:nil error:&error];
+  if (!library) return false;
+  id<MTLFunction> prefilter = [library newFunctionWithName:@"anity_urp_bloom_prefilter"];
+  id<MTLFunction> downsample = [library newFunctionWithName:@"anity_urp_bloom_downsample"];
+  id<MTLFunction> combine = [library newFunctionWithName:@"anity_urp_hdr_post"];
+  if (!prefilter || !downsample || !combine) {
+    [prefilter release];
+    [downsample release];
+    [combine release];
+    [library release];
+    return false;
+  }
+  st->hdrBloomPrefilterPipeline =
+      [st->device newComputePipelineStateWithFunction:prefilter error:&error];
+  st->hdrBloomDownsamplePipeline =
+      [st->device newComputePipelineStateWithFunction:downsample error:&error];
+  st->hdrPostProcessPipeline =
+      [st->device newComputePipelineStateWithFunction:combine error:&error];
+  [prefilter release];
+  [downsample release];
+  [combine release];
+  [library release];
+  if (!st->hdrBloomPrefilterPipeline || !st->hdrBloomDownsamplePipeline ||
+      !st->hdrPostProcessPipeline) {
+    [st->hdrBloomPrefilterPipeline release]; st->hdrBloomPrefilterPipeline = nil;
+    [st->hdrBloomDownsamplePipeline release]; st->hdrBloomDownsamplePipeline = nil;
+    [st->hdrPostProcessPipeline release]; st->hdrPostProcessPipeline = nil;
+    return false;
+  }
+  *outPrefilter = st->hdrBloomPrefilterPipeline;
+  *outDownsample = st->hdrBloomDownsamplePipeline;
+  *outCombine = st->hdrPostProcessPipeline;
+  return true;
+}
+
+static AnityResult ProcessMetalHDRTexture(
+    MetalState* st, id<MTLTexture> texture, const AnityHDRColorGrade* grade,
+    id<MTLCommandBuffer>* lastSubmission) {
+  if (!st || !texture || !grade || !lastSubmission ||
+      texture.pixelFormat != MTLPixelFormatRGBA16Float || !st->queue)
+    return ANITY_ERR_NOT_SUPPORTED;
+  if (!EnsureWhiteTexture(st)) return ANITY_ERR_OUT_OF_MEMORY;
+  id<MTLComputePipelineState> prefilter = nil;
+  id<MTLComputePipelineState> downsample = nil;
+  id<MTLComputePipelineState> combine = nil;
+  if (!GetMetalHDRPostProcessPipelines(st, &prefilter, &downsample, &combine))
+    return ANITY_ERR_NOT_SUPPORTED;
+  id<MTLBuffer> curveLut = GetMetalHDRCurveLutBuffer(st, grade);
+  if (!curveLut) return ANITY_ERR_OUT_OF_MEMORY;
+  id<MTLCommandBuffer> commandBuffer = [st->queue commandBuffer];
+  if (!commandBuffer) return ANITY_ERR_DEVICE_LOST;
+  commandBuffer.label = @"Anity URP HDR PostProcess";
+  const int requestedBloomLevels = grade->bloomMaxIterations > 0
+      ? std::max(1, std::min(8, grade->bloomMaxIterations)) : 2;
+  const NSUInteger initialDivisor = grade->bloomDownscale == 0 ? 2u : 4u;
+  id<MTLTexture> bloomTextures[8] = { nil, nil, nil, nil, nil, nil, nil, nil };
+  int bloomLevelCount = 0;
+  NSUInteger bloomWidth = std::max<NSUInteger>(1u,
+      (texture.width + initialDivisor - 1u) / initialDivisor);
+  NSUInteger bloomHeight = std::max<NSUInteger>(1u,
+      (texture.height + initialDivisor - 1u) / initialDivisor);
+  for (int level = 0; level < requestedBloomLevels; ++level) {
+    MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float
+        width:bloomWidth height:bloomHeight mipmapped:NO];
+    descriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
+    descriptor.storageMode = MTLStorageModePrivate;
+    bloomTextures[level] = [st->device newTextureWithDescriptor:descriptor];
+    if (!bloomTextures[level]) {
+      for (int index = 0; index < level; ++index) [bloomTextures[index] release];
+      return ANITY_ERR_OUT_OF_MEMORY;
+    }
+    ++bloomLevelCount;
+    if (bloomWidth == 1 && bloomHeight == 1) break;
+    bloomWidth = std::max<NSUInteger>(1u, (bloomWidth + 1u) / 2u);
+    bloomHeight = std::max<NSUInteger>(1u, (bloomHeight + 1u) / 2u);
+  }
+  const auto releaseBlooms = [&] {
+    for (int index = 0; index < bloomLevelCount; ++index) [bloomTextures[index] release];
+  };
+  MetalHDRPostGrade parameters{};
+  parameters.postExposure = grade->postExposure;
+  parameters.contrast = grade->contrast;
+  parameters.saturation = grade->saturation;
+  parameters.temperature = grade->temperature;
+  parameters.tint = grade->tint;
+  parameters.hueShift = grade->hueShift;
+  parameters.colorFilterR = grade->colorFilterR;
+  parameters.colorFilterG = grade->colorFilterG;
+  parameters.colorFilterB = grade->colorFilterB;
+  parameters.mixerRedR = grade->mixerRedR;
+  parameters.mixerRedG = grade->mixerRedG;
+  parameters.mixerRedB = grade->mixerRedB;
+  parameters.mixerGreenR = grade->mixerGreenR;
+  parameters.mixerGreenG = grade->mixerGreenG;
+  parameters.mixerGreenB = grade->mixerGreenB;
+  parameters.mixerBlueR = grade->mixerBlueR;
+  parameters.mixerBlueG = grade->mixerBlueG;
+  parameters.mixerBlueB = grade->mixerBlueB;
+  parameters.curveEnabled = grade->curveEnabled;
+  parameters.bloomThreshold = grade->bloomThreshold;
+  parameters.bloomIntensity = grade->bloomIntensity;
+  parameters.bloomScatter = std::max(0.f, std::min(1.f, grade->bloomScatter));
+  parameters.bloomMaxIterations = bloomLevelCount;
+  parameters.bloomDownscale = grade->bloomDownscale == 0 ? 0 : 1;
+  parameters.bloomHighQualityFiltering = grade->bloomHighQualityFiltering != 0 ? 1 : 0;
+  parameters.bloomTintR = grade->bloomTintR;
+  parameters.bloomTintG = grade->bloomTintG;
+  parameters.bloomTintB = grade->bloomTintB;
+  id<MTLTexture> dirtTexture = st->whiteTexture;
+  id<MTLSamplerState> dirtSampler = st->defaultSampler;
+  parameters.bloomDirtIntensity = 0.f;
+  parameters.bloomDirtMipBias = 0.f;
+  if (grade->bloomDirtTextureId != 0 && grade->bloomDirtIntensity > 0.f) {
+    std::lock_guard<std::mutex> lock(st->textureMutex);
+    const auto dirt = st->textures.find(grade->bloomDirtTextureId);
+    if (dirt != st->textures.end() && dirt->second.texture && dirt->second.sampler) {
+      dirtTexture = dirt->second.texture;
+      dirtSampler = dirt->second.sampler;
+      parameters.bloomDirtIntensity = grade->bloomDirtIntensity;
+      parameters.bloomDirtMipBias = dirt->second.mipMapBias;
+    }
+  }
+  parameters.tonemapMode = grade->tonemapMode;
+  const auto dispatch = ^(id<MTLComputeCommandEncoder> encoder,
+      id<MTLComputePipelineState> pipeline, NSUInteger width, NSUInteger height) {
+    const NSUInteger threads = std::min<NSUInteger>(pipeline.maxTotalThreadsPerThreadgroup, 64u);
+    [encoder setComputePipelineState:pipeline];
+    [encoder dispatchThreads:MTLSizeMake(width, height, 1)
+        threadsPerThreadgroup:MTLSizeMake(std::max<NSUInteger>(1u, threads), 1, 1)];
+  };
+  id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
+  if (!encoder) { releaseBlooms(); return ANITY_ERR_DEVICE_LOST; }
+  [encoder setTexture:texture atIndex:0];
+  [encoder setTexture:bloomTextures[0] atIndex:1];
+  [encoder setBytes:&parameters length:sizeof(parameters) atIndex:0];
+  dispatch(encoder, prefilter, bloomTextures[0].width, bloomTextures[0].height);
+  [encoder endEncoding];
+  for (int level = 1; level < bloomLevelCount; ++level) {
+    encoder = [commandBuffer computeCommandEncoder];
+    if (!encoder) { releaseBlooms(); return ANITY_ERR_DEVICE_LOST; }
+    [encoder setTexture:bloomTextures[level - 1] atIndex:0];
+    [encoder setTexture:bloomTextures[level] atIndex:1];
+    [encoder setBytes:&parameters length:sizeof(parameters) atIndex:0];
+    dispatch(encoder, downsample, bloomTextures[level].width, bloomTextures[level].height);
+    [encoder endEncoding];
+  }
+  encoder = [commandBuffer computeCommandEncoder];
+  if (!encoder) { releaseBlooms(); return ANITY_ERR_DEVICE_LOST; }
+  [encoder setTexture:texture atIndex:0];
+  for (int index = 0; index < 8; ++index) {
+    id<MTLTexture> bloom = bloomTextures[std::min(index, bloomLevelCount - 1)];
+    [encoder setTexture:bloom atIndex:index + 1];
+  }
+  [encoder setTexture:dirtTexture atIndex:9];
+  [encoder setSamplerState:dirtSampler atIndex:0];
+  [encoder setBytes:&parameters length:sizeof(parameters) atIndex:0];
+  [encoder setBuffer:curveLut offset:0 atIndex:1];
+  dispatch(encoder, combine, texture.width, texture.height);
+  [encoder endEncoding];
+  [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completedBuffer) {
+    ObserveMetalDeviceLoss(st, completedBuffer);
+  }];
+  [commandBuffer commit];
+  releaseBlooms();
+  [*lastSubmission release];
+  *lastSubmission = [commandBuffer retain];
+  return ANITY_OK;
 }
 
 static AnityResult WaitForMetalVFXPlanarSubmissions(
@@ -664,6 +1223,7 @@ static MTLSamplerAddressMode ToMetalAddressMode(int32_t mode) {
   switch (mode) {
     case 0: return MTLSamplerAddressModeRepeat;
     case 2: return MTLSamplerAddressModeMirrorRepeat;
+    case 3: return MTLSamplerAddressModeMirrorClampToEdge;
     default: return MTLSamplerAddressModeClampToEdge;
   }
 }
@@ -678,6 +1238,9 @@ static id<MTLSamplerState> CreateSampler(
       : (desc.filterMode == 2 ? MTLSamplerMipFilterLinear : MTLSamplerMipFilterNearest);
   sampler.lodMinClamp = 0.0f;
   sampler.lodMaxClamp = static_cast<float>(std::max(0, desc.mipCount - 1));
+  /* Unity Point filtering has no footprint to anisotropically filter. */
+  sampler.maxAnisotropy = static_cast<NSUInteger>(
+      desc.filterMode == 0 ? 1 : std::max(1, desc.anisoLevel));
   sampler.sAddressMode = ToMetalAddressMode(desc.wrapU);
   sampler.tAddressMode = ToMetalAddressMode(desc.wrapV);
   return [st->device newSamplerStateWithDescriptor:sampler];
@@ -833,9 +1396,9 @@ static id<MTLRenderPipelineState> CreateUIPipeline(
       "    texture2d<float> mainTexture [[texture(0)]],\n"
       "    texture2d<float> alphaTexture [[texture(1)]],\n"
       "    sampler mainSampler [[sampler(0)]], sampler alphaSampler [[sampler(1)]],\n"
-      "    constant uint& textureFlags [[buffer(0)]]) {\n"
-      "  float4 output = input.color * mainTexture.sample(mainSampler, input.uv);\n"
-      "  if ((textureFlags & 2u) != 0u) output.a *= alphaTexture.sample(alphaSampler, input.uv).r;\n"
+      "    constant uint& textureFlags [[buffer(0)]], constant float2& mipBias [[buffer(1)]]) {\n"
+      "  float4 output = input.color * mainTexture.sample(mainSampler, input.uv, bias(mipBias.x));\n"
+      "  if ((textureFlags & 2u) != 0u) output.a *= alphaTexture.sample(alphaSampler, input.uv, bias(mipBias.y)).r;\n"
       "  return output;\n"
       "}\n";
   NSError* error = nil;
@@ -1710,9 +2273,19 @@ struct MetalSwapchainState {
   int32_t ownsLayer = 0;
   CAMetalLayer* layer = nil;
   id<CAMetalDrawable> currentDrawable = nil;
+  int32_t msaaSamples = 1;
   id<MTLTexture> offscreenTexture = nil;
+  id<MTLTexture> msaaColorTexture = nil;
   id<MTLTexture> depthTexture = nil;
+  id<MTLTexture> normalTexture = nil;
+  id<MTLTexture> msaaNormalTexture = nil;
+  id<MTLTexture> motionTexture = nil;
+  id<MTLTexture> msaaMotionTexture = nil;
   bool depthInitialized = false;
+  bool normalsInitialized = false;
+  bool motionInitialized = false;
+  bool postProcessedToSrgb = false;
+  id<MTLCommandBuffer> lastCameraPass = nil;
   int32_t imageIndex = 0;
 };
 
@@ -1787,6 +2360,28 @@ extern "C" void AnityGraphics_Metal_Destroy(AnityGraphicsDevice* device) {
   }
   st->uiPipelineBGRA8 = nil;
   st->uiPipelineRGBA16 = nil;
+  [st->cameraClearLibrary release];
+  st->cameraClearLibrary = nil;
+  for (int format = 0; format < 2; ++format)
+    for (int mode = 0; mode < 3; ++mode)
+      [st->cameraClearPipelines[format][mode] release];
+  for (int format = 0; format < 2; ++format)
+    for (int mode = 0; mode < 3; ++mode)
+      st->cameraClearPipelines[format][mode] = nil;
+  [st->cameraClearDepthStates[0] release];
+  [st->cameraClearDepthStates[1] release];
+  st->cameraClearDepthStates[0] = nil;
+  st->cameraClearDepthStates[1] = nil;
+  [st->transientResourceLibrary release];
+  st->transientResourceLibrary = nil;
+  [st->cameraDepthCopyPipeline release];
+  st->cameraDepthCopyPipeline = nil;
+  [st->cameraDepthCopyMsaaPipeline release];
+  st->cameraDepthCopyMsaaPipeline = nil;
+  [st->cameraDepthCopyArrayPipeline release];
+  st->cameraDepthCopyArrayPipeline = nil;
+  [st->cameraDepthCopyMsaaArrayPipeline release];
+  st->cameraDepthCopyMsaaArrayPipeline = nil;
   [st->vfxInitializeCopyPipeline release];
   st->vfxInitializeCopyPipeline = nil;
   [st->vfxInitializeKernelPipeline release];
@@ -1825,6 +2420,21 @@ extern "C" void AnityGraphics_Metal_Destroy(AnityGraphicsDevice* device) {
     std::lock_guard<std::mutex> lock(st->textureMutex);
     st->textures.clear();
   }
+  {
+    std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+    for (auto& item : st->cameraTargets)
+      ReleaseMetalCameraRenderTarget(st, &item.second);
+    st->cameraTargets.clear();
+  }
+  [st->hdrPostProcessPipeline release];
+  st->hdrPostProcessPipeline = nil;
+  [st->hdrBloomPrefilterPipeline release];
+  st->hdrBloomPrefilterPipeline = nil;
+  [st->hdrBloomDownsamplePipeline release];
+  st->hdrBloomDownsamplePipeline = nil;
+  [st->hdrCurveLutBuffer release];
+  st->hdrCurveLutBuffer = nil;
+  st->hdrCurveLutValid = false;
   st->whiteTexture = nil;
   st->defaultSampler = nil;
   st->queue = nil;
@@ -4609,6 +5219,8 @@ extern "C" AnityResult AnityGraphics_Metal_DrawUI(
     id<MTLSamplerState> mainSampler = st->defaultSampler;
     id<MTLTexture> alphaTexture = st->whiteTexture;
     id<MTLSamplerState> alphaSampler = st->defaultSampler;
+    float mainMipBias = 0.0f;
+    float alphaMipBias = 0.0f;
     uint32_t textureFlags = 0;
     {
       std::lock_guard<std::mutex> lock(st->textureMutex);
@@ -4616,12 +5228,14 @@ extern "C" AnityResult AnityGraphics_Metal_DrawUI(
       if (main != st->textures.end()) {
         mainTexture = main->second.texture;
         mainSampler = main->second.sampler;
+        mainMipBias = main->second.mipMapBias;
         textureFlags |= 1u;
       }
       auto alpha = st->textures.find(packet.info.alphaTextureId);
       if (alpha != st->textures.end()) {
         alphaTexture = alpha->second.texture;
         alphaSampler = alpha->second.sampler;
+        alphaMipBias = alpha->second.mipMapBias;
         textureFlags |= 2u;
       }
     }
@@ -4630,6 +5244,8 @@ extern "C" AnityResult AnityGraphics_Metal_DrawUI(
     [encoder setFragmentSamplerState:mainSampler atIndex:0];
     [encoder setFragmentSamplerState:alphaSampler atIndex:1];
     [encoder setFragmentBytes:&textureFlags length:sizeof(textureFlags) atIndex:0];
+    const float mipBias[2] = {mainMipBias, alphaMipBias};
+    [encoder setFragmentBytes:mipBias length:sizeof(mipBias) atIndex:1];
     [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
         indexCount:static_cast<NSUInteger>(packet.info.indexCount)
         indexType:MTLIndexTypeUInt32
@@ -4688,7 +5304,7 @@ extern "C" AnityResult AnityGraphics_Metal_SyncTexture(
   {
     std::lock_guard<std::mutex> lock(st->textureMutex);
     st->textures[textureId] = MetalTextureEntry{
-        texture, sampler, snapshot.info.desc.revision};
+        texture, sampler, snapshot.info.desc.revision, snapshot.info.desc.mipMapBias};
   }
   AnityGraphics_SetTextureBackendState(
       device, textureId, (__bridge void*)texture, 2);
@@ -4734,6 +5350,14 @@ extern "C" AnityResult AnityGraphics_Metal_CreateSwapchain(
   mst->height = sc->height;
   mst->imageCount = sc->imageCount;
   mst->headless = sc->headless;
+  mst->msaaSamples = device->msaaSamples > 0 ? device->msaaSamples : 1;
+  if ((mst->msaaSamples != 1 && mst->msaaSamples != 2 &&
+       mst->msaaSamples != 4 && mst->msaaSamples != 8) ||
+      ![st->device supportsTextureSampleCount:mst->msaaSamples]) {
+    delete mst;
+    delete sc;
+    return ANITY_ERR_NOT_SUPPORTED;
+  }
 
   CAMetalLayer* layer = nil;
   if (desc->nativeWindow) {
@@ -4779,7 +5403,8 @@ extern "C" AnityResult AnityGraphics_Metal_CreateSwapchain(
         width:static_cast<NSUInteger>(sc->width)
         height:static_cast<NSUInteger>(sc->height)
         mipmapped:NO];
-    textureDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    textureDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead |
+        MTLTextureUsageShaderWrite;
     textureDescriptor.storageMode = MTLStorageModeShared;
     mst->offscreenTexture = [st->device newTextureWithDescriptor:textureDescriptor];
     if (!mst->offscreenTexture) {
@@ -4789,16 +5414,79 @@ extern "C" AnityResult AnityGraphics_Metal_CreateSwapchain(
     }
   }
 
-  MTLTextureDescriptor* depthDescriptor = [MTLTextureDescriptor
-      texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-      width:static_cast<NSUInteger>(sc->width)
-      height:static_cast<NSUInteger>(sc->height)
-      mipmapped:NO];
-  depthDescriptor.usage = MTLTextureUsageRenderTarget;
+  if (mst->msaaSamples > 1) {
+    MTLTextureDescriptor* msaaColorDescriptor = [MTLTextureDescriptor new];
+    msaaColorDescriptor.textureType = MTLTextureType2DMultisample;
+    msaaColorDescriptor.pixelFormat = layer.pixelFormat;
+    msaaColorDescriptor.width = static_cast<NSUInteger>(sc->width);
+    msaaColorDescriptor.height = static_cast<NSUInteger>(sc->height);
+    msaaColorDescriptor.mipmapLevelCount = 1;
+    msaaColorDescriptor.sampleCount = static_cast<NSUInteger>(mst->msaaSamples);
+    msaaColorDescriptor.usage = MTLTextureUsageRenderTarget;
+    msaaColorDescriptor.storageMode = MTLStorageModePrivate;
+    mst->msaaColorTexture = [st->device newTextureWithDescriptor:msaaColorDescriptor];
+    [msaaColorDescriptor release];
+    if (!mst->msaaColorTexture) {
+      [mst->offscreenTexture release];
+      mst->offscreenTexture = nil;
+      delete mst;
+      delete sc;
+      return ANITY_ERR_OUT_OF_MEMORY;
+    }
+  }
+
+  MTLTextureDescriptor* depthDescriptor = mst->msaaSamples > 1
+      ? [MTLTextureDescriptor new]
+      : [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+          MTLPixelFormatDepth32Float width:static_cast<NSUInteger>(sc->width)
+          height:static_cast<NSUInteger>(sc->height) mipmapped:NO];
+  if (mst->msaaSamples > 1) {
+    depthDescriptor.textureType = MTLTextureType2DMultisample;
+    depthDescriptor.pixelFormat = MTLPixelFormatDepth32Float;
+    depthDescriptor.width = static_cast<NSUInteger>(sc->width);
+    depthDescriptor.height = static_cast<NSUInteger>(sc->height);
+    depthDescriptor.mipmapLevelCount = 1;
+    depthDescriptor.sampleCount = static_cast<NSUInteger>(mst->msaaSamples);
+  }
+  depthDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
   depthDescriptor.storageMode = MTLStorageModePrivate;
   mst->depthTexture = [st->device newTextureWithDescriptor:depthDescriptor];
-  if (!mst->depthTexture) {
+  if (mst->msaaSamples > 1) [depthDescriptor release];
+  MTLTextureDescriptor* normalDescriptor = [MTLTextureDescriptor
+      texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Snorm
+      width:static_cast<NSUInteger>(sc->width) height:static_cast<NSUInteger>(sc->height) mipmapped:NO];
+  normalDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+  normalDescriptor.storageMode = MTLStorageModePrivate;
+  mst->normalTexture = [st->device newTextureWithDescriptor:normalDescriptor];
+  MTLTextureDescriptor* motionDescriptor = [MTLTextureDescriptor
+      texture2DDescriptorWithPixelFormat:MTLPixelFormatRG16Float
+      width:static_cast<NSUInteger>(sc->width) height:static_cast<NSUInteger>(sc->height) mipmapped:NO];
+  motionDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+  motionDescriptor.storageMode = MTLStorageModePrivate;
+  mst->motionTexture = [st->device newTextureWithDescriptor:motionDescriptor];
+  if (mst->msaaSamples > 1) {
+    MTLTextureDescriptor* msaaNormal = [MTLTextureDescriptor new];
+    msaaNormal.textureType = MTLTextureType2DMultisample; msaaNormal.pixelFormat = MTLPixelFormatRGBA8Snorm;
+    msaaNormal.width = sc->width; msaaNormal.height = sc->height; msaaNormal.mipmapLevelCount = 1;
+    msaaNormal.sampleCount = mst->msaaSamples; msaaNormal.usage = MTLTextureUsageRenderTarget; msaaNormal.storageMode = MTLStorageModePrivate;
+    mst->msaaNormalTexture = [st->device newTextureWithDescriptor:msaaNormal]; [msaaNormal release];
+    MTLTextureDescriptor* msaaMotion = [MTLTextureDescriptor new];
+    msaaMotion.textureType = MTLTextureType2DMultisample; msaaMotion.pixelFormat = MTLPixelFormatRG16Float;
+    msaaMotion.width = sc->width; msaaMotion.height = sc->height; msaaMotion.mipmapLevelCount = 1;
+    msaaMotion.sampleCount = mst->msaaSamples; msaaMotion.usage = MTLTextureUsageRenderTarget; msaaMotion.storageMode = MTLStorageModePrivate;
+    mst->msaaMotionTexture = [st->device newTextureWithDescriptor:msaaMotion]; [msaaMotion release];
+  }
+  if (!mst->depthTexture || !mst->normalTexture || !mst->motionTexture ||
+      (mst->msaaSamples > 1 && (!mst->msaaNormalTexture || !mst->msaaMotionTexture))) {
+    [mst->offscreenTexture release];
+    [mst->msaaColorTexture release];
     mst->offscreenTexture = nil;
+    mst->msaaColorTexture = nil;
+    [mst->normalTexture release]; mst->normalTexture = nil;
+    [mst->msaaNormalTexture release]; mst->msaaNormalTexture = nil;
+    [mst->motionTexture release]; mst->motionTexture = nil;
+    [mst->msaaMotionTexture release]; mst->msaaMotionTexture = nil;
+    [mst->depthTexture release]; mst->depthTexture = nil;
     mst->layer = nil;
     delete mst;
     delete sc;
@@ -4820,9 +5508,19 @@ extern "C" void AnityGraphics_Metal_DestroySwapchain(AnitySwapchain* swapchain) 
   if (st) (void)WaitForMetalVFXPlanarSubmissions(st, 0, -1, true);
   auto* mst = reinterpret_cast<MetalSwapchainState*>(swapchain->backend);
   mst->currentDrawable = nil;
-  mst->offscreenTexture = nil;
-  mst->depthTexture = nil;
+  [mst->lastCameraPass release];
+  mst->lastCameraPass = nil;
+  [mst->msaaColorTexture release];
+  mst->msaaColorTexture = nil;
+  [mst->normalTexture release]; mst->normalTexture = nil;
+  [mst->msaaNormalTexture release]; mst->msaaNormalTexture = nil;
+  [mst->motionTexture release]; mst->motionTexture = nil;
+  [mst->msaaMotionTexture release]; mst->msaaMotionTexture = nil;
+  [mst->offscreenTexture release]; mst->offscreenTexture = nil;
+  [mst->depthTexture release]; mst->depthTexture = nil;
   mst->depthInitialized = false;
+  mst->normalsInitialized = false;
+  mst->motionInitialized = false;
   if (mst->ownsLayer) {
     mst->layer = nil; /* ARC release */
   } else {
@@ -4830,6 +5528,983 @@ extern "C" void AnityGraphics_Metal_DestroySwapchain(AnitySwapchain* swapchain) 
   }
   delete mst;
   swapchain->backend = nullptr;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_EnsureCameraRenderTarget(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraRenderTargetDesc* desc) {
+  if (!device || !device->backend || !desc || desc->targetId == 0 ||
+      desc->width <= 0 || desc->height <= 0 ||
+      (desc->msaaSamples != 1 && desc->msaaSamples != 2 &&
+       desc->msaaSamples != 4 && desc->msaaSamples != 8) ||
+      (desc->hdrEnabled != 0 && desc->hdrEnabled != 1) ||
+      (desc->colorFormat < 0 || desc->colorFormat > 2) ||
+      (desc->colorFormat != 0 && desc->hdrEnabled != 0) ||
+      (desc->dimension != 2 && desc->dimension != 5) || desc->volumeDepth <= 0 ||
+      (desc->dimension == 2 && desc->volumeDepth != 1))
+    return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  if (IsMetalDeviceLost(st) || !st->device) return ANITY_ERR_DEVICE_LOST;
+  if (![st->device supportsTextureSampleCount:desc->msaaSamples])
+    return ANITY_ERR_NOT_SUPPORTED;
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  auto found = st->cameraTargets.find(desc->targetId);
+  if (found != st->cameraTargets.end() &&
+      IsCameraTargetDescriptorEqual(found->second, *desc))
+    return ANITY_OK;
+  if (found != st->cameraTargets.end()) {
+    ReleaseMetalCameraRenderTarget(st, &found->second);
+    st->cameraTargets.erase(found);
+  }
+
+  const MTLPixelFormat colorFormat = desc->hdrEnabled != 0
+      ? MTLPixelFormatRGBA16Float
+      : (desc->colorFormat == 1 ? MTLPixelFormatRGBA8Snorm :
+         (desc->colorFormat == 2 ? MTLPixelFormatRG16Float : MTLPixelFormatBGRA8Unorm));
+  const bool isArray = desc->dimension == 5;
+  MTLTextureDescriptor* colorDescriptor = [MTLTextureDescriptor new];
+  colorDescriptor.textureType = isArray ? MTLTextureType2DArray : MTLTextureType2D;
+  colorDescriptor.pixelFormat = colorFormat;
+  colorDescriptor.width = desc->width;
+  colorDescriptor.height = desc->height;
+  colorDescriptor.mipmapLevelCount = 1;
+  colorDescriptor.arrayLength = isArray ? desc->volumeDepth : 1;
+  colorDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead |
+      MTLTextureUsageShaderWrite;
+  colorDescriptor.storageMode = MTLStorageModeShared;
+  id<MTLTexture> color = [st->device newTextureWithDescriptor:colorDescriptor];
+  [colorDescriptor release];
+  MTLTextureDescriptor* renderColorDescriptor = nullptr;
+  if (desc->msaaSamples > 1) {
+    renderColorDescriptor = [MTLTextureDescriptor new];
+    renderColorDescriptor.textureType = isArray ? MTLTextureType2DMultisampleArray : MTLTextureType2DMultisample;
+    renderColorDescriptor.pixelFormat = colorFormat;
+    renderColorDescriptor.width = desc->width;
+    renderColorDescriptor.height = desc->height;
+    renderColorDescriptor.mipmapLevelCount = 1;
+    renderColorDescriptor.arrayLength = isArray ? desc->volumeDepth : 1;
+    renderColorDescriptor.sampleCount = desc->msaaSamples;
+    renderColorDescriptor.usage = MTLTextureUsageRenderTarget;
+    renderColorDescriptor.storageMode = MTLStorageModePrivate;
+  }
+  id<MTLTexture> renderColor = renderColorDescriptor
+      ? [st->device newTextureWithDescriptor:renderColorDescriptor] : nil;
+  [renderColorDescriptor release];
+  MTLTextureDescriptor* depthDescriptor = nil;
+  if (desc->msaaSamples > 1) {
+    depthDescriptor = [MTLTextureDescriptor new];
+    depthDescriptor.textureType = isArray ? MTLTextureType2DMultisampleArray : MTLTextureType2DMultisample;
+    depthDescriptor.pixelFormat = MTLPixelFormatDepth32Float;
+    depthDescriptor.width = desc->width;
+    depthDescriptor.height = desc->height;
+    depthDescriptor.mipmapLevelCount = 1;
+    depthDescriptor.arrayLength = isArray ? desc->volumeDepth : 1;
+    depthDescriptor.sampleCount = desc->msaaSamples;
+  } else {
+    depthDescriptor = [MTLTextureDescriptor new];
+    depthDescriptor.textureType = isArray ? MTLTextureType2DArray : MTLTextureType2D;
+    depthDescriptor.pixelFormat = MTLPixelFormatDepth32Float;
+    depthDescriptor.width = desc->width;
+    depthDescriptor.height = desc->height;
+    depthDescriptor.mipmapLevelCount = 1;
+    depthDescriptor.arrayLength = isArray ? desc->volumeDepth : 1;
+  }
+  depthDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+  depthDescriptor.storageMode = MTLStorageModePrivate;
+  id<MTLTexture> depth = [st->device newTextureWithDescriptor:depthDescriptor];
+  [depthDescriptor release];
+  MTLTextureDescriptor* normalDescriptor = [MTLTextureDescriptor new];
+  normalDescriptor.textureType = isArray ? MTLTextureType2DArray : MTLTextureType2D;
+  normalDescriptor.pixelFormat = MTLPixelFormatRGBA8Snorm;
+  normalDescriptor.width = desc->width;
+  normalDescriptor.height = desc->height;
+  normalDescriptor.mipmapLevelCount = 1;
+  normalDescriptor.arrayLength = isArray ? desc->volumeDepth : 1;
+  normalDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+  normalDescriptor.storageMode = MTLStorageModePrivate;
+  id<MTLTexture> normal = [st->device newTextureWithDescriptor:normalDescriptor];
+  [normalDescriptor release];
+  id<MTLTexture> renderNormal = nil;
+  if (desc->msaaSamples > 1) {
+    MTLTextureDescriptor* msaaNormalDescriptor = [MTLTextureDescriptor new];
+    msaaNormalDescriptor.textureType = isArray ? MTLTextureType2DMultisampleArray : MTLTextureType2DMultisample;
+    msaaNormalDescriptor.pixelFormat = MTLPixelFormatRGBA8Snorm;
+    msaaNormalDescriptor.width = desc->width;
+    msaaNormalDescriptor.height = desc->height;
+    msaaNormalDescriptor.mipmapLevelCount = 1;
+    msaaNormalDescriptor.arrayLength = isArray ? desc->volumeDepth : 1;
+    msaaNormalDescriptor.sampleCount = desc->msaaSamples;
+    msaaNormalDescriptor.usage = MTLTextureUsageRenderTarget;
+    msaaNormalDescriptor.storageMode = MTLStorageModePrivate;
+    renderNormal = [st->device newTextureWithDescriptor:msaaNormalDescriptor];
+    [msaaNormalDescriptor release];
+  }
+  MTLTextureDescriptor* motionDescriptor = [MTLTextureDescriptor new];
+  motionDescriptor.textureType = isArray ? MTLTextureType2DArray : MTLTextureType2D;
+  motionDescriptor.pixelFormat = MTLPixelFormatRG16Float;
+  motionDescriptor.width = desc->width;
+  motionDescriptor.height = desc->height;
+  motionDescriptor.mipmapLevelCount = 1;
+  motionDescriptor.arrayLength = isArray ? desc->volumeDepth : 1;
+  motionDescriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+  motionDescriptor.storageMode = MTLStorageModePrivate;
+  id<MTLTexture> motion = [st->device newTextureWithDescriptor:motionDescriptor];
+  [motionDescriptor release];
+  id<MTLTexture> renderMotion = nil;
+  if (desc->msaaSamples > 1) {
+    MTLTextureDescriptor* msaaMotionDescriptor = [MTLTextureDescriptor new];
+    msaaMotionDescriptor.textureType = isArray ? MTLTextureType2DMultisampleArray : MTLTextureType2DMultisample;
+    msaaMotionDescriptor.pixelFormat = MTLPixelFormatRG16Float;
+    msaaMotionDescriptor.width = desc->width;
+    msaaMotionDescriptor.height = desc->height;
+    msaaMotionDescriptor.mipmapLevelCount = 1;
+    msaaMotionDescriptor.arrayLength = isArray ? desc->volumeDepth : 1;
+    msaaMotionDescriptor.sampleCount = desc->msaaSamples;
+    msaaMotionDescriptor.usage = MTLTextureUsageRenderTarget;
+    msaaMotionDescriptor.storageMode = MTLStorageModePrivate;
+    renderMotion = [st->device newTextureWithDescriptor:msaaMotionDescriptor];
+    [msaaMotionDescriptor release];
+  }
+  if (!color || !depth || !normal || !motion ||
+      (desc->msaaSamples > 1 && (!renderColor || !renderNormal || !renderMotion))) {
+    [color release];
+    [renderColor release];
+    [depth release];
+    [normal release];
+    [renderNormal release];
+    [motion release];
+    [renderMotion release];
+    return ANITY_ERR_OUT_OF_MEMORY;
+  }
+  MetalCameraRenderTarget target{};
+  target.width = desc->width;
+  target.height = desc->height;
+  target.msaaSamples = desc->msaaSamples;
+  target.hdrEnabled = desc->hdrEnabled;
+  target.colorFormat = desc->colorFormat;
+  target.dimension = desc->dimension;
+  target.volumeDepth = desc->volumeDepth;
+  target.colorTexture = color;
+  target.msaaColorTexture = renderColor;
+  target.depthTexture = depth;
+  target.normalTexture = normal;
+  target.msaaNormalTexture = renderNormal;
+  target.motionTexture = motion;
+  target.msaaMotionTexture = renderMotion;
+  st->cameraTargets.emplace(desc->targetId, target);
+  return ANITY_OK;
+}
+
+extern "C" void AnityGraphics_Metal_DestroyCameraRenderTarget(
+    AnityGraphicsDevice* device, uint64_t targetId) {
+  if (!device || !device->backend || targetId == 0) return;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto found = st->cameraTargets.find(targetId);
+  if (found == st->cameraTargets.end()) return;
+  ReleaseMetalCameraRenderTarget(st, &found->second);
+  st->cameraTargets.erase(found);
+}
+
+extern "C" AnityResult AnityGraphics_Metal_ReadbackCameraRenderTargetSliceRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, int32_t depthSlice,
+    uint8_t* pixels, int32_t pixelCapacity, int32_t* outWritten);
+
+extern "C" AnityResult AnityGraphics_Metal_ReadbackCameraRenderTargetRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, uint8_t* pixels,
+    int32_t pixelCapacity, int32_t* outWritten) {
+  return AnityGraphics_Metal_ReadbackCameraRenderTargetSliceRGBA8(
+      device, targetId, 0, pixels, pixelCapacity, outWritten);
+}
+
+extern "C" AnityResult AnityGraphics_Metal_ReadbackCameraRenderTargetSliceRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, int32_t depthSlice,
+    uint8_t* pixels, int32_t pixelCapacity, int32_t* outWritten) {
+  if (!device || !device->backend || targetId == 0 || pixelCapacity < 0 ||
+      !outWritten || depthSlice < 0) return ANITY_ERR_INVALID_ARG;
+  *outWritten = 0;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto found = st->cameraTargets.find(targetId);
+  if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  MetalCameraRenderTarget& target = found->second;
+  if (depthSlice >= target.volumeDepth) return ANITY_ERR_INVALID_ARG;
+  if (!target.colorTexture ||
+      (target.colorTexture.pixelFormat != MTLPixelFormatBGRA8Unorm &&
+       target.colorTexture.pixelFormat != MTLPixelFormatRGBA8Snorm &&
+       target.colorTexture.pixelFormat != MTLPixelFormatRG16Float))
+    return ANITY_ERR_NOT_SUPPORTED;
+  const uint64_t required64 = static_cast<uint64_t>(target.width) *
+      static_cast<uint64_t>(target.height) * 4u;
+  if (required64 > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()))
+    return ANITY_ERR_OUT_OF_MEMORY;
+  const int32_t required = static_cast<int32_t>(required64);
+  *outWritten = required;
+  if (pixelCapacity < required || (required > 0 && !pixels)) return ANITY_ERR_INVALID_ARG;
+  if (target.lastCameraPass) {
+    [target.lastCameraPass waitUntilCompleted];
+    ObserveMetalDeviceLoss(st, target.lastCameraPass);
+    if (IsMetalDeviceLost(st)) return ANITY_ERR_DEVICE_LOST;
+    [target.lastCameraPass release];
+    target.lastCameraPass = nil;
+  }
+  std::vector<uint8_t> raw(static_cast<size_t>(required));
+  if (target.dimension == 5) {
+    [target.colorTexture getBytes:raw.data()
+        bytesPerRow:static_cast<NSUInteger>(target.width) * 4u
+        bytesPerImage:static_cast<NSUInteger>(required)
+        fromRegion:MTLRegionMake2D(0, 0, target.width, target.height)
+        mipmapLevel:0 slice:static_cast<NSUInteger>(depthSlice)];
+  } else {
+    [target.colorTexture getBytes:raw.data()
+        bytesPerRow:static_cast<NSUInteger>(target.width) * 4u
+        fromRegion:MTLRegionMake2D(0, 0, target.width, target.height)
+        mipmapLevel:0];
+  }
+  if (target.colorTexture.pixelFormat == MTLPixelFormatRGBA8Snorm) {
+    const int8_t* snorm = reinterpret_cast<const int8_t*>(raw.data());
+    for (int32_t offset = 0; offset < required; ++offset) {
+      const float signedValue = std::max(-1.0f, static_cast<float>(snorm[offset]) / 127.0f);
+      pixels[offset] = static_cast<uint8_t>(std::round((signedValue * 0.5f + 0.5f) * 255.0f));
+    }
+    return ANITY_OK;
+  }
+  if (target.colorTexture.pixelFormat == MTLPixelFormatRG16Float) {
+    const uint16_t* half = reinterpret_cast<const uint16_t*>(raw.data());
+    for (int32_t pixel = 0; pixel < target.width * target.height; ++pixel) {
+      const float x = std::clamp(MetalHalfToFloat(half[pixel * 2]), -1.0f, 1.0f);
+      const float y = std::clamp(MetalHalfToFloat(half[pixel * 2 + 1]), -1.0f, 1.0f);
+      pixels[pixel * 4] = static_cast<uint8_t>(std::round((x * 0.5f + 0.5f) * 255.0f));
+      pixels[pixel * 4 + 1] = static_cast<uint8_t>(std::round((y * 0.5f + 0.5f) * 255.0f));
+      pixels[pixel * 4 + 2] = 0;
+      pixels[pixel * 4 + 3] = 255;
+    }
+    return ANITY_OK;
+  }
+  for (int32_t offset = 0; offset < required; offset += 4) {
+    pixels[offset + 0] = raw[offset + 2];
+    pixels[offset + 1] = raw[offset + 1];
+    pixels[offset + 2] = raw[offset + 0];
+    pixels[offset + 3] = raw[offset + 3];
+  }
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_ReadbackCameraRenderTargetToneMappedSliceRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, int32_t depthSlice,
+    uint8_t* pixels, int32_t pixelCapacity, int32_t* outWritten) {
+  if (!device || !device->backend || targetId == 0 || pixelCapacity < 0 ||
+      !outWritten || depthSlice < 0) return ANITY_ERR_INVALID_ARG;
+  *outWritten = 0;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto found = st->cameraTargets.find(targetId);
+  if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  MetalCameraRenderTarget& target = found->second;
+  if (depthSlice >= target.volumeDepth) return ANITY_ERR_INVALID_ARG;
+  if (target.lastCameraPass) {
+    [target.lastCameraPass waitUntilCompleted];
+    ObserveMetalDeviceLoss(st, target.lastCameraPass);
+    if (IsMetalDeviceLost(st)) return ANITY_ERR_DEVICE_LOST;
+    [target.lastCameraPass release];
+    target.lastCameraPass = nil;
+  }
+  id<MTLTexture> readbackTexture = target.colorTexture;
+  if (target.dimension == 5) {
+    readbackTexture = [target.colorTexture newTextureViewWithPixelFormat:target.colorTexture.pixelFormat
+        textureType:MTLTextureType2D levels:NSMakeRange(0, 1)
+        slices:NSMakeRange(static_cast<NSUInteger>(depthSlice), 1)];
+    if (!readbackTexture) return ANITY_ERR_OUT_OF_MEMORY;
+  }
+  const AnityResult result = ReadbackMetalHdrTextureToneMappedRGBA8(readbackTexture,
+      target.width, target.height, pixels, pixelCapacity, outWritten,
+      target.postProcessedToSrgb);
+  if (target.dimension == 5) [readbackTexture release];
+  return result;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_ReadbackCameraRenderTargetToneMappedRGBA8(
+    AnityGraphicsDevice* device, uint64_t targetId, uint8_t* pixels,
+    int32_t pixelCapacity, int32_t* outWritten) {
+  return AnityGraphics_Metal_ReadbackCameraRenderTargetToneMappedSliceRGBA8(
+      device, targetId, 0, pixels, pixelCapacity, outWritten);
+}
+
+extern "C" AnityResult AnityGraphics_Metal_ProcessCameraRenderTargetHDR(
+    AnityGraphicsDevice* device, uint64_t targetId,
+    const AnityHDRColorGrade* grade) {
+  if (!device || !device->backend || targetId == 0 || !grade)
+    return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  if (IsMetalDeviceLost(st)) return ANITY_ERR_DEVICE_LOST;
+  std::lock_guard<std::mutex> lock(st->cameraTargetMutex);
+  const auto found = st->cameraTargets.find(targetId);
+  if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  MetalCameraRenderTarget& target = found->second;
+  // The final URP grade is normally given a Texture2D.  XR single-pass
+  // instancing owns a Texture2DArray, so process an explicit 2D view of every
+  // eye layer rather than silently binding just layer zero to the compute
+  // kernels.  Queue ordering keeps all eye grades in the same final stack.
+  const int32_t sliceCount = target.volumeDepth;
+  AnityResult result = ANITY_OK;
+  for (int32_t slice = 0; slice < sliceCount; ++slice) {
+    id<MTLTexture> gradeView = target.colorTexture;
+    if (sliceCount > 1) {
+      gradeView = [target.colorTexture newTextureViewWithPixelFormat:target.colorTexture.pixelFormat
+          textureType:MTLTextureType2D levels:NSMakeRange(0, 1)
+          slices:NSMakeRange(static_cast<NSUInteger>(slice), 1)];
+      if (!gradeView) { result = ANITY_ERR_OUT_OF_MEMORY; break; }
+    }
+    result = ProcessMetalHDRTexture(st, gradeView, grade, &target.lastCameraPass);
+    if (sliceCount > 1) [gradeView release];
+    if (result != ANITY_OK) break;
+  }
+  if (result == ANITY_OK) target.postProcessedToSrgb = true;
+  return result;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId);
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId) {
+  return AnityGraphics_Metal_CopyCameraRenderTargetColorSlice(
+      device, sourceTargetId, sourceIsCameraTarget, 0, 0, destinationTargetId);
+}
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId) {
+  if (!device || !device->backend || destinationTargetId == 0 ||
+      sourceSlice < 0 || destinationSlice < 0 ||
+      (sourceIsCameraTarget != 0 && sourceIsCameraTarget != 1) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == 0) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == destinationTargetId))
+    return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  if (IsMetalDeviceLost(st) || !st->queue) return ANITY_ERR_DEVICE_LOST;
+
+  id<MTLTexture> source = nil;
+  if (sourceIsCameraTarget != 0) {
+    if (!device->swapchain || !device->swapchain->backend)
+      return ANITY_ERR_NOT_SUPPORTED;
+    auto* swapchain = reinterpret_cast<MetalSwapchainState*>(device->swapchain->backend);
+    source = swapchain->currentDrawable ? swapchain->currentDrawable.texture :
+        swapchain->offscreenTexture;
+  }
+
+  std::unique_lock<std::mutex> targetsLock(st->cameraTargetMutex);
+  if (sourceIsCameraTarget == 0) {
+    const auto sourceFound = st->cameraTargets.find(sourceTargetId);
+    if (sourceFound == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+    if (sourceSlice >= sourceFound->second.volumeDepth) return ANITY_ERR_INVALID_ARG;
+    source = sourceFound->second.colorTexture;
+  } else if (sourceSlice != 0) {
+    return ANITY_ERR_INVALID_ARG;
+  }
+  const auto destinationFound = st->cameraTargets.find(destinationTargetId);
+  if (destinationFound == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  MetalCameraRenderTarget& destination = destinationFound->second;
+  if (destinationSlice >= destination.volumeDepth) return ANITY_ERR_INVALID_ARG;
+  if (!source || !destination.colorTexture ||
+      source.width != destination.colorTexture.width ||
+      source.height != destination.colorTexture.height ||
+      source.pixelFormat != destination.colorTexture.pixelFormat)
+    return ANITY_ERR_NOT_SUPPORTED;
+
+  id<MTLCommandBuffer> commandBuffer = [st->queue commandBuffer];
+  if (!commandBuffer) return ANITY_ERR_DEVICE_LOST;
+  commandBuffer.label = @"Anity URP Opaque Texture Copy";
+  id<MTLBlitCommandEncoder> encoder = [commandBuffer blitCommandEncoder];
+  if (!encoder) return ANITY_ERR_DEVICE_LOST;
+  const MTLSize size = MTLSizeMake(source.width, source.height, 1);
+  [encoder copyFromTexture:source sourceSlice:static_cast<NSUInteger>(sourceSlice) sourceLevel:0
+      sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:size
+      toTexture:destination.colorTexture destinationSlice:static_cast<NSUInteger>(destinationSlice) destinationLevel:0
+      destinationOrigin:MTLOriginMake(0, 0, 0)];
+  [encoder endEncoding];
+  [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completedBuffer) {
+    ObserveMetalDeviceLoss(st, completedBuffer);
+  }];
+  [commandBuffer commit];
+  [destination.lastCameraPass release];
+  destination.lastCameraPass = [commandBuffer retain];
+  destination.postProcessedToSrgb = false;
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetDepthToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId);
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetDepthToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId) {
+  return AnityGraphics_Metal_CopyCameraRenderTargetDepthToColorSlice(
+      device, sourceTargetId, sourceIsCameraTarget, 0, 0, destinationTargetId);
+}
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetDepthToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId) {
+  if (!device || !device->backend || destinationTargetId == 0 ||
+      sourceSlice < 0 || destinationSlice < 0 ||
+      (sourceIsCameraTarget != 0 && sourceIsCameraTarget != 1) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == 0) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == destinationTargetId))
+    return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  if (IsMetalDeviceLost(st) || !st->queue) return ANITY_ERR_DEVICE_LOST;
+
+  id<MTLTexture> sourceDepth = nil;
+  if (sourceIsCameraTarget != 0) {
+    if (!device->swapchain || !device->swapchain->backend)
+      return ANITY_ERR_NOT_SUPPORTED;
+    auto* swapchain = reinterpret_cast<MetalSwapchainState*>(device->swapchain->backend);
+    if (sourceSlice != 0) return ANITY_ERR_INVALID_ARG;
+    sourceDepth = swapchain->depthTexture;
+  }
+
+  std::unique_lock<std::mutex> targetsLock(st->cameraTargetMutex);
+  if (sourceIsCameraTarget == 0) {
+    const auto sourceFound = st->cameraTargets.find(sourceTargetId);
+    if (sourceFound == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+    if (sourceSlice >= sourceFound->second.volumeDepth) return ANITY_ERR_INVALID_ARG;
+    sourceDepth = sourceFound->second.depthTexture;
+  }
+  const auto destinationFound = st->cameraTargets.find(destinationTargetId);
+  if (destinationFound == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+  MetalCameraRenderTarget& destination = destinationFound->second;
+  if (destinationSlice >= destination.volumeDepth) return ANITY_ERR_INVALID_ARG;
+  if (!sourceDepth || !destination.colorTexture ||
+      sourceDepth.width != destination.colorTexture.width ||
+      sourceDepth.height != destination.colorTexture.height ||
+      sourceDepth.pixelFormat != MTLPixelFormatDepth32Float)
+    return ANITY_ERR_NOT_SUPPORTED;
+
+  id<MTLComputePipelineState> singlePipeline = nil;
+  id<MTLComputePipelineState> msaaPipeline = nil;
+  id<MTLComputePipelineState> arrayPipeline = nil;
+  id<MTLComputePipelineState> msaaArrayPipeline = nil;
+  if (!EnsureMetalCameraDepthCopyPipelines(st, &singlePipeline, &msaaPipeline,
+      &arrayPipeline, &msaaArrayPipeline))
+    return ANITY_ERR_NOT_SUPPORTED;
+  const bool array = sourceDepth.textureType == MTLTextureType2DArray ||
+      sourceDepth.textureType == MTLTextureType2DMultisampleArray;
+  const bool destinationArray = destination.colorTexture.textureType == MTLTextureType2DArray;
+  if (array != destinationArray) return ANITY_ERR_NOT_SUPPORTED;
+  const bool msaa = sourceDepth.textureType == MTLTextureType2DMultisample ||
+      sourceDepth.textureType == MTLTextureType2DMultisampleArray;
+  id<MTLCommandBuffer> commandBuffer = [st->queue commandBuffer];
+  if (!commandBuffer) return ANITY_ERR_DEVICE_LOST;
+  commandBuffer.label = @"Anity URP Depth Texture Copy";
+  id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
+  if (!encoder) return ANITY_ERR_DEVICE_LOST;
+  id<MTLComputePipelineState> pipeline = array
+      ? (msaa ? msaaArrayPipeline : arrayPipeline)
+      : (msaa ? msaaPipeline : singlePipeline);
+  [encoder setComputePipelineState:pipeline];
+  [encoder setTexture:sourceDepth atIndex:0];
+  [encoder setTexture:destination.colorTexture atIndex:1];
+  if (array) {
+    const uint32_t slices[2] = {static_cast<uint32_t>(sourceSlice), static_cast<uint32_t>(destinationSlice)};
+    [encoder setBytes:slices length:sizeof(slices) atIndex:0];
+  }
+  MTLSamplerDescriptor* samplerDescriptor = nil;
+  id<MTLSamplerState> sampler = nil;
+  if (!msaa) {
+    samplerDescriptor = [MTLSamplerDescriptor new];
+    samplerDescriptor.minFilter = MTLSamplerMinMagFilterNearest;
+    samplerDescriptor.magFilter = MTLSamplerMinMagFilterNearest;
+    samplerDescriptor.sAddressMode = MTLSamplerAddressModeClampToEdge;
+    samplerDescriptor.tAddressMode = MTLSamplerAddressModeClampToEdge;
+    sampler = [st->device newSamplerStateWithDescriptor:samplerDescriptor];
+    [samplerDescriptor release];
+    if (!sampler) {
+      [encoder endEncoding];
+      return ANITY_ERR_OUT_OF_MEMORY;
+    }
+    [encoder setSamplerState:sampler atIndex:0];
+  }
+  const NSUInteger threads = std::max<NSUInteger>(1u,
+      std::min<NSUInteger>(pipeline.maxTotalThreadsPerThreadgroup, 64u));
+  [encoder dispatchThreads:MTLSizeMake(destination.colorTexture.width,
+      destination.colorTexture.height, 1)
+      threadsPerThreadgroup:MTLSizeMake(threads, 1, 1)];
+  [encoder endEncoding];
+  [sampler release];
+  [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completedBuffer) {
+    ObserveMetalDeviceLoss(st, completedBuffer);
+  }];
+  [commandBuffer commit];
+  [destination.lastCameraPass release];
+  destination.lastCameraPass = [commandBuffer retain];
+  destination.postProcessedToSrgb = false;
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetNormalsToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId);
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetNormalsToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId) {
+  return AnityGraphics_Metal_CopyCameraRenderTargetNormalsToColorSlice(
+      device, sourceTargetId, sourceIsCameraTarget, 0, 0, destinationTargetId);
+}
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetNormalsToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId) {
+  if (!device || !device->backend || destinationTargetId == 0 ||
+      sourceSlice < 0 || destinationSlice < 0 ||
+      (sourceIsCameraTarget != 0 && sourceIsCameraTarget != 1) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == 0) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == destinationTargetId))
+    return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  if (IsMetalDeviceLost(st) || !st->queue) return ANITY_ERR_DEVICE_LOST;
+  std::unique_lock<std::mutex> targetsLock(st->cameraTargetMutex);
+  const auto destinationFound = st->cameraTargets.find(destinationTargetId);
+  if (destinationFound == st->cameraTargets.end())
+    return ANITY_ERR_INVALID_ARG;
+  MetalCameraRenderTarget& destination = destinationFound->second;
+  id<MTLTexture> sourceTexture = nil;
+  if (sourceIsCameraTarget != 0) {
+    if (!device->swapchain || !device->swapchain->backend) return ANITY_ERR_NOT_SUPPORTED;
+    if (sourceSlice != 0) return ANITY_ERR_INVALID_ARG;
+    sourceTexture = reinterpret_cast<MetalSwapchainState*>(device->swapchain->backend)->normalTexture;
+  } else {
+    const auto sourceFound = st->cameraTargets.find(sourceTargetId);
+    if (sourceFound == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+    if (sourceSlice >= sourceFound->second.volumeDepth) return ANITY_ERR_INVALID_ARG;
+    sourceTexture = sourceFound->second.normalTexture;
+  }
+  if (destinationSlice >= destination.volumeDepth) return ANITY_ERR_INVALID_ARG;
+  if (!sourceTexture || !destination.colorTexture ||
+      sourceTexture.width != destination.colorTexture.width ||
+      sourceTexture.height != destination.colorTexture.height ||
+      sourceTexture.pixelFormat != destination.colorTexture.pixelFormat)
+    return ANITY_ERR_NOT_SUPPORTED;
+  id<MTLCommandBuffer> commandBuffer = [st->queue commandBuffer];
+  id<MTLBlitCommandEncoder> encoder = commandBuffer ? [commandBuffer blitCommandEncoder] : nil;
+  if (!encoder) return ANITY_ERR_DEVICE_LOST;
+  commandBuffer.label = @"Anity URP Normals Texture Copy";
+  const MTLSize size = MTLSizeMake(sourceTexture.width, sourceTexture.height, 1);
+  [encoder copyFromTexture:sourceTexture sourceSlice:static_cast<NSUInteger>(sourceSlice) sourceLevel:0
+      sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:size
+      toTexture:destination.colorTexture destinationSlice:static_cast<NSUInteger>(destinationSlice) destinationLevel:0
+      destinationOrigin:MTLOriginMake(0, 0, 0)];
+  [encoder endEncoding];
+  [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completedBuffer) {
+    ObserveMetalDeviceLoss(st, completedBuffer);
+  }];
+  [commandBuffer commit];
+  [destination.lastCameraPass release];
+  destination.lastCameraPass = [commandBuffer retain];
+  destination.postProcessedToSrgb = false;
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetMotionToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId);
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetMotionToColor(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, uint64_t destinationTargetId) {
+  return AnityGraphics_Metal_CopyCameraRenderTargetMotionToColorSlice(
+      device, sourceTargetId, sourceIsCameraTarget, 0, 0, destinationTargetId);
+}
+
+extern "C" AnityResult AnityGraphics_Metal_CopyCameraRenderTargetMotionToColorSlice(
+    AnityGraphicsDevice* device, uint64_t sourceTargetId,
+    int32_t sourceIsCameraTarget, int32_t sourceSlice, int32_t destinationSlice,
+    uint64_t destinationTargetId) {
+  if (!device || !device->backend || destinationTargetId == 0 ||
+      sourceSlice < 0 || destinationSlice < 0 ||
+      (sourceIsCameraTarget != 0 && sourceIsCameraTarget != 1) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == 0) ||
+      (sourceIsCameraTarget == 0 && sourceTargetId == destinationTargetId))
+    return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  if (IsMetalDeviceLost(st) || !st->queue) return ANITY_ERR_DEVICE_LOST;
+  std::unique_lock<std::mutex> targetsLock(st->cameraTargetMutex);
+  const auto destinationFound = st->cameraTargets.find(destinationTargetId);
+  if (destinationFound == st->cameraTargets.end())
+    return ANITY_ERR_INVALID_ARG;
+  MetalCameraRenderTarget& destination = destinationFound->second;
+  id<MTLTexture> sourceTexture = nil;
+  if (sourceIsCameraTarget != 0) {
+    if (!device->swapchain || !device->swapchain->backend) return ANITY_ERR_NOT_SUPPORTED;
+    if (sourceSlice != 0) return ANITY_ERR_INVALID_ARG;
+    sourceTexture = reinterpret_cast<MetalSwapchainState*>(device->swapchain->backend)->motionTexture;
+  } else {
+    const auto sourceFound = st->cameraTargets.find(sourceTargetId);
+    if (sourceFound == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+    if (sourceSlice >= sourceFound->second.volumeDepth) return ANITY_ERR_INVALID_ARG;
+    sourceTexture = sourceFound->second.motionTexture;
+  }
+  if (destinationSlice >= destination.volumeDepth) return ANITY_ERR_INVALID_ARG;
+  if (!sourceTexture || !destination.colorTexture ||
+      sourceTexture.width != destination.colorTexture.width ||
+      sourceTexture.height != destination.colorTexture.height ||
+      sourceTexture.pixelFormat != destination.colorTexture.pixelFormat)
+    return ANITY_ERR_NOT_SUPPORTED;
+  id<MTLCommandBuffer> commandBuffer = [st->queue commandBuffer];
+  id<MTLBlitCommandEncoder> encoder = commandBuffer ? [commandBuffer blitCommandEncoder] : nil;
+  if (!encoder) return ANITY_ERR_DEVICE_LOST;
+  commandBuffer.label = @"Anity URP Motion Vector Copy";
+  const MTLSize size = MTLSizeMake(sourceTexture.width, sourceTexture.height, 1);
+  [encoder copyFromTexture:sourceTexture sourceSlice:static_cast<NSUInteger>(sourceSlice) sourceLevel:0
+      sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:size
+      toTexture:destination.colorTexture destinationSlice:static_cast<NSUInteger>(destinationSlice) destinationLevel:0
+      destinationOrigin:MTLOriginMake(0, 0, 0)];
+  [encoder endEncoding];
+  [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completedBuffer) {
+    ObserveMetalDeviceLoss(st, completedBuffer);
+  }];
+  [commandBuffer commit];
+  [destination.lastCameraPass release];
+  destination.lastCameraPass = [commandBuffer retain];
+  destination.postProcessedToSrgb = false;
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_DrawCameraMesh(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraMeshDrawDesc* desc) {
+  if (!device || !device->backend || !desc ||
+      (desc->targetId == 0 && desc->targetIsCameraTarget == 0) ||
+      (desc->targetIsCameraTarget != 0 && desc->targetIsCameraTarget != 1) ||
+      desc->blendMode < 0 || desc->blendMode > 4 ||
+      (desc->depthWriteEnabled != 0 && desc->depthWriteEnabled != 1) ||
+      (desc->stereoInstanceCount != 1 && desc->stereoInstanceCount != 2) ||
+      (desc->alphaClipEnabled != 0 && desc->alphaClipEnabled != 1) ||
+      desc->depthSlice < 0 ||
+      !std::isfinite(desc->alphaClipThreshold) ||
+      !desc->vertices || desc->vertexCount <= 0 || !desc->indices ||
+      desc->indexCount <= 0 || (desc->indexCount % 3) != 0 ||
+      (desc->hasPreviousObjectToClip != 0 && desc->hasPreviousObjectToClip != 1))
+    return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  if (IsMetalDeviceLost(st) || !st->device || !st->queue) return ANITY_ERR_DEVICE_LOST;
+  // The mesh fragment always samples a base-map slot. Ensure the Unity-white
+  // fallback exists even for an untextured material, instead of relying on a
+  // previous texture-registry or UI submission to have created it.
+  if (!EnsureWhiteTexture(st)) return ANITY_ERR_OUT_OF_MEMORY;
+  std::unique_lock<std::mutex> lock(st->cameraTargetMutex, std::defer_lock);
+  MetalCameraRenderTarget* target = nullptr;
+  MetalSwapchainState* swapchain = nullptr;
+  id<MTLTexture> colorResolve = nil, normalResolve = nil, motionResolve = nil, depth = nil;
+  id<MTLTexture> color = nil, normal = nil, motion = nil;
+  int32_t msaaSamples = 1;
+  bool normalsInitialized = false, motionInitialized = false;
+  if (desc->targetIsCameraTarget != 0) {
+    if (!device->swapchain || !device->swapchain->backend) return ANITY_ERR_NOT_SUPPORTED;
+    swapchain = reinterpret_cast<MetalSwapchainState*>(device->swapchain->backend);
+    colorResolve = swapchain->currentDrawable ? swapchain->currentDrawable.texture : swapchain->offscreenTexture;
+    normalResolve = swapchain->normalTexture; motionResolve = swapchain->motionTexture; depth = swapchain->depthTexture;
+    color = swapchain->msaaColorTexture ? swapchain->msaaColorTexture : colorResolve;
+    normal = swapchain->msaaNormalTexture ? swapchain->msaaNormalTexture : normalResolve;
+    motion = swapchain->msaaMotionTexture ? swapchain->msaaMotionTexture : motionResolve;
+    msaaSamples = swapchain->msaaSamples; normalsInitialized = swapchain->normalsInitialized; motionInitialized = swapchain->motionInitialized;
+  } else {
+    lock.lock(); const auto found = st->cameraTargets.find(desc->targetId);
+    if (found == st->cameraTargets.end()) return ANITY_ERR_INVALID_ARG;
+    target = &found->second;
+    colorResolve = target->colorTexture; normalResolve = target->normalTexture; motionResolve = target->motionTexture; depth = target->depthTexture;
+    color = target->msaaColorTexture ? target->msaaColorTexture : colorResolve;
+    normal = target->msaaNormalTexture ? target->msaaNormalTexture : normalResolve;
+    motion = target->msaaMotionTexture ? target->msaaMotionTexture : motionResolve;
+    msaaSamples = target->msaaSamples; normalsInitialized = target->normalsInitialized; motionInitialized = target->motionInitialized;
+  }
+  if ((swapchain && (desc->depthSlice != 0 || desc->stereoInstanceCount != 1)) ||
+      (target && desc->depthSlice + desc->stereoInstanceCount > target->volumeDepth))
+    return ANITY_ERR_INVALID_ARG;
+  if (!color || !colorResolve || !normal || !normalResolve || !motion || !motionResolve || !depth) return ANITY_ERR_NOT_SUPPORTED;
+  const uint64_t vertexBytes = static_cast<uint64_t>(desc->vertexCount) * sizeof(AnityGraphicsMeshVertex);
+  const uint64_t indexBytes = static_cast<uint64_t>(desc->indexCount) * sizeof(uint32_t);
+  if (vertexBytes > std::numeric_limits<NSUInteger>::max() ||
+      indexBytes > std::numeric_limits<NSUInteger>::max()) return ANITY_ERR_OUT_OF_MEMORY;
+  id<MTLBuffer> vertices = [st->device newBufferWithBytes:desc->vertices
+      length:static_cast<NSUInteger>(vertexBytes) options:MTLResourceStorageModeShared];
+  id<MTLBuffer> indices = [st->device newBufferWithBytes:desc->indices
+      length:static_cast<NSUInteger>(indexBytes) options:MTLResourceStorageModeShared];
+  if (!vertices || !indices) { [vertices release]; [indices release]; return ANITY_ERR_OUT_OF_MEMORY; }
+  static NSString* stereoSource = @
+      "#include <metal_stdlib>\nusing namespace metal;\n"
+      "struct V { packed_float3 p; packed_float3 pp; packed_float3 n; packed_float4 t; packed_float2 uv; packed_float4 c; }; struct O { float4 p [[position]]; float4 c; float3 n; float4 t; float2 uv; float2 m; uint layer [[render_target_array_index]]; }; struct F { half4 c [[color(0)]]; half4 n [[color(1)]]; half2 m [[color(2)]]; };\n"
+      "vertex O anity_mesh_vs(const device V* v [[buffer(0)]], constant float4x4* m [[buffer(1)]], constant float4x4* p [[buffer(2)]], constant float4x4* motion [[buffer(3)]], constant int& hasPrev [[buffer(4)]], constant int& instances [[buffer(5)]], uint id [[vertex_id]], uint instance [[instance_id]]) { uint eye=instances == 2 ? min(instance, 1u) : 0u; O o; float4 pos=float4(float3(v[id].p),1.0); o.p=m[eye]*pos; o.c=float4(v[id].c); o.n=normalize(float3(v[id].n)); o.t=float4(v[id].t); o.uv=float2(v[id].uv); float4 currentMotion=motion[eye]*pos; float4 prev=hasPrev!=0?p[eye]*float4(float3(v[id].pp),1.0):currentMotion; o.m=(currentMotion.xy/currentMotion.w-prev.xy/prev.w)*0.5; o.layer=eye; return o; }\n"
+      "fragment F anity_mesh_fs(O in [[stage_in]], constant float& cutoff [[buffer(0)]], constant int& alphaClip [[buffer(1)]], constant float4& baseMapST [[buffer(2)]], constant int& hasNormalMap [[buffer(3)]], texture2d<float> baseMap [[texture(0)]], texture2d<float> normalMap [[texture(1)]], sampler baseSampler [[sampler(0)]], sampler normalSampler [[sampler(1)]]) { float2 uv=in.uv*baseMapST.xy+baseMapST.zw; float4 shaded=in.c*baseMap.sample(baseSampler,uv); if (alphaClip != 0 && shaded.a < cutoff) discard_fragment(); float3 normal=in.n; if (hasNormalMap != 0) { float3 map=normalMap.sample(normalSampler,uv).xyz*2.0-1.0; float3 tangent=normalize(in.t.xyz); float3 bitangent=normalize(cross(normal,tangent)*in.t.w); normal=normalize(tangent*map.x+bitangent*map.y+normal*map.z); } F o; o.c=half4(shaded); o.n=half4(half3(normal), 0.0h); o.m=half2(in.m); return o; }\n";
+  static NSString* monoSource = @
+      "#include <metal_stdlib>\nusing namespace metal;\n"
+      "struct V { packed_float3 p; packed_float3 pp; packed_float3 n; packed_float4 t; packed_float2 uv; packed_float4 c; }; struct O { float4 p [[position]]; float4 c; float3 n; float4 t; float2 uv; float2 m; }; struct F { half4 c [[color(0)]]; half4 n [[color(1)]]; half2 m [[color(2)]]; };\n"
+      "vertex O anity_mesh_vs(const device V* v [[buffer(0)]], constant float4x4* m [[buffer(1)]], constant float4x4* p [[buffer(2)]], constant float4x4* motion [[buffer(3)]], constant int& hasPrev [[buffer(4)]], uint id [[vertex_id]]) { O o; float4 pos=float4(float3(v[id].p),1.0); o.p=m[0]*pos; o.c=float4(v[id].c); o.n=normalize(float3(v[id].n)); o.t=float4(v[id].t); o.uv=float2(v[id].uv); float4 currentMotion=motion[0]*pos; float4 prev=hasPrev!=0?p[0]*float4(float3(v[id].pp),1.0):currentMotion; o.m=(currentMotion.xy/currentMotion.w-prev.xy/prev.w)*0.5; return o; }\n"
+      "fragment F anity_mesh_fs(O in [[stage_in]], constant float& cutoff [[buffer(0)]], constant int& alphaClip [[buffer(1)]], constant float4& baseMapST [[buffer(2)]], constant int& hasNormalMap [[buffer(3)]], texture2d<float> baseMap [[texture(0)]], texture2d<float> normalMap [[texture(1)]], sampler baseSampler [[sampler(0)]], sampler normalSampler [[sampler(1)]]) { float2 uv=in.uv*baseMapST.xy+baseMapST.zw; float4 shaded=in.c*baseMap.sample(baseSampler,uv); if (alphaClip != 0 && shaded.a < cutoff) discard_fragment(); float3 normal=in.n; if (hasNormalMap != 0) { float3 map=normalMap.sample(normalSampler,uv).xyz*2.0-1.0; float3 tangent=normalize(in.t.xyz); float3 bitangent=normalize(cross(normal,tangent)*in.t.w); normal=normalize(tangent*map.x+bitangent*map.y+normal*map.z); } F o; o.c=half4(shaded); o.n=half4(half3(normal), 0.0h); o.m=half2(in.m); return o; }\n";
+  NSString* source = desc->stereoInstanceCount == 2 ? stereoSource : monoSource;
+  NSError* error = nil;
+  id<MTLLibrary> library = [st->device newLibraryWithSource:source options:nil error:&error];
+  id<MTLFunction> vs = library ? [library newFunctionWithName:@"anity_mesh_vs"] : nil;
+  id<MTLFunction> fs = library ? [library newFunctionWithName:@"anity_mesh_fs"] : nil;
+  MTLRenderPipelineDescriptor* pipelineDesc = [MTLRenderPipelineDescriptor new];
+  pipelineDesc.vertexFunction = vs; pipelineDesc.fragmentFunction = fs;
+  pipelineDesc.colorAttachments[0].pixelFormat = color.pixelFormat;
+  pipelineDesc.colorAttachments[1].pixelFormat = normal.pixelFormat;
+  pipelineDesc.colorAttachments[2].pixelFormat = motion.pixelFormat;
+  pipelineDesc.colorAttachments[2].writeMask = desc->writeMotionVectors != 0
+      ? MTLColorWriteMaskAll : MTLColorWriteMaskNone;
+  MTLRenderPipelineColorAttachmentDescriptor* colorAttachment = pipelineDesc.colorAttachments[0];
+  colorAttachment.blendingEnabled = desc->blendMode != 0;
+  if (colorAttachment.blendingEnabled) {
+    switch (desc->blendMode) {
+      case 1: colorAttachment.sourceRGBBlendFactor = MTLBlendFactorSourceAlpha; colorAttachment.destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha; break;
+      case 2: colorAttachment.sourceRGBBlendFactor = MTLBlendFactorOne; colorAttachment.destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha; break;
+      case 3: colorAttachment.sourceRGBBlendFactor = MTLBlendFactorSourceAlpha; colorAttachment.destinationRGBBlendFactor = MTLBlendFactorOne; break;
+      default: colorAttachment.sourceRGBBlendFactor = MTLBlendFactorDestinationColor; colorAttachment.destinationRGBBlendFactor = MTLBlendFactorZero; break;
+    }
+    colorAttachment.sourceAlphaBlendFactor = colorAttachment.sourceRGBBlendFactor;
+    colorAttachment.destinationAlphaBlendFactor = colorAttachment.destinationRGBBlendFactor;
+  }
+  pipelineDesc.depthAttachmentPixelFormat = depth.pixelFormat;
+  pipelineDesc.rasterSampleCount = static_cast<NSUInteger>(std::max(1, msaaSamples));
+  // Metal requires a declared primitive topology when a vertex shader routes
+  // instances to array layers through render_target_array_index.
+  pipelineDesc.inputPrimitiveTopology = MTLPrimitiveTopologyClassTriangle;
+  id<MTLRenderPipelineState> pipeline = vs && fs ? [st->device newRenderPipelineStateWithDescriptor:pipelineDesc error:&error] : nil;
+  [pipelineDesc release]; [vs release]; [fs release]; [library release];
+  if (!pipeline) { [vertices release]; [indices release]; return ANITY_ERR_NOT_SUPPORTED; }
+  MTLDepthStencilDescriptor* depthDesc = [MTLDepthStencilDescriptor new];
+  depthDesc.depthCompareFunction = MTLCompareFunctionLessEqual; depthDesc.depthWriteEnabled = desc->depthWriteEnabled != 0;
+  id<MTLDepthStencilState> depthState = [st->device newDepthStencilStateWithDescriptor:depthDesc];
+  [depthDesc release];
+  id<MTLCommandBuffer> command = [st->queue commandBuffer];
+  MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+  // A non-array target must retain Metal's default array length. Explicitly
+  // setting it is only valid for the two-layer single-pass-instanced path.
+  if (desc->stereoInstanceCount == 2)
+    pass.renderTargetArrayLength = 2;
+  pass.colorAttachments[0].texture = color; pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
+  pass.colorAttachments[0].slice = desc->depthSlice;
+  pass.colorAttachments[0].storeAction = color != colorResolve ? MTLStoreActionMultisampleResolve : MTLStoreActionStore;
+  pass.colorAttachments[0].resolveTexture = color != colorResolve ? colorResolve : nil;
+  pass.colorAttachments[0].resolveSlice = desc->depthSlice;
+  pass.colorAttachments[1].texture = normal;
+  pass.colorAttachments[1].slice = desc->depthSlice;
+  pass.colorAttachments[1].loadAction = normalsInitialized ? MTLLoadActionLoad : MTLLoadActionClear;
+  pass.colorAttachments[1].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
+  pass.colorAttachments[1].storeAction = normal != normalResolve ? MTLStoreActionMultisampleResolve : MTLStoreActionStore;
+  pass.colorAttachments[1].resolveTexture = normal != normalResolve ? normalResolve : nil;
+  pass.colorAttachments[1].resolveSlice = desc->depthSlice;
+  pass.colorAttachments[2].texture = motion;
+  pass.colorAttachments[2].slice = desc->depthSlice;
+  pass.colorAttachments[2].loadAction = motionInitialized ? MTLLoadActionLoad : MTLLoadActionClear;
+  pass.colorAttachments[2].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
+  pass.colorAttachments[2].storeAction = motion != motionResolve ? MTLStoreActionMultisampleResolve : MTLStoreActionStore;
+  pass.colorAttachments[2].resolveTexture = motion != motionResolve ? motionResolve : nil;
+  pass.colorAttachments[2].resolveSlice = desc->depthSlice;
+  pass.depthAttachment.texture = depth; pass.depthAttachment.slice = desc->depthSlice; pass.depthAttachment.loadAction = MTLLoadActionLoad; pass.depthAttachment.storeAction = MTLStoreActionStore;
+  id<MTLRenderCommandEncoder> encoder = command ? [command renderCommandEncoderWithDescriptor:pass] : nil;
+  if (!encoder || !depthState) { [encoder endEncoding]; [depthState release]; [pipeline release]; [vertices release]; [indices release]; return ANITY_ERR_DEVICE_LOST; }
+  [encoder setRenderPipelineState:pipeline]; [encoder setDepthStencilState:depthState];
+  [encoder setVertexBuffer:vertices offset:0 atIndex:0]; [encoder setVertexBytes:desc->stereoObjectToClip length:sizeof(desc->stereoObjectToClip) atIndex:1];
+  [encoder setVertexBytes:desc->stereoPreviousObjectToClip length:sizeof(desc->stereoPreviousObjectToClip) atIndex:2];
+  [encoder setVertexBytes:desc->stereoMotionObjectToClip length:sizeof(desc->stereoMotionObjectToClip) atIndex:3];
+  [encoder setVertexBytes:&desc->hasPreviousObjectToClip length:sizeof(desc->hasPreviousObjectToClip) atIndex:4];
+  [encoder setVertexBytes:&desc->stereoInstanceCount length:sizeof(desc->stereoInstanceCount) atIndex:5];
+  [encoder setFragmentBytes:&desc->alphaClipThreshold length:sizeof(desc->alphaClipThreshold) atIndex:0];
+  [encoder setFragmentBytes:&desc->alphaClipEnabled length:sizeof(desc->alphaClipEnabled) atIndex:1];
+  [encoder setFragmentBytes:desc->baseMapST length:sizeof(desc->baseMapST) atIndex:2];
+  id<MTLTexture> baseTexture = st->whiteTexture;
+  id<MTLSamplerState> baseSampler = st->defaultSampler;
+  if (desc->baseTextureId != 0) {
+    std::lock_guard<std::mutex> textureLock(st->textureMutex);
+    const auto foundTexture = st->textures.find(desc->baseTextureId);
+    if (foundTexture != st->textures.end()) { baseTexture = foundTexture->second.texture; baseSampler = foundTexture->second.sampler; }
+  }
+  [encoder setFragmentTexture:baseTexture atIndex:0];
+  [encoder setFragmentSamplerState:baseSampler atIndex:0];
+  id<MTLTexture> normalTexture = st->whiteTexture;
+  id<MTLSamplerState> normalSampler = st->defaultSampler;
+  int32_t hasNormalMap = 0;
+  if (desc->normalMapTextureId != 0) {
+    std::lock_guard<std::mutex> textureLock(st->textureMutex);
+    const auto foundTexture = st->textures.find(desc->normalMapTextureId);
+    if (foundTexture != st->textures.end()) { normalTexture = foundTexture->second.texture; normalSampler = foundTexture->second.sampler; hasNormalMap = 1; }
+  }
+  [encoder setFragmentBytes:&hasNormalMap length:sizeof(hasNormalMap) atIndex:3];
+  [encoder setFragmentTexture:normalTexture atIndex:1];
+  [encoder setFragmentSamplerState:normalSampler atIndex:1];
+  [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:static_cast<NSUInteger>(desc->indexCount) indexType:MTLIndexTypeUInt32 indexBuffer:indices indexBufferOffset:0 instanceCount:static_cast<NSUInteger>(desc->stereoInstanceCount)];
+  [encoder endEncoding]; [command commit];
+  if (swapchain) {
+    [swapchain->lastCameraPass release]; swapchain->lastCameraPass = [command retain]; swapchain->depthInitialized = true;
+    swapchain->normalsInitialized = true; swapchain->motionInitialized = true; swapchain->postProcessedToSrgb = false;
+  } else {
+    [target->lastCameraPass release]; target->lastCameraPass = [command retain]; target->depthInitialized = true;
+    target->normalsInitialized = true; target->motionInitialized = true; target->postProcessedToSrgb = false;
+  }
+  [depthState release]; [pipeline release]; [vertices release]; [indices release];
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_GetHDRPostProcessStats(
+    const AnityGraphicsDevice* device,
+    AnityGraphicsHDRPostProcessStats* outStats) {
+  if (!device || !device->backend || !outStats) return ANITY_ERR_INVALID_ARG;
+  const auto* constState = reinterpret_cast<const MetalState*>(device->backend);
+  auto* st = const_cast<MetalState*>(constState);
+  std::lock_guard<std::mutex> lock(st->postProcessMutex);
+  *outStats = {};
+  outStats->backendKind = 2;
+  outStats->curveLutSamplesPerCurve = 128;
+  outStats->curveLutByteCapacity = st->hdrCurveLutBuffer
+      ? static_cast<uint64_t>(st->hdrCurveLutBuffer.length) : 0u;
+  outStats->curveLutUploadCount = st->hdrCurveLutUploadCount;
+  outStats->curveLutCacheHitCount = st->hdrCurveLutCacheHitCount;
+  return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_ExecuteCameraPass(
+    AnityGraphicsDevice* device, const AnityGraphicsCameraPassDesc* desc) {
+  if (!device || !device->backend || !desc) return ANITY_ERR_INVALID_ARG;
+  auto* st = reinterpret_cast<MetalState*>(device->backend);
+  if (IsMetalDeviceLost(st) || !st->queue) return ANITY_ERR_DEVICE_LOST;
+  const bool isCameraTarget =
+      (desc->flags & ANITY_CAMERA_PASS_TARGET_IS_CAMERA_TARGET) != 0;
+  MetalSwapchainState* mst = nullptr;
+  MetalCameraRenderTarget* renderTarget = nullptr;
+  std::unique_lock<std::mutex> renderTargetLock;
+  id<MTLTexture> target = nil;
+  id<MTLTexture> renderColor = nil;
+  id<MTLTexture> depth = nil;
+  bool depthInitialized = false;
+  if (isCameraTarget) {
+    if (!device->swapchain || !device->swapchain->backend) return ANITY_ERR_NOT_SUPPORTED;
+    mst = reinterpret_cast<MetalSwapchainState*>(device->swapchain->backend);
+    target = mst->currentDrawable ? mst->currentDrawable.texture : mst->offscreenTexture;
+    if (desc->msaaSamples != mst->msaaSamples) return ANITY_ERR_INVALID_ARG;
+    renderColor = mst->msaaColorTexture ? mst->msaaColorTexture : target;
+    depth = mst->depthTexture;
+    depthInitialized = mst->depthInitialized;
+  } else {
+    renderTargetLock = std::unique_lock<std::mutex>(st->cameraTargetMutex);
+    const auto found = st->cameraTargets.find(desc->targetId);
+    if (found == st->cameraTargets.end()) return ANITY_ERR_NOT_SUPPORTED;
+    renderTarget = &found->second;
+    target = renderTarget->colorTexture;
+    if (desc->msaaSamples != renderTarget->msaaSamples)
+      return ANITY_ERR_INVALID_ARG;
+    renderColor = renderTarget->msaaColorTexture
+        ? renderTarget->msaaColorTexture : target;
+    depth = renderTarget->depthTexture;
+    depthInitialized = renderTarget->depthInitialized;
+  }
+  if ((mst && (desc->depthSlice != 0 || desc->depthSliceCount != 1)) ||
+      (renderTarget && (desc->depthSlice >= renderTarget->volumeDepth ||
+          desc->depthSliceCount > renderTarget->volumeDepth - desc->depthSlice)))
+    return ANITY_ERR_INVALID_ARG;
+  if (!target || !renderColor || !depth ||
+      desc->targetWidth != static_cast<int32_t>(target.width) ||
+      desc->targetHeight != static_cast<int32_t>(target.height))
+    return ANITY_ERR_NOT_SUPPORTED;
+
+  if (mst) mst->postProcessedToSrgb = false;
+  else renderTarget->postProcessedToSrgb = false;
+
+  const bool fullViewport = desc->viewportX == 0.0f &&
+      desc->viewportY == 0.0f &&
+      desc->viewportWidth == static_cast<float>(target.width) &&
+      desc->viewportHeight == static_cast<float>(target.height);
+  const bool partialColorClear = !fullViewport &&
+      (desc->flags & ANITY_CAMERA_PASS_CLEAR_COLOR) != 0;
+  const bool partialDepthClear = !fullViewport &&
+      (desc->flags & ANITY_CAMERA_PASS_CLEAR_DEPTH) != 0;
+
+  id<MTLCommandBuffer> commandBuffer = [st->queue commandBuffer];
+  if (!commandBuffer) return ANITY_ERR_DEVICE_LOST;
+  commandBuffer.label = @"Anity URP Camera Pass";
+  MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+  pass.renderTargetArrayLength = desc->depthSliceCount;
+  pass.colorAttachments[0].texture = renderColor;
+  pass.colorAttachments[0].slice = desc->depthSlice;
+  pass.colorAttachments[0].loadAction =
+      fullViewport && (desc->flags & ANITY_CAMERA_PASS_CLEAR_COLOR) != 0
+      ? MTLLoadActionClear : MTLLoadActionLoad;
+  if (renderColor != target) {
+    pass.colorAttachments[0].resolveTexture = target;
+    pass.colorAttachments[0].resolveSlice = desc->depthSlice;
+    pass.colorAttachments[0].storeAction = MTLStoreActionStoreAndMultisampleResolve;
+  } else {
+    pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+  }
+  pass.colorAttachments[0].clearColor = MTLClearColorMake(
+      desc->clearR, desc->clearG, desc->clearB, desc->clearA);
+  pass.depthAttachment.texture = depth;
+  pass.depthAttachment.slice = desc->depthSlice;
+  const bool clearDepth = (fullViewport &&
+      (desc->flags & ANITY_CAMERA_PASS_CLEAR_DEPTH) != 0) || !depthInitialized;
+  pass.depthAttachment.loadAction = clearDepth ? MTLLoadActionClear : MTLLoadActionLoad;
+  pass.depthAttachment.storeAction = MTLStoreActionStore;
+  pass.depthAttachment.clearDepth = desc->clearDepth;
+  id<MTLRenderCommandEncoder> encoder =
+      [commandBuffer renderCommandEncoderWithDescriptor:pass];
+  if (!encoder) return ANITY_ERR_DEVICE_LOST;
+  const double metalViewportY = static_cast<double>(target.height) -
+      (static_cast<double>(desc->viewportY) + desc->viewportHeight);
+  [encoder setViewport:(MTLViewport){
+      desc->viewportX, metalViewportY, desc->viewportWidth,
+      desc->viewportHeight, 0.0, 1.0 }];
+  if (partialColorClear || partialDepthClear) {
+    const int32_t mode = partialColorClear && partialDepthClear
+        ? METAL_CAMERA_CLEAR_COLOR_DEPTH
+        : (partialColorClear ? METAL_CAMERA_CLEAR_COLOR : METAL_CAMERA_CLEAR_DEPTH);
+    if (!EnsureMetalCameraClearPipeline(st, renderColor.pixelFormat, mode)) {
+      [encoder endEncoding];
+      return ANITY_ERR_NOT_SUPPORTED;
+    }
+    const int32_t formatIndex = MetalCameraClearFormatIndex(renderColor.pixelFormat);
+    const float color[4] = {
+        desc->clearR, desc->clearG, desc->clearB, desc->clearA };
+    [encoder setRenderPipelineState:st->cameraClearPipelines[formatIndex][mode]];
+    [encoder setDepthStencilState:st->cameraClearDepthStates[
+        mode == METAL_CAMERA_CLEAR_COLOR ? 0 : 1]];
+    [encoder setFragmentBytes:color length:sizeof(color) atIndex:0];
+    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+  }
+  [encoder endEncoding];
+  [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> completedBuffer) {
+    ObserveMetalDeviceLoss(st, completedBuffer);
+  }];
+  [commandBuffer commit];
+  if (mst) {
+    [mst->lastCameraPass release];
+    mst->lastCameraPass = [commandBuffer retain];
+    mst->depthInitialized = true;
+    if (clearDepth) {
+      mst->normalsInitialized = false;
+      mst->motionInitialized = false;
+    }
+  } else {
+    [renderTarget->lastCameraPass release];
+    renderTarget->lastCameraPass = [commandBuffer retain];
+    renderTarget->depthInitialized = true;
+    // A cleared depth buffer begins a fresh visible-surface set, so the next
+    // mesh draw must also clear its transient normals attachment.
+    if (clearDepth) {
+      renderTarget->normalsInitialized = false;
+      renderTarget->motionInitialized = false;
+    }
+  }
+  return ANITY_OK;
 }
 
 extern "C" AnityResult AnityGraphics_Metal_Acquire(AnitySwapchain* swapchain, int32_t* outIndex) {
@@ -4896,6 +6571,13 @@ extern "C" AnityResult AnityGraphics_Metal_ReadbackSwapchainRGBA8(
   const AnityResult vfxWait =
       WaitForMetalVFXPlanarSubmissions(st, 0, -1, true);
   if (vfxWait != ANITY_OK) return vfxWait;
+  if (mst->lastCameraPass) {
+    [mst->lastCameraPass waitUntilCompleted];
+    ObserveMetalDeviceLoss(st, mst->lastCameraPass);
+    if (IsMetalDeviceLost(st)) return ANITY_ERR_DEVICE_LOST;
+    [mst->lastCameraPass release];
+    mst->lastCameraPass = nil;
+  }
   for (int i = 0; i < 3; ++i) {
     if (!st->uiSlotAcquired[i] ||
         st->uiSlotSubmitted[i].load(std::memory_order_acquire) == 0)
@@ -4915,6 +6597,45 @@ extern "C" AnityResult AnityGraphics_Metal_ReadbackSwapchainRGBA8(
     pixels[offset + 3] = bgra[offset + 3];
   }
   return ANITY_OK;
+}
+
+extern "C" AnityResult AnityGraphics_Metal_ReadbackSwapchainToneMappedRGBA8(
+    AnitySwapchain* swapchain, uint8_t* pixels, int32_t pixelCapacity,
+    int32_t* outWritten) {
+  if (!swapchain || !swapchain->backend || pixelCapacity < 0 || !outWritten)
+    return ANITY_ERR_INVALID_ARG;
+  *outWritten = 0;
+  auto* mst = reinterpret_cast<MetalSwapchainState*>(swapchain->backend);
+  auto* st = swapchain->device
+      ? reinterpret_cast<MetalState*>(swapchain->device->backend) : nullptr;
+  if (!st || !mst->offscreenTexture) return ANITY_ERR_NOT_SUPPORTED;
+  const AnityResult vfxWait = WaitForMetalVFXPlanarSubmissions(st, 0, -1, true);
+  if (vfxWait != ANITY_OK) return vfxWait;
+  if (mst->lastCameraPass) {
+    [mst->lastCameraPass waitUntilCompleted];
+    ObserveMetalDeviceLoss(st, mst->lastCameraPass);
+    if (IsMetalDeviceLost(st)) return ANITY_ERR_DEVICE_LOST;
+    [mst->lastCameraPass release];
+    mst->lastCameraPass = nil;
+  }
+  return ReadbackMetalHdrTextureToneMappedRGBA8(mst->offscreenTexture,
+      mst->width, mst->height, pixels, pixelCapacity, outWritten,
+      mst->postProcessedToSrgb);
+}
+
+extern "C" AnityResult AnityGraphics_Metal_ProcessSwapchainHDR(
+    AnitySwapchain* swapchain, const AnityHDRColorGrade* grade) {
+  if (!swapchain || !swapchain->backend || !grade) return ANITY_ERR_INVALID_ARG;
+  auto* st = swapchain->device
+      ? reinterpret_cast<MetalState*>(swapchain->device->backend) : nullptr;
+  auto* mst = reinterpret_cast<MetalSwapchainState*>(swapchain->backend);
+  if (!st || IsMetalDeviceLost(st)) return ANITY_ERR_DEVICE_LOST;
+  id<MTLTexture> target = mst->currentDrawable
+      ? mst->currentDrawable.texture : mst->offscreenTexture;
+  const AnityResult result = ProcessMetalHDRTexture(st, target, grade,
+      &mst->lastCameraPass);
+  if (result == ANITY_OK) mst->postProcessedToSrgb = true;
+  return result;
 }
 
 #else

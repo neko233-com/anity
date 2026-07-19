@@ -121,7 +121,13 @@ public static class EditorApplication
 
   public static void OpenProject(string projectPath)
   {
-    _ = projectPath;
+    var fullPath = Path.GetFullPath(projectPath);
+    if (!Directory.Exists(fullPath))
+    {
+      throw new DirectoryNotFoundException($"Project path not found: {fullPath}");
+    }
+    Directory.SetCurrentDirectory(fullPath);
+    AssetDatabase.SetProjectRoot(fullPath);
     projectChanged?.Invoke();
   }
 

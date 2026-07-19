@@ -1,6 +1,7 @@
 #define ANITY_NATIVE_BUILD
 #include "anity_graphics_texture_internal.h"
 
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -39,7 +40,8 @@ bool IsValidTextureDesc(const AnityGraphicsTextureDesc& desc, int32_t byteCount)
   if (desc.textureId == 0 || desc.width <= 0 || desc.height <= 0 ||
       desc.mipCount <= 0 || byteCount < 0 || desc.filterMode < 0 ||
       desc.filterMode > 2 || desc.wrapU < 0 || desc.wrapU > 3 ||
-      desc.wrapV < 0 || desc.wrapV > 3 || (desc.linear != 0 && desc.linear != 1))
+      desc.wrapV < 0 || desc.wrapV > 3 || (desc.linear != 0 && desc.linear != 1) ||
+      !std::isfinite(desc.mipMapBias) || desc.anisoLevel < 0 || desc.anisoLevel > 16)
     return false;
   int32_t fullMipCount = 1;
   int32_t fullWidth = desc.width;
@@ -125,6 +127,10 @@ AnityResult ANITY_CALL AnityGraphics_UploadTextureRGBA8(
     auto replacement = std::make_unique<AnityGraphicsTextureStorage>();
     replacement->rgba8.assign(pixels, pixels + byteCount);
     replacement->info.desc = *desc;
+    /* Zero was the field's value for callers compiled against the previous
+     * descriptor. Normalize it to Unity's default aniso level. */
+    if (replacement->info.desc.anisoLevel == 0)
+      replacement->info.desc.anisoLevel = 1;
     replacement->info.byteCount = byteCount;
     replacement->info.backendKind = 0;
     {

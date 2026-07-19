@@ -55,7 +55,7 @@ public sealed class CliHost
                     Fail($"projectPath not found: {parsed.ProjectPath}");
                     return _exitCode;
                 }
-                Directory.SetCurrentDirectory(parsed.ProjectPath);
+                EditorApplication.OpenProject(parsed.ProjectPath);
                 WriteLine($"projectPath={parsed.ProjectPath}");
             }
 

@@ -95,8 +95,11 @@ public abstract class RenderPipeline : IDisposable
     private void RenderSingleCamera(ScriptableRenderContext context, Camera camera)
     {
         var cmd = CommandBufferPool.Get("Camera.Render");
-        cmd.ClearRenderTarget(true, true, camera.backgroundColor);
-        context.ExecuteCommandBuffer(cmd);
+        if (ShouldClearCameraTarget(camera))
+        {
+            cmd.ClearRenderTarget(true, true, camera.backgroundColor);
+            context.ExecuteCommandBuffer(cmd);
+        }
         ExecuteRender(context, camera);
         // Native Planar VFX is an immediate transparent pass in the first
         // production subset. Submit it after the recorded camera clear and
@@ -104,6 +107,12 @@ public abstract class RenderPipeline : IDisposable
         UnityEngine.VFX.VFXManager.ProcessCameraCommandFromRenderLoop(camera, cmd);
         CommandBufferPool.Release(cmd);
     }
+
+    /// <summary>
+    /// Lets a pipeline own target clearing when it has camera-stack semantics.
+    /// The default preserves the built-in SRP behavior.
+    /// </summary>
+    protected virtual bool ShouldClearCameraTarget(Camera camera) => true;
 
     protected abstract void ExecuteRender(ScriptableRenderContext context, Camera camera);
 

@@ -439,6 +439,70 @@ namespace UnityEngine.Rendering
     }
   }
 
+  /// <summary>
+  /// Unity-style color-grading curve metadata.  The renderer bakes this into
+  /// a fixed LUT before crossing the native graphics ABI.
+  /// </summary>
+  [Serializable]
+  public sealed class TextureCurve
+  {
+    public AnimationCurve curve;
+    public Color color;
+    public float loop;
+    public bool zeroValueIsOne;
+
+    public TextureCurve(AnimationCurve curve, float loop, bool zeroValueIsOne, Color color)
+    {
+      this.curve = curve ?? AnimationCurve.Linear(0f, 0f, 1f, 1f);
+      this.loop = loop;
+      this.zeroValueIsOne = zeroValueIsOne;
+      this.color = color;
+    }
+
+    public static TextureCurve Identity(Color color) => new TextureCurve(
+      AnimationCurve.Linear(0f, 0f, 1f, 1f), 0f, false, color);
+
+    public static TextureCurve ModifierIdentity(Color color) => new TextureCurve(
+      AnimationCurve.Constant(0f, 1f, 1f), 0f, false, color);
+
+    public float Evaluate(float time)
+    {
+      if (loop > Mathf.Epsilon)
+      {
+        time %= loop;
+        if (time < 0f) time += loop;
+      }
+      float value = curve != null ? curve.Evaluate(time) : time;
+      return zeroValueIsOne && Math.Abs(value) <= Mathf.Epsilon ? 1f : value;
+    }
+
+    public bool IsIdentity()
+    {
+      for (int i = 0; i <= 4; i++)
+      {
+        float x = i * 0.25f;
+        if (Math.Abs(Evaluate(x) - x) > 0.0001f) return false;
+      }
+      return true;
+    }
+
+    public bool IsModifierIdentity()
+    {
+      for (int i = 0; i <= 4; i++)
+        if (Math.Abs(Evaluate(i * 0.25f) - 1f) > 0.0001f) return false;
+      return true;
+    }
+  }
+
+  [Serializable]
+  public sealed class TextureCurveParameter : VolumeParameter<TextureCurve>
+  {
+    public TextureCurveParameter(TextureCurve value, bool overrideState = false)
+      : base(value, overrideState)
+    {
+    }
+  }
+
   [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
   public class VolumeComponentMenuAttribute : Attribute
   {
@@ -608,4 +672,3 @@ namespace UnityEngine.Rendering
 }
 
 // AnimationCurve / Keyframe live in UnityEngine (UnityCompat/Runtime) — do not redefine here.
-

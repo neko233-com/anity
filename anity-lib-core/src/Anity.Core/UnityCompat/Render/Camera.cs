@@ -11,8 +11,10 @@ public class Camera : Behaviour
     private static int _cameraCount;
 
     private Matrix4x4 _projectionMatrix;
+    private Matrix4x4 _nonJitteredProjectionMatrix;
     private Matrix4x4 _worldToCameraMatrix;
     private bool _projectionMatrixOverride;
+    private bool _nonJitteredProjectionMatrixOverride;
     private bool _worldToCameraMatrixOverride;
     private float _fieldOfView = 60f;
     private float _nearClipPlane = 0.3f;
@@ -33,6 +35,18 @@ public class Camera : Behaviour
     private bool _useOcclusionCulling;
     private bool _allowHDR = true;
     private bool _allowMSAA = true;
+    private bool _useJitteredProjectionMatrixForTransparentRendering = true;
+    private StereoTargetEyeMask _stereoTargetEye = StereoTargetEyeMask.Both;
+    private float _stereoSeparation = .022f;
+    private float _stereoConvergence = 10f;
+    private Matrix4x4 _leftStereoProjectionMatrix;
+    private Matrix4x4 _rightStereoProjectionMatrix;
+    private Matrix4x4 _leftStereoViewMatrix;
+    private Matrix4x4 _rightStereoViewMatrix;
+    private bool _leftStereoProjectionMatrixOverride;
+    private bool _rightStereoProjectionMatrixOverride;
+    private bool _leftStereoViewMatrixOverride;
+    private bool _rightStereoViewMatrixOverride;
     private bool _enabled = true;
     private int _depthTextureMode;
 
@@ -116,6 +130,51 @@ public class Camera : Behaviour
     {
         get => _allowMSAA;
         set => _allowMSAA = value;
+    }
+
+    public bool useJitteredProjectionMatrixForTransparentRendering
+    {
+        get => _useJitteredProjectionMatrixForTransparentRendering;
+        set => _useJitteredProjectionMatrixForTransparentRendering = value;
+    }
+
+    /// <summary>
+    /// Matches Unity's stereo target mask. A camera becomes stereo-active when
+    /// this mask addresses a two-layer XR render texture.
+    /// </summary>
+    public StereoTargetEyeMask stereoTargetEye
+    {
+        get => _stereoTargetEye;
+        set
+        {
+            if ((value & ~StereoTargetEyeMask.Both) != 0)
+                throw new ArgumentOutOfRangeException(nameof(value));
+            _stereoTargetEye = value;
+        }
+    }
+
+    public bool stereoEnabled => _targetTexture?.dimension == TextureDimension.Tex2DArray &&
+        _targetTexture.volumeDepth >= 2 && _targetTexture.vrUsage == VRTextureUsage.TwoEyes &&
+        _stereoTargetEye != StereoTargetEyeMask.None;
+
+    public float stereoSeparation
+    {
+        get => _stereoSeparation;
+        set
+        {
+            if (!float.IsFinite(value) || value < 0f) throw new ArgumentOutOfRangeException(nameof(value));
+            _stereoSeparation = value;
+        }
+    }
+
+    public float stereoConvergence
+    {
+        get => _stereoConvergence;
+        set
+        {
+            if (!float.IsFinite(value) || value < 0f) throw new ArgumentOutOfRangeException(nameof(value));
+            _stereoConvergence = value;
+        }
     }
 
     public new bool enabled
@@ -212,6 +271,13 @@ public class Camera : Behaviour
         }
     }
 
+    public Matrix4x4 nonJitteredProjectionMatrix
+    {
+        get => _nonJitteredProjectionMatrixOverride ? _nonJitteredProjectionMatrix : projectionMatrix;
+        set { _nonJitteredProjectionMatrix = value; _nonJitteredProjectionMatrixOverride = true; }
+    }
+
+
     public Matrix4x4 worldToCameraMatrix
     {
         get
@@ -228,6 +294,76 @@ public class Camera : Behaviour
     }
 
     public Matrix4x4 cameraToWorldMatrix => worldToCameraMatrix.inverse;
+
+    public Matrix4x4 GetStereoProjectionMatrix(StereoscopicEye eye)
+    {
+        ValidateStereoEye(eye);
+        return eye == StereoscopicEye.Left
+            ? (_leftStereoProjectionMatrixOverride ? _leftStereoProjectionMatrix : CalculateStereoProjectionMatrix(eye, projectionMatrix))
+            : (_rightStereoProjectionMatrixOverride ? _rightStereoProjectionMatrix : CalculateStereoProjectionMatrix(eye, projectionMatrix));
+    }
+
+    public Matrix4x4 GetStereoNonJitteredProjectionMatrix(StereoscopicEye eye)
+    {
+        ValidateStereoEye(eye);
+        // Unity's per-eye non-jittered query preserves the SDK/custom eye
+        // projection contract while replacing the camera's jittered base.
+        return eye == StereoscopicEye.Left && _leftStereoProjectionMatrixOverride
+            ? _leftStereoProjectionMatrix
+            : eye == StereoscopicEye.Right && _rightStereoProjectionMatrixOverride
+                ? _rightStereoProjectionMatrix
+                : CalculateStereoProjectionMatrix(eye, nonJitteredProjectionMatrix);
+    }
+
+    public void SetStereoProjectionMatrix(StereoscopicEye eye, Matrix4x4 matrix)
+    {
+        ValidateStereoEye(eye);
+        if (eye == StereoscopicEye.Left)
+        {
+            _leftStereoProjectionMatrix = matrix;
+            _leftStereoProjectionMatrixOverride = true;
+        }
+        else
+        {
+            _rightStereoProjectionMatrix = matrix;
+            _rightStereoProjectionMatrixOverride = true;
+        }
+    }
+
+    public void ResetStereoProjectionMatrices()
+    {
+        _leftStereoProjectionMatrixOverride = false;
+        _rightStereoProjectionMatrixOverride = false;
+    }
+
+    public Matrix4x4 GetStereoViewMatrix(StereoscopicEye eye)
+    {
+        ValidateStereoEye(eye);
+        return eye == StereoscopicEye.Left
+            ? (_leftStereoViewMatrixOverride ? _leftStereoViewMatrix : CalculateStereoViewMatrix(eye))
+            : (_rightStereoViewMatrixOverride ? _rightStereoViewMatrix : CalculateStereoViewMatrix(eye));
+    }
+
+    public void SetStereoViewMatrix(StereoscopicEye eye, Matrix4x4 matrix)
+    {
+        ValidateStereoEye(eye);
+        if (eye == StereoscopicEye.Left)
+        {
+            _leftStereoViewMatrix = matrix;
+            _leftStereoViewMatrixOverride = true;
+        }
+        else
+        {
+            _rightStereoViewMatrix = matrix;
+            _rightStereoViewMatrixOverride = true;
+        }
+    }
+
+    public void ResetStereoViewMatrices()
+    {
+        _leftStereoViewMatrixOverride = false;
+        _rightStereoViewMatrixOverride = false;
+    }
 
     public static Camera? main
     {
@@ -309,6 +445,29 @@ public class Camera : Behaviour
         Vector3 target = pos + rot * Vector3.forward;
         Vector3 up = rot * Vector3.up;
         return Matrix4x4.LookAt(pos, target, up);
+    }
+
+    private Matrix4x4 CalculateStereoProjectionMatrix(StereoscopicEye eye, Matrix4x4 baseProjection)
+    {
+        if (_stereoSeparation == 0f || _stereoConvergence <= 1e-6f) return baseProjection;
+        float offset = _stereoSeparation * .5f / _stereoConvergence;
+        baseProjection.m02 += eye == StereoscopicEye.Left ? offset : -offset;
+        return baseProjection;
+    }
+
+    private Matrix4x4 CalculateStereoViewMatrix(StereoscopicEye eye)
+    {
+        float eyeOffset = (eye == StereoscopicEye.Left ? -.5f : .5f) * _stereoSeparation;
+        // Translation in camera-local X after the world-to-camera transform
+        // yields the actual eye origin for both calculated and overridden
+        // camera view matrices.
+        return Matrix4x4.Translate(new Vector3(-eyeOffset, 0f, 0f)) * worldToCameraMatrix;
+    }
+
+    private static void ValidateStereoEye(StereoscopicEye eye)
+    {
+        if (eye != StereoscopicEye.Left && eye != StereoscopicEye.Right)
+            throw new ArgumentOutOfRangeException(nameof(eye));
     }
 
     public Matrix4x4 CalculateObliqueMatrix(Vector4 clipPlane)
@@ -396,6 +555,7 @@ public class Camera : Behaviour
     public void ResetProjectionMatrix()
     {
         _projectionMatrixOverride = false;
+        _nonJitteredProjectionMatrixOverride = false;
     }
 
     public void ResetWorldToCameraMatrix()
@@ -527,6 +687,18 @@ public class Camera : Behaviour
         _cameraType = other._cameraType;
         _allowHDR = other._allowHDR;
         _allowMSAA = other._allowMSAA;
+        _useJitteredProjectionMatrixForTransparentRendering = other._useJitteredProjectionMatrixForTransparentRendering;
+        _stereoTargetEye = other._stereoTargetEye;
+        _stereoSeparation = other._stereoSeparation;
+        _stereoConvergence = other._stereoConvergence;
+        _leftStereoProjectionMatrix = other._leftStereoProjectionMatrix;
+        _rightStereoProjectionMatrix = other._rightStereoProjectionMatrix;
+        _leftStereoViewMatrix = other._leftStereoViewMatrix;
+        _rightStereoViewMatrix = other._rightStereoViewMatrix;
+        _leftStereoProjectionMatrixOverride = other._leftStereoProjectionMatrixOverride;
+        _rightStereoProjectionMatrixOverride = other._rightStereoProjectionMatrixOverride;
+        _leftStereoViewMatrixOverride = other._leftStereoViewMatrixOverride;
+        _rightStereoViewMatrixOverride = other._rightStereoViewMatrixOverride;
         _depthTextureMode = other._depthTextureMode;
     }
 
@@ -537,6 +709,28 @@ public class Camera : Behaviour
         public CubemapFace face;
         public int slice;
         public bool isValid;
+    }
+
+    public enum StereoscopicEye
+    {
+        Left = 0,
+        Right = 1
+    }
+
+    public enum MonoOrStereoscopicEye
+    {
+        Left = 0,
+        Right = 1,
+        Mono = 2
+    }
+
+    [Flags]
+    public enum StereoTargetEyeMask
+    {
+        None = 0,
+        Left = 1,
+        Right = 2,
+        Both = Left | Right
     }
 }
 

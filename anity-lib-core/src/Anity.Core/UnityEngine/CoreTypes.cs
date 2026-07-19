@@ -298,10 +298,13 @@ public class AssetImporter : Object
 
     public void SaveAndReimport()
     {
+        SaveSettings();
+        UnityEditor.AssetDatabase.ReimportImporter(this);
     }
 
     public void SaveSettings()
     {
+        UnityEditor.AssetDatabase.WriteImportSettingsIfDirty(assetPath);
     }
 }
 
@@ -401,6 +404,16 @@ public class ComputeBuffer : IDisposable
     public IntPtr GetNativeBufferPtr() => IntPtr.Zero;
     public bool IsValid() => !_released && _data != null;
 
+    internal bool TryGetReadbackData(int size, int offset, out byte[] data)
+    {
+        data = Array.Empty<byte>();
+        if (_released || _data == null || size < 0 || offset < 0 || offset > _data.Length || size > _data.Length - offset)
+            return false;
+        data = new byte[size];
+        Buffer.BlockCopy(_data, offset, data, 0, size);
+        return true;
+    }
+
     public void Release()
     {
         if (!_released)
@@ -449,4 +462,3 @@ public class Flare : Object
 {
     public Texture texture { get; set; }
 }
-

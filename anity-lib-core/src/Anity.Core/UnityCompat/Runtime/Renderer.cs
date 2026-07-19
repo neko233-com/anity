@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Anity.Core.Runtime.Native;
 
 namespace UnityEngine;
 
@@ -447,6 +448,8 @@ public class SkinnedMeshRenderer : Renderer
     private Transform[] _bones = Array.Empty<Transform>();
     private Transform? _rootBone;
     private Bounds _localBounds;
+    private bool _localBoundsExplicit;
+    private float[] _blendShapeWeights = Array.Empty<float>();
     private bool _updateWhenOffscreen;
     private int _quality = 2;
     private SkinQuality _skinWeight = SkinQuality.Auto;
@@ -459,7 +462,13 @@ public class SkinnedMeshRenderer : Renderer
     public Mesh? sharedMesh
     {
         get => _sharedMesh;
-        set => _sharedMesh = value;
+        set
+        {
+            _sharedMesh = value;
+            if (!_localBoundsExplicit && value is not null)
+                _localBounds = value.bounds;
+            _blendShapeWeights = value is null ? Array.Empty<float>() : new float[value.blendShapeCount];
+        }
     }
 
     public Transform[] bones
@@ -477,7 +486,7 @@ public class SkinnedMeshRenderer : Renderer
     public new Bounds localBounds
     {
         get => _localBounds;
-        set => _localBounds = value;
+        set { _localBounds = value; _localBoundsExplicit = true; }
     }
 
     public bool updateWhenOffscreen
@@ -504,6 +513,27 @@ public class SkinnedMeshRenderer : Renderer
         set => _skinnedMotionVectors = value;
     }
 
+    public float GetBlendShapeWeight(int index)
+    {
+        ValidateBlendShapeIndex(index);
+        return index < _blendShapeWeights.Length ? _blendShapeWeights[index] : 0f;
+    }
+
+    public void SetBlendShapeWeight(int index, float value)
+    {
+        ValidateBlendShapeIndex(index);
+        if (!float.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value));
+        if (_blendShapeWeights.Length < _sharedMesh!.blendShapeCount)
+            Array.Resize(ref _blendShapeWeights, _sharedMesh.blendShapeCount);
+        _blendShapeWeights[index] = value;
+    }
+
+    private void ValidateBlendShapeIndex(int index)
+    {
+        if (_sharedMesh is null || index < 0 || index >= _sharedMesh.blendShapeCount)
+            throw new IndexOutOfRangeException();
+    }
+
     public Vector3[] vertices
     {
         get => _vertices;
@@ -525,10 +555,35 @@ public class SkinnedMeshRenderer : Renderer
     public void BakeMesh(Mesh mesh) { BakeMesh(mesh, true); }
     public void BakeMesh(Mesh mesh, bool useScale)
     {
-        if (mesh != null)
+        if (mesh is null) throw new ArgumentNullException(nameof(mesh));
+        if (_sharedMesh is null || !NativeGraphicsDevice.TrySkinMeshVertices(_sharedMesh, this,
+                out var positions, out var normals, out var tangents))
         {
             mesh.Clear();
+            return;
         }
+        if (useScale && transform is { } rendererTransform)
+        {
+            Vector3 scale = rendererTransform.lossyScale;
+            for (int i = 0; i < positions.Length; i++)
+            {
+                Vector3 position = positions[i]; positions[i] = new Vector3(position.x * scale.x, position.y * scale.y, position.z * scale.z);
+                Vector3 normal = normals[i]; normals[i] = new Vector3(
+                    Math.Abs(scale.x) > 1e-8f ? normal.x / scale.x : 0f,
+                    Math.Abs(scale.y) > 1e-8f ? normal.y / scale.y : 0f,
+                    Math.Abs(scale.z) > 1e-8f ? normal.z / scale.z : 0f).normalized;
+                Vector4 tangent = tangents[i];
+                Vector3 tangentDirection = new Vector3(tangent.x * scale.x, tangent.y * scale.y, tangent.z * scale.z).normalized;
+                tangents[i] = new Vector4(tangentDirection.x, tangentDirection.y, tangentDirection.z, tangent.w);
+            }
+        }
+        mesh.Clear();
+        mesh.vertices = positions; mesh.normals = normals; mesh.tangents = tangents;
+        mesh.uv = _sharedMesh.uv; mesh.colors = _sharedMesh.colors;
+        mesh.subMeshCount = _sharedMesh.subMeshCount;
+        for (int submesh = 0; submesh < _sharedMesh.subMeshCount; submesh++)
+            mesh.SetTriangles(_sharedMesh.GetTriangles(submesh), submesh);
+        mesh.RecalculateBounds();
     }
 }
 

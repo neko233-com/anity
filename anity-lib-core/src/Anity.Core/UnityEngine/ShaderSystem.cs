@@ -1611,6 +1611,16 @@ public class GraphicsBuffer : IDisposable
     public IntPtr GetNativeBufferPtr() => IntPtr.Zero;
     public bool IsValid() => !_released && _data != null;
 
+    internal bool TryGetReadbackData(int size, int offset, out byte[] data)
+    {
+        data = Array.Empty<byte>();
+        if (_released || _data == null || size < 0 || offset < 0 || offset > _data.Length || size > _data.Length - offset)
+            return false;
+        data = new byte[size];
+        Buffer.BlockCopy(_data, offset, data, 0, size);
+        return true;
+    }
+
     public void Release()
     {
         if (!_released)
@@ -1637,43 +1647,6 @@ public class GraphicsBuffer : IDisposable
         IndirectArguments = 256,
         Constant = 512
     }
-}
-
-public class AsyncGPUReadbackRequest
-{
-    public bool done;
-    public bool hasError;
-    public int layerCount;
-    private Action<AsyncGPUReadbackRequest> _callback;
-    private int _frameCount;
-    private const int FramesToComplete = 3;
-
-    public void WaitForCompletion() { done = true; _callback?.Invoke(this); }
-    public void Update()
-    {
-        if (done) return;
-        _frameCount++;
-        if (_frameCount >= FramesToComplete)
-        {
-            done = true;
-            _callback?.Invoke(this);
-        }
-    }
-    public void Dispose() { done = true; }
-    public NativeArray<byte> GetData<T>(int layer = 0) where T : struct => default;
-    public NativeArray<byte> ToNativeArray<T>(int layer = 0) where T : struct => default;
-}
-
-public static class AsyncGPUReadback
-{
-    public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex = 0) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, RenderTextureFormat dstFormat) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(ComputeBuffer src) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(GraphicsBuffer src) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, TextureFormat dstFormat) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(Texture src, int mipIndex, int x, int width, int y, int height, int z, int depth, RenderTextureFormat dstFormat) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(ComputeBuffer src, int size, int offset) => new() { done = true };
-    public static AsyncGPUReadbackRequest Request(GraphicsBuffer src, int size, int offset) => new() { done = true };
 }
 
 public struct MaterialProperty
