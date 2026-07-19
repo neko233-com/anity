@@ -127,7 +127,7 @@ public sealed class NativeModelImportTests : IDisposable
 
     [Theory]
     [MemberData(nameof(GimbalUnityQuaternionSamples))]
-    public void NonXyzRotationOrdersStayWithinTwoUlpsAcrossGimbalSingularities(
+    public void NonXyzRotationOrdersMatchUnityBitsAcrossGimbalSingularities(
         int rotationOrder, float middleX, float middleY, float middleZ,
         string expectedSamplesBase64)
     {
@@ -148,8 +148,7 @@ public sealed class NativeModelImportTests : IDisposable
             {
                 var bits = BinaryPrimitives.ReadInt32LittleEndian(
                     expectedBytes.AsSpan(expectedIndex * sizeof(float), sizeof(float)));
-                var expected = BitConverter.Int32BitsToSingle(bits);
-                Assert.InRange(UlpDistance(expected, key.value), 0, 2);
+                Assert.Equal(bits, BitConverter.SingleToInt32Bits(key.value));
                 expectedIndex++;
             }
         }

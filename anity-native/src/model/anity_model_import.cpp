@@ -342,6 +342,45 @@ static const ufbx_anim_value* FindSingleRawValue(
   return result;
 }
 
+static float EvaluateUnityFbxUnweightedCubic(
+    float leftValue, float rightValue,
+    float outHandle, float inHandle, double sourceT) {
+  // Autodesk KFCurve::EvaluateIndex() has a specialized unweighted path. It
+  // uses the tangent handles directly for the outer first-level segments and
+  // constructs the middle difference in two float subtractions. A generic
+  // De Casteljau loop loses this instruction ordering near float boundaries.
+  volatile double scaledOut = sourceT * static_cast<double>(outHandle);
+  const float a = static_cast<float>(
+    scaledOut + static_cast<double>(leftValue));
+  const float p1 = leftValue + outHandle;
+  const float p2 = rightValue - inHandle;
+  const float middleFromLeft = p2 - leftValue;
+  const float middleDifference = middleFromLeft - outHandle;
+  volatile double scaledMiddle =
+    sourceT * static_cast<double>(middleDifference);
+  const float b = static_cast<float>(
+    scaledMiddle + static_cast<double>(p1));
+  volatile double scaledIn = sourceT * static_cast<double>(inHandle);
+  const float c = static_cast<float>(
+    scaledIn + static_cast<double>(p2));
+
+  const float secondLeftDifference = b - a;
+  volatile double scaledSecondLeft =
+    sourceT * static_cast<double>(secondLeftDifference);
+  const float secondLeft = static_cast<float>(
+    scaledSecondLeft + static_cast<double>(a));
+  const float secondRightDifference = c - b;
+  volatile double scaledSecondRight =
+    sourceT * static_cast<double>(secondRightDifference);
+  const float secondRight = static_cast<float>(
+    scaledSecondRight + static_cast<double>(b));
+  const float finalDifference = secondRight - secondLeft;
+  volatile double scaledFinal =
+    sourceT * static_cast<double>(finalDifference);
+  return static_cast<float>(
+    scaledFinal + static_cast<double>(secondLeft));
+}
+
 static double EvaluateUnityCompatibleCurve(
     const ufbx_anim_curve* curve, double time, double defaultValue) {
   if (!curve || curve->keyframes.count < 2 ||
@@ -351,9 +390,11 @@ static double EvaluateUnityCompatibleCurve(
 
   const ufbx_keyframe* left = curve->keyframes.data;
   const ufbx_keyframe* right = left + 1;
+  size_t leftIndex = 0;
   for (size_t index = 1; index < curve->keyframes.count; ++index) {
     right = curve->keyframes.data + index;
     left = right - 1;
+    leftIndex = index - 1;
     if (time <= right->time) break;
   }
   if (time == left->time) return left->value;
@@ -361,7 +402,18 @@ static double EvaluateUnityCompatibleCurve(
   if (left->interpolation != UFBX_INTERPOLATION_CUBIC)
     return ufbx_evaluate_curve(curve, time, defaultValue);
 
-  const double duration = right->time - left->time;
+  // KFCurve derives both the segment duration and local parameter from
+  // FbxTime's integer tick subtraction, not from the rounded seconds exposed
+  // by ufbx. The two differ by a few double ULPs at ordinary frame ratios.
+  constexpr double ticksPerSecond = 141120000.0;
+  const int64_t leftTicks = static_cast<int64_t>(
+    std::llround(left->time * ticksPerSecond));
+  const int64_t rightTicks = static_cast<int64_t>(
+    std::llround(right->time * ticksPerSecond));
+  const int64_t timeTicks = static_cast<int64_t>(
+    std::llround(time * ticksPerSecond));
+  const int64_t durationTicks = rightTicks - leftTicks;
+  const double duration = static_cast<double>(durationTicks) / ticksPerSecond;
   if (!(duration > 0.0)) return left->value;
   const double rightWeight = left->right.dx / duration;
   const double leftWeight = right->left.dx / duration;
@@ -373,7 +425,12 @@ static double EvaluateUnityCompatibleCurve(
       std::abs(leftWeight - 0.333333) > 2e-6)
     return ufbx_evaluate_curve(curve, time, defaultValue);
 
-  const double sourceT = (time - left->time) / duration;
+  const double segmentRatio = static_cast<double>(timeTicks - leftTicks) /
+    static_cast<double>(durationTicks);
+  // KeyFind() returns keyIndex + ratio; EvaluateIndex() then subtracts the
+  // integer index again. Preserve the intervening double rounding.
+  const double curveIndex = static_cast<double>(leftIndex) + segmentRatio;
+  const double sourceT = curveIndex - static_cast<double>(leftIndex);
   const float durationFloat = static_cast<float>(duration);
   const float outSlope = std::abs(left->right.dx) > 1e-12
     ? left->right.dy / left->right.dx : 0.0f;
@@ -382,21 +439,9 @@ static double EvaluateUnityCompatibleCurve(
   const float outHandle = outSlope * durationFloat / 3.0f;
   const float inHandle = inSlope * durationFloat / 3.0f;
   const float p0 = Real(left->value);
-  const float p1 = p0 + outHandle;
   const float p3 = Real(right->value);
-  const float p2 = p3 - inHandle;
-  const auto evaluateStage = [sourceT](float from, float to) {
-    // FBX SDK's unweighted KFCurve::EvaluateIndex() subtracts in float,
-    // performs the multiply/add with its double-precision time parameter, and
-    // rounds every De Casteljau stage back to float.
-    const float difference = to - from;
-    return static_cast<float>(
-      sourceT * static_cast<double>(difference) + static_cast<double>(from));
-  };
-  const float a = evaluateStage(p0, p1);
-  const float b = evaluateStage(p1, p2);
-  const float c = evaluateStage(p2, p3);
-  return evaluateStage(evaluateStage(a, b), evaluateStage(b, c));
+  return EvaluateUnityFbxUnweightedCubic(
+    p0, p3, outHandle, inHandle, sourceT);
 }
 
 static ufbx_quat UnityFbxEulerToQuaternion(
@@ -484,103 +529,178 @@ static ufbx_quat UnityFbxEulerToQuaternion(
     m20 = matrix[2][0]; m21 = matrix[2][1]; m22 = matrix[2][2];
   }
 
+  constexpr double radiansToDegrees = 180.0 /
+    3.14159265358979323846264338327950288;
+  // FbxRotationOrder::M2V(XYZ) and FbxAMatrix::GetQ() both pass through
+  // GetROnly(). Its singular test is the length of matrix row 0's XY
+  // projection against 2^-48; at gimbal lock it moves the coupled rotation
+  // into X and emits Z as zero.
+  constexpr double singularThreshold = 0x1p-48;
+  volatile double projectionX = m00 * m00;
+  volatile double projectionY = m01 * m01;
+  const double projection = std::sqrt(projectionX + projectionY);
+  const double canonicalX = projection > singularThreshold
+    ? std::atan2(m12, m22) : std::atan2(-m21, m11);
+  const double canonicalY = std::atan2(-m02, projection);
+  const double canonicalZ = projection > singularThreshold
+    ? std::atan2(m01, m00) : 0.0;
   if (xyzEquivalent) {
-    if (order == UFBX_ROTATION_ORDER_XYZ) {
-      *xyzEquivalent = euler;
-    } else {
-      constexpr double radiansToDegrees = 180.0 /
-        3.14159265358979323846264338327950288;
-      // FbxRotationOrder::M2V(XYZ) delegates to FbxAMatrix::GetROnly(). Its
-      // singular test is the length of matrix row 0's XY projection against
-      // 2^-48, and Y is atan2(-m02, projection), not asin(-m02). At gimbal
-      // lock it moves the remaining rotation into X and emits Z as zero.
-      constexpr double singularThreshold = 0x1p-48;
-      // GetROnly emits two multiplies followed by one add; contracting this
-      // into an FMA shifts the regular branch near gimbal lock by one ULP.
-      volatile double projectionX = m00 * m00;
-      volatile double projectionY = m01 * m01;
-      const double projection = std::sqrt(projectionX + projectionY);
-      const double x = projection > singularThreshold
-        ? std::atan2(m12, m22) : std::atan2(-m21, m11);
-      const double y = std::atan2(-m02, projection);
-      const double z = projection > singularThreshold
-        ? std::atan2(m01, m00) : 0.0;
-      const ufbx_vec3 precise = {
-        x * radiansToDegrees, y * radiansToDegrees, z * radiansToDegrees,
-      };
-      const auto storeFbxEuler = [](double value) {
-        // M2V canonicalizes the exact identity matrix to positive zero even
-        // when atan2 observes subnormal trigonometric residue.
-        return std::abs(value) < 1e-12 ? 0.0f : static_cast<float>(value);
-      };
-      xyzEquivalent->x = storeFbxEuler(precise.x);
-      xyzEquivalent->y = storeFbxEuler(precise.y);
-      xyzEquivalent->z = storeFbxEuler(precise.z);
-    }
+    const auto storeFbxEuler = [](double value) {
+      // M2V canonicalizes the exact identity matrix to positive zero even
+      // when atan2 observes subnormal trigonometric residue.
+      return std::abs(value) < 1e-12 ? 0.0f : static_cast<float>(value);
+    };
+    xyzEquivalent->x = storeFbxEuler(canonicalX * radiansToDegrees);
+    xyzEquivalent->y = storeFbxEuler(canonicalY * radiansToDegrees);
+    xyzEquivalent->z = storeFbxEuler(canonicalZ * radiansToDegrees);
   }
+
+  // FbxAMatrix::GetQ() calls GetR(), rebuilds a pure XYZ rotation matrix from
+  // that canonical Euler vector, and only then calls GetUnnormalizedQ().
+  const double canonicalSinX = std::sin(canonicalX);
+  const double canonicalCosX = std::cos(canonicalX);
+  const double canonicalSinY = std::sin(canonicalY);
+  const double canonicalCosY = std::cos(canonicalY);
+  const double canonicalSinZ = std::sin(canonicalZ);
+  const double canonicalCosZ = std::cos(canonicalZ);
+  const double canonicalSinXSinY = canonicalSinX * canonicalSinY;
+  const double canonicalCosXSinY = canonicalCosX * canonicalSinY;
+  m00 = canonicalCosY * canonicalCosZ;
+  m01 = canonicalCosY * canonicalSinZ;
+  m02 = -canonicalSinY;
+  volatile double canonicalM10Left = canonicalCosZ * canonicalSinXSinY;
+  volatile double canonicalM10Right = canonicalCosX * canonicalSinZ;
+  m10 = canonicalM10Left - canonicalM10Right;
+  volatile double canonicalM11Left = canonicalCosX * canonicalCosZ;
+  volatile double canonicalM11Right = canonicalSinZ * canonicalSinXSinY;
+  m11 = canonicalM11Left + canonicalM11Right;
+  m12 = canonicalCosY * canonicalSinX;
+  volatile double canonicalM20Left = canonicalSinX * canonicalSinZ;
+  volatile double canonicalM20Right = canonicalCosZ * canonicalCosXSinY;
+  m20 = canonicalM20Left + canonicalM20Right;
+  volatile double canonicalM21Left = canonicalSinZ * canonicalCosXSinY;
+  volatile double canonicalM21Right = canonicalSinX * canonicalCosZ;
+  m21 = canonicalM21Left - canonicalM21Right;
+  m22 = canonicalCosY * canonicalCosX;
 
   ufbx_quat result{};
   const double trace = m00 + m11 + m22;
   if (trace > 0.0) {
-    const double scale = std::sqrt(trace + 1.0) * 2.0;
-    result.x = (m12 - m21) / scale;
-    result.y = (m20 - m02) / scale;
-    result.z = (m01 - m10) / scale;
-    result.w = 0.25 * scale;
+    const double root = std::sqrt(trace + 1.0);
+    volatile double principal = 0.5 * root;
+    result.w = principal;
+    volatile double inverse = 0.5 / root;
+    result.x = inverse * (m12 - m21);
+    result.y = inverse * (m20 - m02);
+    result.z = inverse * (m01 - m10);
   } else if (m00 > m11 && m00 > m22) {
-    const double scale = std::sqrt(1.0 + m00 - m11 - m22) * 2.0;
-    result.x = 0.25 * scale;
-    result.y = (m01 + m10) / scale;
-    result.z = (m02 + m20) / scale;
-    result.w = (m12 - m21) / scale;
+    const double root = std::sqrt(1.0 + m00 - m11 - m22);
+    volatile double principal = 0.5 * root;
+    result.x = principal;
+    volatile double inverse = 0.5 / root;
+    result.y = inverse * (m01 + m10);
+    result.z = inverse * (m02 + m20);
+    result.w = inverse * (m12 - m21);
   } else if (m11 > m22) {
-    const double scale = std::sqrt(1.0 + m11 - m00 - m22) * 2.0;
-    result.x = (m01 + m10) / scale;
-    result.y = 0.25 * scale;
-    result.z = (m12 + m21) / scale;
-    result.w = (m20 - m02) / scale;
+    const double root = std::sqrt(1.0 + m11 - m00 - m22);
+    volatile double principal = 0.5 * root;
+    result.y = principal;
+    volatile double inverse = 0.5 / root;
+    result.x = inverse * (m01 + m10);
+    result.z = inverse * (m12 + m21);
+    result.w = inverse * (m20 - m02);
   } else {
-    const double scale = std::sqrt(1.0 + m22 - m00 - m11) * 2.0;
-    result.x = (m02 + m20) / scale;
-    result.y = (m12 + m21) / scale;
-    result.z = 0.25 * scale;
-    result.w = (m01 - m10) / scale;
+    const double root = std::sqrt(1.0 + m22 - m00 - m11);
+    volatile double principal = 0.5 * root;
+    result.z = principal;
+    volatile double inverse = 0.5 / root;
+    result.x = inverse * (m02 + m20);
+    result.y = inverse * (m12 + m21);
+    result.w = inverse * (m01 - m10);
   }
   return result;
 }
 
 static float EvaluateUnityConvertedFrameSegment(
     float leftValue, float rightValue,
+    double leftTangentValue, double rightTangentValue,
     double sourceT, double frameStep) {
   // MatrixConverter stores each converted Euler key as float-expanded double,
   // calculates its user-tangent derivative in double, then converts the
   // derivative to float. KFCurve evaluates the unweighted Hermite segment
   // through the same float-rounded De Casteljau stages as the source curves.
   const float slope = static_cast<float>(
-    (static_cast<double>(rightValue) - static_cast<double>(leftValue)) / frameStep);
+    (rightTangentValue - leftTangentValue) / frameStep);
   const float duration = static_cast<float>(frameStep);
   const float handle = slope * duration / 3.0f;
-  const float p0 = leftValue;
-  const float p1 = p0 + handle;
-  const float p3 = rightValue;
-  const float p2 = p3 - handle;
-  const auto evaluateStage = [sourceT](float from, float to) {
-    const float difference = to - from;
-    volatile double scaled = sourceT * static_cast<double>(difference);
-    return static_cast<float>(
-      scaled + static_cast<double>(from));
+  return EvaluateUnityFbxUnweightedCubic(
+    leftValue, rightValue, handle, handle, sourceT);
+}
+
+static double UnityFbxWrapEulerNear(double value, double reference) {
+  // FbxGetContinuousRotation uses modf(), not round(), so preserve its exact
+  // half-turn comparisons and arithmetic order.
+  double integral = 0.0;
+  const double fraction = std::modf((reference - value) / 360.0, &integral);
+  if (fraction > 0.5) integral += 1.0;
+  if (fraction < -0.5) integral -= 1.0;
+  return value + integral * 360.0;
+}
+
+static ufbx_vec3 UnityFbxContinuousXyzEuler(
+    const ufbx_vec3& value, const ufbx_vec3& reference) {
+  const ufbx_vec3 direct = {
+    UnityFbxWrapEulerNear(value.x, reference.x),
+    UnityFbxWrapEulerNear(value.y, reference.y),
+    UnityFbxWrapEulerNear(value.z, reference.z),
   };
-  const float a = evaluateStage(p0, p1);
-  const float b = evaluateStage(p1, p2);
-  const float c = evaluateStage(p2, p3);
-  return evaluateStage(evaluateStage(a, b), evaluateStage(b, c));
+  const ufbx_vec3 alternate = {
+    UnityFbxWrapEulerNear(value.x + 180.0, reference.x),
+    UnityFbxWrapEulerNear(180.0 - value.y, reference.y),
+    UnityFbxWrapEulerNear(value.z + 180.0, reference.z),
+  };
+  const double directX = reference.x - direct.x;
+  const double directY = reference.y - direct.y;
+  const double directZ = reference.z - direct.z;
+  const double alternateX = reference.x - alternate.x;
+  const double alternateY = reference.y - alternate.y;
+  const double alternateZ = reference.z - alternate.z;
+  // FBX emits three multiplies and two ordered additions for each candidate.
+  volatile double directSquareX = directX * directX;
+  volatile double directSquareY = directY * directY;
+  volatile double directSquareZ = directZ * directZ;
+  volatile double alternateSquareX = alternateX * alternateX;
+  volatile double alternateSquareY = alternateY * alternateY;
+  volatile double alternateSquareZ = alternateZ * alternateZ;
+  volatile double directSquareXy = directSquareX + directSquareY;
+  volatile double alternateSquareXy = alternateSquareX + alternateSquareY;
+  const double directDistance = directSquareXy + directSquareZ;
+  const double alternateDistance = alternateSquareXy + alternateSquareZ;
+  ufbx_vec3 result = directDistance < alternateDistance ? direct : alternate;
+
+  // At XYZ gimbal lock X and Z are coupled. FbxGetContinuousRotation splits
+  // their residual equally so the continuous destination key stays closest
+  // to the preceding frame without changing the represented rotation.
+  const double middle = std::fmod(std::fmod(result.y, 360.0) + 360.0, 360.0);
+  const bool positiveGimbal = std::abs(middle - 90.0) <= 1e-6;
+  const bool negativeGimbal = std::abs(middle - 270.0) <= 1e-6;
+  if (positiveGimbal || negativeGimbal) {
+    const double xDelta = reference.x - result.x;
+    const double zDelta = reference.z - result.z;
+    const double adjustment = positiveGimbal
+      ? (xDelta + zDelta) * 0.5
+      : (xDelta - zDelta) * 0.5;
+    result.x += adjustment;
+    result.z += positiveGimbal ? adjustment : -adjustment;
+  }
+  return result;
 }
 
 static double UnityFbxSampleTime(
     double playbackTimeBegin, float frameRate, size_t sampleIndex) {
   // Unity creates resampling times through FBX's legacy KTime path. The frame
   // number and seconds-per-frame multiplication happen in float, after which
-  // KTime truncates to its 141120000-tick second. Keeping that tick grid is
+  // FbxTime truncates to its 141120000-tick second. Keeping that tick grid is
   // observable at source keys and at strict quaternion reduction thresholds.
   constexpr double ticksPerSecond = 141120000.0;
   const float firstFrame = static_cast<float>(playbackTimeBegin * frameRate);
@@ -592,9 +712,45 @@ static double UnityFbxSampleTime(
   return static_cast<double>(ticks) / ticksPerSecond;
 }
 
+static std::vector<ufbx_vec3> BuildUnityFbxConvertedEulerKeys(
+    const ufbx_anim_value* rawRotation, ufbx_rotation_order rotationOrder,
+    double playbackTimeBegin, float frameRate, size_t keyCount) {
+  std::vector<ufbx_vec3> result;
+  if (!rawRotation || rotationOrder == UFBX_ROTATION_ORDER_XYZ ||
+      rotationOrder == UFBX_ROTATION_ORDER_SPHERIC || !(frameRate > 0.0f))
+    return result;
+
+  constexpr double ticksPerSecond = 141120000.0;
+  const int64_t startTicks = static_cast<int64_t>(
+    std::llround(playbackTimeBegin * ticksPerSecond));
+  const int64_t frameTicks = static_cast<int64_t>(
+    std::llround(ticksPerSecond / static_cast<double>(frameRate)));
+  result.reserve(keyCount);
+  ufbx_vec3 previous{};
+  for (size_t key = 0; key < keyCount; ++key) {
+    const double time = static_cast<double>(
+      startTicks + static_cast<int64_t>(key) * frameTicks) / ticksPerSecond;
+    ufbx_vec3 source = rawRotation->default_value;
+    source.x = static_cast<float>(EvaluateUnityCompatibleCurve(
+      rawRotation->curves[0], time, source.x));
+    source.y = static_cast<float>(EvaluateUnityCompatibleCurve(
+      rawRotation->curves[1], time, source.y));
+    source.z = static_cast<float>(EvaluateUnityCompatibleCurve(
+      rawRotation->curves[2], time, source.z));
+    ufbx_vec3 stored{};
+    UnityFbxEulerToQuaternion(source, rotationOrder, &stored);
+    const ufbx_vec3 continuous = key == 0
+      ? stored : UnityFbxContinuousXyzEuler(stored, previous);
+    result.push_back(continuous);
+    previous = continuous;
+  }
+  return result;
+}
+
 static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     const ufbx_node* node, const ufbx_anim_value* rawRotation,
-    double absoluteTime, double orderedConversionTime, float frameRate) {
+    double absoluteTime, double orderedConversionTime, float frameRate,
+    size_t sampleIndex, const std::vector<ufbx_vec3>* convertedEulerKeys) {
   const AnityModelQuaternionKey fallback = QuaternionKey(source, node);
   if (!node || !rawRotation || node->rotation_order == UFBX_ROTATION_ORDER_SPHERIC) return fallback;
 
@@ -621,7 +777,8 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     const double timeOffset = absoluteTime - orderedConversionTime;
     // Unity evaluates the converted destination curve on its float-derived
     // KTime even when that sample is only a few ticks away from a source key.
-    if (timeOffset != 0.0) {
+    if (timeOffset != 0.0 && convertedEulerKeys &&
+        sampleIndex < convertedEulerKeys->size()) {
       constexpr double ticksPerSecond = 141120000.0;
       const int64_t sampleTicks = static_cast<int64_t>(
         std::llround(absoluteTime * ticksPerSecond));
@@ -630,37 +787,44 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
       const int64_t frameTicks = static_cast<int64_t>(
         std::llround(ticksPerSecond / static_cast<double>(frameRate)));
       const double frameStep = static_cast<double>(frameTicks) / ticksPerSecond;
-      const double neighborTime = orderedConversionTime +
-        (timeOffset > 0.0 ? frameStep : -frameStep);
-      ufbx_vec3 neighborEuler = rawRotation->default_value;
-      neighborEuler.x = static_cast<float>(EvaluateUnityCompatibleCurve(
-        rawRotation->curves[0], neighborTime, neighborEuler.x));
-      neighborEuler.y = static_cast<float>(EvaluateUnityCompatibleCurve(
-        rawRotation->curves[1], neighborTime, neighborEuler.y));
-      neighborEuler.z = static_cast<float>(EvaluateUnityCompatibleCurve(
-        rawRotation->curves[2], neighborTime, neighborEuler.z));
-      ufbx_vec3 neighborXyz{};
-      UnityFbxEulerToQuaternion(neighborEuler, node->rotation_order, &neighborXyz);
+      // MatrixConverter runs each direct M2V float through V2VRef before it
+      // writes the destination curve. That continuous float-expanded sequence
+      // defines both the key values and user tangents. Use the track-level
+      // sequence precomputed from the take start.
+      const int64_t neighborIndex = timeOffset > 0.0
+        ? static_cast<int64_t>(sampleIndex) + 1
+        : std::max<int64_t>(static_cast<int64_t>(sampleIndex) - 1, 0);
+      const size_t neighborKey = static_cast<size_t>(std::clamp<int64_t>(
+        neighborIndex, 0,
+        static_cast<int64_t>(convertedEulerKeys->size() - 1)));
+      const ufbx_vec3 currentReference = (*convertedEulerKeys)[sampleIndex];
+      const ufbx_vec3 neighborReference = (*convertedEulerKeys)[neighborKey];
       const double interpolation = static_cast<double>(
         std::abs(sampleTicks - orderedTicks)) / static_cast<double>(frameTicks);
       const bool usesFollowingFrame = timeOffset > 0.0;
       const double sourceT = usesFollowingFrame ? interpolation : 1.0 - interpolation;
       const auto evaluateComponent = [usesFollowingFrame, sourceT, frameStep](
-          double current, double neighbor) {
+          double current, double neighbor,
+          double currentTangent, double neighborTangent) {
         return usesFollowingFrame
           ? EvaluateUnityConvertedFrameSegment(
               static_cast<float>(current), static_cast<float>(neighbor),
+              currentTangent, neighborTangent,
               sourceT, frameStep)
           : EvaluateUnityConvertedFrameSegment(
               static_cast<float>(neighbor), static_cast<float>(current),
+              neighborTangent, currentTangent,
               sourceT, frameStep);
       };
       unityXyzEuler.x = evaluateComponent(
-        unityXyzEuler.x, neighborXyz.x);
+        currentReference.x, neighborReference.x,
+        currentReference.x, neighborReference.x);
       unityXyzEuler.y = evaluateComponent(
-        unityXyzEuler.y, neighborXyz.y);
+        currentReference.y, neighborReference.y,
+        currentReference.y, neighborReference.y);
       unityXyzEuler.z = evaluateComponent(
-        unityXyzEuler.z, neighborXyz.z);
+        currentReference.z, neighborReference.z,
+        currentReference.z, neighborReference.z);
     }
   }
   const ufbx_quat referenceRaw = ufbx_euler_to_quat(referenceEuler, node->rotation_order);
@@ -1031,6 +1195,12 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             ? source->nodes.data[bakedNode.typed_id] : nullptr;
           const ufbx_anim_value* rawRotation = sourceNode
             ? FindSingleRawValue(stack, &sourceNode->element, UFBX_Lcl_Rotation) : nullptr;
+          const std::vector<ufbx_vec3> convertedEulerKeys =
+            BuildUnityFbxConvertedEulerKeys(
+              rawRotation,
+              sourceNode ? sourceNode->rotation_order : UFBX_ROTATION_ORDER_XYZ,
+              baked->playback_time_begin, scene->frameRate,
+              bakedNode.rotation_keys.count);
           for (size_t key = 0; key < bakedNode.rotation_keys.count; ++key) {
             const ufbx_baked_quat& sourceKey = bakedNode.rotation_keys.data[key];
             const double sampleTime = UnityFbxSampleTime(
@@ -1045,7 +1215,8 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
               ticksPerSecond;
             AnityModelQuaternionKey rotationKey = UnityQuaternionKey(
               sourceKey, sourceNode, rawRotation, sampleTime,
-              orderedConversionTime, scene->frameRate);
+              orderedConversionTime, scene->frameRate, key,
+              &convertedEulerKeys);
             rotationKey.time = Real(sampleTime) - Real(baked->playback_time_begin);
             track.rotationKeys.push_back(rotationKey);
           }
