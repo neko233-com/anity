@@ -1,71 +1,47 @@
-# anity
+# Anity
 
-Anity is a Unity-inspired, cross-platform open game/editor platform split into four functional workspaces:
-
-- `anity-hub`: desktop launcher, account/login shell, project workspace management, and update bootstrap.
-- `anity-editor`: editor core application (project/session/assets graph, play loop orchestration, extension host).
-- `anity-lib-core`: shared runtime/runtime-less shared libs, serialization, package manifests, utility services.
-- `anity-webgl`: WebGL platform support (Unity WebGL compatibility layer).
+Anity is a cross-platform engine and editor whose target is API, behavior,
+asset, build, and editor compatibility with Unity 2022.3.61f1 Pro. The parity
+work is ongoing; `PLAN.md` and `Checklist.md` are the acceptance ledgers.
 
 ## Repository Layout
 
-- `anity-hub/` - desktop launcher and project management
-- `anity-editor/` - editor core application
-- `anity-lib-core/` - shared runtime and Unity API compatibility layer
-- `anity-webgl/` - WebGL platform support
-- `docs/` - architecture and ops documents
-- `scripts/` - bootstrap and CI scripts
-- `.github/workflows/` - cross-platform pipeline
+- `anity-native/` — native C++ engine, rendering, physics, media, import, and jobs
+- `anity-lib-core/` — C# Unity API compatibility and managed/native bridge
+- `anity-editor/` — editor host and Unity-compatible editor workflows
+- `anity-cli/` — Unity-compatible `anity` command line
+- `anity-agent/` — separately versioned official Agent extension
+- `anity-webgl/` — WebGL runtime and platform integration
+- `anity-shader-graph/` / `anity-vfx-graph/` — Unity package compatibility
+- `anity-hub/` — launcher and project management
+- `_scripts/` — the only supported environment, build, test, and audit entrypoints
+- `samples/` — integration samples
 
-> All modules are at the root level for easy access and maintenance.
+All modules are tracked directly in this monorepo.
 
-## Quick start (create GitHub repos + workspace)
+## Build and test
 
-### 1) Prepare GH CLI
+macOS/Linux:
 
 ```bash
-gh auth status
+bash _scripts/verify-env.sh
+bash _scripts/build-all.sh Release
+bash _scripts/run-tests.sh Release
 ```
 
-### 2) Run bootstrap script (PowerShell)
+Windows:
 
 ```powershell
-.\scripts\create-anity-org-repos.ps1 -Owner "YOUR_ORG_OR_USER" -Visibility private
-.\scripts\bootstrap-workspace.ps1 -Owner "YOUR_ORG_OR_USER"
+.\_scripts\verify-env.ps1
+.\_scripts\build-all.ps1 Release
+.\_scripts\run-tests.ps1 Release
 ```
 
-### 3) Run bootstrap script (bash/macOS/Linux)
-
-```bash
-bash ./scripts/create-anity-org-repos.sh YOUR_ORG_OR_USER private
-bash ./scripts/bootstrap-workspace.sh YOUR_ORG_OR_USER
-```
-
-## What this setup includes
-
-- Submodule wiring in one command
-- Cross-platform CI (`ubuntu`, `windows`, `macos`)
-- Release workflow scaffold with version tag + changelog hook points
-- Repo strategy, dependency policy, and versioning rules docs
-- GitHub project conventions for 4-repo architecture
-- Unity compatibility shim in `anity-lib-core` (`UnityCompat`) for API-parity migration
-- WebGL platform support in `anity-webgl`
-
-Note: "Unity API一样" is achieved via staged compatibility, not vendor-equivalent source.
+Run `_scripts/install-env.*` first on a new machine. Native-backed tests require a
+fresh native build and intentionally fail when the runtime cannot be loaded.
 
 ## Branch model
 
 - `main`: stable release line
 - `release/x.y.z`: pre-release stabilization
 - `feat/*`, `fix/*`, `chore/*`: task branches
-
-## Submodule map
-
-Add these repositories as submodules:
-
-- `anity-hub`
-- `anity-editor`
-- `anity-lib-core`
-- `anity-webgl`
-
-Then keep all four at compatible tags / commit pins.

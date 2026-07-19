@@ -37,5 +37,4 @@ Official Unity VFX Spawner Player fixture:
   - Validates 573 state snapshots, 100 Player Output Event records, and 24 callback lifecycle records in
     parity-evidence/unity-vfx-spawner-2022.3.51f1.json.
 
-Legacy scripts/ folder only forwards to _scripts where applicable.
 All new install/build scripts MUST live here (see AGENTS.md §六).

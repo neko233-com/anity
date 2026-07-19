@@ -13,8 +13,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Generate release notes
         id: notes
@@ -28,4 +26,3 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ steps.notes.outputs.name }}
           body: ${{ steps.notes.outputs.body }}
-

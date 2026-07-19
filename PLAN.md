@@ -1,5 +1,23 @@
 # PLAN
 
+## 2026-07-19 — 安装缓存与未使用 legacy 基础设施清理
+
+### 已完成
+- 对仓库全部 ignored 安装/构建产物做冷启动审计，删除 `_scripts`、Core、Agent、CLI、Editor、Hub、WebGL、Shader Graph、VFX Graph、sample 的 `bin/obj`，以及 `anity-native/build*`、Unity probe `Generated/Logs/UserSettings` 与 ignored parity 日志；清理前约 **145 MB**，所有目标均由 `.gitignore` 确认为可重建产物。共享的系统 NuGet/Homebrew/Unity 安装缓存未越界删除。
+- 证明历史 submodule 架构已经停用：`.gitmodules` 声称的四个模块在当前 Git index 中均为普通 `100644` 文件，模块内无嵌套 Git，local config 无 `submodule.*`，现行 build/test/workflow 无 `modules/` 调用。已删除 `.gitmodules`、12 个仅操作旧多仓库/模式切换/过期 unsupported 表的 `scripts/` helper 及其 legacy README，并移除 workflow 的 recursive submodule checkout。
+- README、architecture、CI、ops、contributing、dependency policy、versioning 与 AGENTS 脚本规则已统一为真实 monorepo + `_scripts/` 唯一入口。对 8 个已删脚本/配置名执行 tracked-source 反向引用审计（排除 PLAN/Checklist 历史记录）均为 **0**。
+- 保留 Unity 2022.3 公开反射面要求的 `[Obsolete]` API、removed legacy networking 类型、FBX legacy 数值规则和 VFX serialized deprecated-field migration；这些均被反射/行为/asset migration 测试引用，删除会破坏 Unity 对齐，不属于未使用废弃代码。
+- 在完全无旧 `bin/obj/CMake` 产物下运行 `_scripts/verify-env.sh`，确认 native 初始未构建；随后 `_scripts/build-all.sh Release` 从零成功，所有产品工程 **0 编译错误**。统一 native-required 八工程矩阵 **4164/4164**（Core **3155/3155**），0 失败、0 跳过，证明被删 legacy 基础设施和旧缓存均非当前构建/运行依赖。
+
+### 尚未完成
+- 本轮只清理仓库范围内可重建缓存和已证明未使用的历史基础设施；系统级共享 package/toolchain cache 影响其它项目，未把“项目清理”扩张为全机破坏性删除。
+- Unity 2022.3 的 obsolete 兼容面仍随总体 API parity 持续扩充；保留它们不代表所有历史 API 已完成。整体 Unity 2022.3.61f1 Pro 对齐仍是 🟡，尤其 retained-pivot position/pre-post quaternion、visibility binding 与完整平台/编辑器门禁均未闭环。
+
+### 下一优先项
+1. 对齐 retained-pivot position 的 FBX matrix/float 舍入和 signed-zero，并收紧 24-key position A/B 到 exact-bit。
+2. 对齐 pre/post rotation baked quaternion 的 MatrixConverter stack 与 normalize 舍入，消除剩余 1–5 ULP。
+3. 增加 Renderer visibility `m_Enabled` binding，并补 ≥10 个 importer/runtime/Animator 用例。
+
 ## 2026-07-19 — Unity FBX pivot raw Euler exact-bit
 
 ### 已完成

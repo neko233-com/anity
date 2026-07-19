@@ -6,7 +6,18 @@
 > - 🟡 部分实现 / API 壳 / 尚缺 Unity 官方 A/B 行为证据
 > - ❌ 未实现
 >
-> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **4,124/4,124**（Core **3,115/3,115**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
+> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **4,164/4,164**（Core **3,155/3,155**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
+
+---
+
+## 0. 仓库与构建卫生
+
+| 项目 | 状态 | 备注 |
+|------|------|------|
+| Monorepo source layout | ✅ | 四个历史 submodule 声明与实际 Git index 不一致，已证明当前模块全部为普通 tracked source；`.gitmodules`、recursive checkout、`modules/` ignore 与多仓库文档已移除 |
+| `_scripts/` 唯一入口 | ✅ | 12 个未被现行构建/测试/workflow 引用的旧 `scripts/` helper 及其 README 已删除；8 个历史入口名在 tracked source 中反向引用为 0，AGENTS 明确禁止恢复旧目录 |
+| Cache-free rebuild | ✅ | 冷删约 145 MB repo-local `bin/obj/CMake/Unity probe` 生成缓存后，verify-env 明确报告 native 未构建；从零 build-all 0 错误，八工程 **4164/4164** 通过 |
+| Unity obsolete/legacy compatibility | 🟡 | Unity 2022.3 公开 `[Obsolete]` API、removed networking、FBX legacy 数值与 VFX deprecated serialized migration 均有反射/行为/资产测试引用，按兼容目标保留；完整 obsolete surface 仍随全局 parity 推进 |
 
 ---
 

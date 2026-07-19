@@ -150,7 +150,7 @@
 | `install-vulkan-sdk.ps1` | Vulkan SDK（Windows/Linux） |
 | 其它 | 按模块追加，统一放在 `_scripts/` |
 
-- 旧目录 `scripts/` 仅作兼容转发；**新脚本只写 `_scripts/`**。
+- 旧目录 `scripts/` 已移除；**所有脚本只写 `_scripts/`，禁止恢复旧入口**。
 - Windows 优先 PowerShell；Unix 提供对应 `.sh`。
 
 ---

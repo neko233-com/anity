@@ -210,15 +210,6 @@ docs/compose/
 .agents/
 *.local.md
 
-# ----- Submodule / nested build artifacts -----
-modules/**/bin/
-modules/**/obj/
-modules/**/.vs/
-modules/**/packages/
-modules/**/[Bb]uild/
-modules/**/[Ll]ibrary/
-modules/**/[Tt]emp/
-
 # ----- Misc junk -----
 *.bak
 *.orig

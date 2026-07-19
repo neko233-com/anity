@@ -4,25 +4,18 @@
 
 `.github/workflows/ci.yml` validates:
 
-- repository checkout with submodules
-- basic environment steps
-- module presence checks
+- tag/manual checkout of the monorepo
+- .NET 10 and .NET 8 availability
+- compile checks for Core, Agent, CLI, Editor, WebGL, and Hub
 
-## Suggested per-module CI
+The workflow is intentionally compile-only. Product acceptance uses the local
+native-backed gates below so a managed-only CI pass cannot be mistaken for
+Unity parity evidence.
 
-### anity-lib-core
-- build shared packages
-- run API compatibility tests
-
-### anity-editor
-- editor compile & unit tests
-- headless smoke run
-- artifact generation for mac/win/linux
-
-### anity-hub
-- launcher build
-- update channel simulation
-- package resolver dry-run
+```bash
+bash _scripts/build-all.sh Release
+bash _scripts/run-tests.sh Release
+```
 
 ## Release
 
@@ -33,5 +26,6 @@ git tag v0.1.0
 git push --tags
 ```
 
-Root release job publishes a lightweight GitHub release. You can replace this with changelog-driven artifact publish.
-
+The release workflow publishes a lightweight GitHub release. A GitHub release
+does not by itself certify Unity 2022.3 Pro parity; the parity ledgers and local
+runtime evidence remain authoritative.

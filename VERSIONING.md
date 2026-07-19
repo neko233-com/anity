@@ -1,16 +1,14 @@
 # Versioning
 
-## Root repo version
+## Product version
 
-- root follows `vX.Y.Z` for orchestration metadata and release bundles.
-- each module keeps independent semver (`MAJOR.MINOR.PATCH`) in its own repo.
+- The monorepo follows `vX.Y.Z` for product release bundles.
+- Independently published packages such as `anity-agent` may keep their own semver.
 
 ## Dependency pin policy
 
-- Modules consume each other only through:
-  - `anity-lib-core` contract packages
-  - explicit tags in module-specific manifests
-- Root repo pins submodule SHAs to exact commit IDs.
+- External dependencies use locked package manifests or checksummed vendored sources.
+- In-repository modules are versioned atomically with the commit that changes their ABI or contract.
 
 ## Compatibility levels
 
@@ -23,4 +21,3 @@
 - Release tags: `v0.1.0`, `v0.2.0`...
 - RC tags: `v0.2.0-rc.1`
 - Hotfix tags: `v0.2.1-hf.1`
-
