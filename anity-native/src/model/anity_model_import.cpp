@@ -490,17 +490,20 @@ static ufbx_quat UnityFbxEulerToQuaternion(
     } else {
       constexpr double radiansToDegrees = 180.0 /
         3.14159265358979323846264338327950288;
-      // FbxRotationOrder::M2V(XYZ) extracts the equivalent XYZ angles from
-      // the ordered matrix and Unity stores the result through float curves.
-      // The regular branch is x=atan2(m12,m22), y=asin(-m02),
-      // z=atan2(m01,m00). Keep a deterministic gimbal fallback until its
-      // exact FBX SDK tie-break is covered by a dedicated A/B fixture.
-      const double clampedSinY = std::clamp(-m02, -1.0, 1.0);
-      const double y = std::asin(clampedSinY);
-      const double cosY = std::cos(y);
-      const double x = std::abs(cosY) > 1e-12
+      // FbxRotationOrder::M2V(XYZ) delegates to FbxAMatrix::GetROnly(). Its
+      // singular test is the length of matrix row 0's XY projection against
+      // 2^-48, and Y is atan2(-m02, projection), not asin(-m02). At gimbal
+      // lock it moves the remaining rotation into X and emits Z as zero.
+      constexpr double singularThreshold = 0x1p-48;
+      // GetROnly emits two multiplies followed by one add; contracting this
+      // into an FMA shifts the regular branch near gimbal lock by one ULP.
+      volatile double projectionX = m00 * m00;
+      volatile double projectionY = m01 * m01;
+      const double projection = std::sqrt(projectionX + projectionY);
+      const double x = projection > singularThreshold
         ? std::atan2(m12, m22) : std::atan2(-m21, m11);
-      const double z = std::abs(cosY) > 1e-12
+      const double y = std::atan2(-m02, projection);
+      const double z = projection > singularThreshold
         ? std::atan2(m01, m00) : 0.0;
       const ufbx_vec3 precise = {
         x * radiansToDegrees, y * radiansToDegrees, z * radiansToDegrees,
@@ -616,16 +619,9 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     euler, node->rotation_order, &unityXyzEuler);
   if (node->rotation_order != UFBX_ROTATION_ORDER_XYZ && frameRate > 0.0f) {
     const double timeOffset = absoluteTime - orderedConversionTime;
-    bool isOriginalSourceKey = false;
-    if (const ufbx_anim_curve* curve = rawRotation->curves[0]) {
-      for (size_t keyIndex = 0; keyIndex < curve->keyframes.count; ++keyIndex) {
-        if (std::abs(curve->keyframes.data[keyIndex].time - orderedConversionTime) < 1e-10) {
-          isOriginalSourceKey = true;
-          break;
-        }
-      }
-    }
-    if (timeOffset != 0.0 && !isOriginalSourceKey) {
+    // Unity evaluates the converted destination curve on its float-derived
+    // KTime even when that sample is only a few ticks away from a source key.
+    if (timeOffset != 0.0) {
       constexpr double ticksPerSecond = 141120000.0;
       const int64_t sampleTicks = static_cast<int64_t>(
         std::llround(absoluteTime * ticksPerSecond));

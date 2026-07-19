@@ -5,14 +5,16 @@
 ### 已完成
 - 用本机 Unity 2022.3.51f1 batchmode 对同一 Maya FBX 构造 `XYZ / XZY / YZX / YXZ / ZXY / ZYX` 六种 `RotationOrder` fixture，逐帧采集未压缩 quaternion，并采集 `animationRotationError = 0.01 / 0.1 / 0.5` 的同步保留帧集合；确认 Unity 对非 XYZ 源先走 `FbxRotationOrder::V2M → FbxAnimCurveFilterMatrixConverter → M2V(XYZ)`，再进入 legacy XYZ quaternion 提取与压缩链。
 - `anity-native` 已复刻 FBX SDK 的六种 axis table、odd-parity 符号、`FbxAMatrix::SetR` 运算顺序及等价 XYZ 提取；继续反汇编 `SetDestFCurveTangeant` 与 `KFCurve::EvaluateIndex`，按 float-expanded key、double derivative、float Hermite handle、legacy KTime tick 及逐级 float De Casteljau 顺序复刻 MatrixConverter 曲线，并将 identity M2V residue 规范为正零。
-- 五种非 XYZ 顺序的未压缩 quaternion 共 **480/480 float 逐 bit 一致**；`animationRotationError = 0.01 / 0.1 / 0.5` 的 **15/15** 同步保留帧集合全部一致，原 `ZYX + 0.01` 的 frame 7/9 差异已消除。新增 24 帧/四分量同步、source key、zero crossing、identity 正零符号及 strict/normal/loose reduction 共 **35 个用例**；`NativeModelImportTests` **72/72**。`_scripts/build-all.sh Release` 全部 0 编译错误；最终强制 native 八工程矩阵 **4114/4114**（Core **3105/3105**），均 0 失败、0 跳过。
+- 五种非 XYZ 顺序的未压缩 quaternion 共 **480/480 float 逐 bit 一致**；`animationRotationError = 0.01 / 0.1 / 0.5` 的 **15/15** 同步保留帧集合全部一致，原 `ZYX + 0.01` 的 frame 7/9 差异已消除。新增 24 帧/四分量同步、source key、zero crossing、identity 正零符号及 strict/normal/loose reduction 共 **35 个用例**；`NativeModelImportTests` **72/72**。
+- 反汇编 Unity 随附 FBX SDK 的 `FbxAMatrix::GetROnly`，补齐 `M2V(XYZ)` 的精确 singular 判定：row-0 XY projection 与 `2^-48` 比较，regular 分支使用三组 `atan2`，gimbal 分支使用 `atan2(-m21,m11)`、保留 `atan2(-m02,projection)` 并令 Z 为正零；projection 明确保持两次乘法再相加，禁止 FMA 收缩。
+- 用 `+90° / -90°` 两个目标姿态反解五种非 XYZ 源欧拉角，形成 **10 组** Unity 2022.3.51f1 batchmode A/B；完整固化 24 帧 × 4 分量 × 10 组共 **960 个 Unity float**，Anity 全部落在 **≤2 ULP**，其中 XZY-、ZXY± 三组 **288/288 float 逐 bit 一致**。新增 10 个完整曲线用例，`NativeModelImportTests` **82/82**；`_scripts/build-all.sh Release` 全部 0 编译错误，强制 native 八工程矩阵 **4124/4124**（Core **3115/3115**），均 0 失败、0 跳过。
 
 ### 尚未完成
-- 等价 XYZ 提取在 gimbal-lock 邻域的 FBX tie-break、pre/post rotation、rotation/scaling pivot、helper transform、多 animation layer，以及 constant/stepped/weighted/broken tangent 尚未逐项完成 Unity A/B；不满足已证明约束的资产继续保留 ufbx baked 安全路径。
+- gimbal singular tie-break 已锁定，但另外 7 组曲线仍各有 2–3 个采样点存在 **1–2 ULP** 的 MatrixConverter source-key merge/KTime 调度差异，尚未达到全 960 float 逐 bit 一致；pre/post rotation、rotation/scaling pivot、helper transform、多 animation layer，以及 constant/stepped/weighted/broken tangent 仍未逐项完成 Unity A/B。不满足已证明约束的资产继续保留 ufbx baked 安全路径。
 - 正式目标仍需在 Unity 2022.3.61f1 Pro 上重跑逐 ULP、Editor curve visualization 与 Player 连续时间采样门禁；ModelImporter/AnimationClip 保持 🟡。
 
 ### 下一优先项
-1. 增加 Euler wrap/gimbal-lock 与六种 rotation order 的极值 fixture，锁定 `M2V(XYZ)` singular tie-break。
+1. 继续反汇编 MatrixConverter 的 source-key merge / destination-curve sample scheduling，消除 gimbal A/B 剩余 1–2 ULP，使 960/960 float 逐 bit 一致；随后补 Euler wrap 极值。
 2. 增加 pre/post rotation、rotation/scaling pivot、helper 与多 animation layer fixture，逐项替换安全 fallback。
 3. 完成 importer loop/root motion/additive/mask 与 stable sub-asset fileID/type-tree/artifact cache，并迁移到 Unity 2022.3.61f1 Pro 完整门禁。
 
