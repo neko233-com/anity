@@ -14212,16 +14212,32 @@ static float ufbxi_solve_auto_tangent_right(ufbxi_context *uc, double time, doub
 	return (float)slope;
 }
 
-static void ufbxi_solve_tcb(float *p_slope_left, float *p_slope_right, double tension, double continuity, double bias, double slope_left, double slope_right, bool edge)
+static float ufbxi_solve_tcb_component(double a, double b, float value_delta, double duration)
 {
-	double factor = edge ? 1.0 : 0.5;
-	double d00 = factor * (1.0 - tension) * (1.0 + bias) * (1.0 - continuity);
-	double d01 = factor * (1.0 - tension) * (1.0 - bias) * (1.0 + continuity);
-	double d10 = factor * (1.0 - tension) * (1.0 + bias) * (1.0 + continuity);
-	double d11 = factor * (1.0 - tension) * (1.0 - bias) * (1.0 - continuity);
+	if (!(duration > 0.0)) return 0.0f;
+	double coefficient = a * b;
+	double scaled = coefficient * (double)value_delta;
+	return (float)(scaled / duration);
+}
 
-	*p_slope_left = (float)(d00 * slope_left + d01 * slope_right);
-	*p_slope_right = (float)(d10 * slope_left + d11 * slope_right);
+static void ufbxi_solve_tcb(float *p_slope_left, float *p_slope_right,
+	float tension, float continuity, float bias,
+	float value_delta_left, double duration_left,
+	float value_delta_right, double duration_right, bool edge)
+{
+	// Autodesk KFCurve rounds each continuity/bias component to float, adds
+	// those components in float, and only then applies tension in double.
+	// Keeping those intermediate stores is required for bit-identical import.
+	float left_prev = ufbxi_solve_tcb_component(1.0 + (double)bias, 1.0 - (double)continuity, value_delta_left, duration_left);
+	float left_next = ufbxi_solve_tcb_component(1.0 - (double)bias, 1.0 + (double)continuity, value_delta_right, duration_right);
+	float right_prev = ufbxi_solve_tcb_component(1.0 + (double)bias, 1.0 + (double)continuity, value_delta_left, duration_left);
+	float right_next = ufbxi_solve_tcb_component(1.0 - (double)bias, 1.0 - (double)continuity, value_delta_right, duration_right);
+	float left_sum = left_prev + left_next;
+	float right_sum = right_prev + right_next;
+	double factor = (1.0 - (double)tension) * (edge ? 1.0 : 0.5);
+
+	*p_slope_left = (float)(factor * (double)left_sum);
+	*p_slope_right = (float)(factor * (double)right_sum);
 }
 
 ufbxi_noinline static void ufbxi_read_extrapolation(ufbx_extrapolation *p_extrapolation, ufbxi_node *node, const char *name)
@@ -14296,6 +14312,7 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 	// The previous key defines the weight/slope of the left tangent
 	float slope_left = 0.0f;
 	float weight_left = 0.333333f;
+	bool weighted_left = false;
 	// float velocity_left = 0.0f;
 
 	double prev_time = 0.0;
@@ -14331,9 +14348,11 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 
 		float slope_right = p_attr[0];
 		float weight_right = 0.333333f;
+		bool weighted_right = false;
 		//float velocity_right = 0.0f;
 		float next_slope_left = p_attr[1];
 		float next_weight_left = 0.333333f;
+		bool next_weighted_left = false;
 		// float next_velocity_left = 0.0f;
 
 		if ((flags & (UFBXI_KEY_WEIGHTED_RIGHT|UFBXI_KEY_WEIGHTED_NEXT_LEFT)) != 0) {
@@ -14346,11 +14365,13 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 			if (flags & UFBXI_KEY_WEIGHTED_RIGHT) {
 				// Right tangent is weighted
 				weight_right = (float)(packed_weights & 0xffff) * 0.0001f;
+				weighted_right = true;
 			}
 
 			if (flags & UFBXI_KEY_WEIGHTED_NEXT_LEFT) {
 				// Next left tangent is weighted
 				next_weight_left = (float)(packed_weights >> 16) * 0.0001f;
+				next_weighted_left = true;
 			}
 		}
 #if 0
@@ -14384,6 +14405,7 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 			}
 
 			weight_right = next_weight_left = 0.333333f;
+			weighted_right = next_weighted_left = false;
 			slope_right = next_slope_left = 0.0f;
 
 		} else if (flags & UFBXI_KEY_INTERPOLATION_CUBIC) {
@@ -14391,25 +14413,33 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 			key->interpolation = UFBX_INTERPOLATION_CUBIC;
 
 			if (flags & UFBXI_KEY_TANGENT_TCB) {
-				double tcb_slope_left = 0.0;
-				double tcb_slope_right = 0.0;
+				float tcb_value_delta_left = 0.0f;
+				double tcb_duration_left = 0.0;
+				float tcb_value_delta_right = 0.0f;
+				double tcb_duration_right = 0.0;
 				bool tcb_edge = false;
 				if (i > 0 && key->time > prev_time) {
-					tcb_slope_left = (key->value - p_value[-1]) / (key->time - prev_time);
+					tcb_value_delta_left = (float)key->value - (float)p_value[-1];
+					tcb_duration_left = key->time - prev_time;
 				} else {
 					tcb_edge = true;
 				}
 				if (i + 1 < num_keys && next_time > key->time) {
-					tcb_slope_right = (p_value[1] - key->value) / (next_time - key->time);
+					tcb_value_delta_right = (float)p_value[1] - (float)key->value;
+					tcb_duration_right = next_time - key->time;
 				} else {
 					tcb_edge = true;
 				}
 
-				ufbxi_solve_tcb(&slope_left, &slope_right, p_attr[0], p_attr[1], p_attr[2], tcb_slope_left, tcb_slope_right, tcb_edge);
+				ufbxi_solve_tcb(&slope_left, &slope_right,
+					p_attr[0], p_attr[1], p_attr[2],
+					tcb_value_delta_left, tcb_duration_left,
+					tcb_value_delta_right, tcb_duration_right, tcb_edge);
 
 				// TODO: How to handle these?
 				next_slope_left = 0.0f;
 				next_weight_left = 0.333333f;
+				weighted_right = next_weighted_left = false;
 				// next_velocity_left = 0.0f;
 			} else if (flags & UFBXI_KEY_TANGENT_USER) {
 				// User tangents
@@ -14478,6 +14508,7 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 
 			weight_right = 0.333333f;
 			next_weight_left = 0.333333f;
+			weighted_right = next_weighted_left = false;
 
 			if (next_time > key->time) {
 				double delta_time = next_time - key->time;
@@ -14496,6 +14527,9 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 		// between the previous/next key) and slope (simply d = slope * dx)
 		key->anity_source_left_slope = slope_left;
 		key->anity_source_right_slope = slope_right;
+		key->anity_source_left_weight = weight_left;
+		key->anity_source_right_weight = weight_right;
+		key->anity_source_weight_flags = (weighted_left ? 1u : 0u) | (weighted_right ? 2u : 0u);
 
 		if (key->time > prev_time) {
 			double delta = key->time - prev_time;
@@ -14517,6 +14551,7 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 
 		slope_left = next_slope_left;
 		weight_left = next_weight_left;
+		weighted_left = next_weighted_left;
 		// velocity_left = next_velocity_left;
 		prev_time = key->time;
 
@@ -15362,6 +15397,7 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_take_anim_channel(ufbxi_con
 
 	float slope_left = 0.0f;
 	float weight_left = 0.333333f;
+	bool weighted_left = false;
 
 	double next_time = 0.0;
 	double next_value = 0.0;
@@ -15397,8 +15433,10 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_take_anim_channel(ufbxi_con
 
 		float slope_right = 0.0f;
 		float weight_right = 0.333333f;
+		bool weighted_right = false;
 		float next_slope_left = 0.0f;
 		float next_weight_left = 0.333333f;
+		bool next_weighted_left = false;
 		bool auto_slope = false;
 
 		if (mode == 'U') {
@@ -15494,16 +15532,20 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_take_anim_channel(ufbxi_con
 					ufbxi_check(data_end - data >= 2);
 					weight_right = (float)data[0];
 					next_weight_left = (float)data[1];
+					weighted_right = true;
+					next_weighted_left = true;
 					data += 2;
 				} else if (weight_mode == 'l') {
 					// Next left tangent is weighted
 					ufbxi_check(data_end - data >= 1);
 					next_weight_left = (float)data[0];
+					next_weighted_left = true;
 					data += 1;
 				} else if (weight_mode == 'r') {
 					// Right tangent is weighted
 					ufbxi_check(data_end - data >= 1);
 					weight_right = (float)data[0];
+					weighted_right = true;
 					data += 1;
 				} else if (weight_mode == 'c') {
 					// TODO: What is this mode? At least it has no parameters so let's
@@ -15559,6 +15601,9 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_take_anim_channel(ufbxi_con
 
 		key->anity_source_left_slope = slope_left;
 		key->anity_source_right_slope = slope_right;
+		key->anity_source_left_weight = weight_left;
+		key->anity_source_right_weight = weight_right;
+		key->anity_source_weight_flags = (weighted_left ? 1u : 0u) | (weighted_right ? 2u : 0u);
 
 		if (key->time > prev_time) {
 			double delta = key->time - prev_time;
@@ -15580,6 +15625,7 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_take_anim_channel(ufbxi_con
 
 		slope_left = next_slope_left;
 		weight_left = next_weight_left;
+		weighted_left = next_weighted_left;
 		prev_time = key->time;
 	}
 

@@ -3211,6 +3211,13 @@ typedef struct ufbx_keyframe {
 	// always recover the FBX SDK derivative bit-for-bit.
 	float anity_source_left_slope;
 	float anity_source_right_slope;
+	// Preserve the pre-multiplication weights as well. Recovering a normalized
+	// weight from tangent.dx / duration loses information for extreme packed
+	// values and can select a different root of a non-monotonic Bezier time
+	// curve. Bit 0/1 indicate explicit left/right weighting respectively.
+	float anity_source_left_weight;
+	float anity_source_right_weight;
+	uint32_t anity_source_weight_flags;
 } ufbx_keyframe;
 
 UFBX_LIST_TYPE(ufbx_keyframe_list, ufbx_keyframe);

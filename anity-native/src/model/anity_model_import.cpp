@@ -474,19 +474,84 @@ static float FindUnityFbxWeightedBezierReverseT(
 static float UnityFbxTangentWeight(
     double normalizedWeight, bool weighted) {
   if (!weighted) return 1.0f / 3.0f;
-  // FBX serializes weights as four-decimal 16-bit integers. Autodesk's
-  // KFCurve divides that integer by 9999.0f (not 10000.0f as ufbx does).
+  // FBX serializes weights as four-decimal 16-bit integers. Autodesk's ARM64
+  // KFCurve evaluator sign-extends that halfword before dividing by 9999.0f
+  // (not 10000.0f as ufbx does), including values above 0x7fff.
   const int packedWeight = static_cast<int>(
     std::llround(normalizedWeight * 10000.0));
-  return static_cast<float>(packedWeight) / 9999.0f;
+  return static_cast<float>(static_cast<int16_t>(packedWeight)) / 9999.0f;
 }
 
 static double EvaluateUnityCompatibleCurve(
     const ufbx_anim_curve* curve, double time, double defaultValue) {
-  if (!curve || curve->keyframes.count < 2 ||
-      time < curve->keyframes.data[0].time ||
-      time > curve->keyframes.data[curve->keyframes.count - 1].time)
+  if (!curve || curve->keyframes.count < 2)
     return ufbx_evaluate_curve(curve, time, defaultValue);
+
+  // Unity's KFCurve API receives FbxTime, so all extrapolation arithmetic is
+  // performed on integer ticks even though ufbx exposes the sample as seconds.
+  constexpr double ticksPerSecond = 141120000.0;
+  const ufbx_keyframe* first = curve->keyframes.data;
+  const ufbx_keyframe* last =
+    curve->keyframes.data + curve->keyframes.count - 1;
+  const int64_t firstTicks = static_cast<int64_t>(
+    std::llround(first->time * ticksPerSecond));
+  const int64_t lastTicks = static_cast<int64_t>(
+    std::llround(last->time * ticksPerSecond));
+  const int64_t timeTicks = static_cast<int64_t>(
+    std::llround(time * ticksPerSecond));
+  if (timeTicks < firstTicks || timeTicks > lastTicks) {
+    const bool pre = timeTicks < firstTicks;
+    const ufbx_keyframe* boundary = pre ? first : last;
+    const ufbx_extrapolation extrapolation = pre
+      ? curve->pre_extrapolation : curve->post_extrapolation;
+    if (extrapolation.mode == UFBX_EXTRAPOLATION_CONSTANT)
+      return boundary->value;
+    if (extrapolation.mode == UFBX_EXTRAPOLATION_SLOPE) {
+      // KFCurve converts the integer tick delta to double seconds, multiplies
+      // by the source float derivative in double, rounds that product to
+      // float, then performs the final value addition in float.
+      const float slope = pre
+        ? boundary->anity_source_right_slope
+        : boundary->anity_source_left_slope;
+      const int64_t boundaryTicks = pre ? firstTicks : lastTicks;
+      const double seconds = static_cast<double>(timeTicks - boundaryTicks) /
+        ticksPerSecond;
+      volatile double scaled = seconds * static_cast<double>(slope);
+      const float delta = static_cast<float>(scaled);
+      return Real(boundary->value) + delta;
+    }
+    if (extrapolation.repeat_count == 0) return boundary->value;
+
+    const int64_t durationTicks = lastTicks - firstTicks;
+    if (durationTicks < 1) return boundary->value;
+    const int64_t deltaTicks = pre
+      ? firstTicks - timeTicks : timeTicks - lastTicks;
+    int64_t repetition = deltaTicks / durationTicks;
+    int64_t remainder = deltaTicks % durationTicks;
+    if (extrapolation.repeat_count > 0 &&
+        repetition >= extrapolation.repeat_count) {
+      repetition = extrapolation.repeat_count - 1;
+      remainder = durationTicks;
+    }
+    if (extrapolation.mode == UFBX_EXTRAPOLATION_MIRROR &&
+        (repetition & 1) == 0) {
+      remainder = durationTicks - remainder;
+    }
+    if (pre) remainder = durationTicks - remainder;
+
+    const int64_t remappedTicks = firstTicks + remainder;
+    const double remappedTime = static_cast<double>(remappedTicks) /
+      ticksPerSecond;
+    float value = Real(EvaluateUnityCompatibleCurve(
+      curve, remappedTime, boundary->value));
+    if (extrapolation.mode == UFBX_EXTRAPOLATION_REPEAT_RELATIVE) {
+      const float valueDelta = Real(last->value) - Real(first->value);
+      const float cycle = static_cast<float>(repetition + 1);
+      volatile float offset = valueDelta * cycle;
+      value = pre ? value - offset : value + offset;
+    }
+    return value;
+  }
 
   const ufbx_keyframe* left = curve->keyframes.data;
   const ufbx_keyframe* right = left + 1;
@@ -505,24 +570,25 @@ static double EvaluateUnityCompatibleCurve(
   // KFCurve derives both the segment duration and local parameter from
   // FbxTime's integer tick subtraction, not from the rounded seconds exposed
   // by ufbx. The two differ by a few double ULPs at ordinary frame ratios.
-  constexpr double ticksPerSecond = 141120000.0;
   const int64_t leftTicks = static_cast<int64_t>(
     std::llround(left->time * ticksPerSecond));
   const int64_t rightTicks = static_cast<int64_t>(
     std::llround(right->time * ticksPerSecond));
-  const int64_t timeTicks = static_cast<int64_t>(
-    std::llround(time * ticksPerSecond));
   const int64_t durationTicks = rightTicks - leftTicks;
   const double duration = static_cast<double>(durationTicks) / ticksPerSecond;
   if (!(duration > 0.0)) return left->value;
-  const double rightWeight = left->right.dx / duration;
-  const double leftWeight = right->left.dx / duration;
+  const double rightWeight = left->anity_source_right_weight;
+  const double leftWeight = right->anity_source_left_weight;
   // Legacy FBX unweighted tangents serialize the decimal weight 0.333333.
   // Autodesk's evaluator treats these as exact one-third Hermite handles;
   // interpreting the rounded value as a weighted Bezier handle shifts Unity's
   // resampled rotations enough to change the strict rotation-error gate.
-  const double segmentRatio = static_cast<double>(timeTicks - leftTicks) /
-    static_cast<double>(durationTicks);
+  // KeyFind() converts both FbxTime differences to double seconds separately
+  // before dividing them. Cancelling the common tick scale algebraically
+  // changes the rounding of a few ordinary frame ratios by one double ULP.
+  const double elapsed = static_cast<double>(timeTicks - leftTicks) /
+    ticksPerSecond;
+  const double segmentRatio = elapsed / duration;
   // KeyFind() returns keyIndex + ratio; EvaluateIndex() then subtracts the
   // integer index again. Preserve the intervening double rounding.
   const double curveIndex = static_cast<double>(leftIndex) + segmentRatio;
@@ -539,9 +605,9 @@ static double EvaluateUnityCompatibleCurve(
   const float p0 = Real(left->value);
   const float p3 = Real(right->value);
   const bool rightWeighted =
-    std::abs(rightWeight - 0.333333) > 2e-6;
+    (left->anity_source_weight_flags & 2u) != 0;
   const bool leftWeighted =
-    std::abs(leftWeight - 0.333333) > 2e-6;
+    (right->anity_source_weight_flags & 1u) != 0;
   if (rightWeighted || leftWeighted) {
     const float unityRightWeight = UnityFbxTangentWeight(
       rightWeight, rightWeighted);
@@ -1821,7 +1887,6 @@ static float EvaluateUnityLayeredVisibility(
         weight = EvaluateUnityCompatibleCurve(
           weightProperty->anim_value->curves[0], time,
           weightProperty->anim_value->default_value.x) / 100.0;
-        weight = std::clamp(weight, 0.0, 1.0);
       }
     }
     if (layer->additive) {
@@ -1875,7 +1940,10 @@ static bool BuildUnityVisibilityKeys(
       std::floor(playbackDuration * static_cast<double>(frameRate) + 0.5));
     destination.reserve(static_cast<size_t>(lastFrame + 1));
     for (int64_t frame = 0; frame <= lastFrame; ++frame) {
-      const double absoluteTime = UnityFbxSampleTime(
+      // ModelImporter evaluates layered visibility on the exact FbxTime frame
+      // grid. The legacy float/KTime path used for Euler resampling can drift
+      // by several ticks at frames such as 10/24 and changes TCB output bits.
+      const double absoluteTime = UnityFbxFrameTime(
         trimStart, frameRate, static_cast<size_t>(frame));
       float relativeTime = Real(absoluteTime) - Real(trimStart);
       if (std::abs(relativeTime) < 1e-7f) relativeTime = 0.0f;

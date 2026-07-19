@@ -1,5 +1,27 @@
 # PLAN
 
+## 2026-07-20 — Unity FBX weighted tangent extremes / extrapolation exact-bit
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 构造并采集 **23 组** AnimationLayer weight 权威 fixture，覆盖单端/双端 weighted tangent、packed `1/3333/9999/10000/65535` 极值、Broken、Auto/Clamp、非对称 TCB，以及 Constant/Slope/Repeat/Mirror/RepeatRelative 的 pre/post extrapolation。新增 **22 个**永久逐帧 float-bit 回归，所有样本与 Unity 输出 exact-bit 一致。
+- 反汇编 Unity 随附 Autodesk FBX SDK 2020.3.7 的 ARM64 `KFCurve::Evaluate` / `EvaluateIndex` / `KeyFind` / derivative 路径，并用 Unity 官方 Autodesk FBX C# binding 直接核对 TCB source derivative bit。确认 packed weight 先按 signed 16-bit 扩展再除以 `9999.0f`；TCB continuity/bias 分量、float 求和和 tension 乘法存在不可合并的阶段舍入。
+- vendored ufbx 现在同时保留 source left/right derivative、显式 weight 与 weighted flag，现代与 FBX 6.x parser 均覆盖；TCB solver 按 Autodesk KFCurve 的 float/double 指令顺序计算，避免从已乘 duration 的 handle 反推 source 数据。
+- native Unity-compatible evaluator 新增基于 **141120000 ticks/s** 的 Constant/Slope/Repeat/Mirror/RepeatRelative exact extrapolation，分别把 elapsed/duration 转为 double seconds 后再求 ratio，允许 Unity 一致的负值及大于 100 的动画层 weight；visibility layered bake 改用 exact FbxTime frame grid，消除 24 fps TCB 采样的单 ULP 漂移。
+- `NativeModelImportTests` 从 **206/206** 增至 **228/228**；`bash _scripts/build-all.sh Release` 全产品 0 编译错误，强制 native 八工程矩阵 **4283/4283**（Core **3261/3261**），0 失败、0 跳过。
+- `/Applications/Anity.app` 已重新安装；Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，深度签名、Info.plist、图标逐 byte 及 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过，tracked lockfile 无 RID restore 漂移。
+- 再次对 legacy/obsolete/deprecated 标识与调用面做反向引用复审，没有发现新的零引用 legacy 实现；Unity 公开 `[Obsolete]` API、旧 FBX 解析规则和 serialized asset migration 仍被编译、反射或行为测试使用，继续保留以避免破坏兼容。此前唯一零调用、零导出的 native VFX legacy 同步路径已在清理检查点删除，并已通过完整构建/测试证明现行路径不依赖它。
+- 最终门禁后逐项确认并移出 **39 个** Git ignored、内部零 tracked 的 repo-local `bin/obj/build` 目录，共 **375,276 KiB**；同时移出 **271 个 / 189,464 KiB** 本项目 `/private/tmp/anity-*` 探针、日志和反汇编临时目标，合计 **564,740 KiB（约 551.5 MiB）**。内容可从废纸篓 `/Users/solarisneko/.Trash/anity-weighted-extremes-final.pVUrWa` 恢复；最终复扫仓库缓存目录与 Anity 临时目标均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 权威 A/B 来自当前可用的 Unity 2022.3.51f1；目标 Unity 2022.3.61f1 Pro 尚未安装，不能把 51f1 的 exact-bit 证据直接表述为 61f1 已实测。
+- 多个同时动画的 layer weight 与复杂 layer blend 组合、instanced/skinned/非 Mesh Renderer topology、custom clip/loop/root motion/crossfade/mask 仍需独立 Unity fixture；ModelImporter/AnimationClip 继续为 🟡。
+- 此数值路径完成不代表 Editor GUI、IL2CPP、各 Player、Package Manager 或完整 Unity 2022.3 Pro 已完成，整体目标仍继续推进。
+
+### 下一优先项
+1. 补多个同时动画的 layer weight、additive/override/passthrough 交叉组合与 layer 顺序 A/B。
+2. 扩展 visibility 到 instanced/skinned/非 Mesh Renderer，并联测 custom clip、loop/root motion、Animator crossfade/layer/mask。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑 ModelImporter/AnimationClip A/B，并在 Windows 11 x64 与 Linux x64 实跑 CLI/Player 门禁。
+
 ## 2026-07-20 — Unity FBX Visibility hierarchy / animation layers
 
 ### 已完成

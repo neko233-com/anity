@@ -887,6 +887,59 @@ public sealed class NativeModelImportTests : IDisposable
     }
 
     [Theory]
+    [InlineData("RightOnly", 1073756635, 1075065845, 1077899885)]
+    [InlineData("LeftOnly", 1073783623, 1076993201, 1077929935)]
+    [InlineData("RightPacked1", 1074062351, 1076318104, 1077905117)]
+    [InlineData("LeftPacked1", 1073774494, 1075123595, 1077616476)]
+    [InlineData("BothPacked1", 1073962470, 1075728590, 1077715484)]
+    [InlineData("RightPacked3333", 1073777501, 1075678462, 1077902276)]
+    [InlineData("BothPacked9999", 1073748232, 1074729715, 1077931683)]
+    [InlineData("RightPacked10000", 1073748107, 1074240033, 1077893785)]
+    [InlineData("LeftPacked10000", 1073786450, 1077296687, 1077931761)]
+    [InlineData("BothPacked65535", 1073962684, 1075728609, 1077715266)]
+    [InlineData("BrokenBoth", 1073757459, 1076666150, 1077929874)]
+    [InlineData("AutoProgressive", 1073775457, 1075673564, 1077902495)]
+    [InlineData("AutoClamp", 1073962577, 1075728600, 1077715375)]
+    [InlineData("TcbAsymmetric", 1073893186, 1075751370, 1077803118)]
+    public void WeightedLayerCurveModesMatchUnity2022FrameBits(
+        string variant, int expected1, int expected9, int expected18)
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true,
+            source => RewriteFbxLayerWeightCurve(source, variant)).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
+        foreach (var (frame, expected) in new[]
+        {
+            (1, expected1), (9, expected9), (18, expected18),
+        })
+            Assert.Equal(expected, BitConverter.SingleToInt32Bits(keys[frame].value));
+    }
+
+    [Theory]
+    [InlineData("PostSlope", 20, 1077936500, 29, 1077939843, 119, 1077973273)]
+    [InlineData("PostRepeat", 20, 1073757459, 29, 1077041918, 119, 1074314069)]
+    [InlineData("PostMirror", 20, 1077929874, 29, 1076666150, 119, 1074314069)]
+    [InlineData("PostRepeatRelative", 20, 1077951763, 38, 1082130432, 119, 1090662101)]
+    [InlineData("PreSlopeDelayed", 0, 1073700445, 5, 1073723433, 9, 1073741824)]
+    [InlineData("PreRepeatDelayed", 0, 1073796923, 5, 1077391280, 9, 1073741824)]
+    [InlineData("PreMirrorDelayed", 0, 1077913407, 5, 1075841433, 9, 1073741824)]
+    [InlineData("PreRepeatRelativeDelayed", 0, 1065463414, 5, 1072652129, 9, 1073741824)]
+    public void LayerWeightExtrapolationMatchesUnity2022FrameBits(
+        string variant, int frameA, int expectedA, int frameB, int expectedB,
+        int frameC, int expectedC)
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true,
+            source => RewriteFbxLayerWeightCurve(source, variant)).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
+        foreach (var (frame, expected) in new[]
+        {
+            (frameA, expectedA), (frameB, expectedB), (frameC, expectedC),
+        })
+            Assert.Equal(expected, BitConverter.SingleToInt32Bits(keys[frame].value));
+    }
+
+    [Theory]
     [InlineData("Baseline", 0, 0, 0, 0, 0, 0, 2f, 2.92984843f, 3f)]
     [InlineData("MuteBase", 1, 0, 0, 0, 0, 0, 1f, 1.92984831f, 2f)]
     [InlineData("MuteX", 0, 0, 1, 0, 0, 0, 1f, 1.92984831f, 2f)]
@@ -1380,6 +1433,90 @@ public sealed class NativeModelImportTests : IDisposable
         Assert.NotEqual(block, rewritten);
         return source.Substring(0, start) + rewritten +
             source.Substring(start + block.Length);
+    }
+
+    private static string RewriteFbxLayerWeightCurve(string source, string variant)
+    {
+        const string marker = "\tAnimationCurve: 2425217120608";
+        var block = FbxBraceBlock(source, marker);
+        const int user = 0x408;
+        const int broken = 0xc08;
+        const int weightedRight = 0x1000000;
+        const int weightedNextLeft = 0x2000000;
+        var defaultPacked = unchecked((int)0x0d050d05u);
+        var slopeOut = BitConverter.SingleToInt32Bits(1.3154056072235107f);
+        var slopeIn = BitConverter.SingleToInt32Bits(0.21254299581050873f);
+        var slopeEnd = BitConverter.SingleToInt32Bits(0.21251147985458374f);
+
+        int[] Weighted(uint packed) => new[]
+        {
+            slopeOut, slopeIn, unchecked((int)packed), 0,
+            slopeEnd, 0, defaultPacked, 0,
+        };
+
+        var config = variant switch
+        {
+            "RightOnly" => (user | weightedRight, user, Weighted(0x0d0515fbu), (char?)null, (char?)null, false),
+            "LeftOnly" => (user | weightedNextLeft, user, Weighted(0x20630d05u), (char?)null, (char?)null, false),
+            "RightPacked1" => (user | weightedRight, user, Weighted(0x0d050001u), (char?)null, (char?)null, false),
+            "LeftPacked1" => (user | weightedNextLeft, user, Weighted(0x00010d05u), (char?)null, (char?)null, false),
+            "BothPacked1" => (user | weightedRight | weightedNextLeft, user, Weighted(0x00010001u), (char?)null, (char?)null, false),
+            "RightPacked3333" => (user | weightedRight, user, Weighted(0x0d050d05u), (char?)null, (char?)null, false),
+            "BothPacked9999" => (user | weightedRight | weightedNextLeft, user, Weighted(0x270f270fu), (char?)null, (char?)null, false),
+            "RightPacked10000" => (user | weightedRight, user, Weighted(0x0d052710u), (char?)null, (char?)null, false),
+            "LeftPacked10000" => (user | weightedNextLeft, user, Weighted(0x27100d05u), (char?)null, (char?)null, false),
+            "BothPacked65535" => (user | weightedRight | weightedNextLeft, user, Weighted(0xffffffffu), (char?)null, (char?)null, false),
+            "BrokenBoth" => (broken | weightedRight | weightedNextLeft, broken, Weighted(0x206315fbu), (char?)null, (char?)null, false),
+            "AutoProgressive" => (0x6108, 0x6108, new[] { 0, 0, defaultPacked, 0, 0, 0, defaultPacked, 0 }, (char?)null, (char?)null, false),
+            "AutoClamp" => (0x3108, 0x3108, new[] { 0, 0, defaultPacked, 0, 0, 0, defaultPacked, 0 }, (char?)null, (char?)null, false),
+            "TcbAsymmetric" => (0x208, 0x208, new[]
+            {
+                BitConverter.SingleToInt32Bits(0.2f),
+                BitConverter.SingleToInt32Bits(-0.3f),
+                BitConverter.SingleToInt32Bits(0.4f), 0,
+                BitConverter.SingleToInt32Bits(-0.1f),
+                BitConverter.SingleToInt32Bits(0.25f),
+                BitConverter.SingleToInt32Bits(-0.35f), 0,
+            }, (char?)null, (char?)null, false),
+            "PostSlope" => (user | weightedRight | weightedNextLeft, user, Weighted(0x206315fbu), (char?)null, (char?)'K', false),
+            "PostRepeat" => (user | weightedRight | weightedNextLeft, user, Weighted(0x206315fbu), (char?)null, (char?)'R', false),
+            "PostMirror" => (user | weightedRight | weightedNextLeft, user, Weighted(0x206315fbu), (char?)null, (char?)'M', false),
+            "PostRepeatRelative" => (user | weightedRight | weightedNextLeft, user, Weighted(0x206315fbu), (char?)null, (char?)'A', false),
+            "PreSlopeDelayed" => (user | weightedRight | weightedNextLeft, user, Weighted(0x206315fbu), (char?)'K', (char?)null, true),
+            "PreRepeatDelayed" => (user | weightedRight | weightedNextLeft, user, Weighted(0x206315fbu), (char?)'R', (char?)null, true),
+            "PreMirrorDelayed" => (user | weightedRight | weightedNextLeft, user, Weighted(0x206315fbu), (char?)'M', (char?)null, true),
+            "PreRepeatRelativeDelayed" => (user | weightedRight | weightedNextLeft, user, Weighted(0x206315fbu), (char?)'A', (char?)null, true),
+            _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, null),
+        };
+
+        var rewritten = block.Replace(
+            "\t\t\ta: 50332680,1032",
+            "\t\t\ta: " + config.Item1.ToString(CultureInfo.InvariantCulture) + "," +
+            config.Item2.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        rewritten = rewritten.Replace(
+            "\t\t\ta: 1067999030,1046062303,543364603,0,1046060188,0,218434821,0",
+            "\t\t\ta: " + string.Join(",", config.Item3.Select(value =>
+                value.ToString(CultureInfo.InvariantCulture))), StringComparison.Ordinal);
+        if (config.Item6)
+        {
+            rewritten = rewritten.Replace(
+                "\t\t\ta: 1924423250,38488465000",
+                "\t\t\ta: 19244232500,38488465000", StringComparison.Ordinal);
+        }
+        if (config.Item4.HasValue)
+            rewritten = AddFbxCurveExtrapolation(rewritten, "Pre-Extrapolation", config.Item4.Value);
+        if (config.Item5.HasValue)
+            rewritten = AddFbxCurveExtrapolation(rewritten, "Post-Extrapolation", config.Item5.Value);
+        Assert.NotEqual(block, rewritten);
+        return source.Replace(block, rewritten, StringComparison.Ordinal);
+    }
+
+    private static string AddFbxCurveExtrapolation(string block, string name, char type)
+    {
+        var close = block.LastIndexOf('}');
+        Assert.True(close >= 0);
+        return block.Substring(0, close) + "\t\t" + name + ":  {\n" +
+            "\t\t\tType: " + type + "\n\t\t\tRepetition: -1\n\t\t}\n\t}";
     }
 
     private (GameObject Root, AnimationClip Clip) ReimportOrderedAnimation(
