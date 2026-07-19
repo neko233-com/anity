@@ -1882,11 +1882,11 @@ static float EvaluateUnityLayeredVisibility(
     const double layerValue = EvaluateUnityVisibilityStep(
       value->curves[0], time, UnityVisibilityDefaultValue(value));
     // ufbx clamps the convenience `layer->weight` field to [0,1], while Unity
-    // preserves an unbounded static Weight for the first active property layer.
-    // Read the raw FBX property only for that proven special case; later static
-    // layer extrapolation remains on the independently verified ufbx path.
+    // preserves unbounded static Weight on every layer. Read the raw FBX
+    // property so negative and greater-than-100 weights reach the same layer
+    // blend formula as animated weights.
     const ufbx_prop* rawWeight = ufbx_find_prop(&layer->props, "Weight");
-    double weight = !hasActiveLayerValue && rawWeight
+    double weight = rawWeight
       ? rawWeight->value_real / 100.0
       : layer->weight;
     if (layer->weight_is_animated) {

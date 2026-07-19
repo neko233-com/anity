@@ -1007,6 +1007,43 @@ public sealed class NativeModelImportTests : IDisposable
     }
 
     [Theory]
+    [InlineData(0, -50, false, false, 1065353216)]
+    [InlineData(0, -50, false, true, -1082130432)]
+    [InlineData(0, -50, true, false, 1065353216)]
+    [InlineData(0, -50, true, true, -1082130432)]
+    [InlineData(0, 150, false, false, 1091567616)]
+    [InlineData(0, 150, false, true, 1088421888)]
+    [InlineData(0, 150, true, false, 1091567616)]
+    [InlineData(0, 150, true, true, 1088421888)]
+    [InlineData(1, -50, false, false, -1073741824)]
+    [InlineData(1, -50, false, true, -1073741824)]
+    [InlineData(1, -50, true, false, 0)]
+    [InlineData(1, -50, true, true, -1073741824)]
+    [InlineData(1, 150, false, false, 1086324736)]
+    [InlineData(1, 150, false, true, 1086324736)]
+    [InlineData(1, 150, true, false, 1090519040)]
+    [InlineData(1, 150, true, true, 1086324736)]
+    [InlineData(2, -50, false, false, 1075838976)]
+    [InlineData(2, -50, false, true, -1090519040)]
+    [InlineData(2, -50, true, false, 1069547520)]
+    [InlineData(2, -50, true, true, -1090519040)]
+    [InlineData(2, 150, false, false, 1083179008)]
+    [InlineData(2, 150, false, true, 1085276160)]
+    [InlineData(2, 150, true, false, 1089470464)]
+    [InlineData(2, 150, true, true, 1085276160)]
+    public void LaterStaticLayerWeightModeOrderAndMuteMatchUnity2022FrameBits(
+        int blendMode, int staticWeight, bool reverse, bool muteX, int expected)
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true,
+            source => RewriteFbxLaterStaticLayerWeight(
+                source, blendMode, staticWeight, reverse, muteX)).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
+        foreach (var frame in new[] { 0, 13, 119 })
+            Assert.Equal(expected, BitConverter.SingleToInt32Bits(keys[frame].value));
+    }
+
+    [Theory]
     [InlineData("Baseline", 0, 0, 0, 0, 0, 0, 2f, 2.92984843f, 3f)]
     [InlineData("MuteBase", 1, 0, 0, 0, 0, 0, 1f, 1.92984831f, 2f)]
     [InlineData("MuteX", 0, 0, 1, 0, 0, 0, 1f, 1.92984831f, 2f)]
@@ -1754,6 +1791,43 @@ public sealed class NativeModelImportTests : IDisposable
             staticWeight.ToString(CultureInfo.InvariantCulture));
         return source.Substring(0, start) + rewritten +
             source.Substring(start + block.Length);
+    }
+
+    private static string RewriteFbxLaterStaticLayerWeight(
+        string source, int blendMode, int staticWeight, bool reverse, bool muteX)
+    {
+        const long stackId = 2425829828848;
+        const long xLayerId = 2425581317088;
+        const long yLayerId = 2425581322864;
+        const long yWeightCurveId = 2425217120608;
+        const long yWeightNodeId = 2425829827184;
+        var inv = CultureInfo.InvariantCulture;
+        source = RewriteFbxVisibilityNode(source, 2425829830304, 2);
+        source = RewriteFbxVisibilityNode(source, 2425829827392, 4);
+        source = RewriteFbxVisibilityCurve(source, 2425217126208, 4);
+        source = RewriteFbxLayerBlend(source, "Y", blendMode, false);
+        source = RewriteFbxLayerStaticWeight(source, "Y", staticWeight);
+        source = SetFbxLayerMuteSolo(source, "X", muteX ? 1 : 0, 0);
+        source = ReplaceRequired(source,
+            "\tC: \"OO\"," + yWeightNodeId.ToString(inv) + "," +
+            yLayerId.ToString(inv) + "\n", string.Empty);
+        source = ReplaceRequired(source,
+            "\tC: \"OP\"," + yWeightNodeId.ToString(inv) + "," +
+            yLayerId.ToString(inv) + ", \"Weight\"\n", string.Empty);
+        source = ReplaceRequired(source,
+            "\tC: \"OP\"," + yWeightCurveId.ToString(inv) + "," +
+            yWeightNodeId.ToString(inv) + ", \"d|Weight\"\n", string.Empty);
+        if (!reverse)
+            return source;
+
+        var xConnection = "\tC: \"OO\"," + xLayerId.ToString(inv) + "," +
+            stackId.ToString(inv);
+        var yConnection = "\tC: \"OO\"," + yLayerId.ToString(inv) + "," +
+            stackId.ToString(inv);
+        const string placeholder = "\tC: \"OO\",9999999999999,9999999999998";
+        source = ReplaceRequired(source, xConnection, placeholder);
+        source = ReplaceRequired(source, yConnection, xConnection);
+        return ReplaceRequired(source, placeholder, yConnection);
     }
 
     private static string RewriteFbxLayerBlend(

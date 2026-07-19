@@ -1,5 +1,25 @@
 # PLAN
 
+## 2026-07-20 — Unity FBX later static layer unbounded weight
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 构造 Base 为首层、Y 为后续目标层的权威 fixture：Y visibility=`4`，静态 Weight=`-50/150%`，覆盖 Additive / Override / Override Passthrough 三种 mode、X→Y / Y→X 两种连接顺序及 X 活跃/静音，共 **24 组**。frame `0/13/119` 的 72 个 imported float 均固化为 exact-bit 门禁。
+- A/B 确认后续静态层与首层一致，不会把 Weight 钳制到 `0..100%`：Additive 执行 `accumulator + layerValue * weight`，Override 执行 `layerValue * weight`，Override Passthrough 执行 `accumulator * (1-weight) + layerValue * weight`；连接顺序决定后续 accumulator，Mute 会把 X 从相应位置完全移除。
+- 修复 `anity-native` 对后续静态层误用 ufbx 已钳制 `layer->weight` 的差距。所有 layer 现在都从原始 FBX `Weight` property 读取静态 double 权重，动画层继续使用 Autodesk-compatible curve evaluator；三种 BlendMode 共用同一未钳制权重值。
+- 新增 **24 个**后续静态 Weight × mode × order × Mute 逐 bit 回归；`NativeModelImportTests` 从 **262/262** 增至 **286/286**。`bash _scripts/build-all.sh Release` 全产品 0 编译错误；强制 native 八工程矩阵 **4341/4341**（Core **3319/3319**），0 失败、0 跳过。
+- `/Applications/Anity.app` 已从本轮最终源码重新安装；Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，深度签名、Info.plist、图标逐 byte 及 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过。
+- 最终门禁后逐项确认并可恢复地移出 **39 个 / 375,228 KiB** Git ignored、内部零 tracked 的 repo-local `bin/obj/build` 目录，以及 **5 个 / 8,592 KiB** 本轮 `/private/tmp/anity-*` Unity 工程、结果和进程日志，合计 **383,820 KiB（约 374.8 MiB）**。内容位于废纸篓 `/Users/solarisneko/.Trash/anity-later-static-final.vfSOQR`；最终复扫仓库缓存目录与 Anity 临时目标均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 权威 exact-bit 证据仍来自当前可用的 Unity 2022.3.51f1；目标 Unity 2022.3.61f1 Pro 尚未安装，不能把 51f1 证据表述为 61f1 已实测。
+- 当前 visibility layer 权重闭环建立在 MeshRenderer layered fixture；instanced mesh、SkinnedMeshRenderer、LOD/helper 与非 Mesh Renderer 的导入 topology、property binding 和祖先传播仍需独立 Unity A/B。
+- custom clip/loop/root motion、Animator crossfade/layer/mask 与 imported visibility 的联合运行时语义仍未闭环；本轮不代表 Editor GUI、IL2CPP、各 Player、Package Manager 或完整 Unity 2022.3 Pro 已完成，整体目标继续推进。
+
+### 下一优先项
+1. 扩展 visibility 到 instanced mesh、SkinnedMeshRenderer、LOD/helper 与非 Mesh Renderer topology，固化导入 binding/传播 exact-bit fixture。
+2. 联测 custom clip slicing、loop/root motion 与 Animator crossfade/layer/mask 对 imported visibility 的运行时语义。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑 ModelImporter/AnimationClip A/B，并在 Windows 11 x64 与 Linux x64 实跑 CLI/Player 门禁。
+
 ## 2026-07-20 — Unity FBX first active layer unbounded weight
 
 ### 已完成
