@@ -502,9 +502,17 @@ static ufbx_quat UnityFbxEulerToQuaternion(
         ? std::atan2(m12, m22) : std::atan2(-m21, m11);
       const double z = std::abs(cosY) > 1e-12
         ? std::atan2(m01, m00) : 0.0;
-      xyzEquivalent->x = static_cast<float>(x * radiansToDegrees);
-      xyzEquivalent->y = static_cast<float>(y * radiansToDegrees);
-      xyzEquivalent->z = static_cast<float>(z * radiansToDegrees);
+      const ufbx_vec3 precise = {
+        x * radiansToDegrees, y * radiansToDegrees, z * radiansToDegrees,
+      };
+      const auto storeFbxEuler = [](double value) {
+        // M2V canonicalizes the exact identity matrix to positive zero even
+        // when atan2 observes subnormal trigonometric residue.
+        return std::abs(value) < 1e-12 ? 0.0f : static_cast<float>(value);
+      };
+      xyzEquivalent->x = storeFbxEuler(precise.x);
+      xyzEquivalent->y = storeFbxEuler(precise.y);
+      xyzEquivalent->z = storeFbxEuler(precise.z);
     }
   }
 
@@ -536,6 +544,33 @@ static ufbx_quat UnityFbxEulerToQuaternion(
     result.w = (m01 - m10) / scale;
   }
   return result;
+}
+
+static float EvaluateUnityConvertedFrameSegment(
+    float leftValue, float rightValue,
+    double sourceT, double frameStep) {
+  // MatrixConverter stores each converted Euler key as float-expanded double,
+  // calculates its user-tangent derivative in double, then converts the
+  // derivative to float. KFCurve evaluates the unweighted Hermite segment
+  // through the same float-rounded De Casteljau stages as the source curves.
+  const float slope = static_cast<float>(
+    (static_cast<double>(rightValue) - static_cast<double>(leftValue)) / frameStep);
+  const float duration = static_cast<float>(frameStep);
+  const float handle = slope * duration / 3.0f;
+  const float p0 = leftValue;
+  const float p1 = p0 + handle;
+  const float p3 = rightValue;
+  const float p2 = p3 - handle;
+  const auto evaluateStage = [sourceT](float from, float to) {
+    const float difference = to - from;
+    volatile double scaled = sourceT * static_cast<double>(difference);
+    return static_cast<float>(
+      scaled + static_cast<double>(from));
+  };
+  const float a = evaluateStage(p0, p1);
+  const float b = evaluateStage(p1, p2);
+  const float c = evaluateStage(p2, p3);
+  return evaluateStage(evaluateStage(a, b), evaluateStage(b, c));
 }
 
 static double UnityFbxSampleTime(
@@ -591,7 +626,14 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
       }
     }
     if (timeOffset != 0.0 && !isOriginalSourceKey) {
-      const double frameStep = 1.0 / static_cast<double>(frameRate);
+      constexpr double ticksPerSecond = 141120000.0;
+      const int64_t sampleTicks = static_cast<int64_t>(
+        std::llround(absoluteTime * ticksPerSecond));
+      const int64_t orderedTicks = static_cast<int64_t>(
+        std::llround(orderedConversionTime * ticksPerSecond));
+      const int64_t frameTicks = static_cast<int64_t>(
+        std::llround(ticksPerSecond / static_cast<double>(frameRate)));
+      const double frameStep = static_cast<double>(frameTicks) / ticksPerSecond;
       const double neighborTime = orderedConversionTime +
         (timeOffset > 0.0 ? frameStep : -frameStep);
       ufbx_vec3 neighborEuler = rawRotation->default_value;
@@ -603,20 +645,26 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
         rawRotation->curves[2], neighborTime, neighborEuler.z));
       ufbx_vec3 neighborXyz{};
       UnityFbxEulerToQuaternion(neighborEuler, node->rotation_order, &neighborXyz);
-      const double interpolation = std::abs(timeOffset) / frameStep;
-      const auto interpolateConvertedCurve = [interpolation](double from, double to) {
-        // Reconstruct the first-order frame segment of the float XYZ curves
-        // produced by FbxAnimCurveFilterMatrixConverter. The legacy KTime
-        // resampler evaluates just past some exact frame keys; subtraction is
-        // float, interpolation time is double, and the result rounds to float.
-        // Exact FBX auto-tangent reconstruction remains tracked in PLAN.md.
-        const float difference = static_cast<float>(to) - static_cast<float>(from);
-        return static_cast<float>(interpolation * static_cast<double>(difference) +
-          static_cast<double>(static_cast<float>(from)));
+      const double interpolation = static_cast<double>(
+        std::abs(sampleTicks - orderedTicks)) / static_cast<double>(frameTicks);
+      const bool usesFollowingFrame = timeOffset > 0.0;
+      const double sourceT = usesFollowingFrame ? interpolation : 1.0 - interpolation;
+      const auto evaluateComponent = [usesFollowingFrame, sourceT, frameStep](
+          double current, double neighbor) {
+        return usesFollowingFrame
+          ? EvaluateUnityConvertedFrameSegment(
+              static_cast<float>(current), static_cast<float>(neighbor),
+              sourceT, frameStep)
+          : EvaluateUnityConvertedFrameSegment(
+              static_cast<float>(neighbor), static_cast<float>(current),
+              sourceT, frameStep);
       };
-      unityXyzEuler.x = interpolateConvertedCurve(unityXyzEuler.x, neighborXyz.x);
-      unityXyzEuler.y = interpolateConvertedCurve(unityXyzEuler.y, neighborXyz.y);
-      unityXyzEuler.z = interpolateConvertedCurve(unityXyzEuler.z, neighborXyz.z);
+      unityXyzEuler.x = evaluateComponent(
+        unityXyzEuler.x, neighborXyz.x);
+      unityXyzEuler.y = evaluateComponent(
+        unityXyzEuler.y, neighborXyz.y);
+      unityXyzEuler.z = evaluateComponent(
+        unityXyzEuler.z, neighborXyz.z);
     }
   }
   const ufbx_quat referenceRaw = ufbx_euler_to_quat(referenceEuler, node->rotation_order);
@@ -670,6 +718,12 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     y /= magnitude;
     z /= magnitude;
     w /= magnitude;
+  }
+  if (node->rotation_order != UFBX_ROTATION_ORDER_XYZ) {
+    if (x == 0.0f) x = 0.0f;
+    if (y == 0.0f) y = 0.0f;
+    if (z == 0.0f) z = 0.0f;
+    if (w == 0.0f) w = 0.0f;
   }
   return { Real(source.time), x, y, z, w };
 }
@@ -985,8 +1039,14 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             const ufbx_baked_quat& sourceKey = bakedNode.rotation_keys.data[key];
             const double sampleTime = UnityFbxSampleTime(
               baked->playback_time_begin, scene->frameRate, key);
-            const double orderedConversionTime = baked->playback_time_begin +
-              static_cast<double>(key) / static_cast<double>(scene->frameRate);
+            constexpr double ticksPerSecond = 141120000.0;
+            const int64_t orderedStartTicks = static_cast<int64_t>(
+              std::llround(baked->playback_time_begin * ticksPerSecond));
+            const int64_t orderedFrameTicks = static_cast<int64_t>(
+              std::llround(ticksPerSecond / static_cast<double>(scene->frameRate)));
+            const double orderedConversionTime = static_cast<double>(
+              orderedStartTicks + static_cast<int64_t>(key) * orderedFrameTicks) /
+              ticksPerSecond;
             AnityModelQuaternionKey rotationKey = UnityQuaternionKey(
               sourceKey, sourceNode, rawRotation, sampleTime,
               orderedConversionTime, scene->frameRate);

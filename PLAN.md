@@ -4,17 +4,16 @@
 
 ### 已完成
 - 用本机 Unity 2022.3.51f1 batchmode 对同一 Maya FBX 构造 `XYZ / XZY / YZX / YXZ / ZXY / ZYX` 六种 `RotationOrder` fixture，逐帧采集未压缩 quaternion，并采集 `animationRotationError = 0.01 / 0.1 / 0.5` 的同步保留帧集合；确认 Unity 对非 XYZ 源先走 `FbxRotationOrder::V2M → FbxAnimCurveFilterMatrixConverter → M2V(XYZ)`，再进入 legacy XYZ quaternion 提取与压缩链。
-- `anity-native` 已复刻 FBX SDK 的六种 axis table、odd-parity 符号、`FbxAMatrix::SetR` 运算顺序及等价 XYZ 提取；非 XYZ 原始 Euler 在精确 take frame grid 上求值，原始 source key 的四元数与 Unity 逐 float 相等，非 source sample 与 Unity 控制在最多 3 ULP。
-- 新增 5 种非 XYZ 顺序的 24 帧/四分量同步、5 组 source-key quaternion 精确值及 14 组 strict/normal/loose reduction 对照，共 **24 个用例**；`NativeModelImportTests` **61/61**，0 失败、0 跳过。15 组已采集压缩集合中 **14/15** 逐帧一致。`_scripts/build-all.sh Release` 全部 0 编译错误；最终强制 native 八工程矩阵 **4103/4103**（Core **3094/3094**），均 0 失败、0 跳过。
+- `anity-native` 已复刻 FBX SDK 的六种 axis table、odd-parity 符号、`FbxAMatrix::SetR` 运算顺序及等价 XYZ 提取；继续反汇编 `SetDestFCurveTangeant` 与 `KFCurve::EvaluateIndex`，按 float-expanded key、double derivative、float Hermite handle、legacy KTime tick 及逐级 float De Casteljau 顺序复刻 MatrixConverter 曲线，并将 identity M2V residue 规范为正零。
+- 五种非 XYZ 顺序的未压缩 quaternion 共 **480/480 float 逐 bit 一致**；`animationRotationError = 0.01 / 0.1 / 0.5` 的 **15/15** 同步保留帧集合全部一致，原 `ZYX + 0.01` 的 frame 7/9 差异已消除。新增 24 帧/四分量同步、source key、zero crossing、identity 正零符号及 strict/normal/loose reduction 共 **35 个用例**；`NativeModelImportTests` **72/72**。`_scripts/build-all.sh Release` 全部 0 编译错误；最终强制 native 八工程矩阵 **4114/4114**（Core **3105/3105**），均 0 失败、0 跳过。
 
 ### 尚未完成
-- `FbxAnimCurveFilterMatrixConverter` 生成的等价 XYZ 曲线使用 FBX auto tangent；当前只复建相邻帧的一阶段。`ZYX + rotationError 0.01` 仍保留 frame `9` 而 Unity 保留 frame `7`，其余 14 组一致，因此本项不能标为完全完成。
 - 等价 XYZ 提取在 gimbal-lock 邻域的 FBX tie-break、pre/post rotation、rotation/scaling pivot、helper transform、多 animation layer，以及 constant/stepped/weighted/broken tangent 尚未逐项完成 Unity A/B；不满足已证明约束的资产继续保留 ufbx baked 安全路径。
 - 正式目标仍需在 Unity 2022.3.61f1 Pro 上重跑逐 ULP、Editor curve visualization 与 Player 连续时间采样门禁；ModelImporter/AnimationClip 保持 🟡。
 
 ### 下一优先项
-1. 精确复刻 `FbxAnimCurveFilterMatrixConverter` 的 auto tangent/curve evaluation，消除 `ZYX + 0.01` 的 frame 7/9 差异并把全部非 XYZ sample 收敛到逐 ULP。
-2. 增加 Euler wrap/gimbal-lock、pre/post rotation、pivot/helper 与多 animation layer fixture，逐项替换安全 fallback。
+1. 增加 Euler wrap/gimbal-lock 与六种 rotation order 的极值 fixture，锁定 `M2V(XYZ)` singular tie-break。
+2. 增加 pre/post rotation、rotation/scaling pivot、helper 与多 animation layer fixture，逐项替换安全 fallback。
 3. 完成 importer loop/root motion/additive/mask 与 stable sub-asset fileID/type-tree/artifact cache，并迁移到 Unity 2022.3.61f1 Pro 完整门禁。
 
 ## 2026-07-19 — Unity FBX quaternion 同步 angular reduction

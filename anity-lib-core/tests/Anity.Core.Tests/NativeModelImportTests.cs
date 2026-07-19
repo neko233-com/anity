@@ -67,10 +67,54 @@ public sealed class NativeModelImportTests : IDisposable
     }
 
     [Theory]
+    [InlineData(1, -6.06403638E-09f, 1.73606658E-08f, 2.64970872E-08f)]
+    [InlineData(2, -8.734566E-09f, 1.89047054E-08f, 2.54229118E-08f)]
+    [InlineData(3, -8.833036E-09f, 1.7548496E-08f, 2.5447406E-08f)]
+    [InlineData(4, -5.9601466E-09f, 1.87167117E-08f, 2.64841038E-08f)]
+    [InlineData(5, -6.01030559E-09f, 1.8700721E-08f, 2.55728114E-08f)]
+    public void NonXyzRotationOrdersMatchUnity2022AtMatrixConverterZeroCrossing(
+        int rotationOrder, float x, float y, float z)
+    {
+        var imported = ReimportOrderedAnimation(rotationOrder, importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        });
+        Assert.Equal(x, Curve(imported.Clip, "m_LocalRotation.x").keys[18].value);
+        Assert.Equal(y, Curve(imported.Clip, "m_LocalRotation.y").keys[18].value);
+        Assert.Equal(z, Curve(imported.Clip, "m_LocalRotation.z").keys[18].value);
+        Assert.Equal(1f, Curve(imported.Clip, "m_LocalRotation.w").keys[18].value);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void NonXyzRotationOrdersCanonicalizeUnityIdentityQuaternionToPositiveZero(
+        int rotationOrder)
+    {
+        var imported = ReimportOrderedAnimation(rotationOrder, importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        });
+        Assert.Equal(0, BitConverter.SingleToInt32Bits(
+            Curve(imported.Clip, "m_LocalRotation.x").keys[0].value));
+        Assert.Equal(0, BitConverter.SingleToInt32Bits(
+            Curve(imported.Clip, "m_LocalRotation.y").keys[0].value));
+        Assert.Equal(0, BitConverter.SingleToInt32Bits(
+            Curve(imported.Clip, "m_LocalRotation.z").keys[0].value));
+        Assert.Equal(1f, Curve(imported.Clip, "m_LocalRotation.w").keys[0].value);
+    }
+
+    [Theory]
     [InlineData(1, 0.01f, "0,1,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23")]
     [InlineData(2, 0.01f, "0,1,3,5,6,8,12,13,14,16,17,18,19,21,22,23")]
     [InlineData(3, 0.01f, "0,1,3,4,6,7,10,12,13,14,15,16,17,18,19,20,21,22,23")]
     [InlineData(4, 0.01f, "0,1,3,5,6,10,11,12,13,14,16,17,18,19,20,21,22,23")]
+    [InlineData(5, 0.01f, "0,1,3,6,7,10,11,12,13,14,15,16,17,18,19,20,22,23")]
     [InlineData(1, 0.1f, "0,1,7,12,14,17,19,22,23")]
     [InlineData(2, 0.1f, "0,1,7,12,14,17,19,22,23")]
     [InlineData(3, 0.1f, "0,1,7,12,13,14,17,19,22,23")]
