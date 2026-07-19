@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Anity.Core.Runtime.Native;
 
@@ -216,6 +217,168 @@ public static class AnityNative
         _avatarNativeAvailable = false;
         if (NativeTransformRequired)
             throw new DllNotFoundException("anity-native AvatarBuilder entry points are required but unavailable.");
+        return false;
+    }
+
+    private static bool _avatarMaskNativeAvailable = true;
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_Create")]
+    private static extern Result AvatarMask_Create(out IntPtr mask);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_Destroy")]
+    private static extern void AvatarMask_Destroy(IntPtr mask);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_GetHumanoidBodyPartActive")]
+    private static extern Result AvatarMask_GetHumanoidBodyPartActive(IntPtr mask, int index, out int active);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_SetHumanoidBodyPartActive")]
+    private static extern Result AvatarMask_SetHumanoidBodyPartActive(IntPtr mask, int index, int active);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_GetTransformCount")]
+    private static extern Result AvatarMask_GetTransformCount(IntPtr mask, out int count);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_SetTransformCount")]
+    private static extern Result AvatarMask_SetTransformCount(IntPtr mask, int count);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_GetTransformActive")]
+    private static extern Result AvatarMask_GetTransformActive(IntPtr mask, int index, out int active);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_SetTransformActive")]
+    private static extern Result AvatarMask_SetTransformActive(IntPtr mask, int index, int active);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_CopyTransformPath")]
+    private static extern Result AvatarMask_CopyTransformPath(
+        IntPtr mask, int index, IntPtr buffer, int bufferCapacity, out int requiredBytes);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_SetTransformPath")]
+    private static extern Result AvatarMask_SetTransformPath(
+        IntPtr mask, int index, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_AddTransformPath")]
+    private static extern Result AvatarMask_AddTransformPath(
+        IntPtr mask, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_RemoveTransformPath")]
+    private static extern Result AvatarMask_RemoveTransformPath(
+        IntPtr mask, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int recursive);
+
+    public static bool TryCreateAvatarMask(out IntPtr mask)
+    {
+        mask = IntPtr.Zero;
+        if (!_avatarMaskNativeAvailable) return false;
+        try { return AvatarMask_Create(out mask) == Result.Ok && mask != IntPtr.Zero; }
+        catch (DllNotFoundException) { return HandleMissingAvatarMaskNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarMaskNative(); }
+    }
+
+    public static void DestroyAvatarMask(IntPtr mask)
+    {
+        if (mask == IntPtr.Zero || !_avatarMaskNativeAvailable) return;
+        try { AvatarMask_Destroy(mask); }
+        catch (DllNotFoundException) { _avatarMaskNativeAvailable = false; }
+        catch (EntryPointNotFoundException) { _avatarMaskNativeAvailable = false; }
+    }
+
+    public static bool TryGetAvatarMaskHumanoidBodyPartActive(IntPtr mask, int index, out bool active)
+    {
+        active = false;
+        try
+        {
+            int value = 0;
+            bool success = _avatarMaskNativeAvailable &&
+                AvatarMask_GetHumanoidBodyPartActive(mask, index, out value) == Result.Ok;
+            active = success && value != 0;
+            return success;
+        }
+        catch (DllNotFoundException) { return HandleMissingAvatarMaskNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarMaskNative(); }
+    }
+
+    public static bool TrySetAvatarMaskHumanoidBodyPartActive(IntPtr mask, int index, bool active)
+        => TryAvatarMaskCall(() => AvatarMask_SetHumanoidBodyPartActive(mask, index, active ? 1 : 0));
+
+    public static bool TryGetAvatarMaskTransformCount(IntPtr mask, out int count)
+    {
+        count = 0;
+        try
+        {
+            return _avatarMaskNativeAvailable && AvatarMask_GetTransformCount(mask, out count) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAvatarMaskNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarMaskNative(); }
+    }
+
+    public static bool TrySetAvatarMaskTransformCount(IntPtr mask, int count)
+        => TryAvatarMaskCall(() => AvatarMask_SetTransformCount(mask, count));
+
+    public static bool TryGetAvatarMaskTransformActive(IntPtr mask, int index, out bool active)
+    {
+        active = false;
+        try
+        {
+            int value = 0;
+            bool success = _avatarMaskNativeAvailable &&
+                AvatarMask_GetTransformActive(mask, index, out value) == Result.Ok;
+            active = success && value != 0;
+            return success;
+        }
+        catch (DllNotFoundException) { return HandleMissingAvatarMaskNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarMaskNative(); }
+    }
+
+    public static bool TrySetAvatarMaskTransformActive(IntPtr mask, int index, bool active)
+        => TryAvatarMaskCall(() => AvatarMask_SetTransformActive(mask, index, active ? 1 : 0));
+
+    public static bool TryGetAvatarMaskTransformPath(IntPtr mask, int index, out string path)
+    {
+        path = string.Empty;
+        IntPtr buffer = IntPtr.Zero;
+        try
+        {
+            if (!_avatarMaskNativeAvailable ||
+                AvatarMask_CopyTransformPath(mask, index, IntPtr.Zero, 0, out int requiredBytes) != Result.Ok ||
+                requiredBytes <= 0)
+                return false;
+            buffer = Marshal.AllocHGlobal(requiredBytes);
+            if (AvatarMask_CopyTransformPath(mask, index, buffer, requiredBytes, out int writtenBytes) != Result.Ok ||
+                writtenBytes != requiredBytes)
+                return false;
+            int contentBytes = requiredBytes - 1;
+            if (contentBytes == 0) return true;
+            var bytes = new byte[contentBytes];
+            Marshal.Copy(buffer, bytes, 0, contentBytes);
+            path = Encoding.UTF8.GetString(bytes);
+            return true;
+        }
+        catch (DllNotFoundException) { return HandleMissingAvatarMaskNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarMaskNative(); }
+        finally
+        {
+            if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    public static bool TrySetAvatarMaskTransformPath(IntPtr mask, int index, string path)
+        => TryAvatarMaskCall(() => AvatarMask_SetTransformPath(mask, index, path ?? string.Empty));
+
+    public static bool TryAddAvatarMaskTransformPath(IntPtr mask, string path)
+        => TryAvatarMaskCall(() => AvatarMask_AddTransformPath(mask, path ?? string.Empty));
+
+    public static bool TryRemoveAvatarMaskTransformPath(IntPtr mask, string path, bool recursive)
+        => TryAvatarMaskCall(() => AvatarMask_RemoveTransformPath(mask, path ?? string.Empty, recursive ? 1 : 0));
+
+    private static bool TryAvatarMaskCall(Func<Result> call)
+    {
+        try { return _avatarMaskNativeAvailable && call() == Result.Ok; }
+        catch (DllNotFoundException) { return HandleMissingAvatarMaskNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarMaskNative(); }
+    }
+
+    private static bool HandleMissingAvatarMaskNative()
+    {
+        _avatarMaskNativeAvailable = false;
+        if (NativeTransformRequired)
+            throw new DllNotFoundException("anity-native AvatarMask entry points are required but unavailable.");
         return false;
     }
 

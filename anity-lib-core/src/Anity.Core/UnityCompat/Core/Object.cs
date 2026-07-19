@@ -177,6 +177,8 @@ public class Object
       Anity.Core.Runtime.Native.NativeGraphicsDevice.ReleaseTextureFromAll(texture);
     if (obj is VFX.VisualEffect visualEffect)
       visualEffect.ReleaseNativeState();
+    if (obj is AvatarMask avatarMask)
+      avatarMask.ReleaseNativeState();
 
     if (obj is GameObject gameObject)
     {

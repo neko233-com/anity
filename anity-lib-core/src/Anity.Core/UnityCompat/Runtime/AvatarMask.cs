@@ -1,141 +1,142 @@
+using System;
 using System.Collections.Generic;
+using Anity.Core.Runtime.Native;
 
 namespace UnityEngine;
 
-public struct TransformMaskElement
+[Scripting.APIUpdating.MovedFrom(true, "UnityEditor.Animations", "UnityEditor", null)]
+public enum AvatarMaskBodyPart
 {
-  public string path;
-  public bool active;
-
-  public TransformMaskElement(string path, bool active)
-  {
-    this.path = path ?? string.Empty;
-    this.active = active;
-  }
+  Root = 0,
+  Body = 1,
+  Head = 2,
+  LeftLeg = 3,
+  RightLeg = 4,
+  LeftArm = 5,
+  RightArm = 6,
+  LeftFingers = 7,
+  RightFingers = 8,
+  LeftFootIK = 9,
+  RightFootIK = 10,
+  LeftHandIK = 11,
+  RightHandIK = 12,
+  LastBodyPart = 13,
 }
 
-public class AvatarMask : Object
+[Bindings.NativeHeader("Modules/Animation/AvatarMask.h")]
+[Bindings.NativeHeader("Modules/Animation/ScriptBindings/Animation.bindings.h")]
+[Scripting.APIUpdating.MovedFrom(true, "UnityEditor.Animations", "UnityEditor", null)]
+[Scripting.UsedByNativeCode]
+public sealed class AvatarMask : Object
 {
-  public string name { get; set; } = string.Empty;
-  public int humanMachineCount { get; set; }
-  public int skeletonCount { get; set; }
-  private readonly Dictionary<HumanBodyBones, bool> _humanoidParts = new();
-  private readonly List<TransformMaskElement> _transformElements = new();
+  private IntPtr _nativeHandle;
 
-  public int transformCount => _transformElements.Count;
-
-  public TransformMaskElement[] GetTransformMaskElements()
+  public AvatarMask()
   {
-    return _transformElements.ToArray();
+    if (!AnityNative.TryCreateAvatarMask(out _nativeHandle))
+      throw new InvalidOperationException("anity-native AvatarMask runtime is unavailable.");
   }
 
-  public bool GetHumanoidBodyPartActive(HumanBodyBones humanBodyPart)
-  {
-    return _humanoidParts.TryGetValue(humanBodyPart, out var active) && active;
-  }
+  [Obsolete("AvatarMask.humanoidBodyPartCount is deprecated, use AvatarMaskBodyPart.LastBodyPart instead.")]
+  public int humanoidBodyPartCount => (int)AvatarMaskBodyPart.LastBodyPart;
 
-  public void SetHumanoidBodyPartActive(HumanBodyBones humanBodyPart, bool value)
+  public int transformCount
   {
-    _humanoidParts[humanBodyPart] = value;
-  }
-
-  public bool GetHumanoidBodyPartMask(HumanBodyBones humanBodyPart)
-  {
-    return GetHumanoidBodyPartActive(humanBodyPart);
-  }
-
-  public void SetHumanoidBodyPartMask(HumanBodyBones humanBodyPart, bool value)
-  {
-    SetHumanoidBodyPartActive(humanBodyPart, value);
-  }
-
-  public bool GetTransformMask(Transform transform)
-  {
-    if (transform == null) return false;
-    string path = GetTransformPathFromTransform(transform);
-    for (int i = 0; i < _transformElements.Count; i++)
+    get
     {
-      if (_transformElements[i].path == path)
-        return _transformElements[i].active;
+      EnsureNative(AnityNative.TryGetAvatarMaskTransformCount(_nativeHandle, out int count));
+      return count;
     }
-    return false;
+    set => EnsureNative(AnityNative.TrySetAvatarMaskTransformCount(_nativeHandle, value));
   }
 
-  public void SetTransformMask(Transform transform, bool value)
+  [Bindings.NativeMethod("GetBodyPart")]
+  public bool GetHumanoidBodyPartActive(AvatarMaskBodyPart index)
   {
-    if (transform == null) return;
-    string path = GetTransformPathFromTransform(transform);
-    for (int i = 0; i < _transformElements.Count; i++)
-    {
-      if (_transformElements[i].path == path)
-      {
-        _transformElements[i] = new TransformMaskElement(path, value);
-        return;
-      }
-    }
-    _transformElements.Add(new TransformMaskElement(path, value));
+    EnsureNative(AnityNative.TryGetAvatarMaskHumanoidBodyPartActive(_nativeHandle, (int)index, out bool active));
+    return active;
+  }
+
+  [Bindings.NativeMethod("SetBodyPart")]
+  public void SetHumanoidBodyPartActive(AvatarMaskBodyPart index, bool value)
+  {
+    EnsureNative(AnityNative.TrySetAvatarMaskHumanoidBodyPartActive(_nativeHandle, (int)index, value));
   }
 
   public bool GetTransformActive(int index)
   {
-    if (index >= 0 && index < _transformElements.Count)
-      return _transformElements[index].active;
-    return false;
+    EnsureNative(AnityNative.TryGetAvatarMaskTransformActive(_nativeHandle, index, out bool active));
+    return active;
   }
 
   public void SetTransformActive(int index, bool value)
   {
-    if (index < 0) return;
-    while (_transformElements.Count <= index)
-      _transformElements.Add(new TransformMaskElement(string.Empty, false));
-    var elem = _transformElements[index];
-    elem.active = value;
-    _transformElements[index] = elem;
+    EnsureNative(AnityNative.TrySetAvatarMaskTransformActive(_nativeHandle, index, value));
   }
 
   public string GetTransformPath(int index)
   {
-    if (index >= 0 && index < _transformElements.Count)
-      return _transformElements[index].path;
-    return string.Empty;
+    EnsureNative(AnityNative.TryGetAvatarMaskTransformPath(_nativeHandle, index, out string path));
+    return path;
   }
 
   public void SetTransformPath(int index, string path)
   {
-    if (index < 0) return;
-    while (_transformElements.Count <= index)
-      _transformElements.Add(new TransformMaskElement(string.Empty, false));
-    var elem = _transformElements[index];
-    elem.path = path ?? string.Empty;
-    _transformElements[index] = elem;
+    EnsureNative(AnityNative.TrySetAvatarMaskTransformPath(_nativeHandle, index, path ?? string.Empty));
   }
 
-  public void AddTransformPath(string path)
+  public void AddTransformPath(Transform transform)
   {
-    _transformElements.Add(new TransformMaskElement(path ?? string.Empty, true));
+    AddTransformPath(transform, true);
   }
 
-  public void AddTransformPath(string path, bool active)
+  public void AddTransformPath(
+    [Bindings.NotNull("ArgumentNullException")] Transform transform,
+    [Internal.DefaultValue("true")] bool recursive)
   {
-    _transformElements.Add(new TransformMaskElement(path ?? string.Empty, active));
+    if (transform is null) throw new ArgumentNullException(nameof(transform));
+    AddTransformPathRecursive(transform, recursive);
   }
 
-  public void RemoveTransformPath(int index)
+  public void RemoveTransformPath(Transform transform)
   {
-    if (index >= 0 && index < _transformElements.Count)
-      _transformElements.RemoveAt(index);
+    RemoveTransformPath(transform, true);
   }
 
-  private string GetTransformPathFromTransform(Transform transform)
+  public void RemoveTransformPath(
+    [Bindings.NotNull("ArgumentNullException")] Transform transform,
+    [Internal.DefaultValue("true")] bool recursive)
+  {
+    if (transform is null) throw new ArgumentNullException(nameof(transform));
+    EnsureNative(AnityNative.TryRemoveAvatarMaskTransformPath(_nativeHandle, GetTransformPathFromHierarchyRoot(transform), recursive));
+  }
+
+  internal void ReleaseNativeState()
+  {
+    IntPtr handle = _nativeHandle;
+    _nativeHandle = IntPtr.Zero;
+    AnityNative.DestroyAvatarMask(handle);
+  }
+
+  private void AddTransformPathRecursive(Transform transform, bool recursive)
+  {
+    EnsureNative(AnityNative.TryAddAvatarMaskTransformPath(_nativeHandle, GetTransformPathFromHierarchyRoot(transform)));
+    if (!recursive) return;
+    for (int index = 0; index < transform.childCount; ++index)
+      AddTransformPathRecursive(transform.GetChild(index), true);
+  }
+
+  private static string GetTransformPathFromHierarchyRoot(Transform transform)
   {
     var names = new List<string>();
-    var current = transform;
-    while (current != null && current.parent != null)
-    {
-      names.Add(current.name);
-      current = current.parent;
-    }
+    for (Transform current = transform; current.parent is not null; current = current.parent)
+      names.Add(current.gameObject?.name ?? string.Empty);
     names.Reverse();
     return string.Join("/", names);
+  }
+
+  private static void EnsureNative(bool success)
+  {
+    if (!success) throw new InvalidOperationException("anity-native AvatarMask operation failed.");
   }
 }

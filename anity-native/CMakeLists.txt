@@ -42,6 +42,7 @@ target_sources(anity_native PRIVATE
   src/math/anity_matrix.cpp
   src/transform/anity_transform.cpp
   src/animation/anity_avatar.cpp
+  src/animation/anity_avatar_mask.cpp
   src/ui/anity_ui_renderer.cpp
   src/graphics/anity_graphics.cpp
   src/graphics/anity_graphics_ui.cpp

@@ -1,5 +1,22 @@
 # PLAN
 
+## 2026-07-19 — AvatarMask 精确公开面与 native 状态
+
+### 已完成
+- `UnityEngine.AvatarMask` 与 `AvatarMaskBodyPart` 已按本机 Unity 2022.3.51f1 预备反射重建：补齐 sealed/type metadata、官方 13 个 body part、可写 `transformCount`、Transform 路径 overload 和 obsolete property，移除错误的 `TransformMaskElement`、HumanBodyBones/string helper、额外计数与可写 `name`。新增的 `MovedFromAttribute` 公开签名也与官方反射指纹一致。
+- 新增 `anity-native` AvatarMask C ABI/C++ 状态，原生持有 humanoid body flags、UTF-8 transform path 与 active flag；托管层仅负责 Unity API、Transform 相对路径遍历和 native 生命周期，符合动画核心落在 C++ 的职责边界。
+- Unity batchmode 行为探针覆盖默认 13 body parts 全启用、非法 body/index、transformCount 扩缩/负数、null/UTF-8 path、depth-first recursive add、重复路径、flat/recursive remove；Anity 逐项复现这些边界语义。
+- 新增 native-required suite **17/17**；AvatarMask/AvatarBuilder/ModelImporter 组合回归 **183/183**，统一 Release 门禁 Core **2949/2949**、全矩阵 **3947/3947**，均为 0 失败、0 跳过。
+
+### 尚未完成
+- 当前已闭环 AvatarMask 公开面、独立状态与 Transform path 编辑语义；AnimatorControllerLayer/Playable 对 mask 的逐骨骼采样、Override/Additive 混合、IK body part 与导入资产生命周期尚未消费该 native 状态，不能将 AvatarMask 运行时效果标为完整。
+- 错误的额外 `RawAvatar` 仍被历史 `AssetPostprocessor` callback 使用，需连同官方回调签名一次性迁移；目标 Unity 2022.3.61f1 Pro 的最终反射与 Player A/B 仍待执行，本轮 2022.3.51f1 证据仅是预备门禁。
+
+### 下一优先项
+1. 将 native AvatarMask 接入 Animator layer/Playable 的骨骼、finger、foot/hand IK 过滤与 Override/Additive 混合，并做逐帧 pose A/B。
+2. 按官方 AssetPostprocessor 公开面移除 `RawAvatar`，完成 ModelImporter mask/source Avatar YAML、子资源与重导入生命周期。
+3. 继续接通 decoded FBX hierarchy、humanoid T-pose/muscle/humanScale/retargeting/root-motion rotation，并在 Unity 2022.3.61f1 Pro 重跑最终门禁。
+
 ## 2026-07-19 — Avatar / AvatarBuilder native hierarchy validation
 
 ### 已完成
@@ -11,12 +28,12 @@
 
 ### 尚未完成
 - 当前 native AvatarBuilder 完成的是 hierarchy/rest-pose/mapping validity 主路径；muscle table、T-pose normalization、humanScale、retargeting、root-motion rotation extraction、Animator 逐帧结果与 Player 资源生命周期仍未实现，不能将 Avatar 系统标为完整。
-- ModelImporter 已保留 YAML `parentName` / `rootMotionBoneRotation` / `skeletonHasParents`，但真实 FBX/OBJ hierarchy decoder 尚未把这些 importer 数据接入 native Avatar build；`AvatarMask`、错误的额外 `RawAvatar` API 与目标 Unity 2022.3.61f1 Pro A/B 也仍未闭环。
+- ModelImporter 已保留 YAML `parentName` / `rootMotionBoneRotation` / `skeletonHasParents`，但真实 FBX/OBJ hierarchy decoder 尚未把这些 importer 数据接入 native Avatar build；AvatarMask 的 Animator 实际消费、错误的额外 `RawAvatar` API 与目标 Unity 2022.3.61f1 Pro A/B 也仍未闭环。
 
 ### 下一优先项
 1. 将 ModelImporter 的 importer-only `parentName`、`rootMotionBoneRotation` 与 `skeletonHasParents` 输入真实 native Avatar asset build，接通 decoded FBX hierarchy 并产出可验证的 Avatar 子资源。
 2. 在 `anity-native` 实现 humanoid T-pose normalization、muscle limits/table、humanScale、retargeting 与 root-motion rotation，并用 Animator 逐帧 A/B 验证。
-3. 清理 `RawAvatar` / `AvatarMask` 公开面差异，完成 material/avatar remap；最终在 Unity 2022.3.61f1 Pro 重跑公开面、importer fixture 与 Player 行为 A/B。
+3. 清理 `RawAvatar` / AssetPostprocessor 公开面差异，将 native AvatarMask 接入 Animator，并完成 material/avatar remap；最终在 Unity 2022.3.61f1 Pro 重跑公开面、importer fixture 与 Player 行为 A/B。
 
 ## 2026-07-19 — ModelImporter root motion 与 source Avatar 对象引用
 
