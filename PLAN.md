@@ -1,5 +1,25 @@
 # PLAN
 
+## 2026-07-20 — 全仓缓存复清与零引用 VFX legacy 路径删除
+
+### 已完成
+- 先在干净 `main` 上解析全部 repo-local 安装/构建缓存，确认 Core、MetadataFixups 与 native 的 5 个初始 `bin/obj/build` 目标均被 Git ignore、内部无 tracked 文件；共 **12,904 KiB（约 13 MiB）**，已移入 macOS 废纸篓而非不可恢复删除。冷态 `_scripts/verify-env.sh` 明确报告 native 尚未构建且工具链完整。
+- 对 tracked source、测试、C ABI、P/Invoke、构建脚本和 workflow 做 legacy/obsolete/deprecated 反向引用审计。唯一真正未使用的是 native 内部 `static SubmitVFXInitializeKernelsSynchronousLegacy`：全仓精确标识符仅定义 **1** 处、调用 **0**、导出 **0**，现行 Initialize ticket/transaction 路径已替代它；已删除完整 **220 行**旧同步实现。
+- 保留 Unity 2022.3 公开 `[Obsolete]` API、removed networking surface、FBX legacy 数值规则、Shader Graph/VFX Graph 旧 serialized asset migration，以及仍被 managed/native 调用或测试覆盖的 ABI compatibility entry；这些是 Unity/API/资产兼容要求，不是可删除死代码。测试编译时对 obsolete API 的显式调用也再次证明其兼容门禁仍在使用。
+- 从无 native/cache 状态执行 `_scripts/build-all.sh Release` 成功；native 及 Core、Agent、Shader Graph、VFX Graph、CLI、WebGL、Hub、Editor、URP sample 均 **0 编译错误**。强制 `ANITY_REQUIRE_NATIVE=1` 的八工程矩阵 **4174/4174**（Core **3165/3165**），0 失败、0 跳过，证明旧同步实现不是任何现行构建或运行依赖。
+- Unity-compatible CLI 通过 `dotnet anity.dll -batchmode -quit -nographics -logFile -`，exit 0；`/Applications/Anity.app` 已重新安装，Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，深度签名、Host/CLI batchmode、Info.plist 和图标逐 byte 门禁均通过。
+- 安装验证产生的两个 `osx-arm64` lockfile section 已精确还原；随后再次移出 **39 个**无 tracked 文件的 `bin/obj/build` 目录，共 **290,572 KiB（约 284 MiB）**。本轮合计从工作区清理 **303,476 KiB（约 296 MiB）**，最终复扫 `node_modules/bin/obj/build/dist/Library/Temp/Logs/.cache/.vite/packages` 为 **0**。
+
+### 尚未完成
+- repo-local 缓存已清空；全机 NuGet/Homebrew/Unity/.NET 共享缓存会影响其它项目，因此没有把本项目清理扩张为系统级破坏性删除。
+- Release 目录中的 framework-dependent `anity` apphost 在当前机器直接运行会因全局 host 只登记 .NET 9 而 exit 150；SDK 托管入口与安装包内 self-contained CLI 均通过，但独立 CLI 分发仍需 self-contained 产物和进程级门禁，不能标为完整。
+- Unity 必须公开的 obsolete/legacy compatibility surface 仍需随 2022.3.61f1 反射审计扩充；保留这些兼容 API 不代表完整 Unity 对齐。FBX pre/post quaternion、visibility binding 与完整平台/编辑器门禁也仍未闭环。
+
+### 下一优先项
+1. 产出可直接运行的 self-contained `anity` / `anity.exe` CLI，并增加无系统 runtime 的进程级安装/退出码门禁。
+2. 对齐 pre/post rotation baked quaternion 的 MatrixConverter stack、normalize 舍入与 signed-zero，收紧到 exact-bit。
+3. 增加 Renderer visibility `m_Enabled` binding，并补 ≥10 个 importer/runtime/Animator 用例。
+
 ## 2026-07-20 — Unity FBX retained-pivot position exact-bit 与废弃 bake 清理
 
 ### 已完成
