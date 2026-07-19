@@ -342,6 +342,201 @@ static const ufbx_anim_value* FindSingleRawValue(
   return result;
 }
 
+static double EvaluateUnityCompatibleCurve(
+    const ufbx_anim_curve* curve, double time, double defaultValue) {
+  if (!curve || curve->keyframes.count < 2 ||
+      time < curve->keyframes.data[0].time ||
+      time > curve->keyframes.data[curve->keyframes.count - 1].time)
+    return ufbx_evaluate_curve(curve, time, defaultValue);
+
+  const ufbx_keyframe* left = curve->keyframes.data;
+  const ufbx_keyframe* right = left + 1;
+  for (size_t index = 1; index < curve->keyframes.count; ++index) {
+    right = curve->keyframes.data + index;
+    left = right - 1;
+    if (time <= right->time) break;
+  }
+  if (time == left->time) return left->value;
+  if (time == right->time) return right->value;
+  if (left->interpolation != UFBX_INTERPOLATION_CUBIC)
+    return ufbx_evaluate_curve(curve, time, defaultValue);
+
+  const double duration = right->time - left->time;
+  if (!(duration > 0.0)) return left->value;
+  const double rightWeight = left->right.dx / duration;
+  const double leftWeight = right->left.dx / duration;
+  // Legacy FBX unweighted tangents serialize the decimal weight 0.333333.
+  // Autodesk's evaluator treats these as exact one-third Hermite handles;
+  // interpreting the rounded value as a weighted Bezier handle shifts Unity's
+  // resampled rotations enough to change the strict rotation-error gate.
+  if (std::abs(rightWeight - 0.333333) > 2e-6 ||
+      std::abs(leftWeight - 0.333333) > 2e-6)
+    return ufbx_evaluate_curve(curve, time, defaultValue);
+
+  const double sourceT = (time - left->time) / duration;
+  const float durationFloat = static_cast<float>(duration);
+  const float outSlope = std::abs(left->right.dx) > 1e-12
+    ? left->right.dy / left->right.dx : 0.0f;
+  const float inSlope = std::abs(right->left.dx) > 1e-12
+    ? right->left.dy / right->left.dx : 0.0f;
+  const float outHandle = outSlope * durationFloat / 3.0f;
+  const float inHandle = inSlope * durationFloat / 3.0f;
+  const float p0 = Real(left->value);
+  const float p1 = p0 + outHandle;
+  const float p3 = Real(right->value);
+  const float p2 = p3 - inHandle;
+  const auto evaluateStage = [sourceT](float from, float to) {
+    // FBX SDK's unweighted KFCurve::EvaluateIndex() subtracts in float,
+    // performs the multiply/add with its double-precision time parameter, and
+    // rounds every De Casteljau stage back to float.
+    const float difference = to - from;
+    return static_cast<float>(
+      sourceT * static_cast<double>(difference) + static_cast<double>(from));
+  };
+  const float a = evaluateStage(p0, p1);
+  const float b = evaluateStage(p1, p2);
+  const float c = evaluateStage(p2, p3);
+  return evaluateStage(evaluateStage(a, b), evaluateStage(b, c));
+}
+
+static ufbx_quat UnityFbxXyzEulerToQuaternion(ufbx_vec3 euler) {
+  constexpr double degreesToRadians = 3.14159265358979323846264338327950288 / 180.0;
+  const double rx = euler.x * degreesToRadians;
+  const double ry = euler.y * degreesToRadians;
+  const double rz = euler.z * degreesToRadians;
+  const double sx = std::sin(rx), cx = std::cos(rx);
+  const double sy = std::sin(ry), cy = std::cos(ry);
+  const double sz = std::sin(rz), cz = std::cos(rz);
+
+  // FbxAMatrix::SetROnly() uses row-vector XYZ matrices. Reconstructing its
+  // matrix before GetQ() preserves the rounding Unity receives from FBX SDK;
+  // the direct closed-form Euler quaternion differs by a few float ULPs.
+  const double m00 = cy * cz;
+  const double m01 = cy * sz;
+  const double m02 = -sy;
+  const double m10 = cz * sy * sx - sz * cx;
+  const double m11 = sz * sy * sx + cz * cx;
+  const double m12 = cy * sx;
+  const double m20 = cz * sy * cx + sz * sx;
+  const double m21 = sz * sy * cx - cz * sx;
+  const double m22 = cy * cx;
+
+  ufbx_quat result{};
+  const double trace = m00 + m11 + m22;
+  if (trace > 0.0) {
+    const double scale = std::sqrt(trace + 1.0) * 2.0;
+    result.x = (m12 - m21) / scale;
+    result.y = (m20 - m02) / scale;
+    result.z = (m01 - m10) / scale;
+    result.w = 0.25 * scale;
+  } else if (m00 > m11 && m00 > m22) {
+    const double scale = std::sqrt(1.0 + m00 - m11 - m22) * 2.0;
+    result.x = 0.25 * scale;
+    result.y = (m01 + m10) / scale;
+    result.z = (m02 + m20) / scale;
+    result.w = (m12 - m21) / scale;
+  } else if (m11 > m22) {
+    const double scale = std::sqrt(1.0 + m11 - m00 - m22) * 2.0;
+    result.x = (m01 + m10) / scale;
+    result.y = 0.25 * scale;
+    result.z = (m12 + m21) / scale;
+    result.w = (m20 - m02) / scale;
+  } else {
+    const double scale = std::sqrt(1.0 + m22 - m00 - m11) * 2.0;
+    result.x = (m02 + m20) / scale;
+    result.y = (m12 + m21) / scale;
+    result.z = 0.25 * scale;
+    result.w = (m01 - m10) / scale;
+  }
+  return result;
+}
+
+static double UnityFbxSampleTime(
+    double playbackTimeBegin, float frameRate, size_t sampleIndex) {
+  // Unity creates resampling times through FBX's legacy KTime path. The frame
+  // number and seconds-per-frame multiplication happen in float, after which
+  // KTime truncates to its 141120000-tick second. Keeping that tick grid is
+  // observable at source keys and at strict quaternion reduction thresholds.
+  constexpr double ticksPerSecond = 141120000.0;
+  const float firstFrame = static_cast<float>(playbackTimeBegin * frameRate);
+  const float secondsPerFrame = 1.0f / frameRate;
+  const float sampleSeconds =
+    (firstFrame + static_cast<float>(sampleIndex)) * secondsPerFrame;
+  const int64_t ticks = static_cast<int64_t>(
+    static_cast<double>(sampleSeconds) * ticksPerSecond);
+  return static_cast<double>(ticks) / ticksPerSecond;
+}
+
+static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
+    const ufbx_node* node, const ufbx_anim_value* rawRotation,
+    double absoluteTime) {
+  const AnityModelQuaternionKey fallback = QuaternionKey(source, node);
+  if (!node || !rawRotation || node->rotation_order != UFBX_ROTATION_ORDER_XYZ) return fallback;
+
+  ufbx_vec3 euler = rawRotation->default_value;
+  ufbx_vec3 referenceEuler = rawRotation->default_value;
+  // Unity's FBX path evaluates each scalar curve to float before passing the
+  // values back to the double-precision FBX matrix/quaternion conversion.
+  euler.x = static_cast<float>(EvaluateUnityCompatibleCurve(rawRotation->curves[0], absoluteTime, euler.x));
+  euler.y = static_cast<float>(EvaluateUnityCompatibleCurve(rawRotation->curves[1], absoluteTime, euler.y));
+  euler.z = static_cast<float>(EvaluateUnityCompatibleCurve(rawRotation->curves[2], absoluteTime, euler.z));
+  referenceEuler.x = ufbx_evaluate_curve(rawRotation->curves[0], absoluteTime, referenceEuler.x);
+  referenceEuler.y = ufbx_evaluate_curve(rawRotation->curves[1], absoluteTime, referenceEuler.y);
+  referenceEuler.z = ufbx_evaluate_curve(rawRotation->curves[2], absoluteTime, referenceEuler.z);
+  const ufbx_quat compatibleRaw = UnityFbxXyzEulerToQuaternion(euler);
+  const ufbx_quat referenceRaw = ufbx_euler_to_quat(referenceEuler, node->rotation_order);
+  const ufbx_quat inverseAdjustment = {
+    -node->adjust_pre_rotation.x, -node->adjust_pre_rotation.y,
+    -node->adjust_pre_rotation.z, node->adjust_pre_rotation.w,
+  };
+  // Conjugate into Unity's imported coordinate basis without a double-precision
+  // normalization. Unity converts the FBX quaternion to float first and only
+  // then normalizes it below.
+  const bool xAxisBasis = std::abs(std::abs(node->adjust_pre_rotation.x) - 1.0) < 1e-9 &&
+    std::abs(node->adjust_pre_rotation.y) < 1e-9 &&
+    std::abs(node->adjust_pre_rotation.z) < 1e-9 &&
+    std::abs(node->adjust_pre_rotation.w) < 1e-9;
+  const ufbx_quat compatible = xAxisBasis
+    ? UnityFbxXyzEulerToQuaternion({euler.x, -euler.y, -euler.z})
+    : ufbx_quat_mul(
+        ufbx_quat_mul(node->adjust_pre_rotation, compatibleRaw), inverseAdjustment);
+  const ufbx_quat reference = ufbx_quat_mul(
+    ufbx_quat_mul(node->adjust_pre_rotation, referenceRaw), inverseAdjustment);
+
+  // Only replace a baked value when it matches the same raw Euler rotation
+  // after coordinate conversion. Complex FBX pre/post rotations, pivots,
+  // layers, and helper transforms retain the baked path.
+  const double dx = static_cast<double>(fallback.x) - reference.x;
+  const double dy = static_cast<double>(fallback.y) - reference.y;
+  const double dz = static_cast<double>(fallback.z) - reference.z;
+  const double dw = static_cast<double>(fallback.w) - reference.w;
+  if (dx * dx + dy * dy + dz * dz + dw * dw > 1e-10) return fallback;
+  float x = Real(compatible.x);
+  float y = Real(compatible.y);
+  float z = Real(compatible.z);
+  float w = Real(compatible.w);
+  // Unity emits four separate multiplies and three ordered adds here. Prevent
+  // FP contraction/reassociation: a fused sum changes the normalized result
+  // by one ULP on otherwise identical FBX samples.
+  volatile float squareX = x * x;
+  volatile float squareY = y * y;
+  volatile float squareZ = z * z;
+  volatile float squareW = w * w;
+  volatile float sumXY = squareX + squareY;
+  volatile float sumXYZ = sumXY + squareZ;
+  volatile float sumXYZW = sumXYZ + squareW;
+  const float magnitude = std::sqrt(sumXYZW);
+  if (magnitude > 1e-6f) {
+    // Keep component-wise division: this is the instruction sequence used by
+    // Unity's ExtractQuaternionFromFBXEulerOld path after FbxAMatrix::GetQ().
+    x /= magnitude;
+    y /= magnitude;
+    z /= magnitude;
+    w /= magnitude;
+  }
+  return { Real(source.time), x, y, z, w };
+}
+
 static double WrapAngleNear(double value, double reference) {
   while (value - reference > 180.0) value -= 360.0;
   while (value - reference < -180.0) value += 360.0;
@@ -647,8 +842,17 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           track.rotationKeys.reserve(bakedNode.rotation_keys.count);
           const ufbx_node* sourceNode = bakedNode.typed_id < source->nodes.count
             ? source->nodes.data[bakedNode.typed_id] : nullptr;
-          for (size_t key = 0; key < bakedNode.rotation_keys.count; ++key)
-            track.rotationKeys.push_back(QuaternionKey(bakedNode.rotation_keys.data[key], sourceNode));
+          const ufbx_anim_value* rawRotation = sourceNode
+            ? FindSingleRawValue(stack, &sourceNode->element, UFBX_Lcl_Rotation) : nullptr;
+          for (size_t key = 0; key < bakedNode.rotation_keys.count; ++key) {
+            const ufbx_baked_quat& sourceKey = bakedNode.rotation_keys.data[key];
+            const double sampleTime = UnityFbxSampleTime(
+              baked->playback_time_begin, scene->frameRate, key);
+            AnityModelQuaternionKey rotationKey = UnityQuaternionKey(
+              sourceKey, sourceNode, rawRotation, sampleTime);
+            rotationKey.time = Real(sampleTime) - Real(baked->playback_time_begin);
+            track.rotationKeys.push_back(rotationKey);
+          }
           track.scaleKeys.reserve(bakedNode.scale_keys.count);
           for (size_t key = 0; key < bakedNode.scale_keys.count; ++key)
             track.scaleKeys.push_back(VectorKey(bakedNode.scale_keys.data[key], 1.0f));

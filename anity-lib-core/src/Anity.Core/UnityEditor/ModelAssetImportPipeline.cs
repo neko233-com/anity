@@ -321,7 +321,8 @@ internal static class ModelAssetImportPipeline
             importer.animationCompression, importer.animationPositionError);
         if (!hasRawEuler)
           AddQuaternionCurves(clip, path, track.RotationKeys, rangeStart, rangeEnd,
-            importer.animationCompression, importer.animationRotationError);
+            importer.animationCompression, importer.animationRotationError,
+            frameRate, source.FirstFrame / frameRate);
         if (!hasRawScale)
           AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd,
             importer.animationCompression, importer.animationScaleError);
@@ -375,13 +376,222 @@ internal static class ModelAssetImportPipeline
 
   private static void AddQuaternionCurves(AnimationClip clip, string path,
     NativeModelDecoder.QuaternionKey[] keys, float start, float end,
-    ModelImporterAnimationCompression compression, float error)
+    ModelImporterAnimationCompression compression, float error,
+    float sampleRate, float reductionTimeOffset)
   {
     if (keys.Length == 0) return;
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end, compression, error));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end, compression, error));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end, compression, error));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.w", CurveForRange(keys.Select(key => (key.time, key.w)).ToArray(), start, end, compression, error));
+    var curves = CompressQuaternionCurves(new[]
+    {
+      Curve(keys.Select(key => (key.time, key.x)).ToArray()),
+      Curve(keys.Select(key => (key.time, key.y)).ToArray()),
+      Curve(keys.Select(key => (key.time, key.z)).ToArray()),
+      Curve(keys.Select(key => (key.time, key.w)).ToArray()),
+    }, compression, error, sampleRate, reductionTimeOffset);
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.x", SliceCurve(curves[0], start, end));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.y", SliceCurve(curves[1], start, end));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.z", SliceCurve(curves[2], start, end));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.w", SliceCurve(curves[3], start, end));
+  }
+
+  private static AnimationCurve[] CompressQuaternionCurves(AnimationCurve[] source,
+    ModelImporterAnimationCompression compression, float rotationErrorDegrees,
+    float sampleRate, float timeOffset)
+  {
+    var sourceKeys = source.Select(curve => curve.keys).ToArray();
+    var count = sourceKeys[0].Length;
+    if (compression == ModelImporterAnimationCompression.Off || count <= 2 ||
+        float.IsNaN(rotationErrorDegrees) || rotationErrorDegrees <= 0f ||
+        !float.IsFinite(sampleRate) || sampleRate <= 0f) return source;
+
+    var keys = new Keyframe[4][];
+    for (var component = 0; component < keys.Length; component++)
+    {
+      if (sourceKeys[component].Length != count) return source;
+      keys[component] = new Keyframe[count];
+      for (var index = 0; index < count; index++)
+      {
+        var key = sourceKeys[component][index];
+        key.time += timeOffset;
+        keys[component][index] = key;
+      }
+    }
+
+    var radians = rotationErrorDegrees / 360f;
+    radians += radians;
+    radians *= MathF.PI;
+    radians *= .5f;
+    var minimumDot = MathF.Cos(radians);
+    var step = 1f / sampleRate;
+    var last = count - 1;
+    var retained = new List<int> { 0 };
+    if (CanReduceQuaternion(keys, 0, last, minimumDot, step, 0, last, false))
+      retained.Add(last);
+    else
+    {
+      var anchor = 0;
+      var current = 1;
+      while (current < last)
+      {
+        var following = current + 1;
+        if (HasSteppedQuaternionEdge(keys, current, following))
+        {
+          if (QuaternionWithinError(KeyQuaternion(keys, current), KeyQuaternion(keys, following), minimumDot))
+          {
+            current = following;
+            continue;
+          }
+          retained.Add(current);
+          retained.Add(following);
+          anchor = following;
+          current = following + 1;
+          continue;
+        }
+
+        var canReduce = CanReduceQuaternion(keys, anchor, following, minimumDot, step,
+            anchor + 1, following, true);
+        if (canReduce)
+        {
+          current = following;
+          continue;
+        }
+        retained.Add(current);
+        anchor = current;
+        current = following;
+      }
+      if (anchor != last && retained[^1] != last) retained.Add(last);
+    }
+
+    if (retained.Count == count) return source;
+    var result = new AnimationCurve[4];
+    for (var component = 0; component < result.Length; component++)
+      result[component] = new AnimationCurve(retained.Select(index => sourceKeys[component][index]).ToArray());
+    return result;
+  }
+
+  private static bool CanReduceQuaternion(Keyframe[][] keys, int left, int right,
+    float minimumDot, float sampleStep, int begin, int end, bool limitSpan)
+  {
+    var leftTime = keys[0][left].time;
+    var rightTime = keys[0][right].time;
+    var duration = rightTime - leftTime;
+    var sampleCount = (int)(duration / sampleStep);
+    for (var sample = 0; sample <= sampleCount; sample++)
+    {
+      var time = leftTime + sample * sampleStep;
+      if (!QuaternionWithinError(EvaluateSourceQuaternion(keys, time),
+          EvaluateReducedQuaternion(keys, left, right, time), minimumDot)) return false;
+    }
+
+    var previousTime = leftTime;
+    for (var index = begin; index < end; index++)
+    {
+      var time = keys[0][index].time;
+      if (!QuaternionWithinError(EvaluateSourceQuaternion(keys, time),
+          EvaluateReducedQuaternion(keys, left, right, time), minimumDot)) return false;
+      var midpoint = (previousTime + time) * .5f;
+      if (!QuaternionWithinError(EvaluateSourceQuaternion(keys, midpoint),
+          EvaluateReducedQuaternion(keys, left, right, midpoint), minimumDot)) return false;
+      previousTime = time;
+    }
+
+    var finalMidpoint = (previousTime + rightTime) * .5f;
+    if (!QuaternionWithinError(EvaluateSourceQuaternion(keys, finalMidpoint),
+        EvaluateReducedQuaternion(keys, left, right, finalMidpoint), minimumDot)) return false;
+    return !limitSpan || duration < sampleStep * 50f;
+  }
+
+  private static bool HasSteppedQuaternionEdge(Keyframe[][] keys, int left, int right)
+  {
+    for (var component = 0; component < keys.Length; component++)
+      if (float.IsPositiveInfinity(keys[component][left].outTangent) ||
+          float.IsPositiveInfinity(keys[component][right].inTangent)) return true;
+    return false;
+  }
+
+  private static (float X, float Y, float Z, float W) KeyQuaternion(Keyframe[][] keys, int index) =>
+    (keys[0][index].value, keys[1][index].value, keys[2][index].value, keys[3][index].value);
+
+  private static (float X, float Y, float Z, float W) EvaluateSourceQuaternion(Keyframe[][] keys, float time) =>
+    (EvaluateCachedHermite(keys[0], time), EvaluateCachedHermite(keys[1], time),
+      EvaluateCachedHermite(keys[2], time), EvaluateCachedHermite(keys[3], time));
+
+  private static (float X, float Y, float Z, float W) EvaluateReducedQuaternion(
+    Keyframe[][] keys, int left, int right, float time) =>
+    (EvaluateReductionHermite(keys[0][left], keys[0][right], time),
+      EvaluateReductionHermite(keys[1][left], keys[1][right], time),
+      EvaluateReductionHermite(keys[2][left], keys[2][right], time),
+      EvaluateReductionHermite(keys[3][left], keys[3][right], time));
+
+  private static bool QuaternionWithinError(
+    (float X, float Y, float Z, float W) original,
+    (float X, float Y, float Z, float W) reduced, float minimumDot)
+  {
+    var reducedLengthSquared = reduced.X * reduced.X + reduced.Y * reduced.Y;
+    reducedLengthSquared += reduced.Z * reduced.Z;
+    reducedLengthSquared += reduced.W * reduced.W;
+    var reducedLength = MathF.Sqrt(reducedLengthSquared);
+    if (!(MathF.Abs(1f - reducedLength) <= .001f)) return false;
+
+    var originalLengthSquared = original.X * original.X + original.Y * original.Y;
+    originalLengthSquared += original.Z * original.Z;
+    originalLengthSquared += original.W * original.W;
+    var originalLength = MathF.Sqrt(originalLengthSquared);
+    if (!(originalLength >= .000001f) || !(reducedLength >= .000001f)) return false;
+
+    var dot = original.X / originalLength * (reduced.X / reducedLength);
+    dot += original.Y / originalLength * (reduced.Y / reducedLength);
+    dot += original.Z / originalLength * (reduced.Z / reducedLength);
+    dot += original.W / originalLength * (reduced.W / reducedLength);
+    return dot >= minimumDot;
+  }
+
+  private static float EvaluateCachedHermite(Keyframe[] keys, float time)
+  {
+    if (time <= keys[0].time) return keys[0].value;
+    if (time >= keys[^1].time) return keys[^1].value;
+    var segment = keys.Length - 2;
+    for (var index = 0; index + 1 < keys.Length; index++)
+      if (time < keys[index + 1].time)
+      {
+        segment = index;
+        break;
+      }
+
+    var left = keys[segment];
+    var right = keys[segment + 1];
+    var duration = MathF.Max(right.time - left.time, .0001f);
+    var delta = right.value - left.value;
+    var inverse = 1f / duration;
+    var inverseSquared = inverse * inverse;
+    var leftDuration = left.outTangent * duration;
+    var rightDuration = right.inTangent * duration;
+    var cubic = leftDuration + rightDuration - delta - delta;
+    cubic *= inverseSquared;
+    cubic *= inverse;
+    var quadratic = delta + delta + delta - leftDuration - leftDuration - rightDuration;
+    quadratic *= inverseSquared;
+    var offset = time - left.time;
+    var value = cubic * offset + quadratic;
+    value = value * offset + left.outTangent;
+    return value * offset + left.value;
+  }
+
+  private static float EvaluateReductionHermite(Keyframe left, Keyframe right, float time)
+  {
+    var duration = right.time - left.time;
+    if (duration == 0f) return left.value;
+    var leftDuration = left.outTangent * duration;
+    var rightDuration = right.inTangent * duration;
+    var t = (time - left.time) / duration;
+    var squared = t * t;
+    var cubed = t * squared;
+    var leftValueWeight = cubed + cubed - 3f * squared + 1f;
+    var leftTangentWeight = cubed - (squared + squared) + t;
+    var rightTangentWeight = cubed - squared;
+    var rightValueWeight = 3f * squared - (cubed + cubed);
+    var value = left.value * leftValueWeight + leftDuration * leftTangentWeight;
+    value += rightDuration * rightTangentWeight;
+    return value + right.value * rightValueWeight;
   }
 
   private static AnimationCurve ScalarCurveForRange(NativeModelDecoder.ScalarKey[] values, float start, float end,

@@ -1,5 +1,22 @@
 # PLAN
 
+## 2026-07-19 — Unity FBX quaternion 同步 angular reduction
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 锁定 `animationRotationError = 0.01 / 0.1 / 0.5 / 1` 的四条 quaternion component curve：四分量始终共享 key time，分别保留 frame `0,1,3,5,6,8,9,11,12,13,14,15,16,17,18,19,20,22,23`、`0,1,7,12,14,17,19,22,23`、`0,5,11,14,17,19,22,23`、`0,7,13,18,20,22,23`，且保留 key 的 value/tangent 不被重算。
+- 反汇编 Unity 的 `ReduceKeyframes` / `QuaternionDistanceError` / `ExtractQuaternionFromFBXEulerOld` 与所带 Autodesk FBX SDK 的 `KFCurve::EvaluateIndex`，复刻原始/候选四元数 normalize、dot 阈值、逐源 key/中点/固定步长采样、50 帧跨度限制和 anchor/current/following 删除顺序；不再把四分量当作四条独立 scalar curve 压缩。
+- `anity-native` 现按 FBX legacy `141120000` tick、`float(frame) * float(1/rate)` 与截断顺序生成重采样时刻；非加权 cubic curve 使用 FBX 的逐级 float-round/double-multiply De Casteljau 顺序，XYZ Euler 经 `FbxAMatrix::SetROnly/GetQ` 等价矩阵路径转为 quaternion，并禁止归一化平方和的 FP contraction。24×4 quaternion value 已逐 ULP 对齐 Unity 黑盒。
+- 新增四档保留 frame、四分量同步、保留 value/tangent 共 **10 个用例**；`NativeModelImportTests` **37/37**。`_scripts/build-all.sh Release` 全部 0 编译错误；最终强制 native 八工程矩阵 **4079/4079**（Core **3070/3070**），均 0 失败、0 跳过。
+
+### 尚未完成
+- 当前精确路径覆盖单层、XYZ rotation order、Unity Maya FBX 常见 X 轴坐标基；其它 rotation order、pre/post rotation、pivot/helper、不同 axis system、多 animation layer 与 weighted/broken/constant/stepped tangent 仍会在安全校验不满足时保留 ufbx baked fallback，尚未逐项完成 Unity A/B。
+- loop pose/root locks/mirror/cycle offset/root motion/additive/mask、连续时间 Player sampling、Editor curve visualization、stable sub-asset fileID/type-tree/artifact cache 与 Unity 2022.3.61f1 Pro 正式门禁仍未闭环，因此 ModelImporter/AnimationClip 保持 🟡。
+
+### 下一优先项
+1. 补 rotation-order/pre-post-rotation/pivot、多 layer、constant/stepped/weighted/broken tangent 官方 fixture，把安全 fallback 逐项替换为已证明的 Unity 等价 native 路径。
+2. 完成 importer loop/root motion/additive/mask 与连续时间 Animator/Player A/B。
+3. 完成 stable sub-asset fileID/type-tree/artifact cache，并迁移到 Unity 2022.3.61f1 Pro 重跑完整 Editor/Player 门禁。
+
 ## 2026-07-19 — Unity CLI `-logFile -` stdout 与日志终结语义
 
 ### 已完成

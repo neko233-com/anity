@@ -163,8 +163,8 @@ public sealed class NativeModelImportTests : IDisposable
         Assert.DoesNotContain(properties, property => property.StartsWith("localEulerAnglesRaw.", StringComparison.Ordinal));
         var keys = Curve(imported.Clip, "m_LocalRotation.x").keys;
         Assert.Equal(24, keys.Length);
-        Assert.Equal(Enumerable.Range(0, 24).Select(frame => (float)frame),
-            keys.Select(key => key.time * imported.Clip.frameRate));
+        Assert.Equal(Enumerable.Range(0, 24), Frames(Curve(imported.Clip,
+            "m_LocalRotation.x"), imported.Clip.frameRate));
     }
 
     [Fact]
@@ -179,6 +179,66 @@ public sealed class NativeModelImportTests : IDisposable
         Assert.Equal(-0.18930785f, Curve(imported.Clip, "m_LocalRotation.y").keys[13].value, 6);
         Assert.Equal(-0.23929834f, Curve(imported.Clip, "m_LocalRotation.z").keys[13].value, 6);
         Assert.Equal(0.9515485f, Curve(imported.Clip, "m_LocalRotation.w").keys[13].value, 6);
+    }
+
+    [Theory]
+    [InlineData(0.01f, "0,1,3,5,6,8,9,11,12,13,14,15,16,17,18,19,20,22,23")]
+    [InlineData(0.1f, "0,1,7,12,14,17,19,22,23")]
+    [InlineData(0.5f, "0,5,11,14,17,19,22,23")]
+    [InlineData(1f, "0,7,13,18,20,22,23")]
+    public void ResampledQuaternionReductionMatchesUnity2022RotationErrorFrames(
+        float rotationError, string expectedFrames)
+    {
+        var imported = ReimportAnimated(importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Optimal;
+            importer.animationRotationError = rotationError;
+        });
+        var expected = expectedFrames.Split(',').Select(int.Parse).ToArray();
+        foreach (var property in QuaternionProperties)
+        {
+            Assert.Equal(expected, Frames(Curve(imported.Clip, property), imported.Clip.frameRate));
+        }
+    }
+
+    [Theory]
+    [InlineData("m_LocalRotation.x")]
+    [InlineData("m_LocalRotation.y")]
+    [InlineData("m_LocalRotation.z")]
+    [InlineData("m_LocalRotation.w")]
+    public void ResampledQuaternionReductionSynchronizesComponentKeyTimes(string property)
+    {
+        var imported = ReimportAnimated(importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Optimal;
+            importer.animationRotationError = 0.5f;
+        });
+        Assert.Equal(Frames(Curve(imported.Clip, "m_LocalRotation.x"), imported.Clip.frameRate),
+            Frames(Curve(imported.Clip, property), imported.Clip.frameRate));
+    }
+
+    [Fact]
+    public void ResampledQuaternionReductionPreservesUnity2022RetainedValues()
+    {
+        var (original, reduced) = ImportOriginalAndReducedQuaternionCurves();
+        foreach (var property in QuaternionProperties)
+        foreach (var retained in reduced[property])
+            Assert.Equal(original[property].Single(key => key.time == retained.time).value, retained.value);
+    }
+
+    [Fact]
+    public void ResampledQuaternionReductionPreservesUnity2022RetainedTangents()
+    {
+        var (original, reduced) = ImportOriginalAndReducedQuaternionCurves();
+        foreach (var property in QuaternionProperties)
+        foreach (var retained in reduced[property])
+        {
+            var source = original[property].Single(key => key.time == retained.time);
+            Assert.Equal(source.inTangent, retained.inTangent);
+            Assert.Equal(source.outTangent, retained.outTangent);
+        }
     }
 
     [Fact]
@@ -286,6 +346,36 @@ public sealed class NativeModelImportTests : IDisposable
 
     private static AnimationCurve Curve(AnimationClip clip, string property) =>
         clip.bindings.Single(binding => string.Equals(binding.propertyName, property, StringComparison.Ordinal)).curve;
+
+    private static readonly string[] QuaternionProperties =
+    {
+        "m_LocalRotation.x", "m_LocalRotation.y", "m_LocalRotation.z", "m_LocalRotation.w",
+    };
+
+    private static int[] Frames(AnimationCurve curve, float frameRate) =>
+        curve.keys.Select(key => (int)MathF.Round(key.time * frameRate)).ToArray();
+
+    private (Dictionary<string, Keyframe[]> Original, Dictionary<string, Keyframe[]> Reduced)
+        ImportOriginalAndReducedQuaternionCurves()
+    {
+        var path = ImportAnimatedFbx();
+        var importer = ModelImporter.GetAtPath(path);
+        importer.resampleCurves = true;
+        importer.animationCompression = ModelImporterAnimationCompression.Off;
+        importer.SaveAndReimport();
+        var originalClip = AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single();
+        var original = QuaternionProperties.ToDictionary(property => property,
+            property => Curve(originalClip, property).keys, StringComparer.Ordinal);
+
+        importer = ModelImporter.GetAtPath(path);
+        importer.animationCompression = ModelImporterAnimationCompression.Optimal;
+        importer.animationRotationError = 0.5f;
+        importer.SaveAndReimport();
+        var reducedClip = AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single();
+        var reduced = QuaternionProperties.ToDictionary(property => property,
+            property => Curve(reducedClip, property).keys, StringComparer.Ordinal);
+        return (original, reduced);
+    }
 
     private string CopyAnimatedFixture()
     {
