@@ -107,7 +107,25 @@ typedef struct AnityModelTrackInfo {
   int32_t positionKeyCount;
   int32_t rotationKeyCount;
   int32_t scaleKeyCount;
+  int32_t transformCurveCount;
 } AnityModelTrackInfo;
+
+typedef enum AnityModelTransformCurveProperty {
+  ANITY_MODEL_POSITION_X = 0,
+  ANITY_MODEL_POSITION_Y = 1,
+  ANITY_MODEL_POSITION_Z = 2,
+  ANITY_MODEL_EULER_X = 3,
+  ANITY_MODEL_EULER_Y = 4,
+  ANITY_MODEL_EULER_Z = 5,
+  ANITY_MODEL_SCALE_X = 6,
+  ANITY_MODEL_SCALE_Y = 7,
+  ANITY_MODEL_SCALE_Z = 8,
+} AnityModelTransformCurveProperty;
+
+typedef struct AnityModelTransformCurveInfo {
+  int32_t property;
+  int32_t keyCount;
+} AnityModelTransformCurveInfo;
 
 typedef struct AnityModelVectorKey {
   float time;
@@ -153,6 +171,8 @@ ANITY_API AnityResult ANITY_CALL AnityModel_GetTrackInfo(const AnityModelScene* 
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyPositionKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelVectorKey* keys, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyRotationKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelQuaternionKey* keys, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyScaleKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelVectorKey* keys, int32_t capacity);
+ANITY_API AnityResult ANITY_CALL AnityModel_GetTransformCurveInfo(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, int32_t curveIndex, AnityModelTransformCurveInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityModel_CopyTransformCurveKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, int32_t curveIndex, AnityModelScalarKey* keys, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_GetBlendShapeTrackInfo(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelBlendShapeTrackInfo* outInfo);
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyBlendShapeKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelScalarKey* keys, int32_t capacity);
 

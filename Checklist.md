@@ -6,7 +6,7 @@
 > - 🟡 部分实现 / API 壳 / 尚缺 Unity 官方 A/B 行为证据
 > - ❌ 未实现
 >
-> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **3,907/3,907** 通过、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
+> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **4,058/4,058**（Core **3,060/3,060**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
 
 ---
 
@@ -234,7 +234,7 @@
 |------|------|------|
 | `Keyframe` | ✅ | time/value/inTangent/outTangent/inWeight/outWeight/weightedMode |
 | `AnimationCurve` | ✅ | Evaluate线性插值、preWrapMode/postWrapMode（Loop/PingPong/ClampForever）、AddKey |
-| `AnimationClip` | 🟡 | 继承Motion、length/frameRate/wrapMode、SetCurve/GetCurve、AnimationCurveBinding[]、event 主路径已具备；SampleAnimation/Animator property pose 已覆盖 Transform 与 `SkinnedMeshRenderer.blendShape.*`。FBX blend-shape 已按 Unity 2022.3 探针闭环 24 Hz deformation、中央/源 Bezier tangent、4 种 compression mode、4 档 error、`resampleCurves=false`、source frame origin、先压缩后切片与多个 clip（专项 42/42）。通用组件 float/object-reference curve、Transform quaternion/Euler 联合 reduction、constant/stepped/weighted tangent、完整 wrap/root-motion/Player A/B 未闭环 |
+| `AnimationClip` | 🟡 | 继承Motion、length/frameRate/wrapMode、SetCurve/GetCurve、AnimationCurveBinding[]、event 主路径已具备；SampleAnimation/Animator property pose 已覆盖 Transform 与 `SkinnedMeshRenderer.blendShape.*`。FBX blend-shape 已按 Unity 2022.3 探针闭环 24 Hz deformation、中央/源 Bezier tangent、4 种 compression mode、4 档 error、source frame origin、先压缩后切片与多个 clip（专项 42/42）；Transform `resampleCurves=false` 现精确保留 9 条 position/raw-Euler/scale 源 curve 的 frame `0/13/23`、value/tangent 并可实际采样，开启重采样的 24 帧 quaternion 在源中点也与 Unity 精确一致（新增 13 例）。通用组件 float/object-reference curve、Transform quaternion 联合 angular reduction、constant/stepped/weighted tangent、完整 wrap/root-motion/Player A/B 未闭环 |
 | `AnimationEvent` | ✅ | time/functionName/stringParameter/floatParameter/intParameter/objectReferenceParameter |
 | `Motion（抽象基类）` | ✅ | name/humanCycle/humanTranslation/averageDuration、ComputeHashCode |
 | `BlendTree` | ✅ | 继承Motion、blendType(1D/2DSimpleDirectional/2DFreeformDirectional/2DFreeformCartesian/Direct)、blendParameter/Y、children ChildMotion[]、1D阈值排序线性插值、2D距离反比权重、Direct直接权重 |
@@ -574,7 +574,7 @@
 | `EditorSettings` | ✅ | Dictionary存储、serializationMode、defaultBehaviorMode、enterPlayModeOptions、spritePackerMode、asyncShaderCompilation、cacheServer配置、projectGenerationRootNamespace、DefineSymbols等完整属性 |
 | `ProjectSettings` | ✅ | Dictionary存储、productName/companyName/applicationIdentifier、**runInBackground**、defaultScreenOrientation/Width/Height、scriptingBackend(Mono/IL2CPP)、apiCompatibilityLevel、strippingLevel(Low/Medium/High/Disabled)、vSyncCount、targetFrameRate、colorSpace(Gamma/Linear)、graphicsJobs、iOS/android配置等完整属性 |
 | `Lightmapping` | ✅ | 见UnityEngine.LightModule |
-| `TextureImporter/ModelImporter/AudioImporter` | 🟡 | 见 AssetImporter；ModelImporter 已进入 native FBX/OBJ hierarchy/indexed mesh/transform + blend-shape animation/skin/bindpose/variable weights/blend-shape 主链，支持 deformation-percent、source take frame、frame-range、同 take 多 clip、raw/resampled tangent 与 Unity imported curve compression/切片顺序，skin/blend suite **42/42**。material、Transform quaternion/Euler reduction 与 tangent 全语义、完整 loop/root motion/additive/mask/humanoid、公开面、完整 Unity YAML/import worker/package/cache 行为仍未全部闭环。 |
+| `TextureImporter/ModelImporter/AudioImporter` | 🟡 | 见 AssetImporter；ModelImporter 已进入 native FBX/OBJ hierarchy/indexed mesh/transform + blend-shape animation/skin/bindpose/variable weights/blend-shape 主链，支持 deformation-percent、source take frame、frame-range、同 take 多 clip、raw/resampled tangent 与 Unity imported curve compression/切片顺序。Transform 原始 position/Euler/scale 源 key 与 Unity FBX 坐标转换已通过 13 个新增用例，`NativeModelImportTests` **27/27**；skin/blend suite **42/42**。material、Transform quaternion 联合 angular reduction、完整 tangent/layer/rotation-order、loop/root motion/additive/mask/humanoid、公开面、完整 Unity YAML/import worker/package/cache 行为仍未全部闭环。 |
 | `EditorUtility` | ✅ | DisplayDialog/ProgressBar/ClearProgressBar/SaveFilePanel/OpenFilePanel/SetDirty/InstanceIDToObject/FormatBytes/NaturalCompare |
 | `EditorPrefs` | ✅ | 独立Dictionary(Editor专属)、SetInt/GetInt/SetFloat/GetFloat/SetString/GetString/HasKey/DeleteKey/DeleteAll |
 | `GUILayout/IMGUI/Event` | ✅ | Event(Current/type/mousePosition/keyCode/button/Use)、EventType(MouseDown/Up/Move/KeyDown/Up/Repaint/ScrollWheel/DragPerform等)、GUILayout(Begin/EndArea/Horizontal/Vertical/ScrollView/Button/Box/Label/TextField/PasswordField/Toggle/Slider/Toolbar/SelectionGrid/Window/Space/FlexibleSpace)、BeginScrollView/BeginArea push/pop scope栈、Handles.BeginGUI/EndGUI矩阵相机栈、EditorPrefs.Save序列化为JSON |

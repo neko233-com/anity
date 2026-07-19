@@ -98,6 +98,89 @@ public sealed class NativeModelImportTests : IDisposable
         Assert.NotEqual(initial, root.transform.localPosition);
     }
 
+    [Theory]
+    [InlineData("m_LocalPosition.x", 0f, -0.01f, 0.01f)]
+    [InlineData("m_LocalPosition.y", 0f, 0.02f, -0.02f)]
+    [InlineData("m_LocalPosition.z", 0f, 0.03f, -0.03f)]
+    [InlineData("localEulerAnglesRaw.x", 0f, 10f, -10f)]
+    [InlineData("localEulerAnglesRaw.y", 0f, -20f, 20f)]
+    [InlineData("localEulerAnglesRaw.z", 0f, -30f, 30f)]
+    [InlineData("m_LocalScale.x", 1f, 1.1f, 0.9f)]
+    [InlineData("m_LocalScale.y", 1f, 1.2f, 0.8f)]
+    [InlineData("m_LocalScale.z", 1f, 1.3f, 0.7f)]
+    public void NonResampledTransformCurveMatchesUnity2022SourceKeys(
+        string property, float first, float middle, float last)
+    {
+        var clip = ImportNonResampledAnimation().Clip;
+        var keys = Curve(clip, property).keys;
+        Assert.Equal(new[] { 0f, 13f, 23f }, keys.Select(key => key.time * clip.frameRate).ToArray());
+        Assert.Equal(first, keys[0].value, 5);
+        Assert.Equal(middle, keys[1].value, 5);
+        Assert.Equal(last, keys[2].value, 5);
+        Assert.All(keys, key =>
+        {
+            Assert.Equal(0f, key.inTangent, 5);
+            Assert.Equal(0f, key.outTangent, 5);
+        });
+    }
+
+    [Fact]
+    public void NonResampledTransformUsesNineRawEulerBindings()
+    {
+        var clip = ImportNonResampledAnimation().Clip;
+        var properties = clip.bindings.Select(binding => binding.propertyName).ToArray();
+        Assert.Equal(9, properties.Length);
+        Assert.Contains("localEulerAnglesRaw.x", properties);
+        Assert.Contains("localEulerAnglesRaw.y", properties);
+        Assert.Contains("localEulerAnglesRaw.z", properties);
+        Assert.DoesNotContain(properties, property => property.StartsWith("m_LocalRotation.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NonResampledTransformSamplesUnityConvertedPose()
+    {
+        var imported = ImportNonResampledAnimation();
+        imported.Clip.SampleAnimation(imported.Root, 13f / 24f);
+        Assert.Equal(-0.01f, imported.Root.transform.localPosition.x, 5);
+        Assert.Equal(0.02f, imported.Root.transform.localPosition.y, 5);
+        Assert.Equal(0.03f, imported.Root.transform.localPosition.z, 5);
+        Assert.Equal(1.1f, imported.Root.transform.localScale.x, 5);
+        Assert.Equal(1.2f, imported.Root.transform.localScale.y, 5);
+        Assert.Equal(1.3f, imported.Root.transform.localScale.z, 5);
+        Assert.InRange(Quaternion.Angle(Quaternion.Euler(10f, -20f, -30f), imported.Root.transform.localRotation), 0f, 0.001f);
+    }
+
+    [Fact]
+    public void ResampledTransformUsesQuaternionBindingsAndTwentyFourFramesWhenUncompressed()
+    {
+        var imported = ReimportAnimated(importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        });
+        var properties = imported.Clip.bindings.Select(binding => binding.propertyName).ToArray();
+        Assert.Contains("m_LocalRotation.w", properties);
+        Assert.DoesNotContain(properties, property => property.StartsWith("localEulerAnglesRaw.", StringComparison.Ordinal));
+        var keys = Curve(imported.Clip, "m_LocalRotation.x").keys;
+        Assert.Equal(24, keys.Length);
+        Assert.Equal(Enumerable.Range(0, 24).Select(frame => (float)frame),
+            keys.Select(key => key.time * imported.Clip.frameRate));
+    }
+
+    [Fact]
+    public void ResampledTransformQuaternionMatchesUnity2022AtMiddleSourceKey()
+    {
+        var imported = ReimportAnimated(importer =>
+        {
+            importer.resampleCurves = true;
+            importer.animationCompression = ModelImporterAnimationCompression.Off;
+        });
+        Assert.Equal(0.038134575f, Curve(imported.Clip, "m_LocalRotation.x").keys[13].value, 6);
+        Assert.Equal(-0.18930785f, Curve(imported.Clip, "m_LocalRotation.y").keys[13].value, 6);
+        Assert.Equal(-0.23929834f, Curve(imported.Clip, "m_LocalRotation.z").keys[13].value, 6);
+        Assert.Equal(0.9515485f, Curve(imported.Clip, "m_LocalRotation.w").keys[13].value, 6);
+    }
+
     [Fact]
     public void ImportAnimationFalseOmitsAnimationClip()
     {
@@ -186,6 +269,23 @@ public sealed class NativeModelImportTests : IDisposable
         AssetDatabase.ImportAsset(path);
         return path;
     }
+
+    private (GameObject Root, AnimationClip Clip) ImportNonResampledAnimation() =>
+        ReimportAnimated(importer => importer.resampleCurves = false);
+
+    private (GameObject Root, AnimationClip Clip) ReimportAnimated(Action<ModelImporter> configure)
+    {
+        var path = ImportAnimatedFbx();
+        var importer = ModelImporter.GetAtPath(path);
+        configure(importer);
+        importer.SaveAndReimport();
+        return (
+            AssetDatabase.LoadAssetAtPath<GameObject>(path)!,
+            AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single());
+    }
+
+    private static AnimationCurve Curve(AnimationClip clip, string property) =>
+        clip.bindings.Single(binding => string.Equals(binding.propertyName, property, StringComparison.Ordinal)).curve;
 
     private string CopyAnimatedFixture()
     {

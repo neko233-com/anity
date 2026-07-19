@@ -20,6 +20,7 @@ internal struct AnimationTransformSample
     public string Path;
     public Vector3 Position;
     public Quaternion Rotation;
+    public Vector3 EulerRotation;
     public Vector3 Scale;
     public AnimationTransformProperties Properties;
 
@@ -30,6 +31,7 @@ internal struct AnimationTransformSample
             Path = path ?? string.Empty,
             Position = transform.localPosition,
             Rotation = transform.localRotation,
+            EulerRotation = transform.localEulerAngles,
             Scale = transform.localScale,
             Properties = AnimationTransformProperties.None
         };

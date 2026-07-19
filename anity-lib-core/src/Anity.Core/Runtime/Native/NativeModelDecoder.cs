@@ -80,6 +80,20 @@ internal static class NativeModelDecoder
         internal VectorKey[] PositionKeys = Array.Empty<VectorKey>();
         internal QuaternionKey[] RotationKeys = Array.Empty<QuaternionKey>();
         internal VectorKey[] ScaleKeys = Array.Empty<VectorKey>();
+        internal TransformCurve[] TransformCurves = Array.Empty<TransformCurve>();
+    }
+
+    internal enum TransformCurveProperty
+    {
+        PositionX, PositionY, PositionZ,
+        EulerX, EulerY, EulerZ,
+        ScaleX, ScaleY, ScaleZ,
+    }
+
+    internal sealed class TransformCurve
+    {
+        internal TransformCurveProperty Property;
+        internal ScalarKey[] Keys = Array.Empty<ScalarKey>();
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -174,7 +188,14 @@ internal static class NativeModelDecoder
     [StructLayout(LayoutKind.Sequential)]
     private struct TrackInfo
     {
-        internal int nodeIndex, positionKeyCount, rotationKeyCount, scaleKeyCount;
+        internal int nodeIndex, positionKeyCount, rotationKeyCount, scaleKeyCount, transformCurveCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TransformCurveInfo
+    {
+        internal TransformCurveProperty property;
+        internal int keyCount;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -311,16 +332,30 @@ internal static class NativeModelDecoder
                     ValidateCount(trackInfo.positionKeyCount, "position key");
                     ValidateCount(trackInfo.rotationKeyCount, "rotation key");
                     ValidateCount(trackInfo.scaleKeyCount, "scale key");
+                    ValidateCount(trackInfo.transformCurveCount, "raw transform curve");
                     var track = new Track
                     {
                         NodeIndex = trackInfo.nodeIndex,
                         PositionKeys = new VectorKey[trackInfo.positionKeyCount],
                         RotationKeys = new QuaternionKey[trackInfo.rotationKeyCount],
                         ScaleKeys = new VectorKey[trackInfo.scaleKeyCount],
+                        TransformCurves = new TransformCurve[trackInfo.transformCurveCount],
                     };
                     Require(CopyPositionKeys(handle, clipIndex, trackIndex, track.PositionKeys, track.PositionKeys.Length), "position keys");
                     Require(CopyRotationKeys(handle, clipIndex, trackIndex, track.RotationKeys, track.RotationKeys.Length), "rotation keys");
                     Require(CopyScaleKeys(handle, clipIndex, trackIndex, track.ScaleKeys, track.ScaleKeys.Length), "scale keys");
+                    for (var curveIndex = 0; curveIndex < track.TransformCurves.Length; curveIndex++)
+                    {
+                        Require(GetTransformCurveInfo(handle, clipIndex, trackIndex, curveIndex, out var curveInfo), "raw transform curve information");
+                        ValidateCount(curveInfo.keyCount, "raw transform curve key");
+                        var curve = new TransformCurve
+                        {
+                            Property = curveInfo.property,
+                            Keys = new ScalarKey[curveInfo.keyCount],
+                        };
+                        Require(CopyTransformCurveKeys(handle, clipIndex, trackIndex, curveIndex, curve.Keys, curve.Keys.Length), "raw transform curve keys");
+                        track.TransformCurves[curveIndex] = curve;
+                    }
                     clip.Tracks[trackIndex] = track;
                 }
                 for (var trackIndex = 0; trackIndex < clip.BlendShapeTracks.Length; trackIndex++)
@@ -406,6 +441,10 @@ internal static class NativeModelDecoder
     private static extern AnityNative.Result CopyRotationKeys(IntPtr scene, int clipIndex, int trackIndex, [Out] QuaternionKey[] keys, int capacity);
     [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_CopyScaleKeys")]
     private static extern AnityNative.Result CopyScaleKeys(IntPtr scene, int clipIndex, int trackIndex, [Out] VectorKey[] keys, int capacity);
+    [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_GetTransformCurveInfo")]
+    private static extern AnityNative.Result GetTransformCurveInfo(IntPtr scene, int clipIndex, int trackIndex, int curveIndex, out TransformCurveInfo info);
+    [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_CopyTransformCurveKeys")]
+    private static extern AnityNative.Result CopyTransformCurveKeys(IntPtr scene, int clipIndex, int trackIndex, int curveIndex, [Out] ScalarKey[] keys, int capacity);
     [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_GetBlendShapeTrackInfo")]
     private static extern AnityNative.Result GetBlendShapeTrackInfo(IntPtr scene, int clipIndex, int trackIndex, out BlendShapeTrackInfo info);
     [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_CopyBlendShapeKeys")]

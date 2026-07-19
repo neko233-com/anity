@@ -58,6 +58,11 @@ struct Track {
   std::vector<AnityModelVectorKey> positionKeys;
   std::vector<AnityModelQuaternionKey> rotationKeys;
   std::vector<AnityModelVectorKey> scaleKeys;
+  struct TransformCurve {
+    AnityModelTransformCurveProperty property = ANITY_MODEL_POSITION_X;
+    std::vector<AnityModelScalarKey> keys;
+  };
+  std::vector<TransformCurve> transformCurves;
 };
 
 struct BlendShapeTrack {
@@ -282,8 +287,18 @@ static AnityModelVectorKey VectorKey(const ufbx_baked_vec3& source, float scale)
   return { Real(source.time), Real(source.value.x * scale), Real(source.value.y * scale), Real(source.value.z * scale) };
 }
 
-static AnityModelQuaternionKey QuaternionKey(const ufbx_baked_quat& source) {
-  return { Real(source.time), Real(source.value.x), Real(source.value.y), Real(source.value.z), Real(source.value.w) };
+static ufbx_quat RemoveRootAxisRotation(ufbx_quat rotation, const ufbx_node* node) {
+  if (!node) return ufbx_quat_normalize(rotation);
+  const ufbx_quat adjustment = node->adjust_pre_rotation;
+  const ufbx_quat inverseAdjustment = {
+    -adjustment.x, -adjustment.y, -adjustment.z, adjustment.w,
+  };
+  return ufbx_quat_normalize(ufbx_quat_mul(rotation, inverseAdjustment));
+}
+
+static AnityModelQuaternionKey QuaternionKey(const ufbx_baked_quat& source, const ufbx_node* node) {
+  const ufbx_quat value = RemoveRootAxisRotation(source.value, node);
+  return { Real(source.time), Real(value.x), Real(value.y), Real(value.z), Real(value.w) };
 }
 
 static bool HasBlendShape(const Mesh& mesh, ufbx_string name) {
@@ -312,6 +327,112 @@ static const ufbx_anim_curve* FindSingleRawCurve(
     }
   }
   return result;
+}
+
+static const ufbx_anim_value* FindSingleRawValue(
+    const ufbx_anim_stack* stack, const ufbx_element* element, const char* propertyName) {
+  const ufbx_anim_value* result = nullptr;
+  for (size_t layerIndex = 0; layerIndex < stack->layers.count; ++layerIndex) {
+    const ufbx_anim_prop* property = ufbx_find_anim_prop(
+      stack->layers.data[layerIndex], element, propertyName);
+    if (!property || !property->anim_value) continue;
+    if (result && result != property->anim_value) return nullptr;
+    result = property->anim_value;
+  }
+  return result;
+}
+
+static double WrapAngleNear(double value, double reference) {
+  while (value - reference > 180.0) value -= 360.0;
+  while (value - reference < -180.0) value += 360.0;
+  return value;
+}
+
+static float RawInTangent(const ufbx_anim_curve* curve, size_t index);
+static float RawOutTangent(const ufbx_anim_curve* curve, size_t index);
+
+static double RawTransformFactor(AnityModelTransformCurveProperty property, float globalScale) {
+  switch (property) {
+    case ANITY_MODEL_POSITION_X: return -globalScale;
+    case ANITY_MODEL_POSITION_Y:
+    case ANITY_MODEL_POSITION_Z: return globalScale;
+    case ANITY_MODEL_EULER_X: return 1.0;
+    case ANITY_MODEL_EULER_Y:
+    case ANITY_MODEL_EULER_Z: return -1.0;
+    default: return 1.0;
+  }
+}
+
+static double EvaluateBakedVectorComponent(const ufbx_baked_node* node,
+    AnityModelTransformCurveProperty property, double time, float globalScale) {
+  switch (property) {
+    case ANITY_MODEL_POSITION_X:
+    case ANITY_MODEL_POSITION_Y:
+    case ANITY_MODEL_POSITION_Z: {
+      const ufbx_vec3 value = ufbx_evaluate_baked_vec3(node->translation_keys, time);
+      const double component = property == ANITY_MODEL_POSITION_X ? value.x :
+        property == ANITY_MODEL_POSITION_Y ? value.y : value.z;
+      return component * globalScale;
+    }
+    case ANITY_MODEL_SCALE_X:
+    case ANITY_MODEL_SCALE_Y:
+    case ANITY_MODEL_SCALE_Z: {
+      const ufbx_vec3 value = ufbx_evaluate_baked_vec3(node->scale_keys, time);
+      return property == ANITY_MODEL_SCALE_X ? value.x :
+        property == ANITY_MODEL_SCALE_Y ? value.y : value.z;
+    }
+    default: return 0.0;
+  }
+}
+
+static void BuildRawTransformCurve(const ufbx_baked_node* node,
+    const ufbx_anim_curve* source, AnityModelTransformCurveProperty property,
+    double trimStart, float globalScale, Track& track) {
+  if (!source || source->keyframes.count == 0) return;
+  Track::TransformCurve curve;
+  curve.property = property;
+  curve.keys.reserve(source->keyframes.count);
+  double reference = 0.0;
+  for (size_t index = 0; index < source->keyframes.count; ++index) {
+    const double time = source->keyframes.data[index].time;
+    const double bakedTime = time - trimStart;
+    const bool isEuler = property >= ANITY_MODEL_EULER_X && property <= ANITY_MODEL_EULER_Z;
+    const double factor = RawTransformFactor(property, globalScale);
+    const double value = isEuler
+      ? WrapAngleNear(source->keyframes.data[index].value * factor, reference)
+      : EvaluateBakedVectorComponent(node, property, bakedTime, globalScale);
+    reference = value;
+    double inTangent = RawInTangent(source, index) * factor;
+    double outTangent = RawOutTangent(source, index) * factor;
+    if (index == 0) inTangent = outTangent;
+    if (index + 1 == source->keyframes.count) outTangent = inTangent;
+    float relativeTime = Real(time - trimStart);
+    if (std::abs(relativeTime) < 1e-7f) relativeTime = 0.0f;
+    curve.keys.push_back({relativeTime, Real(value), Real(inTangent), Real(outTangent)});
+  }
+  track.transformCurves.push_back(std::move(curve));
+}
+
+static void BuildRawTransformCurves(const ufbx_anim_stack* stack, const ufbx_node* sourceNode,
+    const ufbx_baked_node* bakedNode,
+    double trimStart, float globalScale, Track& track) {
+  struct PropertyGroup {
+    const char* name;
+    AnityModelTransformCurveProperty first;
+  };
+  const PropertyGroup groups[] = {
+    {UFBX_Lcl_Translation, ANITY_MODEL_POSITION_X},
+    {UFBX_Lcl_Rotation, ANITY_MODEL_EULER_X},
+    {UFBX_Lcl_Scaling, ANITY_MODEL_SCALE_X},
+  };
+  for (const PropertyGroup& group : groups) {
+    const ufbx_anim_value* value = FindSingleRawValue(stack, &sourceNode->element, group.name);
+    if (!value) continue;
+    for (int axis = 0; axis < 3; ++axis)
+      BuildRawTransformCurve(bakedNode, value->curves[axis],
+        static_cast<AnityModelTransformCurveProperty>(static_cast<int>(group.first) + axis),
+        trimStart, globalScale, track);
+  }
 }
 
 static float Secant(const ufbx_keyframe& left, const ufbx_keyframe& right) {
@@ -407,7 +528,13 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
   }
 
   ufbx_load_opts loadOptions{};
-  loadOptions.target_axes = ufbx_axes_left_handed_y_up;
+  // Match Unity's legacy FBX axis conversion. ufbx's built-in left-handed
+  // Y-up preset produces the opposite transform signs for Maya-style FBX data.
+  loadOptions.target_axes = {
+    UFBX_COORDINATE_AXIS_NEGATIVE_X,
+    UFBX_COORDINATE_AXIS_NEGATIVE_Y,
+    UFBX_COORDINATE_AXIS_NEGATIVE_Z,
+  };
   loadOptions.target_unit_meters = options->useFileUnits ? 1.0 : 0.0;
   loadOptions.space_conversion = UFBX_SPACE_CONVERSION_MODIFY_GEOMETRY;
   loadOptions.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_MODIFY_GEOMETRY;
@@ -451,6 +578,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
       destination.name = String(node->name);
       destination.meshIndex = node->mesh ? static_cast<int32_t>(node->mesh->typed_id) : -1;
       destination.transform = node->local_transform;
+      destination.transform.rotation = RemoveRootAxisRotation(destination.transform.rotation, node);
       destination.transform.translation.x *= options->globalScale;
       destination.transform.translation.y *= options->globalScale;
       destination.transform.translation.z *= options->globalScale;
@@ -517,11 +645,16 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           for (size_t key = 0; key < bakedNode.translation_keys.count; ++key)
             track.positionKeys.push_back(VectorKey(bakedNode.translation_keys.data[key], options->globalScale));
           track.rotationKeys.reserve(bakedNode.rotation_keys.count);
+          const ufbx_node* sourceNode = bakedNode.typed_id < source->nodes.count
+            ? source->nodes.data[bakedNode.typed_id] : nullptr;
           for (size_t key = 0; key < bakedNode.rotation_keys.count; ++key)
-            track.rotationKeys.push_back(QuaternionKey(bakedNode.rotation_keys.data[key]));
+            track.rotationKeys.push_back(QuaternionKey(bakedNode.rotation_keys.data[key], sourceNode));
           track.scaleKeys.reserve(bakedNode.scale_keys.count);
           for (size_t key = 0; key < bakedNode.scale_keys.count; ++key)
             track.scaleKeys.push_back(VectorKey(bakedNode.scale_keys.data[key], 1.0f));
+          if (options->resampleCurves == 0 && sourceNode)
+            BuildRawTransformCurves(stack, sourceNode, &bakedNode,
+              baked->playback_time_begin, options->globalScale, track);
           if (!track.positionKeys.empty()) clip.duration = std::max(clip.duration, track.positionKeys.back().time);
           if (!track.rotationKeys.empty()) clip.duration = std::max(clip.duration, track.rotationKeys.back().time);
           if (!track.scaleKeys.empty()) clip.duration = std::max(clip.duration, track.scaleKeys.back().time);
@@ -706,7 +839,8 @@ AnityResult ANITY_CALL AnityModel_GetTrackInfo(const AnityModelScene* scene, int
   if (trackIndex < 0 || trackIndex >= static_cast<int32_t>(clip.tracks.size())) return ANITY_ERR_INVALID_ARG;
   const Track& track = clip.tracks[trackIndex];
   *outInfo = { track.nodeIndex, static_cast<int32_t>(track.positionKeys.size()),
-    static_cast<int32_t>(track.rotationKeys.size()), static_cast<int32_t>(track.scaleKeys.size()) };
+    static_cast<int32_t>(track.rotationKeys.size()), static_cast<int32_t>(track.scaleKeys.size()),
+    static_cast<int32_t>(track.transformCurves.size()) };
   return ANITY_OK;
 }
 
@@ -729,6 +863,28 @@ AnityResult ANITY_CALL AnityModel_CopyScaleKeys(const AnityModelScene* scene, in
   const Clip& clip = scene->clips[clipIndex];
   if (trackIndex < 0 || trackIndex >= static_cast<int32_t>(clip.tracks.size())) return ANITY_ERR_INVALID_ARG;
   return CopyVector(clip.tracks[trackIndex].scaleKeys, keys, capacity);
+}
+
+AnityResult ANITY_CALL AnityModel_GetTransformCurveInfo(const AnityModelScene* scene,
+    int32_t clipIndex, int32_t trackIndex, int32_t curveIndex, AnityModelTransformCurveInfo* outInfo) {
+  if (!scene || !outInfo || clipIndex < 0 || clipIndex >= static_cast<int32_t>(scene->clips.size())) return ANITY_ERR_INVALID_ARG;
+  const Clip& clip = scene->clips[clipIndex];
+  if (trackIndex < 0 || trackIndex >= static_cast<int32_t>(clip.tracks.size())) return ANITY_ERR_INVALID_ARG;
+  const Track& track = clip.tracks[trackIndex];
+  if (curveIndex < 0 || curveIndex >= static_cast<int32_t>(track.transformCurves.size())) return ANITY_ERR_INVALID_ARG;
+  const Track::TransformCurve& curve = track.transformCurves[curveIndex];
+  *outInfo = {static_cast<int32_t>(curve.property), static_cast<int32_t>(curve.keys.size())};
+  return ANITY_OK;
+}
+
+AnityResult ANITY_CALL AnityModel_CopyTransformCurveKeys(const AnityModelScene* scene,
+    int32_t clipIndex, int32_t trackIndex, int32_t curveIndex, AnityModelScalarKey* keys, int32_t capacity) {
+  if (!scene || clipIndex < 0 || clipIndex >= static_cast<int32_t>(scene->clips.size())) return ANITY_ERR_INVALID_ARG;
+  const Clip& clip = scene->clips[clipIndex];
+  if (trackIndex < 0 || trackIndex >= static_cast<int32_t>(clip.tracks.size())) return ANITY_ERR_INVALID_ARG;
+  const Track& track = clip.tracks[trackIndex];
+  if (curveIndex < 0 || curveIndex >= static_cast<int32_t>(track.transformCurves.size())) return ANITY_ERR_INVALID_ARG;
+  return CopyVector(track.transformCurves[curveIndex].keys, keys, capacity);
 }
 
 AnityResult ANITY_CALL AnityModel_GetBlendShapeTrackInfo(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelBlendShapeTrackInfo* outInfo) {

@@ -182,6 +182,9 @@ public class AnimationClip : Motion
                 case "m_LocalRotation.y": case "localRotation.y": sample.Rotation.y = value; sample.Properties |= AnimationTransformProperties.Rotation; break;
                 case "m_LocalRotation.z": case "localRotation.z": sample.Rotation.z = value; sample.Properties |= AnimationTransformProperties.Rotation; break;
                 case "m_LocalRotation.w": case "localRotation.w": sample.Rotation.w = value; sample.Properties |= AnimationTransformProperties.Rotation; break;
+                case "localEulerAnglesRaw.x": sample.EulerRotation.x = value; sample.Rotation = Quaternion.Euler(sample.EulerRotation); sample.Properties |= AnimationTransformProperties.Rotation; break;
+                case "localEulerAnglesRaw.y": sample.EulerRotation.y = value; sample.Rotation = Quaternion.Euler(sample.EulerRotation); sample.Properties |= AnimationTransformProperties.Rotation; break;
+                case "localEulerAnglesRaw.z": sample.EulerRotation.z = value; sample.Rotation = Quaternion.Euler(sample.EulerRotation); sample.Properties |= AnimationTransformProperties.Rotation; break;
                 case "m_LocalScale.x": case "localScale.x": sample.Scale.x = value; sample.Properties |= AnimationTransformProperties.Scale; break;
                 case "m_LocalScale.y": case "localScale.y": sample.Scale.y = value; sample.Properties |= AnimationTransformProperties.Scale; break;
                 case "m_LocalScale.z": case "localScale.z": sample.Scale.z = value; sample.Properties |= AnimationTransformProperties.Scale; break;

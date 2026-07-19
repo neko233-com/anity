@@ -309,12 +309,22 @@ internal static class ModelAssetImportPipeline
       {
         if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length) continue;
         var path = RelativePath(root.transform, nodes[track.NodeIndex].transform);
-        AddVectorCurves(clip, path, "m_LocalPosition", track.PositionKeys, rangeStart, rangeEnd,
-          importer.animationCompression, importer.animationPositionError);
-        AddQuaternionCurves(clip, path, track.RotationKeys, rangeStart, rangeEnd,
-          importer.animationCompression, importer.animationRotationError);
-        AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd,
-          importer.animationCompression, importer.animationScaleError);
+        var hasRawPosition = track.TransformCurves.Any(curve => curve.Property <= NativeModelDecoder.TransformCurveProperty.PositionZ);
+        var hasRawEuler = track.TransformCurves.Any(curve => curve.Property is >= NativeModelDecoder.TransformCurveProperty.EulerX and <= NativeModelDecoder.TransformCurveProperty.EulerZ);
+        var hasRawScale = track.TransformCurves.Any(curve => curve.Property >= NativeModelDecoder.TransformCurveProperty.ScaleX);
+        foreach (var curve in track.TransformCurves)
+          clip.SetCurve(path, typeof(Transform), TransformCurvePropertyName(curve.Property),
+            ScalarCurveForRange(curve.Keys, rangeStart, rangeEnd,
+              ModelImporterAnimationCompression.Off, 0f));
+        if (!hasRawPosition)
+          AddVectorCurves(clip, path, "m_LocalPosition", track.PositionKeys, rangeStart, rangeEnd,
+            importer.animationCompression, importer.animationPositionError);
+        if (!hasRawEuler)
+          AddQuaternionCurves(clip, path, track.RotationKeys, rangeStart, rangeEnd,
+            importer.animationCompression, importer.animationRotationError);
+        if (!hasRawScale)
+          AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd,
+            importer.animationCompression, importer.animationScaleError);
       }
       if (importer.importBlendShapes && importer.importBlendShapeDeformPercent)
         foreach (var track in source.BlendShapeTracks)
@@ -348,6 +358,20 @@ internal static class ModelAssetImportPipeline
     clip.SetCurve(path, typeof(Transform), property + ".y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end, compression, error));
     clip.SetCurve(path, typeof(Transform), property + ".z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end, compression, error));
   }
+
+  private static string TransformCurvePropertyName(NativeModelDecoder.TransformCurveProperty property) => property switch
+  {
+    NativeModelDecoder.TransformCurveProperty.PositionX => "m_LocalPosition.x",
+    NativeModelDecoder.TransformCurveProperty.PositionY => "m_LocalPosition.y",
+    NativeModelDecoder.TransformCurveProperty.PositionZ => "m_LocalPosition.z",
+    NativeModelDecoder.TransformCurveProperty.EulerX => "localEulerAnglesRaw.x",
+    NativeModelDecoder.TransformCurveProperty.EulerY => "localEulerAnglesRaw.y",
+    NativeModelDecoder.TransformCurveProperty.EulerZ => "localEulerAnglesRaw.z",
+    NativeModelDecoder.TransformCurveProperty.ScaleX => "m_LocalScale.x",
+    NativeModelDecoder.TransformCurveProperty.ScaleY => "m_LocalScale.y",
+    NativeModelDecoder.TransformCurveProperty.ScaleZ => "m_LocalScale.z",
+    _ => throw new ArgumentOutOfRangeException(nameof(property)),
+  };
 
   private static void AddQuaternionCurves(AnimationClip clip, string path,
     NativeModelDecoder.QuaternionKey[] keys, float start, float end,

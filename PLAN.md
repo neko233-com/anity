@@ -1,5 +1,23 @@
 # PLAN
 
+## 2026-07-19 — Unity FBX Transform raw Euler / resampled quaternion 语义
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对同一 Maya FBX 探测 `resampleCurves=true/false`、`Off/Optimal` 与 rotation/position/scale error；锁定关闭重采样时的 9 条 `m_LocalPosition.*` / `localEulerAnglesRaw.*` / `m_LocalScale.*` 源曲线、frame `0/13/23`、源 Bezier tangent，以及开启重采样时 24 个逐帧 quaternion key。官方文档同时确认 rotation error 是原始与压缩 quaternion 的角度误差（度），position/scale error 是相对误差百分比。
+- `anity-native` 的 FBX 坐标基现与 Unity 的 Maya FBX 结果一致；移除 ufbx 顶层轴变换附加旋转后，重采样 quaternion 在 frame 13 精确得到 Unity 的 `(0.038134575, -0.18930785, -0.23929834, 0.9515485)`。原始 Transform curve 通过新 C ABI 保留源 key/time/in-out tangent，并按 Unity 轴映射输出 position、Euler 与 scale。
+- 托管 ModelImporter 在 `resampleCurves=false` 时生成 `localEulerAnglesRaw.*` 而非 quaternion bindings，且不再对源 key 二次压缩；`AnimationClip.SampleAnimation` 已能把三条 raw Euler curve 合成为实际 Transform rotation。开启重采样且 compression `Off` 时仍生成 24 帧 quaternion curves。
+- 新增 Transform curve/value/time/tangent/binding/runtime sampling/quaternion 专项 **13 个用例**；`NativeModelImportTests` **27/27**、相关 model/animation 聚焦回归 **83/83**。`_scripts/build-all.sh Release` 全部 0 编译错误；统一 native-required 八工程矩阵 **4058/4058**（Core **3060/3060**），均 0 失败、0 跳过。
+
+### 尚未完成
+- Unity 的四条 quaternion component curve 会同步删 key；已取得 error `0.01 / 0.1 / 0.5 / 1` 的黑盒 key 集，但其联合 angular reduction 删除顺序尚未精确复刻。当前逐 component 压缩不能冒充联合 quaternion reducer 完成。
+- 多 animation layer、不同 FBX axis/rotation order、pre/post rotation、constant/stepped/weighted/broken/infinite tangent、Euler wrap/gimbal lock，以及 loop pose/root locks/mirror/cycle offset/root motion/additive/mask 仍需扩充官方 fixture。
+- 正式证据仍需 Unity 2022.3.61f1 Pro 的 Editor curve visualization、连续时间 Player sampling、negative scale/多层 hierarchy、sub-asset/fileID 与重导入持久化 A/B；ModelImporter 与 AnimationClip 保持 🟡。
+
+### 下一优先项
+1. 从现有四档 Unity key 集反推并实现同步 quaternion angular reduction，确保四 component 共享完全相同的 key time 与 tangent。
+2. 补 constant/stepped/weighted/broken tangent、多 layer/rotation order 与 Euler wrap fixture，再完成 loop/root motion/additive/mask 的 importer-to-runtime 全链路。
+3. 修复 `anity -logFile -` stdout 语义；补 stable sub-asset fileID/type-tree/artifact cache，并在 Unity 2022.3.61f1 Pro 执行 Editor/Player A/B。
+
 ## 2026-07-19 — Unity imported curve compression / tangent / take timeline
 
 ### 已完成
