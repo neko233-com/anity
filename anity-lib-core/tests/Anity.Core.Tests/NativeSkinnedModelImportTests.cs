@@ -499,7 +499,7 @@ public sealed class NativeSkinnedModelImportTests : IDisposable
 
     private static AnimationClip ConstantBlendClip(string name, float value)
     {
-        var clip = new AnimationClip { name = name, length = 1f };
+        var clip = new AnimationClip { name = name };
         clip.SetCurve(string.Empty, typeof(SkinnedMeshRenderer), "blendShape.TopH",
             AnimationCurve.Linear(0f, value, 1f, value));
         return clip;

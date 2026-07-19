@@ -17,9 +17,10 @@ public class Animator : Behaviour
     private readonly Dictionary<int, AnimatorState> _currentStates = new();
     private readonly Dictionary<int, AnimatorState> _nextStates = new();
     private readonly Dictionary<int, float> _currentStateTimes = new();
+    private readonly Dictionary<int, float> _nextStateTimes = new();
     private readonly Dictionary<int, float> _transitionTimes = new();
     private readonly Dictionary<int, float> _transitionDurations = new();
-    private readonly Dictionary<int, float> _stateSpeeds = new();
+    private readonly Dictionary<int, float> _transitionDurationSeconds = new();
     private bool _initialized;
     private Vector3 _rootPosition;
     private Quaternion _rootRotation = Quaternion.identity;
@@ -65,6 +66,8 @@ public class Animator : Behaviour
         set
         {
             _controller = value;
+            ClearStateMachineRuntime();
+            _initialized = false;
             InitializeParameters();
         }
     }
@@ -203,17 +206,15 @@ public class Animator : Behaviour
     {
         if (_currentStates.TryGetValue(layerIndex, out var state) && state != null)
         {
-            float normTime = 0f;
-            _currentStateTimes.TryGetValue(layerIndex, out normTime);
-            float speed = 1f;
-            _stateSpeeds.TryGetValue(layerIndex, out speed);
+            _currentStateTimes.TryGetValue(layerIndex, out float stateTime);
+            float stateLength = Math.Max(0.000001f, state.length);
             return new AnimatorStateInfo(
                 state.nameHash,
                 state.nameHash,
-                normTime,
+                stateTime / stateLength,
                 state.length,
-                state.speed * speed,
-                speed,
+                state.speed,
+                1f,
                 state.tagHash,
                 state.loop
             );
@@ -225,10 +226,12 @@ public class Animator : Behaviour
     {
         if (_nextStates.TryGetValue(layerIndex, out var state) && state != null)
         {
+            _nextStateTimes.TryGetValue(layerIndex, out float stateTime);
+            float stateLength = Math.Max(0.000001f, state.length);
             return new AnimatorStateInfo(
                 state.nameHash,
                 state.nameHash,
-                0f,
+                stateTime / stateLength,
                 state.length,
                 state.speed,
                 1f,
@@ -243,18 +246,17 @@ public class Animator : Behaviour
     {
         if (IsInTransition(layerIndex) && _nextStates.TryGetValue(layerIndex, out var nextState))
         {
-            float dur = 0f;
-            _transitionDurations.TryGetValue(layerIndex, out dur);
-            float time = 0f;
-            _transitionTimes.TryGetValue(layerIndex, out time);
-            float normalizedTime = dur > 0f ? 1f - (time / dur) : 0f;
+            _transitionDurations.TryGetValue(layerIndex, out float reportedDuration);
+            _transitionDurationSeconds.TryGetValue(layerIndex, out float durationSeconds);
+            _transitionTimes.TryGetValue(layerIndex, out float elapsedTime);
+            float normalizedTime = durationSeconds > 0f ? elapsedTime / durationSeconds : 1f;
             return new AnimatorTransitionInfo(
                 nextState.nameHash,
                 nextState.nameHash,
                 nextState.nameHash,
                 true,
                 normalizedTime,
-                dur,
+                reportedDuration,
                 false
             );
         }
@@ -265,7 +267,8 @@ public class Animator : Behaviour
     {
         if (_currentStates.TryGetValue(layerIndex, out var state) && state?.motion is AnimationClip clip)
         {
-            return new[] { new AnimatorClipInfo(clip, 1f) };
+            float weight = 1f - TransitionWeight(layerIndex);
+            return new[] { new AnimatorClipInfo(clip, weight) };
         }
         return Array.Empty<AnimatorClipInfo>();
     }
@@ -274,7 +277,7 @@ public class Animator : Behaviour
     {
         if (_nextStates.TryGetValue(layerIndex, out var state) && state?.motion is AnimationClip clip)
         {
-            return new[] { new AnimatorClipInfo(clip, 1f) };
+            return new[] { new AnimatorClipInfo(clip, TransitionWeight(layerIndex)) };
         }
         return Array.Empty<AnimatorClipInfo>();
     }
@@ -287,17 +290,18 @@ public class Animator : Behaviour
     public void CrossFade(int stateHashName, float normalizedTransitionDuration, int layer = -1, float normalizedTimeOffset = 0, float normalizedTransitionTime = 0)
     {
         int layerIdx = layer < 0 ? 0 : layer;
+        InitializeIfNeeded();
         var state = FindState(stateHashName, layerIdx);
         if (state == null) return;
 
         if (_currentStates.TryGetValue(layerIdx, out var current) && current != null)
         {
-            _nextStates[layerIdx] = state;
-            _transitionDurations[layerIdx] = normalizedTransitionDuration;
-            _transitionTimes[layerIdx] = normalizedTransitionDuration;
-            _currentStateTimes[layerIdx] = normalizedTimeOffset < 0f ? 0f : normalizedTimeOffset;
-            OnStateExit(current, layerIdx);
-            OnStateEnter(state, layerIdx);
+            float currentLength = Math.Max(0f, current.length);
+            float seconds = Math.Max(0f, normalizedTransitionDuration) * currentLength;
+            float destinationTime = float.IsNegativeInfinity(normalizedTimeOffset)
+                ? 0f : Math.Max(0f, normalizedTimeOffset) * Math.Max(0f, state.length);
+            BeginCrossFade(state, layerIdx, normalizedTransitionDuration, seconds,
+                destinationTime, normalizedTransitionTime);
         }
         else
         {
@@ -307,12 +311,22 @@ public class Animator : Behaviour
 
     public void CrossFadeInFixedTime(string stateName, float fixedTransitionDuration, int layer = -1, float fixedTimeOffset = 0, float normalizedTransitionTime = 0)
     {
-        CrossFade(stateName, fixedTransitionDuration, layer, fixedTimeOffset, normalizedTransitionTime);
+        CrossFadeInFixedTime(StringToHash(stateName), fixedTransitionDuration, layer, fixedTimeOffset, normalizedTransitionTime);
     }
 
     public void CrossFadeInFixedTime(int stateHashName, float fixedTransitionDuration, int layer = -1, float fixedTimeOffset = 0, float normalizedTransitionTime = 0)
     {
-        CrossFade(stateHashName, fixedTransitionDuration, layer, fixedTimeOffset, normalizedTransitionTime);
+        int layerIdx = layer < 0 ? 0 : layer;
+        InitializeIfNeeded();
+        var state = FindState(stateHashName, layerIdx);
+        if (state == null) return;
+        if (_currentStates.TryGetValue(layerIdx, out var current) && current != null)
+        {
+            float seconds = Math.Max(0f, fixedTransitionDuration);
+            BeginCrossFade(state, layerIdx, fixedTransitionDuration, seconds,
+                Math.Max(0f, fixedTimeOffset), normalizedTransitionTime);
+        }
+        else PlayInFixedTime(stateHashName, layer, fixedTimeOffset);
     }
 
     public void Play(string stateName, int layer = -1, float normalizedTime = float.NegativeInfinity)
@@ -323,28 +337,31 @@ public class Animator : Behaviour
     public void Play(int stateNameHash, int layer = -1, float normalizedTime = float.NegativeInfinity)
     {
         int layerIdx = layer < 0 ? 0 : layer;
+        InitializeIfNeeded();
         var state = FindState(stateNameHash, layerIdx);
         if (state == null) return;
-
-        if (_currentStates.TryGetValue(layerIdx, out var oldState) && oldState != null)
-        {
-            OnStateExit(oldState, layerIdx);
-        }
-
-        _currentStates[layerIdx] = state;
-        _currentStateTimes[layerIdx] = normalizedTime == float.NegativeInfinity ? 0f : normalizedTime;
-        _nextStates[layerIdx] = null;
-        _transitionTimes[layerIdx] = 0f;
-        _stateSpeeds[layerIdx] = state.speed;
-        OnStateEnter(state, layerIdx);
+        float time = float.IsNegativeInfinity(normalizedTime)
+            ? ExistingOrZeroTime(layerIdx, state)
+            : normalizedTime * Math.Max(0f, state.length);
+        PlayState(state, layerIdx, time);
     }
 
-    public void PlayInFixedTime(string stateName, int layer = -1, float fixedTime = 0) => Play(stateName, layer, fixedTime > 0f ? fixedTime : 0f);
-    public void PlayInFixedTime(int stateNameHash, int layer = -1, float fixedTime = 0) => Play(stateNameHash, layer, fixedTime > 0f ? fixedTime : 0f);
+    public void PlayInFixedTime(string stateName, int layer = -1, float fixedTime = 0)
+        => PlayInFixedTime(StringToHash(stateName), layer, fixedTime);
+
+    public void PlayInFixedTime(int stateNameHash, int layer = -1, float fixedTime = 0)
+    {
+        int layerIdx = layer < 0 ? 0 : layer;
+        InitializeIfNeeded();
+        var state = FindState(stateNameHash, layerIdx);
+        if (state == null) return;
+        PlayState(state, layerIdx, Math.Max(0f, fixedTime));
+    }
 
     public void Rebind()
     {
         _initialized = true;
+        ClearStateMachineRuntime();
         InitializeDefaultState();
     }
 
@@ -355,7 +372,7 @@ public class Animator : Behaviour
         InitializeIfNeeded();
 
         float dt = deltaTime * _speed;
-        if (dt <= 0f) return;
+        if (dt < 0f) return;
 
         _deltaPosition = Vector3.zero;
         _deltaRotation = Quaternion.identity;
@@ -378,86 +395,50 @@ public class Animator : Behaviour
         if (!_currentStates.TryGetValue(layerIndex, out var currentState) || currentState == null)
             return SampledAnimationPose.Empty;
 
-        float stateTime = 0f;
-        _currentStateTimes.TryGetValue(layerIndex, out stateTime);
-        float stateSpeed = 1f;
-        _stateSpeeds.TryGetValue(layerIndex, out stateSpeed);
-
+        _currentStateTimes.TryGetValue(layerIndex, out float stateTime);
         float stateLength = Math.Max(0.001f, currentState.length);
 
         if (_nextStates.TryGetValue(layerIndex, out var nextState) && nextState != null)
         {
-            float transDuration = 0f;
-            _transitionDurations.TryGetValue(layerIndex, out transDuration);
-            float transTime = 0f;
-            _transitionTimes.TryGetValue(layerIndex, out transTime);
+            _transitionDurationSeconds.TryGetValue(layerIndex, out float durationSeconds);
+            _transitionTimes.TryGetValue(layerIndex, out float elapsedTime);
+            _nextStateTimes.TryGetValue(layerIndex, out float nextTime);
+            stateTime += deltaTime * currentState.speed;
+            nextTime += deltaTime * nextState.speed;
+            elapsedTime += deltaTime;
+            _currentStateTimes[layerIndex] = stateTime;
+            _nextStateTimes[layerIndex] = nextTime;
+            _transitionTimes[layerIndex] = elapsedTime;
 
-            float actualTransDur = transDuration * stateLength;
-            transTime -= deltaTime;
-            _transitionTimes[layerIndex] = transTime;
-
-            if (transTime <= 0f)
+            if (durationSeconds <= 0f || elapsedTime >= durationSeconds)
             {
                 OnStateExit(currentState, layerIndex);
                 _currentStates[layerIndex] = nextState;
-                _nextStates[layerIndex] = null;
-                _currentStateTimes[layerIndex] = 0f;
-                _stateSpeeds[layerIndex] = nextState.speed;
-                OnStateEnter(nextState, layerIndex);
-                return SampleState(nextState, 0f);
+                _currentStateTimes[layerIndex] = nextTime;
+                ClearTransition(layerIndex);
+                return SampleState(nextState, nextTime);
             }
-            else
-            {
-                float t = 1f - (transTime / actualTransDur);
-                t = Math.Clamp(t, 0f, 1f);
-
-                stateTime += deltaTime * stateSpeed;
-                if (currentState.loop)
-                {
-                    while (stateTime > stateLength) stateTime -= stateLength;
-                    while (stateTime < 0f) stateTime += stateLength;
-                }
-                else
-                {
-                    stateTime = Math.Clamp(stateTime, 0f, stateLength);
-                }
-                _currentStateTimes[layerIndex] = stateTime;
-
-                float nextTime = (actualTransDur - transTime) * nextState.speed;
-                float nextLength = Math.Max(0.001f, nextState.length);
-                if (nextState.loop)
-                {
-                    while (nextTime > nextLength) nextTime -= nextLength;
-                }
-                else
-                {
-                    nextTime = Math.Clamp(nextTime, 0f, nextLength);
-                }
-
-                return SampleBlendStates(currentState, stateTime, nextState, nextTime, t);
-            }
+            float weight = Math.Clamp(elapsedTime / durationSeconds, 0f, 1f);
+            return SampleBlendStates(currentState, stateTime, nextState, nextTime, weight);
         }
         else
         {
-            stateTime += deltaTime * stateSpeed;
+            stateTime += deltaTime * currentState.speed;
+            _currentStateTimes[layerIndex] = stateTime;
 
             CheckTransitions(currentState, stateTime, stateLength, layerIndex);
             CheckAnyStateTransitions(layerIndex);
 
             if (!IsInTransition(layerIndex))
             {
-                if (currentState.loop)
-                {
-                    while (stateTime > stateLength) stateTime -= stateLength;
-                    while (stateTime < 0f) stateTime += stateLength;
-                }
-                else
-                {
-                    stateTime = Math.Clamp(stateTime, 0f, stateLength);
-                }
-                _currentStateTimes[layerIndex] = stateTime;
                 OnStateUpdate(currentState, layerIndex);
                 return SampleState(currentState, stateTime);
+            }
+            if (_nextStates.TryGetValue(layerIndex, out nextState) && nextState != null)
+            {
+                _nextStateTimes.TryGetValue(layerIndex, out float nextTime);
+                return SampleBlendStates(currentState, stateTime, nextState, nextTime,
+                    TransitionWeight(layerIndex));
             }
         }
         return SampledAnimationPose.Empty;
@@ -476,7 +457,7 @@ public class Animator : Behaviour
 
             if (transition.destinationState != null)
             {
-                StartTransition(transition.destinationState, transition.duration, layerIndex);
+                StartTransition(transition, layerIndex);
                 return;
             }
         }
@@ -495,7 +476,7 @@ public class Animator : Behaviour
             if (!CheckConditions(transition.conditions)) continue;
             if (transition.destinationState != null && _currentStates.TryGetValue(layerIndex, out var current) && transition.destinationState != current)
             {
-                StartTransition(transition.destinationState, transition.duration, layerIndex);
+                StartTransition(transition, layerIndex);
                 return;
             }
         }
@@ -534,23 +515,67 @@ public class Animator : Behaviour
         return true;
     }
 
-    private void StartTransition(AnimatorState destination, float normalizedDuration, int layerIndex)
+    private void StartTransition(AnimatorStateTransition transition, int layerIndex)
     {
-        if (_currentStates.TryGetValue(layerIndex, out var current) && current != null)
-        {
-            OnStateExit(current, layerIndex);
-        }
+        AnimatorState destination = transition.destinationState;
+        if (destination is null || !_currentStates.TryGetValue(layerIndex, out var current) || current is null) return;
+        float durationSeconds = transition.hasFixedDuration
+            ? Math.Max(0f, transition.duration)
+            : Math.Max(0f, transition.duration) * Math.Max(0f, current.length);
+        float destinationTime = transition.offset * Math.Max(0f, destination.length);
+        BeginCrossFade(destination, layerIndex, transition.duration, durationSeconds,
+            destinationTime, 0f);
+    }
+
+    private void BeginCrossFade(AnimatorState destination, int layerIndex, float reportedDuration,
+        float durationSeconds, float destinationTime, float normalizedTransitionTime)
+    {
+        float progress = float.IsFinite(normalizedTransitionTime)
+            ? Math.Clamp(normalizedTransitionTime, 0f, 1f) : 0f;
         _nextStates[layerIndex] = destination;
-        _transitionDurations[layerIndex] = normalizedDuration;
-        _transitionTimes[layerIndex] = normalizedDuration;
+        _nextStateTimes[layerIndex] = destinationTime;
+        _transitionDurations[layerIndex] = reportedDuration;
+        _transitionDurationSeconds[layerIndex] = durationSeconds;
+        _transitionTimes[layerIndex] = durationSeconds * progress;
         OnStateEnter(destination, layerIndex);
+    }
+
+    private float TransitionWeight(int layerIndex)
+    {
+        if (!_nextStates.ContainsKey(layerIndex)) return 0f;
+        _transitionDurationSeconds.TryGetValue(layerIndex, out float durationSeconds);
+        _transitionTimes.TryGetValue(layerIndex, out float elapsedTime);
+        return durationSeconds > 0f ? Math.Clamp(elapsedTime / durationSeconds, 0f, 1f) : 1f;
+    }
+
+    private float ExistingOrZeroTime(int layerIndex, AnimatorState state)
+        => _currentStates.TryGetValue(layerIndex, out var current) && ReferenceEquals(current, state) &&
+           _currentStateTimes.TryGetValue(layerIndex, out float time) ? time : 0f;
+
+    private void PlayState(AnimatorState state, int layerIndex, float time)
+    {
+        if (_currentStates.TryGetValue(layerIndex, out var oldState) && oldState != null)
+            OnStateExit(oldState, layerIndex);
+        _currentStates[layerIndex] = state;
+        _currentStateTimes[layerIndex] = time;
+        ClearTransition(layerIndex);
+        OnStateEnter(state, layerIndex);
+    }
+
+    private void ClearTransition(int layerIndex)
+    {
+        _nextStates.Remove(layerIndex);
+        _nextStateTimes.Remove(layerIndex);
+        _transitionTimes.Remove(layerIndex);
+        _transitionDurations.Remove(layerIndex);
+        _transitionDurationSeconds.Remove(layerIndex);
     }
 
     private SampledAnimationPose SampleState(AnimatorState state, float time)
     {
         return state?.motion is null || gameObject is null
             ? SampledAnimationPose.Empty
-            : SampleMotion(state.motion, time);
+            : SampleMotion(state.motion, time + state.cycleOffset * Math.Max(0f, state.length));
     }
 
     private SampledAnimationPose SampleBlendStates(
@@ -577,8 +602,8 @@ public class Animator : Behaviour
     {
         if (motion is AnimationClip clip && gameObject is not null)
         {
-            AnimationPose pose = clip.EvaluateTransformPose(gameObject, time);
-            AnimationFloatPose properties = clip.EvaluateFloatProperties(gameObject, time);
+            AnimationPose pose = clip.EvaluateTransformPose(gameObject, time, true);
+            AnimationFloatPose properties = clip.EvaluateFloatProperties(gameObject, time, true);
             clip.TryEvaluateAdditiveReferencePose(gameObject, out AnimationPose referencePose);
             clip.TryEvaluateAdditiveReferenceFloatProperties(gameObject, out AnimationFloatPose referenceProperties);
             return new SampledAnimationPose(pose, properties, referencePose.Count > 0 ? referencePose : null,
@@ -737,7 +762,6 @@ public class Animator : Behaviour
             {
                 _currentStates[i] = layer.stateMachine.defaultState;
                 _currentStateTimes[i] = 0f;
-                _stateSpeeds[i] = layer.stateMachine.defaultState.speed;
                 OnStateEnter(layer.stateMachine.defaultState, i);
             }
             else if (layer?.stateMachine?.entryTransitions != null && layer.stateMachine.entryTransitions.Count > 0)
@@ -747,11 +771,21 @@ public class Animator : Behaviour
                 {
                     _currentStates[i] = entry.destinationState;
                     _currentStateTimes[i] = 0f;
-                    _stateSpeeds[i] = entry.destinationState.speed;
                     OnStateEnter(entry.destinationState, i);
                 }
             }
         }
+    }
+
+    private void ClearStateMachineRuntime()
+    {
+        _currentStates.Clear();
+        _currentStateTimes.Clear();
+        _nextStates.Clear();
+        _nextStateTimes.Clear();
+        _transitionTimes.Clear();
+        _transitionDurations.Clear();
+        _transitionDurationSeconds.Clear();
     }
 
     private void OnStateEnter(AnimatorState state, int layerIndex)

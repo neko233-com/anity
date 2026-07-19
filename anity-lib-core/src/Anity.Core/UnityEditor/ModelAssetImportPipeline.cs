@@ -326,11 +326,11 @@ internal static class ModelAssetImportPipeline
       {
         name = clipSettings is null || string.IsNullOrEmpty(clipSettings.name) ? source.Name : clipSettings.name,
         frameRate = frameRate,
-        length = rangeEnd - rangeStart,
         legacy = importer.animationType == ModelImporterAnimationType.Legacy,
         wrapMode = clipSettings?.wrapMode ?? WrapMode.Default,
         hideFlags = HideFlags.NotEditable,
       };
+      clip.SetImportedLength(rangeEnd - rangeStart);
       foreach (var track in source.Tracks)
       {
         if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length) continue;
@@ -372,7 +372,30 @@ internal static class ModelAssetImportPipeline
               importer.animationCompression, importer.animationPositionError));
         }
       clip.EnsureQuaternionContinuity();
+      clip.SetImportedLength(rangeEnd - rangeStart);
       clip.MarkMecanimDataBuilt();
+      clip.SetImportedMotionMetadata(
+        importer.animationType == ModelImporterAnimationType.Human,
+        hasGenericRoot: false,
+        hasMotion: false,
+        hasMotionFloat: false,
+        hasRoot: false);
+      AnimationUtility.SetAnimationClipSettings(clip, new AnimationClipSettings
+      {
+        loopTime = clipSettings?.loopTime ?? false,
+        loopBlend = clipSettings?.loopPose ?? false,
+        loopBlendOrientation = clipSettings?.lockRootRotation ?? false,
+        loopBlendPositionY = clipSettings?.lockRootHeightY ?? false,
+        loopBlendPositionXZ = clipSettings?.lockRootPositionXZ ?? false,
+        keepOriginalOrientation = clipSettings?.keepOriginalOrientation ?? false,
+        keepOriginalPositionY = clipSettings?.keepOriginalPositionY ?? false,
+        keepOriginalPositionXZ = clipSettings?.keepOriginalPositionXZ ?? false,
+        heightFromFeet = clipSettings?.heightFromFeet ?? false,
+        mirror = clipSettings?.mirror ?? false,
+        cycleOffset = clipSettings?.cycleOffset ?? 0f,
+        startTime = 0f,
+        stopTime = clip.length,
+      });
       clips.Add(clip);
     }
   }

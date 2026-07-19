@@ -2003,8 +2003,19 @@ static float EvaluateUnityVisibilitySource(
 static float EvaluateUnityVisibilityProduct(
     const std::vector<UnityVisibilitySource>& sources, double time) {
   float value = 1.0f;
-  for (const UnityVisibilitySource& source : sources)
-    value *= EvaluateUnityVisibilitySource(source, time);
+  for (size_t index = 0; index < sources.size(); ++index) {
+    const UnityVisibilitySource& source = sources[index];
+    float sourceValue = EvaluateUnityVisibilitySource(source, time);
+    if (index > 0) {
+      const ufbx_node* ancestor = ufbx_as_node(source.element);
+      // Unity preserves the signed Visibility value on the Renderer-owning
+      // node, and on Renderer ancestors, but an FBX Null/helper ancestor only
+      // contributes visibility magnitude. This keeps a helper value of -1
+      // enabled without flipping a descendant Renderer value of +2 to -2.
+      if (ancestor && !ancestor->mesh) sourceValue = std::abs(sourceValue);
+    }
+    value *= sourceValue;
+  }
   return value;
 }
 

@@ -6,7 +6,7 @@
 > - 🟡 部分实现 / API 壳 / 尚缺 Unity 官方 A/B 行为证据
 > - ❌ 未实现
 >
-> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **4,370/4,370**（Core **3,348/3,348**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
+> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备审计：类型存在 992/4,117（24.095%）、类型契约完全一致 467（11.343%）；成员存在 9,297/37,164（25.016%）、成员契约完全一致 7,035（18.930%）；缺失类型 3,125、真实缺失成员 27,867。本轮 native-required 统一 Release 门禁 **4,395/4,395**（Core **3,373/3,373**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
 
 ---
 
@@ -16,8 +16,8 @@
 |------|------|------|
 | Monorepo source layout | ✅ | 四个历史 submodule 声明与实际 Git index 不一致，已证明当前模块全部为普通 tracked source；`.gitmodules`、recursive checkout、`modules/` ignore 与多仓库文档已移除 |
 | `_scripts/` 唯一入口 | ✅ | 12 个未被现行构建/测试/workflow 引用的旧 `scripts/` helper 及其 README 已删除；8 个历史入口名在 tracked source 中反向引用为 0，AGENTS 明确禁止恢复旧目录 |
-| Cache-free rebuild | ✅ | renderer topology 最终门禁完成 build-all 0 错误、八工程 **4,370/4,370**、self-contained CLI 与 App 安装运行门禁；逐项确认 Git ignored/零 tracked 后移出 39 个 repo-local `bin/obj/build`（375,348 KiB）与 15 个 `/private/tmp/anity-*`（93,672 KiB）至可恢复废纸篓，最终全类生成目录复扫为 0 |
-| Unity obsolete/legacy compatibility | 🟡 | 精确反向引用审计已删除零调用/零导出的内部 VFX synchronous legacy、LegacyCanvas 两个重复类型、`LegacyUIVertex` 及 Unity 不存在的 `FindObjectsSortMode.NoneLegacy`；Unity 2022.3 公开 `[Obsolete]` API、removed networking、FBX legacy 数值、Shader/VFX deprecated serialized migration及仍被调用的兼容 ABI 均有反射/行为/资产测试引用，按兼容目标保留；完整 obsolete surface 仍随全局 parity 推进 |
+| Cache-free rebuild | ✅ | imported loop/CrossFade 最终门禁完成 build-all 0 错误、八工程 **4,395/4,395**、self-contained CLI 与 App 安装运行门禁；逐项确认 Git ignored/零 tracked 后移出 39 个 repo-local `bin/obj/build`（375,440 KiB）与 4 个 `/private/tmp/anity-*`（38,784 KiB）至可恢复废纸篓，最终两类目标复扫为 0 |
+| Unity obsolete/legacy compatibility | 🟡 | 精确反向引用审计已删除零调用/零导出的内部 VFX synchronous legacy、LegacyCanvas 两个重复类型、`LegacyUIVertex` 及 Unity 不存在的 `FindObjectsSortMode.NoneLegacy`；本轮复审未发现新的零调用实现或 tracked backup。Unity 2022.3 公开 `[Obsolete]` API、removed networking、FBX legacy 数值、正在调用的 Canvas legacy mesh ABI、Shader/VFX deprecated serialized migration均有反射/行为/资产测试依赖，按兼容目标保留；完整 obsolete surface 仍随全局 parity 推进 |
 
 ---
 
@@ -245,9 +245,9 @@
 |------|------|------|
 | `Keyframe` | ✅ | time/value/inTangent/outTangent/inWeight/outWeight/weightedMode |
 | `AnimationCurve` | ✅ | Evaluate Hermite 插值、preWrapMode/postWrapMode（Loop/PingPong/ClampForever）、AddKey；Unity constant/stepped curve 的 infinite-tangent segment 保持左值到右 key，避免 NaN |
-| `AnimationClip` | 🟡 | 继承Motion、length/frameRate/wrapMode、SetCurve/GetCurve、AnimationCurveBinding[]、event 主路径已具备；SampleAnimation/Animator property pose 已覆盖 Transform、`SkinnedMeshRenderer.blendShape.*` 与 `Renderer.m_Enabled`。FBX blend-shape 已按 Unity 2022.3 探针闭环 24 Hz deformation、Bezier tangent、compression/error、source frame、切片与多 clip（42/42）；Transform raw/resampled、同步 quaternion reduction、非 XYZ gimbal 与 wrap/tie/subframe exact-bit 主链已覆盖。pre/post/pivot/geometric 双模式新增 20/20；10 组 pivot raw Euler 与 retained position 均各自达到 **720/720 float exact-bit**，Pre/Post quaternion 10 组 24×4 key 达到 **960/960 float exact-bit**。Visibility 已覆盖 raw float、非零 bool、resample/raw step、compression/import off、祖先/helper 数值乘积、三种 layer mode、Mute/Solo、weighted tangent/extrapolation、双动画 Weight，以及所有层未钳制静态/动画 Weight 与连接顺序；instanced/skinned/LOD renderer binding 与 Camera/Light-only 空 clip 语义新增 **27/27**。通用组件 curve、root-motion/Player A/B 未闭环 |
+| `AnimationClip` | 🟡 | 继承Motion、getter-only length/motion flags、frameRate/wrapMode/legacy、SetCurve/GetCurve、AnimationCurveBinding[]、event 主路径已具备；SampleAnimation/Animator property pose 已覆盖 Transform、`SkinnedMeshRenderer.blendShape.*` 与 `Renderer.m_Enabled`。FBX blend-shape 已按 Unity 2022.3 探针闭环 24 Hz deformation、Bezier tangent、compression/error、source frame、切片与多 clip（42/42）；Transform raw/resampled、同步 quaternion reduction、非 XYZ gimbal 与 wrap/tie/subframe exact-bit 主链已覆盖。pre/post/pivot/geometric 双模式新增 20/20；10 组 pivot raw Euler 与 retained position 均各自达到 **720/720 float exact-bit**，Pre/Post quaternion 10 组 24×4 key 达到 **960/960 float exact-bit**。Visibility 已覆盖 raw float、非零 bool、resample/raw step、compression/import off、祖先/helper 数值乘积、三种 layer mode、Mute/Solo、weighted tangent/extrapolation、双动画 Weight，以及所有层未钳制静态/动画 Weight 与连接顺序；instanced/skinned/LOD renderer binding 与 Camera/Light-only 空 clip 语义新增 **27/27**。本轮 custom subframe slice、loopTime/direct-vs-Animator wrap、cycleOffset、scalar loopPose 与 settings 接线进入 **25/25** runtime 门禁；Transform/root-motion loop correction 与通用组件 curve/Player A/B 未闭环 |
 | `AnimationEvent` | ✅ | time/functionName/stringParameter/floatParameter/intParameter/objectReferenceParameter |
-| `Motion（抽象基类）` | ✅ | name/humanCycle/humanTranslation/averageDuration、ComputeHashCode |
+| `Motion（抽象基类）` | 🟡 | 继承 `Object.name`；`averageDuration` / `averageAngularSpeed` / `averageSpeed` / `apparentSpeed`、getter-only `isLooping` / `legacy` / `isHumanMotion`，以及 obsolete-error `isAnimatorMotion` / `ValidateIfRetargetable` 已与 Unity 2022.3.51f1 member fingerprint 对齐；BlendTree/Humanoid 的完整 native motion metadata 行为仍需扩大 A/B |
 | `BlendTree` | ✅ | 继承Motion、blendType(1D/2DSimpleDirectional/2DFreeformDirectional/2DFreeformCartesian/Direct)、blendParameter/Y、children ChildMotion[]、1D阈值排序线性插值、2D距离反比权重、Direct直接权重 |
 | `ChildMotion` | ✅ | motion/threshold/position/timeScale/cycleOffset/directBlendParameter |
 | `AnimatorState` | ✅ | name/cycleOffset/speed/speedParameter/motion/transitions/behaviours/iKOnFeet/writeDefaultValues/tag/mirror |
@@ -260,7 +260,7 @@
 | `AnimatorControllerParameter` | ✅ | name/nameHash/type(Float/Int/Bool/Trigger)/defaultFloat/defaultInt/defaultBool |
 | `AnimatorStateInfo` | ✅ | fullPathHash/shortNameHash/length/normalizedTime/speed/loop、IsName/IsTag哈希比较 |
 | `AnimatorOverrideController` | ✅ | runtimeAnimatorController、indexer[AnimationClip]=AnimationClip、GetOverrides/ApplyOverrides |
-| `Animator` | 🟡 | 参数、Play/CrossFade/状态推进已有主路径；generic layer 以 native Transform pose graph + 托管 float property pose 合成 Override/Additive、mask、crossfade 与 BlendTree，不再 last-clip-wins；真实 FBX blendShape clip 的直接播放、Override/additive reference，以及 imported `Renderer.m_Enabled` 直接播放已测。Humanoid muscle/IK pass、其它通用 property、bool curve 的 crossfade/layer 官方逐帧 A/B、root motion、write defaults、synced layers、Playables 及完整公开面仍未闭环 |
+| `Animator` | 🟡 | 参数、Play/CrossFade/状态推进已有主路径；generic layer 以 native Transform pose graph + 托管 float property pose 合成 Override/Additive、mask、crossfade 与 BlendTree，不再 last-clip-wins；真实 FBX blendShape clip 的直接播放、Override/additive reference，以及 imported `Renderer.m_Enabled` 直接播放已测。本轮按 Unity probe 对齐秒制内部 state time、未截断 normalizedTime、Update(0)、Play normalized/PlayInFixedTime seconds、normalized/fixed CrossFade duration、destination offset、transition start/progress 与 current/next clip weight。Humanoid muscle/IK pass、其它通用 property、transition interruption/exit/order、root motion、write defaults、synced layers、Playables 及完整公开面仍未闭环 |
 | `StateMachineBehaviour` | ✅ | 继承ScriptableObject、OnStateEnter/Update/Exit/Move/IK/StateMachineEnter/Exit回调 |
 | `RuntimeAnimatorController` | ✅ | 抽象基类、animationClips |
 | `Avatar` / `AvatarMask` | 🟡 | `HumanDescription` / `HumanBone` / `HumanLimit` / `SkeletonBone`、`Avatar` / `AvatarBuilder` 及 `AvatarMask` / `AvatarMaskBodyPart` 已按本机 Unity 2022.3.51f1 预备反射做到对应公开面与 native metadata 一致；AvatarBuilder 已接 native hierarchy/rest-pose/mapping validation（23 项），ModelImporter 现把真实 decoded FBX hierarchy 交给同一 native validation 并产出有效 Generic imported Avatar；AvatarMask 已接 native body/path 状态（17 项）并被 generic Animator layer 的 native pose graph 消费（25 项）。HumanBone/SkeletonBone importer YAML、`motionNodeName` 与 GUID/fileID source Avatar 已双向持久化。Humanoid imported mapping/T-pose、muscle/finger/IK mask、root-motion rotation、retargeting 与 Unity 2022.3.61f1 A/B 尚未闭环，故不得标完整。 |

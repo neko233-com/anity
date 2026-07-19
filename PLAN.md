@@ -1,5 +1,27 @@
 # PLAN
 
+## 2026-07-20 — Imported AnimationClip loop / slicing / CrossFade runtime
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对 `InstancedVisibility.fbx` 做 importer + Animator 权威探针。确认 source take 为 `0..23 @ 24fps`、默认 clip `length=0.9583334`；`loopTime` 只令 `AnimationClip.isLooping=true` 而不改 `wrapMode`，直接 `SampleAnimation` 仍按 `wrapMode`，Animator 才按 Mecanim loop；`cycleOffset` 也只影响 Animator。`loopPose` 会启用 endpoint difference 分摊；`5.75..17.25` 子帧切片为 `0.4791667s` 且 curve 重新归零。
+- 对齐 `Motion` / `AnimationClip` 公开反射面：删除 Unity 不存在的 `duration`、`humanCycle`、`humanTranslation`、`ComputeHashCode` 等额外成员；补齐 getter-only `isLooping` / `legacy` / `isHumanMotion` / `apparentSpeed` / motion flags，以及 `isAnimatorMotion`、`ValidateIfRetargetable` 的精确 `EditorBrowsable` / `Obsolete(error:true)` metadata。`AnimationClip.length` 与 motion flags 改为只读，并恢复 Unity 的 `NativeProperty("Length", false, Function)` 指纹。本轮相关 `Motion` / `AnimationClip.length` member difference 已从 API 报告消除。
+- importer 现把 clip slice 长度、Human/motion metadata 与 `loopTime`、`loopPose`、root lock/keep-original、height-from-feet、mirror、cycleOffset、start/stop 写入运行时 `AnimationClipSettings`。Mecanim sampling 与直接 sampling 分流，并实现 scalar curve 的 loop-pose endpoint correction；helper/Null 祖先负 Visibility 按 Unity 实测只贡献幅值，Renderer-owning/mesh ancestor 仍保留符号。
+- `Animator` 状态时间统一保存为秒并按 clip length 报告未截断 `normalizedTime`；`Play` 使用 normalized offset，`PlayInFixedTime` 使用秒；`Update(0)` 会真实求值当前 pose。normalized `CrossFade` duration 乘当前 state length，fixed API 直接使用秒，destination offset、normalized transition start、current/next clip weight 和 transition info 均按 Unity 探针收敛；controller 切换/Rebind 清理旧 state runtime。
+- 新增 `ImportedAnimationLoopRuntimeTests` **25/25**，覆盖默认/loopTime/wrapMode、直接与 Animator sampling、cycleOffset、loopPose、custom slice、只读反射面、procedural flags、settings、Update(0)、Play normalized/fixed、state cycle offset、normalized/fixed CrossFade duration/progress/offset/weights；专项必须 native 门禁，防止托管-only 运行把 native 缺失误判为语义失败。
+- `bash _scripts/build-all.sh Release` 全产品 0 编译错误；强制 native 八工程门禁 **4395/4395**（Core **3373/3373**），0 失败、0 跳过。`/Applications/Anity.app` 已从最终源码重装，Host、内置 CLI、`libanity_native.dylib` 均为 ARM64；deep/strict codesign、Info.plist/图标逐 byte 与 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过。
+- legacy/obsolete/deprecated 反向引用复审覆盖 tracked C#/C++、测试、反射字符串、C ABI/PInvoke、构建入口与备份文件；没有发现新的零调用 legacy 实现或 tracked cache/backup。命中项均为 Unity 2022.3 公开 obsolete surface、正在调用的 Canvas legacy mesh ABI、FBX 兼容解析或 Shader/VFX serialized upgrader，并有反射、行为或资产测试依赖，删除会破坏兼容，继续保留。
+- 最终门禁后逐项确认并可恢复地移出 **39 个 / 375440 KiB** Git ignored、内部零 tracked 的 repo-local `bin/obj/build` 生成目录，以及无进程占用的 **4 个 / 38784 KiB** `/private/tmp/anity-*` Unity 工程/API 报告，合计 **414224 KiB（约 404.5 MiB）**。内容位于废纸篓 `/Users/solarisneko/.Trash/anity-loop-runtime-final.Utk8YB`；最终复扫两类目标均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 权威行为证据仍来自当前可用的 Unity 2022.3.51f1；目标 Unity 2022.3.61f1 Pro 尚未安装。当前 API 审计为类型存在 **992/4117**、精确 **467**，成员存在 **9297/37164**、精确 **7035**；全局 baseline 仍有历史差距/漂移，不能把本轮 targeted member 收敛表述为全 API 完成。
+- 本轮 loopPose 只覆盖当前 scalar curve；Transform quaternion/root motion loop correction、`applyRootMotion`/`deltaPosition`/`deltaRotation`、Humanoid retargeting 与 root lock 实际效果尚未闭环。Animator transition interruption/order/exit-condition、write defaults、synced layers、Playables 与完整 layer/mask 官方逐帧 A/B 仍未完成。
+- 本轮不代表 Editor GUI、IL2CPP、各 Player、Package Manager 或完整 Unity 2022.3 Pro 已完成，整体目标继续推进。
+
+### 下一优先项
+1. 以 imported transform clip 闭环 root motion、loopBlend orientation/Y/XZ、keep-original 与 `Animator.applyRootMotion`/delta 的 Unity 逐帧 A/B。
+2. 补 Animator transition exitTime/condition/interruption/order、synced layer/write defaults 及 mask/additive/crossfade 的 imported clip 组合。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑 AnimationClip/Animator A/B，并在 Windows 11 x64、WebGL 与 Android Vulkan 实跑对应 Player 门禁。
+
 ## 2026-07-20 — Unity FBX renderer topology / Camera-Light import / legacy cleanup
 
 ### 已完成

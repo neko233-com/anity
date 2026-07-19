@@ -1,20 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 
 namespace UnityEngine;
 
 public abstract class Motion : Object
 {
-    public string name { get; set; } = string.Empty;
-    public bool humanCycle { get; set; }
-    public bool humanTranslation { get; set; }
-
-    public virtual float duration
-    {
-        get { return averageDuration; }
-    }
-
     public virtual float averageDuration
     {
         get
@@ -25,13 +17,26 @@ public abstract class Motion : Object
         }
     }
 
-    public virtual float averageAngularSpeed { get; set; }
-    public virtual Vector3 averageSpeed { get; set; } = Vector3.zero;
+    public virtual float averageAngularSpeed => 0f;
+    public virtual Vector3 averageSpeed => Vector3.zero;
+    public virtual float apparentSpeed => averageSpeed.magnitude;
+    public bool isLooping => LoopingMotion;
+    public bool legacy => LegacyMotion;
+    public bool isHumanMotion => HumanMotion;
 
-    public int ComputeHashCode()
-    {
-        return name?.GetHashCode() ?? 0;
-    }
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [Obsolete("isAnimatorMotion is not supported anymore, please use !legacy instead.", true)]
+    public bool isAnimatorMotion => !legacy;
+
+    internal virtual bool LoopingMotion => this is BlendTree tree && tree.children.Length != 0 &&
+        tree.children.All(child => child.motion?.isLooping == true);
+    internal virtual bool LegacyMotion => false;
+    internal virtual bool HumanMotion => this is BlendTree humanTree &&
+        humanTree.children.Any(child => child.motion?.isHumanMotion == true);
+
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    [Obsolete("ValidateIfRetargetable is not supported anymore, please use isHumanMotion instead.", true)]
+    public bool ValidateIfRetargetable(bool val) => isHumanMotion;
 
     private float ComputeAverageDuration(BlendTree bt)
     {

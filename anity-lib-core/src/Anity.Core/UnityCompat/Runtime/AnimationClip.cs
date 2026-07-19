@@ -108,6 +108,15 @@ public class AnimationClip : Motion
     private AnimationClip? _additiveReferencePoseClip;
     private float _additiveReferencePoseTime;
     private bool _mecanimDataBuilt;
+    private bool _legacy;
+    private bool _humanMotion;
+    private bool _isLooping;
+    private bool _loopBlend;
+    private float _cycleOffset;
+    private bool _hasGenericRootTransform;
+    private bool _hasMotionCurves;
+    private bool _hasMotionFloatCurves;
+    private bool _hasRootCurves;
 
     public static AnimationClip Empty => new AnimationClip { name = "Empty" };
 
@@ -119,6 +128,7 @@ public class AnimationClip : Motion
         wrapMode = WrapMode.Default;
     }
 
+    [Bindings.NativeProperty("Length", false, Bindings.TargetType.Function)]
     public float length
     {
         get
@@ -138,17 +148,20 @@ public class AnimationClip : Motion
             }
             return maxTime;
         }
-        set => _length = value;
     }
 
     public float frameRate { get; set; }
     public WrapMode wrapMode { get; set; }
-    public bool legacy { get; set; }
-    public bool humanMotion { get; set; }
+    public new bool legacy { get => _legacy; set => _legacy = value; }
+    public bool humanMotion => _humanMotion;
+    internal override bool HumanMotion => _humanMotion;
+    internal override bool LoopingMotion => _isLooping;
+    internal override bool LegacyMotion => _legacy;
     public bool empty => _bindings.Count == 0;
-    public bool hasGenericRootTransform { get; set; }
-    public bool hasMotionFloatCurves { get; set; }
-    public bool hasRootCurves { get; set; }
+    public bool hasGenericRootTransform => _hasGenericRootTransform;
+    public bool hasMotionCurves => _hasMotionCurves;
+    public bool hasMotionFloatCurves => _hasMotionFloatCurves;
+    public bool hasRootCurves => _hasRootCurves;
     public Bounds localBounds { get; set; }
 
     public AnimationEvent[] events
@@ -163,6 +176,31 @@ public class AnimationClip : Motion
 
     public AnimationCurveBinding[] bindings => _bindings.ToArray();
 
+    internal void SetImportedLength(float value)
+    {
+        float maximum = MathF.Max(0f, value);
+        foreach (var binding in _bindings)
+            if (binding.curve is { length: > 0 }) maximum = MathF.Max(maximum, binding.curve.keys[^1].time);
+        _length = maximum;
+    }
+
+    internal void SetImportedMotionMetadata(bool human, bool hasGenericRoot, bool hasMotion,
+        bool hasMotionFloat, bool hasRoot)
+    {
+        _humanMotion = human;
+        _hasGenericRootTransform = hasGenericRoot;
+        _hasMotionCurves = hasMotion;
+        _hasMotionFloatCurves = hasMotionFloat;
+        _hasRootCurves = hasRoot;
+    }
+
+    internal void ApplyMecanimSettings(bool loopTime, bool loopBlend, float cycleOffset)
+    {
+        _isLooping = loopTime;
+        _loopBlend = loopBlend;
+        _cycleOffset = float.IsFinite(cycleOffset) ? cycleOffset : 0f;
+    }
+
     public void SampleAnimation(GameObject go, float time)
     {
         if (go == null) return;
@@ -171,10 +209,13 @@ public class AnimationClip : Motion
     }
 
     internal AnimationFloatPose EvaluateFloatProperties(GameObject go, float time)
+        => EvaluateFloatProperties(go, time, false);
+
+    internal AnimationFloatPose EvaluateFloatProperties(GameObject go, float time, bool animatorPlayback)
     {
         var pose = new AnimationFloatPose();
         if (go is null) return pose;
-        float wrappedTime = WrapTime(time, length, wrapMode);
+        float wrappedTime = ResolveSampleTime(time, animatorPlayback, out float loopPhase);
         foreach (AnimationCurveBinding binding in _bindings)
         {
             if (binding.curve is null) continue;
@@ -185,7 +226,7 @@ public class AnimationClip : Motion
             {
                 if (target.gameObject.GetComponent(binding.type) is Renderer renderer)
                     pose.Set(new AnimationFloatPropertyKey(renderer, binding.path ?? string.Empty),
-                        binding.curve.Evaluate(wrappedTime));
+                        EvaluateCurve(binding.curve, wrappedTime, animatorPlayback, loopPhase));
                 continue;
             }
             if (binding.type != typeof(SkinnedMeshRenderer) ||
@@ -196,16 +237,19 @@ public class AnimationClip : Motion
             var shapeIndex = mesh.GetBlendShapeIndex(binding.propertyName[11..]);
             if (shapeIndex < 0) continue;
             pose.Set(new AnimationFloatPropertyKey(skinned, shapeIndex, binding.path ?? string.Empty),
-                binding.curve.Evaluate(wrappedTime));
+                EvaluateCurve(binding.curve, wrappedTime, animatorPlayback, loopPhase));
         }
         return pose;
     }
 
     internal AnimationPose EvaluateTransformPose(GameObject go, float time)
+        => EvaluateTransformPose(go, time, false);
+
+    internal AnimationPose EvaluateTransformPose(GameObject go, float time, bool animatorPlayback)
     {
         var pose = new AnimationPose();
         if (go is null) return pose;
-        float wrappedTime = WrapTime(time, length, wrapMode);
+        float wrappedTime = ResolveSampleTime(time, animatorPlayback, out float loopPhase);
         foreach (AnimationCurveBinding binding in _bindings)
         {
             Transform target = string.IsNullOrEmpty(binding.path)
@@ -213,7 +257,7 @@ public class AnimationClip : Motion
                 : go.transform.Find(binding.path);
             if (target is null || binding.curve is null) continue;
             AnimationTransformSample sample = pose.GetOrCapture(target, binding.path ?? string.Empty);
-            float value = binding.curve.Evaluate(wrappedTime);
+            float value = EvaluateCurve(binding.curve, wrappedTime, animatorPlayback, loopPhase);
             switch (binding.propertyName)
             {
                 case "m_LocalPosition.x": case "localPosition.x": sample.Position.x = value; sample.Properties |= AnimationTransformProperties.Position; break;
@@ -269,6 +313,43 @@ public class AnimationClip : Motion
         }
         pose = _additiveReferencePoseClip.EvaluateFloatProperties(go, _additiveReferencePoseTime);
         return true;
+    }
+
+    private float ResolveSampleTime(float time, bool animatorPlayback, out float loopPhase)
+    {
+        float duration = length;
+        if (!animatorPlayback)
+        {
+            float directTime = WrapTime(time, duration, wrapMode);
+            loopPhase = duration > 0f ? Math.Clamp(directTime / duration, 0f, 1f) : 0f;
+            return directTime;
+        }
+
+        if (duration <= 0f)
+        {
+            loopPhase = 0f;
+            return time;
+        }
+
+        float animatorTime = time + _cycleOffset * duration;
+        if (_isLooping)
+        {
+            animatorTime %= duration;
+            if (animatorTime < 0f) animatorTime += duration;
+        }
+        else animatorTime = Math.Clamp(animatorTime, 0f, duration);
+        loopPhase = Math.Clamp(animatorTime / duration, 0f, 1f);
+        return animatorTime;
+    }
+
+    private float EvaluateCurve(AnimationCurve curve, float time, bool animatorPlayback, float loopPhase)
+    {
+        float value = curve.Evaluate(time);
+        if (!animatorPlayback || !_isLooping || !_loopBlend || curve.length == 0 || loopPhase <= 0f)
+            return value;
+        float first = curve.Evaluate(0f);
+        float last = curve.Evaluate(length);
+        return value - (last - first) * loopPhase;
     }
 
     private float WrapTime(float time, float duration, WrapMode mode)

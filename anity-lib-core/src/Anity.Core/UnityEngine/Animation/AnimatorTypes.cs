@@ -201,8 +201,7 @@ public class AnimatorState : Object
     {
         get
         {
-            if (motion is AnimationClip clip) return clip.wrapMode == WrapMode.Loop;
-            return false;
+            return motion?.isLooping == true;
         }
     }
 

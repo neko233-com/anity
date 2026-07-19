@@ -215,13 +215,15 @@ public class AnimationUtility
     }
     public static void SetAnimationClipSettings([Bindings.NotNull("ArgumentNullException")] AnimationClip clip, AnimationClipSettings srcClipInfo)
     {
+        if (clip == null) throw new ArgumentNullException(nameof(clip));
         AnimationClipSettings settings = (srcClipInfo ?? new AnimationClipSettings()).Clone();
         GetData(clip).Settings = settings;
         AnimationClip? reference = settings.hasAdditiveReferencePose ? settings.additiveReferencePoseClip : null;
-        bool valid = clip?.CanUseAdditiveReferencePose(reference) == true;
+        bool valid = clip.CanUseAdditiveReferencePose(reference);
         settings.hasAdditiveReferencePose = valid;
         settings.additiveReferencePoseClip = valid ? reference : null;
-        clip?.SetAdditiveReferencePose(reference, settings.additiveReferencePoseTime);
+        clip.SetAdditiveReferencePose(reference, settings.additiveReferencePoseTime);
+        clip.ApplyMecanimSettings(settings.loopTime, settings.loopBlend, settings.cycleOffset);
     }
     [Bindings.NativeThrows]
     public static void SetAnimationEvents([Bindings.NotNull("ArgumentNullException")] AnimationClip clip, [Bindings.NotNull("ArgumentNullException"), Bindings.Unmarshalled] AnimationEvent[] events) { if (clip == null) throw new ArgumentNullException(nameof(clip)); clip.events = events ?? Array.Empty<AnimationEvent>(); Notify(clip, default, CurveModifiedType.ClipModified); }
@@ -259,7 +261,14 @@ public class AnimationUtility
     private static bool Assign(float input, out float output) { output = input; return true; }
     private static object? GetMember(Object? target, string property) { if (target == null || string.IsNullOrEmpty(property)) return null; var member = property.Contains('.') ? property[(property.LastIndexOf('.') + 1)..] : property; var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic; return target.GetType().GetProperty(member, flags)?.GetValue(target) ?? target.GetType().GetField(member, flags)?.GetValue(target); }
     private static Type? GetMemberType(Object? target, string property) { if (target == null) return null; if (target is Transform && (property.Contains("Position") || property.Contains("Rotation") || property.Contains("Scale"))) return typeof(float); var member = property.Contains('.') ? property[(property.LastIndexOf('.') + 1)..] : property; var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic; return target.GetType().GetProperty(member, flags)?.PropertyType ?? target.GetType().GetField(member, flags)?.FieldType; }
-    private static ClipEditorData GetData(AnimationClip? clip) { if (clip == null) throw new ArgumentNullException(nameof(clip)); return ClipData.GetValue(clip, _ => new ClipEditorData()); }
+    private static ClipEditorData GetData(AnimationClip? clip)
+    {
+        if (clip == null) throw new ArgumentNullException(nameof(clip));
+        return ClipData.GetValue(clip, value => new ClipEditorData
+        {
+            Settings = new AnimationClipSettings { stopTime = value.length }
+        });
+    }
     private static CurveEditorData GetCurveData(AnimationCurve? curve) { if (curve == null) throw new ArgumentNullException(nameof(curve)); return CurveData.GetValue(curve, _ => new CurveEditorData()); }
     private static void Notify(AnimationClip clip, EditorCurveBinding binding, CurveModifiedType type) => onCurveWasModified?.Invoke(clip, binding, type);
     private sealed class ClipEditorData { public AnimationClipSettings Settings = new(); public bool GenerateMotionCurves; public ModelImporterAnimationType AnimationType; public readonly Dictionary<EditorCurveBinding, ObjectReferenceKeyframe[]> ObjectCurves = new(); }
