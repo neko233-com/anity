@@ -34,6 +34,52 @@ public static class AnityNative
         WebGL = 6
     }
 
+    [Flags]
+    public enum AvatarValidationFlags : uint
+    {
+        Valid = 0,
+        EmptySkeleton = 1u << 0,
+        InvalidSkeletonName = 1u << 1,
+        DuplicateSkeletonName = 1u << 2,
+        InvalidParent = 1u << 3,
+        MultipleRoots = 1u << 4,
+        HierarchyCycle = 1u << 5,
+        InvalidTransform = 1u << 6,
+        EmptyHumanMapping = 1u << 7,
+        InvalidHumanMapping = 1u << 8,
+        DuplicateHumanBone = 1u << 9,
+        DuplicateHumanName = 1u << 10,
+        MissingMappedBone = 1u << 11,
+        MissingRequiredHumanBone = 1u << 12,
+        MissingRootMotionTransform = 1u << 13
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AvatarSkeletonBoneDesc
+    {
+        public ulong nameHash;
+        public int parentIndex;
+        public float positionX, positionY, positionZ;
+        public float rotationX, rotationY, rotationZ, rotationW;
+        public float scaleX, scaleY, scaleZ;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AvatarHumanBoneDesc
+    {
+        public ulong boneNameHash;
+        public ulong humanNameHash;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AvatarBuildResult
+    {
+        public AvatarValidationFlags flags;
+        public int rootIndex;
+        public int errorIndex;
+        public int mappedBoneCount;
+    }
+
     public enum GraphicsDeviceTypeNative
     {
         Null = 4,
@@ -113,6 +159,64 @@ public static class AnityNative
         {
             return "anity-native unavailable";
         }
+    }
+
+    private static bool _avatarNativeAvailable = true;
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatar_ValidateHuman")]
+    private static extern Result Avatar_ValidateHuman(
+        [In] AvatarSkeletonBoneDesc[] skeleton,
+        int skeletonCount,
+        [In] AvatarHumanBoneDesc[] human,
+        int humanCount,
+        out AvatarBuildResult result);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatar_ValidateGeneric")]
+    private static extern Result Avatar_ValidateGeneric(
+        [In] AvatarSkeletonBoneDesc[] skeleton,
+        int skeletonCount,
+        ulong rootMotionTransformNameHash,
+        out AvatarBuildResult result);
+
+    public static bool TryValidateHumanAvatar(
+        AvatarSkeletonBoneDesc[] skeleton,
+        AvatarHumanBoneDesc[] human,
+        out AvatarBuildResult result)
+    {
+        if (skeleton is null) throw new ArgumentNullException(nameof(skeleton));
+        if (human is null) throw new ArgumentNullException(nameof(human));
+        result = default;
+        if (!_avatarNativeAvailable) return false;
+        try
+        {
+            return Avatar_ValidateHuman(skeleton, skeleton.Length, human, human.Length, out result) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAvatarNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarNative(); }
+    }
+
+    public static bool TryValidateGenericAvatar(
+        AvatarSkeletonBoneDesc[] skeleton,
+        ulong rootMotionTransformNameHash,
+        out AvatarBuildResult result)
+    {
+        if (skeleton is null) throw new ArgumentNullException(nameof(skeleton));
+        result = default;
+        if (!_avatarNativeAvailable) return false;
+        try
+        {
+            return Avatar_ValidateGeneric(skeleton, skeleton.Length, rootMotionTransformNameHash, out result) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAvatarNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarNative(); }
+    }
+
+    private static bool HandleMissingAvatarNative()
+    {
+        _avatarNativeAvailable = false;
+        if (NativeTransformRequired)
+            throw new DllNotFoundException("anity-native AvatarBuilder entry points are required but unavailable.");
+        return false;
     }
 
     // --- Graphics device ---

@@ -98,11 +98,11 @@ public sealed class ModelImporterAvatarSourceTests : IDisposable
     }
 
     [Fact]
-    public void HumanModelImportGeneratesAvatarSubAsset()
+    public void HumanModelImportWithoutDecodedHierarchyGeneratesInvalidAvatarSubAsset()
     {
         var path = ImportModel(NewGuid(), "HumanSource", "{instanceID: 0}", "Root");
         var avatar = Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<Avatar>());
-        Assert.True(avatar.isValid);
+        Assert.False(avatar.isValid);
         Assert.True(avatar.isHuman);
         Assert.Equal(Path.GetFileNameWithoutExtension(path) + "Avatar", avatar.name);
     }

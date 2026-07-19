@@ -1,5 +1,23 @@
 # PLAN
 
+## 2026-07-19 — Avatar / AvatarBuilder native hierarchy validation
+
+### 已完成
+- `UnityEngine.Avatar` 已移除 Unity 2022 不存在的可写 `name`、`hasTransformHierarchy`、`humanScale`、`avatarSize`、`muscleCount`、`rootBone`、body pose、`Build` 与 bone-name helper 等公开面；现仅保留官方只读 `isValid`、`isHuman`、`humanDescription`，构造器可见性和 `NativeHeader` / `UsedByNativeCode` metadata 与本机 Unity 2022.3.51f1 预备反射逐项一致。
+- `AvatarBuilder` 已由错误的 static type 修正为官方可构造 class，并补齐精确的 `BuildGenericAvatar(GameObject,string)`、参数 `NotNull` 与 free-function metadata；`BuildHumanAvatar` 不再恒定返回 valid。两种构建均通过新的 `anity-native` animation C ABI 执行层级、rest pose、mapping 与 root-motion transform 校验。
+- native validator 覆盖空骨架/映射、空或重复名称、非法 parent、多个 root、层级环、NaN/Infinity、零四元数、零 scale、缺失 mapped bone、重复 bone/human mapping、15 个 Unity humanoid 必需骨骼，以及 Generic root-motion transform 解析；有限非单位 scale 保持有效。托管层从实时 GameObject Transform 树推导 HumanDescription 的 parent index，重复或缺失场景节点不会再伪装成有效 Avatar。
+- 尚未解码出真实 FBX transform hierarchy 的 ModelImporter Avatar 子资源现在明确保持 `isValid == false`，不再用 managed `true` 冒充 native 构建成功；CopyFromOther 仅继承真实 source Avatar 的有效性。
+- 新增 native-required suite **23/23**，与 ModelImporter/humanoid 相关组合 **166/166**；`_scripts/build-native.sh Release`、本机 2022.3.51f1 两类型预备反射与统一 Release 门禁均通过。Core **2932/2932**，全矩阵 **3930/3930**、0 失败、0 跳过。
+
+### 尚未完成
+- 当前 native AvatarBuilder 完成的是 hierarchy/rest-pose/mapping validity 主路径；muscle table、T-pose normalization、humanScale、retargeting、root-motion rotation extraction、Animator 逐帧结果与 Player 资源生命周期仍未实现，不能将 Avatar 系统标为完整。
+- ModelImporter 已保留 YAML `parentName` / `rootMotionBoneRotation` / `skeletonHasParents`，但真实 FBX/OBJ hierarchy decoder 尚未把这些 importer 数据接入 native Avatar build；`AvatarMask`、错误的额外 `RawAvatar` API 与目标 Unity 2022.3.61f1 Pro A/B 也仍未闭环。
+
+### 下一优先项
+1. 将 ModelImporter 的 importer-only `parentName`、`rootMotionBoneRotation` 与 `skeletonHasParents` 输入真实 native Avatar asset build，接通 decoded FBX hierarchy 并产出可验证的 Avatar 子资源。
+2. 在 `anity-native` 实现 humanoid T-pose normalization、muscle limits/table、humanScale、retargeting 与 root-motion rotation，并用 Animator 逐帧 A/B 验证。
+3. 清理 `RawAvatar` / `AvatarMask` 公开面差异，完成 material/avatar remap；最终在 Unity 2022.3.61f1 Pro 重跑公开面、importer fixture 与 Player 行为 A/B。
+
 ## 2026-07-19 — ModelImporter root motion 与 source Avatar 对象引用
 
 ### 已完成

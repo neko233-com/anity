@@ -1645,14 +1645,12 @@ public sealed class AssetDatabase
     if (subAssets.OfType<Avatar>().Any()) return;
     var source = model.sourceAvatar;
     var description = source is not null ? source.humanDescription : model.humanDescription;
-    subAssets.Add(new Avatar
-    {
-      name = Path.GetFileNameWithoutExtension(assetPath) + "Avatar",
-      isValid = true,
-      isHuman = model.animationType == ModelImporterAnimationType.Human,
-      hasTransformHierarchy = description.skeleton is { Length: > 0 },
-      humanDescription = description,
-    });
+    Avatar avatar = Avatar.Create(
+      source is not null && source.isValid,
+      model.animationType == ModelImporterAnimationType.Human,
+      description);
+    avatar.name = Path.GetFileNameWithoutExtension(assetPath) + "Avatar";
+    subAssets.Add(avatar);
   }
 
   private static bool TryGetProjectAssetFilePath(string assetPath, out string fullPath)
