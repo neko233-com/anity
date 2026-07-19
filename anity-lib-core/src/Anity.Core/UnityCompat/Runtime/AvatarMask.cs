@@ -118,6 +118,12 @@ public sealed class AvatarMask : Object
     AnityNative.DestroyAvatarMask(handle);
   }
 
+  internal bool IsTransformPathActive(string path)
+  {
+    EnsureNative(AnityNative.TryGetAvatarMaskTransformPathActive(_nativeHandle, path ?? string.Empty, out bool active));
+    return active;
+  }
+
   private void AddTransformPathRecursive(Transform transform, bool recursive)
   {
     EnsureNative(AnityNative.TryAddAvatarMaskTransformPath(_nativeHandle, GetTransformPathFromHierarchyRoot(transform)));

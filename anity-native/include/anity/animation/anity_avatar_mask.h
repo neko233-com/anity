@@ -38,6 +38,9 @@ ANITY_API AnityResult ANITY_CALL AnityAvatarMask_AddTransformPath(
     AnityAvatarMaskHandle mask, const char* path);
 ANITY_API AnityResult ANITY_CALL AnityAvatarMask_RemoveTransformPath(
     AnityAvatarMaskHandle mask, const char* path, int32_t recursive);
+/* Runtime generic-mask query: zero entries mean unmasked; duplicate active paths use OR semantics. */
+ANITY_API AnityResult ANITY_CALL AnityAvatarMask_GetTransformPathActive(
+    AnityAvatarMaskHandle mask, const char* path, int32_t* outActive);
 
 #ifdef __cplusplus
 }

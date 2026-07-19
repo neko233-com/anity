@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Linq;
 
 namespace UnityEngine;
 
@@ -41,6 +40,19 @@ public class Animator : Behaviour
     private TargetPosition _targetPosition;
     private readonly Dictionary<AvatarIKGoal, IkData> _ikGoals = new();
     private readonly Dictionary<AvatarIKHint, IkHintData> _ikHints = new();
+
+    private readonly struct SampledAnimationPose
+    {
+        public SampledAnimationPose(AnimationPose pose, AnimationPose? additiveReferencePose = null)
+        {
+            Pose = pose;
+            AdditiveReferencePose = additiveReferencePose;
+        }
+
+        public AnimationPose Pose { get; }
+        public AnimationPose? AdditiveReferencePose { get; }
+        public static SampledAnimationPose Empty => new(new AnimationPose());
+    }
 
     public RuntimeAnimatorController controller
     {
@@ -343,16 +355,20 @@ public class Animator : Behaviour
         _deltaPosition = Vector3.zero;
         _deltaRotation = Quaternion.identity;
 
+        var accumulatedPose = new AnimationPose();
         int layers = layerCount;
         for (int i = 0; i < layers; i++)
         {
-            UpdateLayer(i, dt);
+            SampledAnimationPose layerPose = UpdateLayer(i, dt);
+            accumulatedPose = ComposeLayer(accumulatedPose, layerPose, i);
         }
+        accumulatedPose.Apply();
     }
 
-    private void UpdateLayer(int layerIndex, float deltaTime)
+    private SampledAnimationPose UpdateLayer(int layerIndex, float deltaTime)
     {
-        if (!_currentStates.TryGetValue(layerIndex, out var currentState) || currentState == null) return;
+        if (!_currentStates.TryGetValue(layerIndex, out var currentState) || currentState == null)
+            return SampledAnimationPose.Empty;
 
         float stateTime = 0f;
         _currentStateTimes.TryGetValue(layerIndex, out stateTime);
@@ -380,7 +396,7 @@ public class Animator : Behaviour
                 _currentStateTimes[layerIndex] = 0f;
                 _stateSpeeds[layerIndex] = nextState.speed;
                 OnStateEnter(nextState, layerIndex);
-                SampleState(nextState, 0f, 1f, layerIndex);
+                return SampleState(nextState, 0f);
             }
             else
             {
@@ -410,7 +426,7 @@ public class Animator : Behaviour
                     nextTime = Math.Clamp(nextTime, 0f, nextLength);
                 }
 
-                SampleBlendStates(currentState, stateTime, 1f - t, nextState, nextTime, t, layerIndex);
+                return SampleBlendStates(currentState, stateTime, nextState, nextTime, t);
             }
         }
         else
@@ -432,10 +448,11 @@ public class Animator : Behaviour
                     stateTime = Math.Clamp(stateTime, 0f, stateLength);
                 }
                 _currentStateTimes[layerIndex] = stateTime;
-                SampleState(currentState, stateTime, 1f, layerIndex);
                 OnStateUpdate(currentState, layerIndex);
+                return SampleState(currentState, stateTime);
             }
         }
+        return SampledAnimationPose.Empty;
     }
 
     private void CheckTransitions(AnimatorState state, float stateTime, float stateLength, int layerIndex)
@@ -521,76 +538,108 @@ public class Animator : Behaviour
         OnStateEnter(destination, layerIndex);
     }
 
-    private void SampleState(AnimatorState state, float time, float weight, int layerIndex)
+    private SampledAnimationPose SampleState(AnimatorState state, float time)
     {
-        if (state?.motion == null || gameObject == null) return;
-
-        if (state.motion is AnimationClip clip)
-        {
-            if (weight >= 0.999f)
-            {
-                clip.SampleAnimation(gameObject, time);
-            }
-            else
-            {
-                SampleClipWithWeight(clip, time, weight);
-            }
-        }
-        else if (state.motion is BlendTree bt)
-        {
-            SampleBlendTree(bt, time, weight);
-        }
+        return state?.motion is null || gameObject is null
+            ? SampledAnimationPose.Empty
+            : SampleMotion(state.motion, time);
     }
 
-    private void SampleBlendStates(AnimatorState state1, float time1, float weight1, AnimatorState state2, float time2, float weight2, int layerIndex)
+    private SampledAnimationPose SampleBlendStates(
+        AnimatorState state1,
+        float time1,
+        AnimatorState state2,
+        float time2,
+        float weight2)
     {
-        if (gameObject == null) return;
-
-        SampleState(state1, time1, weight1, layerIndex);
-        SampleState(state2, time2, weight2, layerIndex);
+        SampledAnimationPose first = SampleState(state1, time1);
+        SampledAnimationPose second = SampleState(state2, time2);
+        AnimationPose pose = AnimationPose.Blend(first.Pose, second.Pose, weight2);
+        AnimationPose? reference = first.AdditiveReferencePose is not null && second.AdditiveReferencePose is not null
+            ? AnimationPose.Blend(first.AdditiveReferencePose, second.AdditiveReferencePose, weight2)
+            : null;
+        return new SampledAnimationPose(pose, reference);
     }
 
-    private void SampleClipWithWeight(AnimationClip clip, float time, float weight)
+    private SampledAnimationPose SampleMotion(Motion motion, float time)
     {
-        if (clip == null || gameObject == null) return;
-        if (weight > 0.001f)
+        if (motion is AnimationClip clip && gameObject is not null)
         {
-            clip.SampleAnimation(gameObject, time);
+            AnimationPose pose = clip.EvaluateTransformPose(gameObject, time);
+            clip.TryEvaluateAdditiveReferencePose(gameObject, out AnimationPose referencePose);
+            return new SampledAnimationPose(pose, referencePose.Count > 0 ? referencePose : null);
         }
+        if (motion is BlendTree blendTree) return SampleBlendTree(blendTree, time);
+        return SampledAnimationPose.Empty;
     }
 
-    private void SampleBlendTree(BlendTree bt, float time, float weight)
+    private SampledAnimationPose SampleBlendTree(BlendTree bt, float time)
     {
-        if (bt == null || bt.children == null || bt.children.Length == 0 || gameObject == null) return;
+        if (bt == null || bt.children == null || bt.children.Length == 0 || gameObject == null)
+            return SampledAnimationPose.Empty;
 
         float x = GetFloat(bt.blendParameter);
         float y = GetFloat(bt.blendParameterY);
         float[] weights = new float[bt.children.Length];
         bt.ComputeBlendTreeWeights(x, y, weights);
-
-        float totalActive = 0f;
+        var accumulated = new AnimationPose();
+        AnimationPose? accumulatedReference = null;
+        float accumulatedWeight = 0f;
+        bool allHaveReference = true;
         for (int i = 0; i < weights.Length; i++)
         {
-            if (bt.children[i].motion is AnimationClip && weights[i] > 0f)
+            float childWeight = weights[i];
+            Motion childMotion = bt.children[i].motion;
+            if (childMotion is null || childWeight <= 0f) continue;
+            SampledAnimationPose child = SampleMotion(
+                childMotion,
+                (time + bt.children[i].cycleOffset * Math.Max(0.001f, childMotion.averageDuration)) * bt.children[i].timeScale);
+            float combinedWeight = accumulatedWeight + childWeight;
+            float blendWeight = accumulatedWeight <= 0f ? 1f : childWeight / combinedWeight;
+            accumulated = AnimationPose.Blend(accumulated, child.Pose, blendWeight);
+            if (child.AdditiveReferencePose is null)
             {
-                totalActive += weights[i];
+                allHaveReference = false;
             }
+            else if (allHaveReference)
+            {
+                accumulatedReference = accumulatedReference is null
+                    ? child.AdditiveReferencePose.Clone()
+                    : AnimationPose.Blend(accumulatedReference, child.AdditiveReferencePose, blendWeight);
+            }
+            accumulatedWeight = combinedWeight;
         }
+        return new SampledAnimationPose(accumulated, allHaveReference ? accumulatedReference : null);
+    }
 
-        if (totalActive > 0f && Math.Abs(weight - 1f) < 0.001f)
+    private AnimationPose ComposeLayer(AnimationPose accumulated, SampledAnimationPose sampled, int layerIndex)
+    {
+        if (sampled.Pose.Count == 0) return accumulated;
+        if (!(_controller is AnimatorController controller) || layerIndex <= 0 || layerIndex >= controller.layers.Length)
+            return AnimationPose.Blend(accumulated, sampled.Pose, 1f);
+
+        AnimatorControllerLayer layer = controller.layers[layerIndex];
+        float weight = float.IsNaN(layer.weight)
+            ? 0f
+            : layer.weight < 0f || layer.weight > 1f
+                ? 1f
+                : layer.weight;
+        if (weight <= 0f) return accumulated;
+        Func<string, bool>? pathActive = layer.avatarMask is null
+            ? null
+            : layer.avatarMask.IsTransformPathActive;
+        if (layer.blendingMode == AnimatorLayerBlendingMode.Additive)
         {
-            if (totalActive > 0.999f && weights.Count(w => w > 0.01f) == 1)
-            {
-                for (int i = 0; i < bt.children.Length; i++)
-                {
-                    if (bt.children[i].motion is AnimationClip clip && weights[i] > 0.01f)
-                    {
-                        clip.SampleAnimation(gameObject, time);
-                        break;
-                    }
-                }
-            }
+            if (sampled.AdditiveReferencePose is null) return accumulated;
+            return AnimationPose.Blend(
+                accumulated,
+                sampled.Pose,
+                weight,
+                additive: true,
+                referencePose: sampled.AdditiveReferencePose,
+                pathActive: pathActive);
         }
+        return AnimationPose.Blend(accumulated, sampled.Pose, weight, pathActive: pathActive);
     }
 
     private AnimatorState FindState(int hash, int layerIndex)

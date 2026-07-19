@@ -17,6 +17,9 @@ public class AnimationClip : Motion
     private readonly List<AnimationCurveBinding> _bindings = new();
     private readonly List<AnimationEvent> _events = new();
     private bool _quaternionContinuityEnsured;
+    private AnimationClip? _additiveReferencePoseClip;
+    private float _additiveReferencePoseTime;
+    private bool _mecanimDataBuilt;
 
     public static AnimationClip Empty => new AnimationClip { name = "Empty" };
 
@@ -75,94 +78,63 @@ public class AnimationClip : Motion
     public void SampleAnimation(GameObject go, float time)
     {
         if (go == null) return;
-
-        float wrappedTime = WrapTime(time, length, wrapMode);
-
-        var sampledValues = new Dictionary<(Transform, string), Vector4>();
-
-        foreach (var binding in _bindings)
-        {
-            Transform target;
-            if (string.IsNullOrEmpty(binding.path))
-            {
-                target = go.transform;
-            }
-            else
-            {
-                target = go.transform.Find(binding.path);
-            }
-
-            if (target == null || binding.curve == null) continue;
-
-            float value = binding.curve.Evaluate(wrappedTime);
-            var key = (target, GetPropertyBase(binding.propertyName));
-
-            if (!sampledValues.TryGetValue(key, out var vec))
-            {
-                vec = new Vector4(0, 0, 0, 1);
-            }
-
-            switch (binding.propertyName)
-            {
-                case "m_LocalPosition.x": vec.x = value; break;
-                case "m_LocalPosition.y": vec.y = value; break;
-                case "m_LocalPosition.z": vec.z = value; break;
-                case "m_LocalRotation.x": vec.x = value; break;
-                case "m_LocalRotation.y": vec.y = value; break;
-                case "m_LocalRotation.z": vec.z = value; break;
-                case "m_LocalRotation.w": vec.w = value; break;
-                case "m_LocalScale.x": vec.x = value; break;
-                case "m_LocalScale.y": vec.y = value; break;
-                case "m_LocalScale.z": vec.z = value; break;
-                case "localPosition.x": vec.x = value; break;
-                case "localPosition.y": vec.y = value; break;
-                case "localPosition.z": vec.z = value; break;
-                case "localRotation.x": vec.x = value; break;
-                case "localRotation.y": vec.y = value; break;
-                case "localRotation.z": vec.z = value; break;
-                case "localRotation.w": vec.w = value; break;
-                case "localScale.x": vec.x = value; break;
-                case "localScale.y": vec.y = value; break;
-                case "localScale.z": vec.z = value; break;
-            }
-
-            sampledValues[key] = vec;
-        }
-
-        foreach (var kv in sampledValues)
-        {
-            var (transform, propBase) = kv.Key;
-            var v = kv.Value;
-
-            if (propBase.Contains("Position"))
-            {
-                transform.localPosition = new Vector3(v.x, v.y, v.z);
-            }
-            else if (propBase.Contains("Rotation"))
-            {
-                transform.localRotation = new Quaternion(v.x, v.y, v.z, v.w);
-            }
-            else if (propBase.Contains("Scale"))
-            {
-                if (v.x == 0 && v.y == 0 && v.z == 0)
-                {
-                    transform.localScale = Vector3.one;
-                }
-                else
-                {
-                    transform.localScale = new Vector3(v.x, v.y, v.z);
-                }
-            }
-        }
+        EvaluateTransformPose(go, time).Apply();
     }
 
-    private string GetPropertyBase(string propertyName)
+    internal AnimationPose EvaluateTransformPose(GameObject go, float time)
     {
-        if (propertyName.EndsWith(".x") || propertyName.EndsWith(".y") || propertyName.EndsWith(".z") || propertyName.EndsWith(".w"))
+        var pose = new AnimationPose();
+        if (go is null) return pose;
+        float wrappedTime = WrapTime(time, length, wrapMode);
+        foreach (AnimationCurveBinding binding in _bindings)
         {
-            return propertyName.Substring(0, propertyName.Length - 2);
+            Transform target = string.IsNullOrEmpty(binding.path)
+                ? go.transform
+                : go.transform.Find(binding.path);
+            if (target is null || binding.curve is null) continue;
+            AnimationTransformSample sample = pose.GetOrCapture(target, binding.path ?? string.Empty);
+            float value = binding.curve.Evaluate(wrappedTime);
+            switch (binding.propertyName)
+            {
+                case "m_LocalPosition.x": case "localPosition.x": sample.Position.x = value; sample.Properties |= AnimationTransformProperties.Position; break;
+                case "m_LocalPosition.y": case "localPosition.y": sample.Position.y = value; sample.Properties |= AnimationTransformProperties.Position; break;
+                case "m_LocalPosition.z": case "localPosition.z": sample.Position.z = value; sample.Properties |= AnimationTransformProperties.Position; break;
+                case "m_LocalRotation.x": case "localRotation.x": sample.Rotation.x = value; sample.Properties |= AnimationTransformProperties.Rotation; break;
+                case "m_LocalRotation.y": case "localRotation.y": sample.Rotation.y = value; sample.Properties |= AnimationTransformProperties.Rotation; break;
+                case "m_LocalRotation.z": case "localRotation.z": sample.Rotation.z = value; sample.Properties |= AnimationTransformProperties.Rotation; break;
+                case "m_LocalRotation.w": case "localRotation.w": sample.Rotation.w = value; sample.Properties |= AnimationTransformProperties.Rotation; break;
+                case "m_LocalScale.x": case "localScale.x": sample.Scale.x = value; sample.Properties |= AnimationTransformProperties.Scale; break;
+                case "m_LocalScale.y": case "localScale.y": sample.Scale.y = value; sample.Properties |= AnimationTransformProperties.Scale; break;
+                case "m_LocalScale.z": case "localScale.z": sample.Scale.z = value; sample.Properties |= AnimationTransformProperties.Scale; break;
+                default: continue;
+            }
+            pose.Set(sample);
         }
-        return propertyName;
+        return pose;
+    }
+
+    internal void SetAdditiveReferencePose(AnimationClip? referenceClip, float time)
+    {
+        _additiveReferencePoseClip = _mecanimDataBuilt && referenceClip?._mecanimDataBuilt == true
+            ? referenceClip
+            : null;
+        _additiveReferencePoseTime = time;
+    }
+
+    internal void MarkMecanimDataBuilt() => _mecanimDataBuilt = true;
+
+    internal bool CanUseAdditiveReferencePose(AnimationClip? referenceClip)
+        => _mecanimDataBuilt && referenceClip?._mecanimDataBuilt == true;
+
+    internal bool TryEvaluateAdditiveReferencePose(GameObject go, out AnimationPose pose)
+    {
+        if (_additiveReferencePoseClip is null)
+        {
+            pose = new AnimationPose();
+            return false;
+        }
+        pose = _additiveReferencePoseClip.EvaluateTransformPose(go, _additiveReferencePoseTime);
+        return true;
     }
 
     private float WrapTime(float time, float duration, WrapMode mode)

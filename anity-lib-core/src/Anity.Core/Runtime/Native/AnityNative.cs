@@ -81,6 +81,23 @@ public static class AnityNative
         public int mappedBoneCount;
     }
 
+    [Flags]
+    public enum AnimationPoseFlags : uint
+    {
+        Position = 1u << 0,
+        Rotation = 1u << 1,
+        Scale = 1u << 2
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AnimationTransformPose
+    {
+        public float positionX, positionY, positionZ;
+        public float rotationX, rotationY, rotationZ, rotationW;
+        public float scaleX, scaleY, scaleZ;
+        public AnimationPoseFlags flags;
+    }
+
     public enum GraphicsDeviceTypeNative
     {
         Null = 4,
@@ -262,6 +279,10 @@ public static class AnityNative
     private static extern Result AvatarMask_RemoveTransformPath(
         IntPtr mask, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int recursive);
 
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAvatarMask_GetTransformPathActive")]
+    private static extern Result AvatarMask_GetTransformPathActive(
+        IntPtr mask, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, out int active);
+
     public static bool TryCreateAvatarMask(out IntPtr mask)
     {
         mask = IntPtr.Zero;
@@ -367,6 +388,21 @@ public static class AnityNative
     public static bool TryRemoveAvatarMaskTransformPath(IntPtr mask, string path, bool recursive)
         => TryAvatarMaskCall(() => AvatarMask_RemoveTransformPath(mask, path ?? string.Empty, recursive ? 1 : 0));
 
+    public static bool TryGetAvatarMaskTransformPathActive(IntPtr mask, string path, out bool active)
+    {
+        active = false;
+        try
+        {
+            int value = 0;
+            bool success = _avatarMaskNativeAvailable &&
+                AvatarMask_GetTransformPathActive(mask, path ?? string.Empty, out value) == Result.Ok;
+            active = success && value != 0;
+            return success;
+        }
+        catch (DllNotFoundException) { return HandleMissingAvatarMaskNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAvatarMaskNative(); }
+    }
+
     private static bool TryAvatarMaskCall(Func<Result> call)
     {
         try { return _avatarMaskNativeAvailable && call() == Result.Ok; }
@@ -379,6 +415,64 @@ public static class AnityNative
         _avatarMaskNativeAvailable = false;
         if (NativeTransformRequired)
             throw new DllNotFoundException("anity-native AvatarMask entry points are required but unavailable.");
+        return false;
+    }
+
+    private static bool _animationPoseNativeAvailable = true;
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAnimation_BlendTransformPose")]
+    private static extern Result Animation_BlendTransformPose(
+        in AnimationTransformPose basePose,
+        in AnimationTransformPose layerPose,
+        IntPtr referencePose,
+        float weight,
+        int additive,
+        out AnimationTransformPose outPose);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityAnimation_BlendTransformPose")]
+    private static extern Result Animation_BlendTransformPoseWithReference(
+        in AnimationTransformPose basePose,
+        in AnimationTransformPose layerPose,
+        in AnimationTransformPose referencePose,
+        float weight,
+        int additive,
+        out AnimationTransformPose outPose);
+
+    public static bool TryBlendAnimationTransformPose(
+        in AnimationTransformPose basePose,
+        in AnimationTransformPose layerPose,
+        AnimationTransformPose? referencePose,
+        float weight,
+        bool additive,
+        out AnimationTransformPose result)
+    {
+        result = default;
+        if (!_animationPoseNativeAvailable) return false;
+        try
+        {
+            Result nativeResult;
+            if (referencePose.HasValue)
+            {
+                AnimationTransformPose reference = referencePose.Value;
+                nativeResult = Animation_BlendTransformPoseWithReference(
+                    in basePose, in layerPose, in reference, weight, additive ? 1 : 0, out result);
+            }
+            else
+            {
+                nativeResult = Animation_BlendTransformPose(
+                    in basePose, in layerPose, IntPtr.Zero, weight, additive ? 1 : 0, out result);
+            }
+            return nativeResult == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAnimationPoseNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAnimationPoseNative(); }
+    }
+
+    private static bool HandleMissingAnimationPoseNative()
+    {
+        _animationPoseNativeAvailable = false;
+        if (NativeTransformRequired)
+            throw new DllNotFoundException("anity-native animation pose entry points are required but unavailable.");
         return false;
     }
 

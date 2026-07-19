@@ -186,7 +186,14 @@ public class AnimationUtility
     }
 
     public static void SetAdditiveReferencePose(AnimationClip clip, AnimationClip referenceClip, float time)
-    { var data = GetData(clip); data.Settings.additiveReferencePoseClip = referenceClip; data.Settings.additiveReferencePoseTime = time; data.Settings.hasAdditiveReferencePose = referenceClip != null; }
+    {
+        var data = GetData(clip);
+        bool valid = clip?.CanUseAdditiveReferencePose(referenceClip) == true;
+        data.Settings.additiveReferencePoseClip = valid ? referenceClip : null;
+        data.Settings.additiveReferencePoseTime = time;
+        data.Settings.hasAdditiveReferencePose = valid;
+        clip?.SetAdditiveReferencePose(referenceClip, time);
+    }
     public static void SetAnimationClips([Bindings.NotNull("ArgumentNullException")] Animation animation, [Bindings.Unmarshalled] AnimationClip[] clips)
     {
         if (animation == null) throw new ArgumentNullException(nameof(animation));
@@ -195,7 +202,16 @@ public class AnimationUtility
         foreach (var clip in clips) if (clip != null) animation.AddClip(clip, clip.name);
         animation.clip = clips.Length > 0 ? clips[0] : null;
     }
-    public static void SetAnimationClipSettings([Bindings.NotNull("ArgumentNullException")] AnimationClip clip, AnimationClipSettings srcClipInfo) => GetData(clip).Settings = (srcClipInfo ?? new AnimationClipSettings()).Clone();
+    public static void SetAnimationClipSettings([Bindings.NotNull("ArgumentNullException")] AnimationClip clip, AnimationClipSettings srcClipInfo)
+    {
+        AnimationClipSettings settings = (srcClipInfo ?? new AnimationClipSettings()).Clone();
+        GetData(clip).Settings = settings;
+        AnimationClip? reference = settings.hasAdditiveReferencePose ? settings.additiveReferencePoseClip : null;
+        bool valid = clip?.CanUseAdditiveReferencePose(reference) == true;
+        settings.hasAdditiveReferencePose = valid;
+        settings.additiveReferencePoseClip = valid ? reference : null;
+        clip?.SetAdditiveReferencePose(reference, settings.additiveReferencePoseTime);
+    }
     [Bindings.NativeThrows]
     public static void SetAnimationEvents([Bindings.NotNull("ArgumentNullException")] AnimationClip clip, [Bindings.NotNull("ArgumentNullException"), Bindings.Unmarshalled] AnimationEvent[] events) { if (clip == null) throw new ArgumentNullException(nameof(clip)); clip.events = events ?? Array.Empty<AnimationEvent>(); Notify(clip, default, CurveModifiedType.ClipModified); }
     [Obsolete("SetAnimationType is no longer supported.")]

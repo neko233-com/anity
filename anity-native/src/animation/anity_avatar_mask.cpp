@@ -156,4 +156,27 @@ AnityResult ANITY_CALL AnityAvatarMask_RemoveTransformPath(
     return ANITY_OK;
 }
 
+AnityResult ANITY_CALL AnityAvatarMask_GetTransformPathActive(
+    AnityAvatarMaskHandle mask, const char* path, int32_t* outActive) {
+    if (!mask || !outActive) return ANITY_ERR_INVALID_ARG;
+    const auto& transforms = State(mask)->transforms;
+    if (transforms.empty()) {
+        *outActive = 1;
+        return ANITY_OK;
+    }
+
+    const std::string target = path ? path : "";
+    if (target.empty()) {
+        *outActive = std::any_of(transforms.begin(), transforms.end(), [](const TransformEntry& entry) {
+            return entry.active;
+        }) ? 1 : 0;
+        return ANITY_OK;
+    }
+
+    *outActive = std::any_of(transforms.begin(), transforms.end(), [&](const TransformEntry& entry) {
+        return entry.active && entry.path == target;
+    }) ? 1 : 0;
+    return ANITY_OK;
+}
+
 } // extern "C"

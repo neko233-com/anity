@@ -1,5 +1,22 @@
 # PLAN
 
+## 2026-07-19 — Animator AvatarMask native layer pose 合成
+
+### 已完成
+- 本机 Unity 2022.3.51f1 batchmode 控制器探针锁定 generic Transform layer 语义：Override position/scale 按 0–1 layer weight 线性插值，rotation 使用 Mecanim shortest-path normalized lerp；负数、>1 与正负 Infinity weight 使用完整上层，NaN 禁用上层；空 transform mask 等价于不筛选，非空 mask 仅启用显式 active path，active 任一路径会使 root 参与，重复路径采用 OR，未被 upper clip 绑定的属性保持下层结果。
+- 新增 `anity-native` animation pose C ABI/C++ 模块，原生执行 position/rotation/scale Override 与 reference-pose Additive 合成；AvatarMask 原生状态新增运行时 path query。Animator 不再逐层直接 `SampleAnimation` 导致最后一层覆盖全部结果，而是先采样 pose、在 native 合成 layer/crossfade/BlendTree，再一次性写回 Transform。
+- `AnimationClip` 的内部 pose 采样会从当前 Transform 初始化未绑定分量，修复只写 `m_LocalPosition.x` 时错误清零 y/z；`AnimationUtility.SetAdditiveReferencePose` / clip settings 已接入运行时 reference pose。仅内部已标记 Mecanim data built 的 clip 可作为有效 reference；普通程序化 clip 按官方探针保持无效且 Additive layer 不生效。
+- 新增 native-required suite **25/25**，覆盖 0/0.25/1/负数/>1/NaN/Infinity layer weight、空/全关/缺失/重复/UTF-8/exact/child mask、partial upper binding、rotation/scale、无效/有效 additive reference、mask additive、crossfade 与部分分量；动画相关组合 **79/79**，AnimationUtility **10/10**。统一 Release 门禁 Core **2974/2974**、全矩阵 **3972/3972**，均为 0 失败、0 跳过。
+
+### 尚未完成
+- 本轮闭环的是 generic Transform curve 的 AnimatorController layer 路径；Humanoid muscle stream、AvatarMaskBodyPart 对 body/finger/foot/hand IK 的过滤、IK pass、root motion/mass center、synced layer、writeDefaultValues 和 Playables/AnimationPlayableOutput 尚未进入该 pose graph。
+- 官方程序化 AnimationClip 不能作为有效 additive reference（Unity 报 `MecanimDataWasBuilt` / invalid additive reference）；本轮确认了无效 reference 会被忽略，并用内部 Mecanim-built 标记验证 native delta math，但 ModelImporter 尚未产出/恢复该标记，有效 imported clip 的 Additive 逐帧 A/B、资产重载持久化及目标 2022.3.61f1 Pro 最终门禁仍未闭环。
+
+### 下一优先项
+1. 将 ModelImporter 的 additive reference、mask/source Avatar 与 decoded hierarchy 产物接入 runtime clip/avatar asset，并用真实导入动画做 Additive/Override 重载 A/B。
+2. 在 native pose graph 增加 humanoid muscle/bone stream、AvatarMaskBodyPart、finger 与四类 IK goal 过滤，接通 Animator IK pass/root motion。
+3. 审计并精确清理 Animator/AnimatorController/Layer 的 Unity 2022.3.61f1 公开面，以及错误 `RawAvatar` / AssetPostprocessor callback。
+
 ## 2026-07-19 — AvatarMask 精确公开面与 native 状态
 
 ### 已完成
@@ -9,11 +26,11 @@
 - 新增 native-required suite **17/17**；AvatarMask/AvatarBuilder/ModelImporter 组合回归 **183/183**，统一 Release 门禁 Core **2949/2949**、全矩阵 **3947/3947**，均为 0 失败、0 跳过。
 
 ### 尚未完成
-- 当前已闭环 AvatarMask 公开面、独立状态与 Transform path 编辑语义；AnimatorControllerLayer/Playable 对 mask 的逐骨骼采样、Override/Additive 混合、IK body part 与导入资产生命周期尚未消费该 native 状态，不能将 AvatarMask 运行时效果标为完整。
+- 当前已闭环 AvatarMask 公开面、独立状态、Transform path 编辑语义及 generic AnimatorController layer 的 Override/reference-pose Additive 消费；Humanoid muscle/IK body part、Playables 与导入资产生命周期仍未消费完整 mask，不能将 AvatarMask 运行时效果标为完整。
 - 错误的额外 `RawAvatar` 仍被历史 `AssetPostprocessor` callback 使用，需连同官方回调签名一次性迁移；目标 Unity 2022.3.61f1 Pro 的最终反射与 Player A/B 仍待执行，本轮 2022.3.51f1 证据仅是预备门禁。
 
 ### 下一优先项
-1. 将 native AvatarMask 接入 Animator layer/Playable 的骨骼、finger、foot/hand IK 过滤与 Override/Additive 混合，并做逐帧 pose A/B。
+1. 将 native AvatarMask 从已完成的 generic Animator layer 扩展到 Playable、humanoid bone/finger/foot/hand IK 与 root-motion 过滤，并做逐帧 pose A/B。
 2. 按官方 AssetPostprocessor 公开面移除 `RawAvatar`，完成 ModelImporter mask/source Avatar YAML、子资源与重导入生命周期。
 3. 继续接通 decoded FBX hierarchy、humanoid T-pose/muscle/humanScale/retargeting/root-motion rotation，并在 Unity 2022.3.61f1 Pro 重跑最终门禁。
 
