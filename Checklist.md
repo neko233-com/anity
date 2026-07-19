@@ -6,7 +6,7 @@
 > - 🟡 部分实现 / API 壳 / 尚缺 Unity 官方 A/B 行为证据
 > - ❌ 未实现
 >
-> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **4,174/4,174**（Core **3,165/3,165**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
+> **全局状态：🟡 持续推进。** “Anity = 源码自主可控的 Unity 2022 Ultra” 是最终验收目标；只有官方 Unity 2022.3 反射面、行为 fixture、编辑器交互及各平台产物门禁全部通过后，才能宣称完全对等。官方 2022.3.51f1 当前预备基线：类型存在 989/4,117（24.022%）、类型契约完全一致 460（11.173%）；成员存在 9,242/37,164（24.868%）、成员契约完全一致 6,973（18.763%）；缺失类型 3,128、真实缺失成员 27,922。本轮 native-required 统一 Release 门禁 **4,187/4,187**（Core **3,165/3,165**）通过、0 失败、0 跳过；目标 2022.3.61f1 尚未安装，以上仍不可作为最终 Pro 证据。
 
 ---
 
@@ -16,7 +16,7 @@
 |------|------|------|
 | Monorepo source layout | ✅ | 四个历史 submodule 声明与实际 Git index 不一致，已证明当前模块全部为普通 tracked source；`.gitmodules`、recursive checkout、`modules/` ignore 与多仓库文档已移除 |
 | `_scripts/` 唯一入口 | ✅ | 12 个未被现行构建/测试/workflow 引用的旧 `scripts/` helper 及其 README 已删除；8 个历史入口名在 tracked source 中反向引用为 0，AGENTS 明确禁止恢复旧目录 |
-| Cache-free rebuild | ✅ | 本轮再次从无 native/cache 状态冷构建，build-all 0 错误、八工程 **4174/4174**；验证后移出 39 个 repo-local `bin/obj/build` 共 290,572 KiB，连同初始缓存本轮合计 303,476 KiB，最终生成目录复扫为 0 |
+| Cache-free rebuild | ✅ | 本轮先从无 native/cache 状态冷构建，最终 build-all 0 错误、八工程 **4187/4187**；self-contained CLI 与 App 安装验证完成后移出 40 个零 tracked 的 repo-local `bin/obj/build`，共 381,480 KiB，最终生成目录复扫为 0 |
 | Unity obsolete/legacy compatibility | 🟡 | 精确引用审计删除唯一零调用/零导出的内部 VFX synchronous legacy 实现 220 行；Unity 2022.3 公开 `[Obsolete]` API、removed networking、FBX legacy 数值、Shader/VFX deprecated serialized migration及仍被调用的兼容 ABI 均有反射/行为/资产测试引用，按兼容目标保留；完整 obsolete surface 仍随全局 parity 推进 |
 
 ---
@@ -529,7 +529,7 @@
 | `HDROutputSettings` / HDR | ✅ | available/active/paperWhiteNits/automaticHDRTonemapping/displayColorGamut/bitDepth、native AnityHDR 路径、HDRUtilities 色调映射 |
 | `ColorGamut` / `HDRDisplayBitDepth` | ✅ | sRGB/Rec709/Rec2020/DisplayP3/HDR10/DolbyHDR/HDR10Plus；8/10/16 bit |
 | `anity-native` C++ | 🟡 | core/graphics/HDR/physics/audio/media/jobs/texture/transform/math/ui/model importer；model C ABI 已以 pinned ufbx 实际解析 FBX/OBJ hierarchy、mesh/submesh、坐标、transform/blend animation、skin/bindpose/weights、blend frame/delta 与 scalar tangent/source take。FBX quaternion 已复刻 legacy tick、KFCurve/MatrixConverter float/double 阶段、FbxAMatrix/GetQ、normalize 与 continuity；非 XYZ gimbal、wrap/tie/subframe 已有 exact-bit fixture。adjusted-to-rotation-pivot 静态层级、Mesh/normal/tangent/blend-delta basis 与 retained-pivot 第二 scene 已接通；raw pivot Euler 新增 exact FbxTime frame grid 并复用 Unity-compatible KFCurve evaluator，10 组 **720/720 float exact-bit**。Canvas native ownership 681/681。retained position/pre-post quaternion ULP、visibility binding、material、多 layer/其它 tangent、Humanoid、Transform ownership 与更多 solver/importer 仍待 native 化 |
-| `_scripts/` 环境与 macOS ARM64 安装 | ✅ | install-env/verify-env/build-native/build-all/gap-audit/install-vulkan/android；`install-macos-arm64.sh` 以原生 ARM64 host gate 构建 self-contained Editor Host、部署 native dylib/Anity 图标、签名并安装 `/Applications/Anity.app`；本机 help/menu smoke、plist 与 arm64 binary/dylib 通过 |
+| `_scripts/` 环境与 macOS ARM64 安装 | ✅ | install-env/verify-env/build-native/build-all/gap-audit/install-vulkan/android；新增 `publish-cli.sh/.ps1` 生成 host-matching self-contained CLI、部署 native runtime、隔离 RID lockfile，并在不存在的 `DOTNET_ROOT` 下做进程 smoke；`install-macos-arm64.sh` 同样使用隔离 restore lock，原生 ARM64 Host/CLI/native、签名、batchmode、plist 与图标通过。Windows/Linux 分发实机证据仍按 CLI 行记录为待办 |
 | Unity API 官方反射门禁 | ✅ | 84 个官方 2022.3.51f1 UnityEngine/UnityEditor 程序集；类型/成员/参数/枚举/特性对照；当前类型存在 **928/4,117**、精确 **404**，成员存在 **8,645/37,164**、精确 **6,417**；SHA-256 baseline `regressions=0` / `removed-or-changed=0` / load issues=0；`UnityEngine.VFXModule` 公开差异 **0**。仍必须迁移到 2022.3.61f1 后重建最终基线 |
 | D3D11 native device | ✅ | D3D11CreateDevice+WARP、swapchain/RTV、Present、HDR R10G10B10A2 |
 | Vulkan native device | ✅ | Instance/Physical/Logical device（需 Vulkan SDK） |
@@ -545,7 +545,7 @@
 | `ColorSpacePipeline` | ✅ | Linear/Gamma 转换、ConfigureURPLinearHDR |
 | `ScreenCapture` | ✅ | CaptureScreenshot/AsTexture/IntoRenderTexture、superSize、StereoMode、真 PNG；测试≥12 |
 | `Il2CppBuilder` / IL2CPP 管线 | ✅ | CodeGeneration/CompilerConfig/stripping、.cpp stub、link.xml、AOT 注册；测试≥14 |
-| `anity.exe` CLI | 🟡 | batchmode/quit/projectPath/executeMethod/build*/runTests + il2cpp/screenshot/agent 主路径已具备；`-logFile -` 已按 Unity 2022.3 官方语义写入并 flush stdout，不创建 dash 文件，普通路径及 version/help/error 早退均会最终落盘；日志专项 11 例、CLI **27/27** 已通过。SDK 托管入口与安装包内 self-contained ARM64 CLI 的 batchmode 均 exit 0；Release 目录 framework-dependent apphost 在当前仅登记全局 .NET 9 的机器上直跑 exit 150，仍需独立 self-contained `anity`/`anity.exe` 分发门禁。默认日志、`-nolog`/`-upmLogFile`、完整 Unity 2022 Editor/Player 参数、退出码、崩溃/许可/UPM 日志与平台产物进程级 A/B 仍缺，故保持 🟡 |
+| `anity.exe` CLI | 🟡 | batchmode/quit/projectPath/executeMethod/build*/runTests + il2cpp/screenshot/agent 主路径已具备；`-logFile -` 已按 Unity 2022.3 官方语义写入并 flush stdout，不创建 dash 文件，普通路径及 version/help/error 早退均会最终落盘。独立 host-matching self-contained 分发已接入 native runtime、atomic publish、RID/输出边界与 staging lock 隔离；macOS ARM64 产物在不存在的 `DOTNET_ROOT` / 无工具 PATH 下直接运行，Mach-O/PE/ELF 架构、hostfxr、runtimeconfig、native 库、日志/错误/测试 XML 等新增 13 项真实进程门禁。CLI **40/40**、统一矩阵 **4187/4187**；Windows `anity.exe` 与 Linux 产物尚未实机执行，默认日志、`-nolog`/`-upmLogFile`、完整 Unity 2022 Editor/Player 参数、退出码、崩溃/许可/UPM 日志及 2022.3.61f1 平台 A/B 仍缺，故保持 🟡 |
 | `Anity.Agent` 官方扩展 | 🟡 | 独立包 Session/Memory/Tools；自定义API Key/Base URL/model、SSE、tool calling、Editor窗口与OS vault已实现。0.6.0新增工具Requested/8类终态审计、默认fail-closed、无原文digest、64 KiB结果上限、跨轮finish reason/usage保存，以及Editor项目级有界SHA-256链/轮换/启动验证/独占lock/Unix私有权限。Agent **91/91**、Editor Host **39/39**、CLI **16/16**；统一Release矩阵强制native并达到 **2,548/2,548**、0失败、0跳过。审计HMAC/外部anchor、持久session、完整JSON Schema、Windows/Linux vault实机、Responses API、真实多厂商及网络矩阵仍缺，故不能标全完成 |
 | `Canvas` Overlay/Camera/World | ✅ | 官方根命名空间与公开面差异 0；pixelRect、planeDistance、worldCamera、rootCanvas、排序、根布局 size/scale/position；Canvas/utility/raycaster 定向 43 测试 |
 | `CanvasScaler` 三模式 | ✅ | ConstantPixel/ScaleWithScreen(Match/Expand/Shrink)/Physical；UIBehaviour override 修复 |

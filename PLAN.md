@@ -1,5 +1,26 @@
 # PLAN
 
+## 2026-07-20 — 独立 self-contained Anity CLI 分发门禁
+
+### 已完成
+- 定位 Release 目录 framework-dependent `anity` apphost 在本机 exit 150 的根因：它仍依赖系统注册的匹配 .NET runtime，而本机全局 host 只登记 .NET 9；这不是 Unity-compatible CLI 参数解析失败。新增 `_scripts/publish-cli.sh` / `publish-cli.ps1`，按当前 host RID 发布 self-contained `anity` / `anity.exe`，并把 host runtime 与 `anity-native` 动态库放入同一分发目录。
+- 发布流程只接受 host-matching 架构，拒绝 cross-arch native 混装与 `build/cli/<rid>` 外的输出；使用同一文件系统下 staging + atomic move，失败 trap 同时回收 publish/smoke 临时目录。macOS 对 apphost/native 分别做 Mach-O 架构与 ad-hoc codesign 门禁，Unix 同时兼容 `file` 的 arm64/aarch64 与 x86_64/x86-64 命名。
+- self-contained smoke 显式设置不存在的 `DOTNET_ROOT`、关闭 multilevel lookup，并执行 `-batchmode -quit -nographics -logFile -`；验证三项状态、exit 0 且不生成名为 `-` 的文件。本机 `osx-arm64` 分发为 **84,220 KiB**，`anity` 与 `libanity_native.dylib` 均为 ARM64、签名有效、无 PDB，apphost 仅动态链接系统 `libSystem` / `libc++`，不再依赖系统 .NET runtime。
+- 新增 **13 个**真实分发进程用例，覆盖无注册 runtime/PATH、batchmode、stdout sentinel、日志 flush、help、缺失 project、未知 target、runTests XML、Mach-O/PE/ELF host 架构、native runtime、runtimeconfig included framework、app-local hostfxr 与无 debug symbols；CLI suite 由 **27/27** 增至 **40/40**。
+- `_scripts/run-tests.sh` / `.ps1` 现在先生成 host self-contained CLI，再把真实分发目录注入测试；最终 native-required 八工程矩阵 **4187/4187**（Core **3165/3165**），0 失败、0 跳过。`_scripts/build-all.sh Release` 全产品 0 编译错误；边界修正后 CLI 聚焦 40/40 与完整 4187/4187 均已重跑。
+- RID restore lock 改为 staging 内按 `MSBuildProjectName` 隔离；`publish-cli` 与 `install-macos-arm64.sh` 都不会再把平台 section 写入 tracked Core/Agent `packages.lock.json`。`/Applications/Anity.app` 已重新安装并独立验证 Host、内置 CLI、native 均为 ARM64，深度签名、图标逐 byte、两条 batchmode exit 0 全部通过，tracked lockfile 保持无差异。
+- 所有验证完成后解析 repo-local 生成目录，确认 **40 个** `bin/obj/build` 目标均被 Git ignore 且内部无 tracked 文件；共 **381,480 KiB（约 372.5 MiB）**，已可恢复地移入 macOS 废纸篓 `/Users/solarisneko/.Trash/anity-cli-final-cleanup.9mdTP3`。最终复扫 `node_modules/bin/obj/build/dist/Library/Temp/Logs/UserSettings/.cache/.vite/packages/Generated` 为 0。
+
+### 尚未完成
+- macOS ARM64 分发已实跑；Windows `publish-cli.ps1` 已实现 `win-x64/win-arm64` host gate、native DLL 部署与无系统 runtime smoke，但本机没有 Windows/pwsh，不能把源码审阅冒充 Windows 11 `anity.exe` 产物证据。Linux x64/ARM64 路径同样尚未在真实 host 执行。
+- CLI 仍缺默认 Editor.log、`-nolog` / `-upmLogFile`、许可/激活、崩溃日志、完整 Unity Editor/Player 参数和官方退出码矩阵；也尚未在 Unity 2022.3.61f1 Pro 对相同命令逐项 A/B，因此 CLI 总体继续为 🟡。
+- self-contained 分发解决了本机 runtime 注册依赖，不代表 IL2CPP、各 Player build、Package Manager、Editor GUI 或整套 Unity 2022.3 Pro 已经完全对齐。
+
+### 下一优先项
+1. 对齐 pre/post rotation baked quaternion 的 MatrixConverter stack、normalize 舍入与 signed-zero，收紧到 exact-bit。
+2. 增加 Renderer visibility `m_Enabled` binding，并补 ≥10 个 importer/runtime/Animator 用例。
+3. 在 Windows 11 x64 与 Linux x64 实跑 `publish-cli`、40 项分发进程门禁及 Unity 2022.3.61f1 CLI A/B。
+
 ## 2026-07-20 — 全仓缓存复清与零引用 VFX legacy 路径删除
 
 ### 已完成

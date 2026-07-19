@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${1:-Release}"
 INSTALL_ROOT="${ANITY_MACOS_INSTALL_DIR:-/Applications}"
 PUBLISH_DIR="$ROOT/build/macos-arm64/publish"
+RESTORE_LOCK_DIR="$ROOT/build/macos-arm64/restore-locks"
 BUNDLE_DIR="$INSTALL_ROOT/Anity.app"
 TEMPLATE="$ROOT/assets/macos/Info.plist"
 ICON="$ROOT/assets/macos/AnityIcon.icns"
@@ -28,6 +29,7 @@ remove_directory() {
 cleanup_build_artifacts() {
   [[ -n "$STAGING_ROOT" ]] && remove_directory "$STAGING_ROOT"
   remove_directory "$PUBLISH_DIR"
+  remove_directory "$RESTORE_LOCK_DIR"
   remove_directory "$NATIVE_BUILD_DIR"
 }
 
@@ -54,10 +56,15 @@ bash "$ROOT/_scripts/build-native.sh" "$CONFIG"
 
 trap cleanup_build_artifacts EXIT
 remove_directory "$PUBLISH_DIR"
+remove_directory "$RESTORE_LOCK_DIR"
+mkdir -p "$RESTORE_LOCK_DIR"
+LOCK_FILE_PATTERN="$RESTORE_LOCK_DIR/\$(MSBuildProjectName).packages.lock.json"
 dotnet build "$METADATA_FIXUPS_PROJECT" --configuration "$CONFIG" --nologo --verbosity quiet --disable-build-servers -m:1 -clp:ErrorsOnly
 dotnet publish "$ROOT/anity-editor/src/Anity.Editor.Host/Anity.Editor.Host.csproj" \
   -c "$CONFIG" -r osx-arm64 --self-contained true --nologo --disable-build-servers -m:1 -clp:ErrorsOnly \
-  -p:PublishSingleFile=false -p:SkipUnityMetadataFixups=true -o "$PUBLISH_DIR"
+  -p:PublishSingleFile=false -p:SkipUnityMetadataFixups=true \
+  -p:RestorePackagesWithLockFile=true -p:NuGetLockFilePath="$LOCK_FILE_PATTERN" \
+  -o "$PUBLISH_DIR"
 
 EDITOR_BINARY="$PUBLISH_DIR/Anity.Editor.Host"
 [[ -x "$EDITOR_BINARY" ]] || { echo "ERROR: publish did not create executable: $EDITOR_BINARY" >&2; exit 1; }

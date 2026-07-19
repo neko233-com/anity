@@ -9,6 +9,16 @@ $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 $env:ANITY_REQUIRE_NATIVE = "1"
 
+# The CLI gate validates a real, host-matching self-contained distribution.
+& "$PSScriptRoot\publish-cli.ps1" -Config $Configuration
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$CliRid = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+  ([System.Runtime.InteropServices.Architecture]::X64) { "win-x64" }
+  ([System.Runtime.InteropServices.Architecture]::Arm64) { "win-arm64" }
+  default { throw "unsupported CLI test architecture" }
+}
+$env:ANITY_CLI_DISTRIBUTION_DIR = Join-Path $Root "build\cli\$CliRid"
+
 $projects = @(
   "anity-lib-core\tests\Anity.Core.Tests\Anity.Core.Tests.csproj",
   "anity-agent\tests\Anity.Agent.Tests\Anity.Agent.Tests.csproj",
