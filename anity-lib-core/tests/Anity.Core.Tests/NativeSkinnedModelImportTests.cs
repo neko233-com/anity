@@ -157,6 +157,220 @@ public sealed class NativeSkinnedModelImportTests : IDisposable
         Assert.Equal(0, AssetDatabase.LoadAllAssetsAtPath(path).OfType<Mesh>().Single().blendShapeCount);
     }
 
+    [Fact]
+    public void ImportedBlendShapeClipUsesUnityRendererBindings()
+    {
+        var clip = BlendShapeClip(out _);
+        var bindings = AnimationUtility.GetCurveBindings(clip);
+        Assert.Contains(bindings, binding => binding.path == string.Empty && binding.type == typeof(SkinnedMeshRenderer) && binding.propertyName == "blendShape.TopH");
+        Assert.Contains(bindings, binding => binding.path == string.Empty && binding.type == typeof(SkinnedMeshRenderer) && binding.propertyName == "blendShape.TopV");
+    }
+
+    [Fact]
+    public void ImportedBlendShapeClipUsesSourceRateAndUnityTrimmedDuration()
+    {
+        var clip = BlendShapeClip(out _);
+        Assert.Equal(24f, clip.frameRate, 5);
+        Assert.Equal(89f / 24f, clip.length, 5);
+    }
+
+    [Fact]
+    public void TopHCurvePreservesUnityPercentSamples()
+    {
+        var curve = BlendCurve(BlendShapeClip(out _), "TopH");
+        Assert.Equal(100f, curve.Evaluate(0f), 4);
+        Assert.Equal(87.87704f, curve.Evaluate(5f / 24f), 3);
+        Assert.Equal(0f, curve.Evaluate(23f / 24f), 4);
+    }
+
+    [Fact]
+    public void TopVCurvePreservesUnityPercentSamples()
+    {
+        var curve = BlendCurve(BlendShapeClip(out _), "TopV");
+        Assert.Equal(100f, curve.Evaluate(0f), 4);
+        Assert.Equal(63.31698f, curve.Evaluate(16f / 24f), 3);
+        Assert.Equal(0f, curve.Evaluate(39f / 24f), 4);
+    }
+
+    [Fact]
+    public void SampleAnimationAppliesImportedBlendShapeWeights()
+    {
+        var clip = BlendShapeClip(out var root);
+        var renderer = Assert.Single(root.GetComponentsInChildren<SkinnedMeshRenderer>());
+        clip.SampleAnimation(root, 23f / 24f);
+        Assert.Equal(0f, renderer.GetBlendShapeWeight(0), 4);
+        Assert.InRange(renderer.GetBlendShapeWeight(1), 35f, 45f);
+    }
+
+    [Fact]
+    public void SampleAnimationChangesBakedMorphGeometry()
+    {
+        var clip = BlendShapeClip(out var root);
+        var renderer = Assert.Single(root.GetComponentsInChildren<SkinnedMeshRenderer>());
+        var original = renderer.sharedMesh!.vertices;
+        clip.SampleAnimation(root, 0f);
+        var baked = new Mesh();
+        renderer.BakeMesh(baked, false);
+        Assert.Contains(original.Zip(baked.vertices), pair => pair.First != pair.Second);
+    }
+
+    [Fact]
+    public void ImportBlendShapeDeformPercentFalseKeepsGeometryButOmitsCurves()
+    {
+        var path = CopyFixture("BlendShapeCube.fbx");
+        AssetDatabase.ImportAsset(path);
+        var importer = ModelImporter.GetAtPath(path);
+        importer.importBlendShapeDeformPercent = false;
+        importer.SaveAndReimport();
+        var assets = AssetDatabase.LoadAllAssetsAtPath(path);
+        Assert.Equal(2, Assert.Single(assets.OfType<Mesh>()).blendShapeCount);
+        var clip = Assert.Single(assets.OfType<AnimationClip>());
+        Assert.DoesNotContain(AnimationUtility.GetCurveBindings(clip), binding => binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ImportBlendShapesFalseOmitsBlendShapeCurves()
+    {
+        var path = CopyFixture("BlendShapeCube.fbx");
+        AssetDatabase.ImportAsset(path);
+        var importer = ModelImporter.GetAtPath(path);
+        importer.importBlendShapes = false;
+        importer.SaveAndReimport();
+        var clip = Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>());
+        Assert.DoesNotContain(AnimationUtility.GetCurveBindings(clip), binding => binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CustomClipFrameRangeSlicesAndShiftsBlendShapeCurves()
+    {
+        var path = ImportPath("BlendShapeCube.fbx");
+        var original = Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>());
+        var originalCurve = BlendCurve(original, "TopH");
+        var expectedStart = originalCurve.Evaluate(1f);
+        var expectedEnd = originalCurve.Evaluate(2f);
+        var importer = ModelImporter.GetAtPath(path);
+        importer.clipAnimations = new[]
+        {
+            new ModelImporterClipAnimation { name = "Slice", takeName = "Take 001", firstFrame = 24f, lastFrame = 48f }
+        };
+        importer.SaveAndReimport();
+        var sliced = Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>());
+        var slicedCurve = BlendCurve(sliced, "TopH");
+        Assert.Equal("Slice", sliced.name);
+        Assert.Equal(1f, sliced.length, 5);
+        Assert.Equal(expectedStart, slicedCurve.Evaluate(0f), 4);
+        Assert.Equal(expectedEnd, slicedCurve.Evaluate(1f), 4);
+        Assert.Equal(0f, slicedCurve.keys[0].time, 5);
+        Assert.Equal(1f, slicedCurve.keys[^1].time, 5);
+    }
+
+    [Fact]
+    public void AnimatorAppliesImportedBlendShapeCurve()
+    {
+        var clip = BlendShapeClip(out var root);
+        var renderer = Assert.Single(root.GetComponentsInChildren<SkinnedMeshRenderer>());
+        var controller = new AnimatorController();
+        var state = controller.layers[0].stateMachine.AddState("Take");
+        state.motion = clip;
+        controller.layers[0].stateMachine.defaultState = state;
+        var animator = root.AddComponent<Animator>();
+        animator.runtimeAnimatorController = controller;
+        animator.Play("Take");
+        animator.Update(5f / 24f);
+        Assert.Equal(87.87704f, renderer.GetBlendShapeWeight(0), 3);
+    }
+
+    [Fact]
+    public void MeshGetBlendShapeIndexUsesOrdinalNameMatching()
+    {
+        var mesh = Assert.Single(AssetDatabase.LoadAllAssetsAtPath(ImportPath("BlendShapeCube.fbx")).OfType<Mesh>());
+        Assert.Equal(0, mesh.GetBlendShapeIndex("TopH"));
+        Assert.Equal(1, mesh.GetBlendShapeIndex("TopV"));
+        Assert.Equal(-1, mesh.GetBlendShapeIndex("toph"));
+        Assert.Equal(-1, mesh.GetBlendShapeIndex("Missing"));
+        Assert.Equal(-1, mesh.GetBlendShapeIndex(null!));
+    }
+
+    [Fact]
+    public void MultipleCustomClipsCanSliceTheSameTake()
+    {
+        var path = ImportPath("BlendShapeCube.fbx");
+        var importer = ModelImporter.GetAtPath(path);
+        importer.clipAnimations = new[]
+        {
+            new ModelImporterClipAnimation { name = "First", takeName = "Take 001", firstFrame = 0f, lastFrame = 24f },
+            new ModelImporterClipAnimation { name = "Second", takeName = "Take 001", firstFrame = 24f, lastFrame = 48f },
+        };
+        importer.SaveAndReimport();
+        var clips = AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().OrderBy(clip => clip.name).ToArray();
+        Assert.Equal(2, clips.Length);
+        Assert.Equal("First", clips[0].name);
+        Assert.Equal("Second", clips[1].name);
+        Assert.All(clips, clip => Assert.Equal(1f, clip.length, 5));
+        Assert.NotEqual(BlendCurve(clips[0], "TopH").Evaluate(0f), BlendCurve(clips[1], "TopH").Evaluate(0f));
+    }
+
+    [Fact]
+    public void AnimatorOverrideLayerBlendsBlendShapeWeights()
+    {
+        var root = Import("BlendShapeCube.fbx");
+        var renderer = Assert.Single(root.GetComponentsInChildren<SkinnedMeshRenderer>());
+        var controller = new AnimatorController();
+        controller.AddAnimationClip(ConstantBlendClip("Base", 100f), "Base");
+        var upper = controller.AddLayer("Upper");
+        upper.weight = 0.25f;
+        upper.stateMachine.AddState("Upper").motion = ConstantBlendClip("Upper", 0f);
+        var animator = root.AddComponent<Animator>();
+        animator.runtimeAnimatorController = controller;
+        animator.Rebind();
+        animator.Update(0.25f);
+        Assert.Equal(75f, renderer.GetBlendShapeWeight(0), 4);
+    }
+
+    [Fact]
+    public void AnimatorAdditiveLayerUsesBlendShapeReferencePose()
+    {
+        var root = Import("BlendShapeCube.fbx");
+        var renderer = Assert.Single(root.GetComponentsInChildren<SkinnedMeshRenderer>());
+        var baseClip = ConstantBlendClip("Base", 50f);
+        var additiveClip = ConstantBlendClip("Additive", 80f);
+        var referenceClip = ConstantBlendClip("Reference", 20f);
+        additiveClip.MarkMecanimDataBuilt();
+        referenceClip.MarkMecanimDataBuilt();
+        AnimationUtility.SetAdditiveReferencePose(additiveClip, referenceClip, 0f);
+        var controller = new AnimatorController();
+        controller.AddAnimationClip(baseClip, "Base");
+        var upper = controller.AddLayer("Additive");
+        upper.weight = 0.5f;
+        upper.blendingMode = AnimatorLayerBlendingMode.Additive;
+        upper.stateMachine.AddState("Additive").motion = additiveClip;
+        var animator = root.AddComponent<Animator>();
+        animator.runtimeAnimatorController = controller;
+        animator.Rebind();
+        animator.Update(0.25f);
+        Assert.Equal(80f, renderer.GetBlendShapeWeight(0), 4);
+    }
+
+    private AnimationClip BlendShapeClip(out GameObject root)
+    {
+        var path = ImportPath("BlendShapeCube.fbx");
+        root = AssetDatabase.LoadAssetAtPath<GameObject>(path)!;
+        return Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>());
+    }
+
+    private static AnimationCurve BlendCurve(AnimationClip clip, string name)
+        => Assert.IsType<AnimationCurve>(AnimationUtility.GetEditorCurve(
+            clip,
+            EditorCurveBinding.FloatCurve(string.Empty, typeof(SkinnedMeshRenderer), "blendShape." + name)));
+
+    private static AnimationClip ConstantBlendClip(string name, float value)
+    {
+        var clip = new AnimationClip { name = name, length = 1f };
+        clip.SetCurve(string.Empty, typeof(SkinnedMeshRenderer), "blendShape.TopH",
+            AnimationCurve.Linear(0f, value, 1f, value));
+        return clip;
+    }
+
     private GameObject Import(string fixture) => AssetDatabase.LoadAssetAtPath<GameObject>(ImportPath(fixture))!;
 
     private string ImportPath(string fixture)

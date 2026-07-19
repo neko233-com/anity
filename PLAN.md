@@ -1,5 +1,24 @@
 # PLAN
 
+## 2026-07-19 — FBX blend-shape animation / clip slicing / Animator float pose
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对 Maya blend-shape FBX 做逐 key 黑盒校准：确认导入 binding 为 `SkinnedMeshRenderer` 的 `blendShape.TopH` / `blendShape.TopV`、空相对路径、24 Hz、take trim 后长度 `89/24` 秒与 0–100 百分比值；另确认 `Mesh.GetBlendShapeIndex(null)` 返回 `-1`。
+- `anity-native` model C ABI 新增 blend-shape track/scalar key 输出。C++ 从 ufbx animated mesh property 映射实际 mesh instance/node，并在 take 起点按源 frame rate 直接求值，避免 key reduction 删除中间 deformation sample；clip duration 由实际 transform/blend track 末 key 决定。
+- 托管 importer 现生成 `blendShape.<name>` curve，支持 `importBlendShapeDeformPercent` / `importBlendShapes` 开关、first/last frame 边界求值与时间归零，并允许同一 take 生成多个自定义切片。导入 clip 标记为 Mecanim-built；`AnimationClip.SampleAnimation` 与 `Animator` 可实际写入 `SkinnedMeshRenderer` weight，Override/Additive layer、reference pose、crossfade/BlendTree float-property 合成已接通，Transform 与 float additive reference 独立处理。
+- 新增导入/曲线/采样/几何/开关/切片/多 clip/API 边界/Animator Override/Additive 专项 **14 项**，`NativeSkinnedModelImportTests` 合计 **27/27**；ModelImporter/Animator/AnimationCurve/YAML 相关回归 **160/160**，均 0 失败、0 跳过。
+- `_scripts/build-native.sh Release` 与 `_scripts/build-all.sh Release` 通过、全部 0 编译错误；统一 native-required 八工程矩阵 **4030/4030**（Core **3032/3032**），0 失败、0 跳过。
+
+### 尚未完成
+- 当前逐帧 deformation 值与 Unity 探针一致，但 Unity importer 的 cubic tangent/key compression 尚未复刻，因此 curve key 数、切线与非 frame-time 连续插值仍不能宣称逐 key 完全一致。
+- `clipAnimations` 的 loop pose、root locks、mirror、cycle offset、mask/source Avatar、root motion 与 additive reference 的 importer/YAML 到 Player 全生命周期仍未闭环；通用 Renderer/Material/自定义 MonoBehaviour float/object-reference animation 也尚未进入同一 property pose graph。
+- 正式证据仍需 Unity 2022.3.61f1 Pro 的 sub-asset/fileID、重导入持久化、Editor preview 与 Player 逐帧 A/B；因此 ModelImporter、AnimationClip 与 Animator 相关项保持 🟡。
+
+### 下一优先项
+1. 复刻 Unity imported curve tangent/key compression，并完成 loop pose/root locks/mirror/cycle offset/root motion/additive/mask 的 importer-to-runtime 全链路。
+2. 完成 material/texture slot/remap、多 skin deformer、Humanoid mapping/T-pose/muscle/retargeting，并扩展 float/object-reference property pose graph。
+3. 补 stable sub-asset fileID/type-tree/artifact cache，在 Unity 2022.3.61f1 Pro 执行 Editor preview 与 Player 逐帧 skin/morph/animation A/B。
+
 ## 2026-07-19 — Native FBX skin / blend shape / imported Avatar 主链
 
 ### 已完成

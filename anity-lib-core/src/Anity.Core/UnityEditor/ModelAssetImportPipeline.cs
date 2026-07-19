@@ -279,13 +279,25 @@ internal static class ModelAssetImportPipeline
     var clips = new List<AnimationClip>(decoded.Clips.Length);
     foreach (var source in decoded.Clips)
     {
-      var clipSettings = (importer.clipAnimations ?? Array.Empty<ModelImporterClipAnimation>()).FirstOrDefault(setting =>
-        string.Equals(setting.takeName, source.Name, StringComparison.Ordinal) || string.Equals(setting.name, source.Name, StringComparison.Ordinal));
+      var matchingSettings = (importer.clipAnimations ?? Array.Empty<ModelImporterClipAnimation>()).Where(setting =>
+        string.Equals(setting.takeName, source.Name, StringComparison.Ordinal) || string.Equals(setting.name, source.Name, StringComparison.Ordinal)).ToArray();
+      if (matchingSettings.Length == 0) BuildClip(source, null);
+      else foreach (var clipSettings in matchingSettings) BuildClip(source, clipSettings);
+    }
+    return clips.ToArray();
+
+    void BuildClip(NativeModelDecoder.Clip source, ModelImporterClipAnimation? clipSettings)
+    {
+      var frameRate = source.FrameRate > 0f ? source.FrameRate : decoded.FrameRate;
+      var rangeStart = clipSettings is not null && clipSettings.firstFrame > 0f ? clipSettings.firstFrame / frameRate : 0f;
+      var rangeEnd = clipSettings is not null && clipSettings.lastFrame >= 0f ? clipSettings.lastFrame / frameRate : source.Duration;
+      rangeStart = Math.Clamp(rangeStart, 0f, source.Duration);
+      rangeEnd = Math.Clamp(rangeEnd, rangeStart, source.Duration);
       var clip = new AnimationClip
       {
         name = clipSettings is null || string.IsNullOrEmpty(clipSettings.name) ? source.Name : clipSettings.name,
-        frameRate = source.FrameRate > 0f ? source.FrameRate : decoded.FrameRate,
-        length = source.Duration,
+        frameRate = frameRate,
+        length = rangeEnd - rangeStart,
         legacy = importer.animationType == ModelImporterAnimationType.Legacy,
         wrapMode = clipSettings?.wrapMode ?? WrapMode.Default,
         hideFlags = HideFlags.NotEditable,
@@ -294,14 +306,22 @@ internal static class ModelAssetImportPipeline
       {
         if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length) continue;
         var path = RelativePath(root.transform, nodes[track.NodeIndex].transform);
-        AddVectorCurves(clip, path, "m_LocalPosition", track.PositionKeys);
-        AddQuaternionCurves(clip, path, track.RotationKeys);
-        AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys);
+        AddVectorCurves(clip, path, "m_LocalPosition", track.PositionKeys, rangeStart, rangeEnd);
+        AddQuaternionCurves(clip, path, track.RotationKeys, rangeStart, rangeEnd);
+        AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd);
       }
+      if (importer.importBlendShapes && importer.importBlendShapeDeformPercent)
+        foreach (var track in source.BlendShapeTracks)
+        {
+          if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length || string.IsNullOrEmpty(track.Name)) continue;
+          var path = RelativePath(root.transform, nodes[track.NodeIndex].transform);
+          clip.SetCurve(path, typeof(SkinnedMeshRenderer), "blendShape." + track.Name,
+            CurveForRange(track.Keys.Select(key => (key.time, key.value)).ToArray(), rangeStart, rangeEnd));
+        }
       clip.EnsureQuaternionContinuity();
+      clip.MarkMecanimDataBuilt();
       clips.Add(clip);
     }
-    return clips.ToArray();
   }
 
   private static string RelativePath(Transform root, Transform target)
@@ -312,21 +332,34 @@ internal static class ModelAssetImportPipeline
     return string.Join("/", names);
   }
 
-  private static void AddVectorCurves(AnimationClip clip, string path, string property, NativeModelDecoder.VectorKey[] keys)
+  private static void AddVectorCurves(AnimationClip clip, string path, string property, NativeModelDecoder.VectorKey[] keys, float start, float end)
   {
     if (keys.Length == 0) return;
-    clip.SetCurve(path, typeof(Transform), property + ".x", Curve(keys.Select(key => (key.time, key.x)).ToArray()));
-    clip.SetCurve(path, typeof(Transform), property + ".y", Curve(keys.Select(key => (key.time, key.y)).ToArray()));
-    clip.SetCurve(path, typeof(Transform), property + ".z", Curve(keys.Select(key => (key.time, key.z)).ToArray()));
+    clip.SetCurve(path, typeof(Transform), property + ".x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end));
+    clip.SetCurve(path, typeof(Transform), property + ".y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end));
+    clip.SetCurve(path, typeof(Transform), property + ".z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end));
   }
 
-  private static void AddQuaternionCurves(AnimationClip clip, string path, NativeModelDecoder.QuaternionKey[] keys)
+  private static void AddQuaternionCurves(AnimationClip clip, string path, NativeModelDecoder.QuaternionKey[] keys, float start, float end)
   {
     if (keys.Length == 0) return;
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.x", Curve(keys.Select(key => (key.time, key.x)).ToArray()));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.y", Curve(keys.Select(key => (key.time, key.y)).ToArray()));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.z", Curve(keys.Select(key => (key.time, key.z)).ToArray()));
-    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.w", Curve(keys.Select(key => (key.time, key.w)).ToArray()));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end));
+    clip.SetCurve(path, typeof(Transform), "m_LocalRotation.w", CurveForRange(keys.Select(key => (key.time, key.w)).ToArray(), start, end));
+  }
+
+  private static AnimationCurve CurveForRange((float Time, float Value)[] values, float start, float end)
+  {
+    if (values.Length == 0) return new AnimationCurve();
+    var source = Curve(values);
+    if (start <= 0f && end >= values[^1].Time) return source;
+    var sliced = new List<(float Time, float Value)> { (0f, source.Evaluate(start)) };
+    foreach (var value in values)
+      if (value.Time > start && value.Time < end) sliced.Add((value.Time - start, value.Value));
+    var duration = end - start;
+    if (duration > 0f) sliced.Add((duration, source.Evaluate(end)));
+    return Curve(sliced.ToArray());
   }
 
   private static AnimationCurve Curve((float Time, float Value)[] values)

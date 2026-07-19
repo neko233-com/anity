@@ -62,6 +62,14 @@ internal static class NativeModelDecoder
         internal float Duration;
         internal float FrameRate;
         internal Track[] Tracks = Array.Empty<Track>();
+        internal BlendShapeTrack[] BlendShapeTracks = Array.Empty<BlendShapeTrack>();
+    }
+
+    internal sealed class BlendShapeTrack
+    {
+        internal int NodeIndex;
+        internal string Name = string.Empty;
+        internal ScalarKey[] Keys = Array.Empty<ScalarKey>();
     }
 
     internal sealed class Track
@@ -156,7 +164,7 @@ internal static class NativeModelDecoder
     {
         internal IntPtr name;
         internal float duration, frameRate;
-        internal int trackCount;
+        internal int trackCount, blendShapeTrackCount;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -176,6 +184,17 @@ internal static class NativeModelDecoder
     {
         internal float time, x, y, z, w;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BlendShapeTrackInfo
+    {
+        internal int nodeIndex;
+        internal IntPtr name;
+        internal int keyCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ScalarKey { internal float time, value; }
 
     internal static bool TryLoad(string path, Options options, out Scene scene, out string error)
     {
@@ -275,7 +294,12 @@ internal static class NativeModelDecoder
             {
                 Require(GetClipInfo(handle, clipIndex, out var native), "clip information");
                 ValidateCount(native.trackCount, "animation track");
-                var clip = new Clip { Name = Utf8(native.name), Duration = native.duration, FrameRate = native.frameRate, Tracks = new Track[native.trackCount] };
+                ValidateCount(native.blendShapeTrackCount, "blend shape animation track");
+                var clip = new Clip
+                {
+                    Name = Utf8(native.name), Duration = native.duration, FrameRate = native.frameRate,
+                    Tracks = new Track[native.trackCount], BlendShapeTracks = new BlendShapeTrack[native.blendShapeTrackCount],
+                };
                 for (var trackIndex = 0; trackIndex < clip.Tracks.Length; trackIndex++)
                 {
                     Require(GetTrackInfo(handle, clipIndex, trackIndex, out var trackInfo), "animation track information");
@@ -293,6 +317,19 @@ internal static class NativeModelDecoder
                     Require(CopyRotationKeys(handle, clipIndex, trackIndex, track.RotationKeys, track.RotationKeys.Length), "rotation keys");
                     Require(CopyScaleKeys(handle, clipIndex, trackIndex, track.ScaleKeys, track.ScaleKeys.Length), "scale keys");
                     clip.Tracks[trackIndex] = track;
+                }
+                for (var trackIndex = 0; trackIndex < clip.BlendShapeTracks.Length; trackIndex++)
+                {
+                    Require(GetBlendShapeTrackInfo(handle, clipIndex, trackIndex, out var trackInfo), "blend shape animation track information");
+                    ValidateCount(trackInfo.keyCount, "blend shape animation key");
+                    var track = new BlendShapeTrack
+                    {
+                        NodeIndex = trackInfo.nodeIndex,
+                        Name = Utf8(trackInfo.name),
+                        Keys = new ScalarKey[trackInfo.keyCount],
+                    };
+                    Require(CopyBlendShapeKeys(handle, clipIndex, trackIndex, track.Keys, track.Keys.Length), "blend shape animation keys");
+                    clip.BlendShapeTracks[trackIndex] = track;
                 }
                 decoded.Clips[clipIndex] = clip;
             }
@@ -364,4 +401,8 @@ internal static class NativeModelDecoder
     private static extern AnityNative.Result CopyRotationKeys(IntPtr scene, int clipIndex, int trackIndex, [Out] QuaternionKey[] keys, int capacity);
     [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_CopyScaleKeys")]
     private static extern AnityNative.Result CopyScaleKeys(IntPtr scene, int clipIndex, int trackIndex, [Out] VectorKey[] keys, int capacity);
+    [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_GetBlendShapeTrackInfo")]
+    private static extern AnityNative.Result GetBlendShapeTrackInfo(IntPtr scene, int clipIndex, int trackIndex, out BlendShapeTrackInfo info);
+    [DllImport(AnityNative.LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityModel_CopyBlendShapeKeys")]
+    private static extern AnityNative.Result CopyBlendShapeKeys(IntPtr scene, int clipIndex, int trackIndex, [Out] ScalarKey[] keys, int capacity);
 }

@@ -60,11 +60,18 @@ struct Track {
   std::vector<AnityModelVectorKey> scaleKeys;
 };
 
+struct BlendShapeTrack {
+  int32_t nodeIndex = -1;
+  std::string name;
+  std::vector<AnityModelScalarKey> keys;
+};
+
 struct Clip {
   std::string name;
   float duration = 0.0f;
   float frameRate = 30.0f;
   std::vector<Track> tracks;
+  std::vector<BlendShapeTrack> blendShapeTracks;
 };
 
 static float Real(float value) { return std::isfinite(value) ? value : 0.0f; }
@@ -277,6 +284,13 @@ static AnityModelQuaternionKey QuaternionKey(const ufbx_baked_quat& source) {
   return { Real(source.time), Real(source.value.x), Real(source.value.y), Real(source.value.z), Real(source.value.w) };
 }
 
+static bool HasBlendShape(const Mesh& mesh, ufbx_string name) {
+  for (const BlendShape& shape : mesh.blendShapes) {
+    if (shape.name.size() == name.length && std::memcmp(shape.name.data(), name.data, name.length) == 0) return true;
+  }
+  return false;
+}
+
 template <typename T>
 static AnityResult CopyVector(const std::vector<T>& source, T* destination, int32_t capacity) {
   if (capacity < 0 || capacity < static_cast<int32_t>(source.size()) || (!destination && !source.empty()))
@@ -389,9 +403,12 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
         ufbx_bake_opts bakeOptions{};
         bakeOptions.trim_start_time = true;
         bakeOptions.resample_rate = scene->frameRate;
+        bakeOptions.minimum_sample_rate = scene->frameRate + 0.5;
         bakeOptions.maximum_sample_rate = std::max<double>(scene->frameRate, 1.0);
-        bakeOptions.key_reduction_enabled = true;
-        bakeOptions.key_reduction_rotation = true;
+        // Unity imports FBX deformation percentages at the source take's sample
+        // rate. Keep those samples intact: reducing the shared baked animation
+        // here can remove a blend-shape frame and change its interpolated value.
+        bakeOptions.key_reduction_enabled = false;
         ufbx_error bakeError{};
         ufbx_baked_anim* baked = ufbx_bake_anim(source, stack->anim, &bakeOptions, &bakeError);
         if (!baked) {
@@ -405,7 +422,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
         Clip clip;
         clip.name = String(stack->name);
         if (clip.name.empty()) clip.name = "Default Take";
-        clip.duration = Real(baked->playback_duration);
+        clip.duration = 0.0f;
         clip.frameRate = scene->frameRate;
         clip.tracks.reserve(baked->nodes.count);
         for (size_t trackIndex = 0; trackIndex < baked->nodes.count; ++trackIndex) {
@@ -423,8 +440,51 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           track.scaleKeys.reserve(bakedNode.scale_keys.count);
           for (size_t key = 0; key < bakedNode.scale_keys.count; ++key)
             track.scaleKeys.push_back(VectorKey(bakedNode.scale_keys.data[key], 1.0f));
+          if (!track.positionKeys.empty()) clip.duration = std::max(clip.duration, track.positionKeys.back().time);
+          if (!track.rotationKeys.empty()) clip.duration = std::max(clip.duration, track.rotationKeys.back().time);
+          if (!track.scaleKeys.empty()) clip.duration = std::max(clip.duration, track.scaleKeys.back().time);
           clip.tracks.push_back(std::move(track));
         }
+        if (options->importBlendShapes != 0) {
+          for (size_t elementIndex = 0; elementIndex < baked->elements.count; ++elementIndex) {
+            const ufbx_baked_element& bakedElement = baked->elements.data[elementIndex];
+            if (bakedElement.element_id >= source->elements.count) continue;
+            ufbx_element* element = source->elements.data[bakedElement.element_id];
+            ufbx_mesh* animatedMesh = ufbx_as_mesh(element);
+            if (!animatedMesh || animatedMesh->typed_id >= scene->meshes.size()) continue;
+            const Mesh& importedMesh = scene->meshes[animatedMesh->typed_id];
+            for (size_t propIndex = 0; propIndex < bakedElement.props.count; ++propIndex) {
+              const ufbx_baked_prop& prop = bakedElement.props.data[propIndex];
+              if (prop.keys.count == 0 || !HasBlendShape(importedMesh, prop.name)) continue;
+              for (size_t instanceIndex = 0; instanceIndex < animatedMesh->instances.count; ++instanceIndex) {
+                const ufbx_node* instance = animatedMesh->instances.data[instanceIndex];
+                const auto found = nodeMap.find(instance->typed_id);
+                if (found == nodeMap.end()) continue;
+                BlendShapeTrack track;
+                track.nodeIndex = found->second;
+                track.name = String(prop.name);
+                const double duration = prop.keys.data[prop.keys.count - 1].time;
+                const int64_t lastFrame = static_cast<int64_t>(std::floor(duration * scene->frameRate + 0.5));
+                track.keys.reserve(static_cast<size_t>(lastFrame + 2));
+                for (int64_t frame = 0; frame <= lastFrame; ++frame) {
+                  const double time = static_cast<double>(frame) / scene->frameRate;
+                  const ufbx_prop value = ufbx_evaluate_prop_len(stack->anim, element,
+                    prop.name.data, prop.name.length, baked->playback_time_begin + time);
+                  track.keys.push_back({Real(time), Real(value.value_real)});
+                }
+                const double sampledEnd = static_cast<double>(lastFrame) / scene->frameRate;
+                if (duration - sampledEnd > 1e-8) {
+                  const ufbx_prop value = ufbx_evaluate_prop_len(stack->anim, element,
+                    prop.name.data, prop.name.length, baked->playback_time_begin + duration);
+                  track.keys.push_back({Real(duration), Real(value.value_real)});
+                }
+                if (!track.keys.empty()) clip.duration = std::max(clip.duration, track.keys.back().time);
+                clip.blendShapeTracks.push_back(std::move(track));
+              }
+            }
+          }
+        }
+        if (clip.duration <= 0.0f) clip.duration = Real(baked->playback_duration);
         ufbx_free_baked_anim(baked);
         scene->clips.push_back(std::move(clip));
       }
@@ -547,7 +607,8 @@ AnityResult ANITY_CALL AnityModel_CopyBlendShapeFrameDeltas(const AnityModelScen
 AnityResult ANITY_CALL AnityModel_GetClipInfo(const AnityModelScene* scene, int32_t clipIndex, AnityModelClipInfo* outInfo) {
   if (!scene || !outInfo || clipIndex < 0 || clipIndex >= static_cast<int32_t>(scene->clips.size())) return ANITY_ERR_INVALID_ARG;
   const Clip& clip = scene->clips[clipIndex];
-  *outInfo = { clip.name.c_str(), clip.duration, clip.frameRate, static_cast<int32_t>(clip.tracks.size()) };
+  *outInfo = { clip.name.c_str(), clip.duration, clip.frameRate, static_cast<int32_t>(clip.tracks.size()),
+    static_cast<int32_t>(clip.blendShapeTracks.size()) };
   return ANITY_OK;
 }
 
@@ -580,6 +641,22 @@ AnityResult ANITY_CALL AnityModel_CopyScaleKeys(const AnityModelScene* scene, in
   const Clip& clip = scene->clips[clipIndex];
   if (trackIndex < 0 || trackIndex >= static_cast<int32_t>(clip.tracks.size())) return ANITY_ERR_INVALID_ARG;
   return CopyVector(clip.tracks[trackIndex].scaleKeys, keys, capacity);
+}
+
+AnityResult ANITY_CALL AnityModel_GetBlendShapeTrackInfo(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelBlendShapeTrackInfo* outInfo) {
+  if (!scene || !outInfo || clipIndex < 0 || clipIndex >= static_cast<int32_t>(scene->clips.size())) return ANITY_ERR_INVALID_ARG;
+  const Clip& clip = scene->clips[clipIndex];
+  if (trackIndex < 0 || trackIndex >= static_cast<int32_t>(clip.blendShapeTracks.size())) return ANITY_ERR_INVALID_ARG;
+  const BlendShapeTrack& track = clip.blendShapeTracks[trackIndex];
+  *outInfo = {track.nodeIndex, track.name.c_str(), static_cast<int32_t>(track.keys.size())};
+  return ANITY_OK;
+}
+
+AnityResult ANITY_CALL AnityModel_CopyBlendShapeKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelScalarKey* keys, int32_t capacity) {
+  if (!scene || clipIndex < 0 || clipIndex >= static_cast<int32_t>(scene->clips.size())) return ANITY_ERR_INVALID_ARG;
+  const Clip& clip = scene->clips[clipIndex];
+  if (trackIndex < 0 || trackIndex >= static_cast<int32_t>(clip.blendShapeTracks.size())) return ANITY_ERR_INVALID_ARG;
+  return CopyVector(clip.blendShapeTracks[trackIndex].keys, keys, capacity);
 }
 
 } // extern "C"

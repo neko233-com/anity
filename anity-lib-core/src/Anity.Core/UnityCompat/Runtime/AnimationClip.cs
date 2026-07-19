@@ -11,6 +11,64 @@ public struct AnimationCurveBinding
     public AnimationCurve curve;
 }
 
+internal readonly struct AnimationFloatPropertyKey : IEquatable<AnimationFloatPropertyKey>
+{
+    internal AnimationFloatPropertyKey(SkinnedMeshRenderer renderer, int blendShapeIndex, string path)
+    {
+        Renderer = renderer;
+        BlendShapeIndex = blendShapeIndex;
+        Path = path;
+    }
+
+    internal SkinnedMeshRenderer Renderer { get; }
+    internal int BlendShapeIndex { get; }
+    internal string Path { get; }
+    public bool Equals(AnimationFloatPropertyKey other)
+        => ReferenceEquals(Renderer, other.Renderer) && BlendShapeIndex == other.BlendShapeIndex;
+    public override bool Equals(object? obj) => obj is AnimationFloatPropertyKey other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(Renderer?.GetInstanceID() ?? 0, BlendShapeIndex);
+}
+
+internal sealed class AnimationFloatPose
+{
+    private readonly Dictionary<AnimationFloatPropertyKey, float> _values = new();
+    internal int Count => _values.Count;
+    internal IEnumerable<KeyValuePair<AnimationFloatPropertyKey, float>> Values => _values;
+    internal void Set(AnimationFloatPropertyKey key, float value) => _values[key] = value;
+    internal bool TryGetValue(AnimationFloatPropertyKey key, out float value) => _values.TryGetValue(key, out value);
+    internal AnimationFloatPose Clone()
+    {
+        var clone = new AnimationFloatPose();
+        foreach (var pair in _values) clone._values[pair.Key] = pair.Value;
+        return clone;
+    }
+    internal void Apply()
+    {
+        foreach (var pair in _values)
+            if (pair.Key.Renderer is not null) pair.Key.Renderer.SetBlendShapeWeight(pair.Key.BlendShapeIndex, pair.Value);
+    }
+    internal static AnimationFloatPose Blend(AnimationFloatPose lower, AnimationFloatPose upper, float weight,
+        bool additive = false, AnimationFloatPose? reference = null, Func<string, bool>? pathActive = null)
+    {
+        var result = lower?.Clone() ?? new AnimationFloatPose();
+        if (upper is null) return result;
+        foreach (var pair in upper._values)
+        {
+            if (pathActive is not null && !pathActive(pair.Key.Path)) continue;
+            var baseValue = result._values.TryGetValue(pair.Key, out var existing)
+                ? existing : pair.Key.Renderer.GetBlendShapeWeight(pair.Key.BlendShapeIndex);
+            if (additive)
+            {
+                var referenceValue = reference is not null && reference._values.TryGetValue(pair.Key, out var found)
+                    ? found : baseValue;
+                result._values[pair.Key] = baseValue + (pair.Value - referenceValue) * weight;
+            }
+            else result._values[pair.Key] = baseValue + (pair.Value - baseValue) * weight;
+        }
+        return result;
+    }
+}
+
 public class AnimationClip : Motion
 {
     private float _length;
@@ -79,6 +137,27 @@ public class AnimationClip : Motion
     {
         if (go == null) return;
         EvaluateTransformPose(go, time).Apply();
+        EvaluateFloatProperties(go, time).Apply();
+    }
+
+    internal AnimationFloatPose EvaluateFloatProperties(GameObject go, float time)
+    {
+        var pose = new AnimationFloatPose();
+        if (go is null) return pose;
+        float wrappedTime = WrapTime(time, length, wrapMode);
+        foreach (AnimationCurveBinding binding in _bindings)
+        {
+            if (binding.type != typeof(SkinnedMeshRenderer) || binding.curve is null ||
+                !binding.propertyName.StartsWith("blendShape.", StringComparison.Ordinal)) continue;
+            Transform target = string.IsNullOrEmpty(binding.path) ? go.transform : go.transform.Find(binding.path);
+            var renderer = target?.gameObject?.GetComponent<SkinnedMeshRenderer>();
+            var mesh = renderer?.sharedMesh;
+            if (renderer is null || mesh is null) continue;
+            var shapeIndex = mesh.GetBlendShapeIndex(binding.propertyName[11..]);
+            if (shapeIndex < 0) continue;
+            pose.Set(new AnimationFloatPropertyKey(renderer, shapeIndex, binding.path ?? string.Empty), binding.curve.Evaluate(wrappedTime));
+        }
+        return pose;
     }
 
     internal AnimationPose EvaluateTransformPose(GameObject go, float time)
@@ -134,6 +213,17 @@ public class AnimationClip : Motion
             return false;
         }
         pose = _additiveReferencePoseClip.EvaluateTransformPose(go, _additiveReferencePoseTime);
+        return true;
+    }
+
+    internal bool TryEvaluateAdditiveReferenceFloatProperties(GameObject go, out AnimationFloatPose pose)
+    {
+        if (_additiveReferencePoseClip is null)
+        {
+            pose = new AnimationFloatPose();
+            return false;
+        }
+        pose = _additiveReferencePoseClip.EvaluateFloatProperties(go, _additiveReferencePoseTime);
         return true;
     }
 

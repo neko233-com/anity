@@ -257,6 +257,14 @@ public partial class Mesh : Object
 
     public string GetBlendShapeName(int shapeIndex) => GetBlendShape(shapeIndex).name;
 
+    public int GetBlendShapeIndex(string blendShapeName)
+    {
+        if (blendShapeName is null) return -1;
+        for (int index = 0; index < _blendShapes.Count; index++)
+            if (string.Equals(_blendShapes[index].name, blendShapeName, StringComparison.Ordinal)) return index;
+        return -1;
+    }
+
     public int GetBlendShapeFrameCount(int shapeIndex) => GetBlendShape(shapeIndex).frames.Count;
 
     public float GetBlendShapeFrameWeight(int shapeIndex, int frameIndex)

@@ -96,6 +96,7 @@ typedef struct AnityModelClipInfo {
   float duration;
   float frameRate;
   int32_t trackCount;
+  int32_t blendShapeTrackCount;
 } AnityModelClipInfo;
 
 typedef struct AnityModelTrackInfo {
@@ -114,6 +115,17 @@ typedef struct AnityModelQuaternionKey {
   float time;
   float x, y, z, w;
 } AnityModelQuaternionKey;
+
+typedef struct AnityModelBlendShapeTrackInfo {
+  int32_t nodeIndex;
+  const char* name;
+  int32_t keyCount;
+} AnityModelBlendShapeTrackInfo;
+
+typedef struct AnityModelScalarKey {
+  float time;
+  float value;
+} AnityModelScalarKey;
 
 ANITY_API AnityResult ANITY_CALL AnityModel_LoadFile(
     const char* path, const AnityModelImportOptions* options,
@@ -136,6 +148,8 @@ ANITY_API AnityResult ANITY_CALL AnityModel_GetTrackInfo(const AnityModelScene* 
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyPositionKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelVectorKey* keys, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyRotationKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelQuaternionKey* keys, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyScaleKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelVectorKey* keys, int32_t capacity);
+ANITY_API AnityResult ANITY_CALL AnityModel_GetBlendShapeTrackInfo(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelBlendShapeTrackInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityModel_CopyBlendShapeKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelScalarKey* keys, int32_t capacity);
 
 #ifdef __cplusplus
 }

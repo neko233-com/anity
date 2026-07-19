@@ -43,15 +43,20 @@ public class Animator : Behaviour
 
     private readonly struct SampledAnimationPose
     {
-        public SampledAnimationPose(AnimationPose pose, AnimationPose? additiveReferencePose = null)
+        public SampledAnimationPose(AnimationPose pose, AnimationFloatPose floatProperties,
+            AnimationPose? additiveReferencePose = null, AnimationFloatPose? additiveReferenceFloatProperties = null)
         {
             Pose = pose;
+            FloatProperties = floatProperties;
             AdditiveReferencePose = additiveReferencePose;
+            AdditiveReferenceFloatProperties = additiveReferenceFloatProperties;
         }
 
         public AnimationPose Pose { get; }
+        public AnimationFloatPose FloatProperties { get; }
         public AnimationPose? AdditiveReferencePose { get; }
-        public static SampledAnimationPose Empty => new(new AnimationPose());
+        public AnimationFloatPose? AdditiveReferenceFloatProperties { get; }
+        public static SampledAnimationPose Empty => new(new AnimationPose(), new AnimationFloatPose());
     }
 
     public RuntimeAnimatorController controller
@@ -356,13 +361,16 @@ public class Animator : Behaviour
         _deltaRotation = Quaternion.identity;
 
         var accumulatedPose = new AnimationPose();
+        var accumulatedFloatProperties = new AnimationFloatPose();
         int layers = layerCount;
         for (int i = 0; i < layers; i++)
         {
             SampledAnimationPose layerPose = UpdateLayer(i, dt);
             accumulatedPose = ComposeLayer(accumulatedPose, layerPose, i);
+            accumulatedFloatProperties = ComposeFloatLayer(accumulatedFloatProperties, layerPose, i);
         }
         accumulatedPose.Apply();
+        accumulatedFloatProperties.Apply();
     }
 
     private SampledAnimationPose UpdateLayer(int layerIndex, float deltaTime)
@@ -555,10 +563,14 @@ public class Animator : Behaviour
         SampledAnimationPose first = SampleState(state1, time1);
         SampledAnimationPose second = SampleState(state2, time2);
         AnimationPose pose = AnimationPose.Blend(first.Pose, second.Pose, weight2);
+        AnimationFloatPose properties = AnimationFloatPose.Blend(first.FloatProperties, second.FloatProperties, weight2);
         AnimationPose? reference = first.AdditiveReferencePose is not null && second.AdditiveReferencePose is not null
             ? AnimationPose.Blend(first.AdditiveReferencePose, second.AdditiveReferencePose, weight2)
             : null;
-        return new SampledAnimationPose(pose, reference);
+        AnimationFloatPose? referenceProperties = first.AdditiveReferenceFloatProperties is not null && second.AdditiveReferenceFloatProperties is not null
+            ? AnimationFloatPose.Blend(first.AdditiveReferenceFloatProperties, second.AdditiveReferenceFloatProperties, weight2)
+            : null;
+        return new SampledAnimationPose(pose, properties, reference, referenceProperties);
     }
 
     private SampledAnimationPose SampleMotion(Motion motion, float time)
@@ -566,8 +578,11 @@ public class Animator : Behaviour
         if (motion is AnimationClip clip && gameObject is not null)
         {
             AnimationPose pose = clip.EvaluateTransformPose(gameObject, time);
+            AnimationFloatPose properties = clip.EvaluateFloatProperties(gameObject, time);
             clip.TryEvaluateAdditiveReferencePose(gameObject, out AnimationPose referencePose);
-            return new SampledAnimationPose(pose, referencePose.Count > 0 ? referencePose : null);
+            clip.TryEvaluateAdditiveReferenceFloatProperties(gameObject, out AnimationFloatPose referenceProperties);
+            return new SampledAnimationPose(pose, properties, referencePose.Count > 0 ? referencePose : null,
+                referenceProperties.Count > 0 ? referenceProperties : null);
         }
         if (motion is BlendTree blendTree) return SampleBlendTree(blendTree, time);
         return SampledAnimationPose.Empty;
@@ -583,9 +598,12 @@ public class Animator : Behaviour
         float[] weights = new float[bt.children.Length];
         bt.ComputeBlendTreeWeights(x, y, weights);
         var accumulated = new AnimationPose();
+        var accumulatedProperties = new AnimationFloatPose();
         AnimationPose? accumulatedReference = null;
+        AnimationFloatPose? accumulatedReferenceProperties = null;
         float accumulatedWeight = 0f;
-        bool allHaveReference = true;
+        bool allHaveTransformReference = true;
+        bool allHaveFloatReference = true;
         for (int i = 0; i < weights.Length; i++)
         {
             float childWeight = weights[i];
@@ -597,19 +615,27 @@ public class Animator : Behaviour
             float combinedWeight = accumulatedWeight + childWeight;
             float blendWeight = accumulatedWeight <= 0f ? 1f : childWeight / combinedWeight;
             accumulated = AnimationPose.Blend(accumulated, child.Pose, blendWeight);
+            accumulatedProperties = AnimationFloatPose.Blend(accumulatedProperties, child.FloatProperties, blendWeight);
             if (child.AdditiveReferencePose is null)
             {
-                allHaveReference = false;
+                allHaveTransformReference = false;
             }
-            else if (allHaveReference)
+            else if (allHaveTransformReference)
             {
                 accumulatedReference = accumulatedReference is null
                     ? child.AdditiveReferencePose.Clone()
                     : AnimationPose.Blend(accumulatedReference, child.AdditiveReferencePose, blendWeight);
             }
+            if (child.AdditiveReferenceFloatProperties is null) allHaveFloatReference = false;
+            else if (allHaveFloatReference)
+                accumulatedReferenceProperties = accumulatedReferenceProperties is null
+                    ? child.AdditiveReferenceFloatProperties.Clone()
+                    : AnimationFloatPose.Blend(accumulatedReferenceProperties, child.AdditiveReferenceFloatProperties, blendWeight);
             accumulatedWeight = combinedWeight;
         }
-        return new SampledAnimationPose(accumulated, allHaveReference ? accumulatedReference : null);
+        return new SampledAnimationPose(accumulated, accumulatedProperties,
+            allHaveTransformReference ? accumulatedReference : null,
+            allHaveFloatReference ? accumulatedReferenceProperties : null);
     }
 
     private AnimationPose ComposeLayer(AnimationPose accumulated, SampledAnimationPose sampled, int layerIndex)
@@ -640,6 +666,24 @@ public class Animator : Behaviour
                 pathActive: pathActive);
         }
         return AnimationPose.Blend(accumulated, sampled.Pose, weight, pathActive: pathActive);
+    }
+
+    private AnimationFloatPose ComposeFloatLayer(AnimationFloatPose accumulated, SampledAnimationPose sampled, int layerIndex)
+    {
+        if (sampled.FloatProperties.Count == 0) return accumulated;
+        if (!(_controller is AnimatorController controller) || layerIndex <= 0 || layerIndex >= controller.layers.Length)
+            return AnimationFloatPose.Blend(accumulated, sampled.FloatProperties, 1f);
+        AnimatorControllerLayer layer = controller.layers[layerIndex];
+        float weight = float.IsNaN(layer.weight) ? 0f : layer.weight < 0f || layer.weight > 1f ? 1f : layer.weight;
+        if (weight <= 0f) return accumulated;
+        Func<string, bool>? pathActive = layer.avatarMask is null ? null : layer.avatarMask.IsTransformPathActive;
+        if (layer.blendingMode == AnimatorLayerBlendingMode.Additive)
+        {
+            if (sampled.AdditiveReferenceFloatProperties is null) return accumulated;
+            return AnimationFloatPose.Blend(accumulated, sampled.FloatProperties, weight, true,
+                sampled.AdditiveReferenceFloatProperties, pathActive);
+        }
+        return AnimationFloatPose.Blend(accumulated, sampled.FloatProperties, weight, pathActive: pathActive);
     }
 
     private AnimatorState FindState(int hash, int layerIndex)
