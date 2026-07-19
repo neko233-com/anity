@@ -1,5 +1,23 @@
 # PLAN
 
+## 2026-07-19 — Unity FBX pre/post rotation、pivot 与 geometry transform
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对同一 Maya FBX 构造 `PreRotation`、`PostRotation`、二者组合、`RotationPivot`、`RotationOffset`、`ScalingPivot`、`ScalingOffset` 与 geometric translation/rotation/scaling 共 **10 组**权威 fixture，并分别采集 `resampleCurves=true/false` 的根节点静态 TRS、Mesh bounds、Transform binding/key 数及 frame `0/13/23` 值。
+- `anity-native` 现以 `UFBX_PIVOT_HANDLING_ADJUST_TO_ROTATION_PIVOT` 构建 Unity 同语义的静态层级，把 rotation pivot 逆补偿下沉到 geometry/child；Mesh position/normal/tangent 与 blend-shape delta 同步应用 Unity FBX X-axis basis 的 Y/Z 反向，rotation/scaling pivot 与 geometric transform 的 bounds center 已与 Unity A/B 一致。
+- 关闭 `resampleCurves` 时实现 Unity 的分支化 Transform 曲线策略：pre/post rotation 保留 3-key raw position 并烘焙 quaternion/scale；pivot compensation 使用 24-key position/scale，未带 rotation offset 时输出 24-key `localEulerAnglesRaw`；plain/geometric-only 资产继续保留 3-key raw position/Euler/scale。为复刻 Unity 的双重 pivot 语义，静态资源使用 adjusted-pivot scene，raw pivot position 由第二个 retained-pivot scene 求值。
+- 新增 resampled/raw 各 **10 个**永久回归：前者逐例校验 16 个静态值、10 条 24 帧共享网格及 30 个 Unity curve sample，后者逐字校验 Transform binding/key-count 并校验 source/0/13/23 sample；新增合计 **20/20**，`NativeModelImportTests` **112/112**，与 skin/blend-shape 联合聚焦门禁 **154/154**。`_scripts/build-native.sh Release`、`_scripts/build-all.sh Release` 均通过且产品工程 0 编译错误；统一 native-required 八工程矩阵 **4154/4154**（Core **3145/3145**），0 失败、0 跳过。
+
+### 尚未完成
+- resampled 静态/曲线当前以绝对误差 `1e-6` 验收，raw sampled Euler 以 `2e-5` 验收；raw Euler 已观测最大差异约 `1.335e-5`，仍需继续复刻 FBX `KFCurve`/MatrixConverter 的精确求值顺序。少量 quaternion ULP 与 signed-zero 也尚未逐 bit 闭环。
+- Unity raw 导入还会生成 3-key `Renderer.m_Enabled` visibility curve；Anity 当前缺该 Renderer binding，不能把 Transform curve 主链通过冒充为完整 AnimationClip 对齐。
+- 多 animation layer、constant/stepped/weighted/broken tangent、真正的 instanced/helper-node topology、skinned pivot/bindpose、loop/root motion/additive/mask、stable sub-asset fileID/type-tree/artifact cache，以及 Unity 2022.3.61f1 Pro Editor/Player A/B 仍未完成，因此 ModelImporter/AnimationClip 保持 🟡。
+
+### 下一优先项
+1. 复刻 raw Euler 的 FBX `KFCurve` 精确求值与 signed-zero/quaternion ULP，收紧 10 组 pivot fixture 到 exact-bit。
+2. 增加 Renderer visibility property binding，输出 Unity 同语义 `m_Enabled` 曲线并补 ≥10 个 importer/runtime/Animator 用例。
+3. 补多 animation layer、constant/stepped/weighted/broken tangent、instanced/helper 与 skinned pivot/bindpose fixture，再推进 loop/root motion/additive/mask。
+
 ## 2026-07-19 — Unity FBX 多圈 wrap / tie / 非整帧采样
 
 ### 已完成

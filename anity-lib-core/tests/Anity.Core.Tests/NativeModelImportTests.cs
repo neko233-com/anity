@@ -172,6 +172,132 @@ public sealed class NativeModelImportTests : IDisposable
         AssertQuaternionBits(imported.Clip, expectedSamplesBase64);
     }
 
+    public static TheoryData<string, string, string, string> TransformStackUnitySamples => new()
+    {
+        { "pre-x", "PreRotation=10,0,0",
+          "AAAAgAAAAAAAAAAAtn6yPQAAAIAAAACAngZ/PwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAArXIzwK1yM8CtcjPA==", "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8tn6yPSam9z2hFji9AAAAgL7BK74npvc9AAAAgI2Agr6ibo8+ngZ/P5DRcT80hXM/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "pre-mixed", "PreRotation=10,20,30",
+          "AAAAgAAAAAAAAAAAATMcPezZQb6hCnW+sJhzPwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAArXIzwK1yM8CtcjPA==", "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8ADMcPZOhlD1aOdC969lBvnh1uL7Fx6e8oAp1vjwr6b7vCTU8r5hzP2+WTz+Nmn4/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "post-y", "PostRotation=0,25,0",
+          "AAAAgAAAAAAAAAAAAAAAAFmiXT4AAACAie55PwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAArXIzwK1yM8CtcjPA==", "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8AAAAAFxStj1MKTu+WaJdPqcdrTy8/7A+AAAAgPfHZr4XKnA+ie55P75PeD8z1mM/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "post-mixed", "PostRotation=-15,25,-35",
+          "AAAAgAAAAAAAAAAAjH9pPaPOeD4ZO4e+7n9uPwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAArXIzwK1yM8CtcjPA==", "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8jH9pPY+qSj76tiy+o854PpH9UT1yFLE+GTuHvu+N6L49Hx297n9uP4n7XT+cFWw/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "pre-post", "PreRotation=10,20,30;PostRotation=-15,25,-35",
+          "AAAAgAAAAAAAAAAAj6pKPpH9UT3vjei+iftdPwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAArXIzwK1yM8CtcjPA==", "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8j6pKPtSooz4umBC9kf1RPSzmFL7VDkk+743ovuGrGb/sRY2+iftdP2P0Nz8otHA/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "rotation-pivot", "RotationPivot=25,-10,15",
+          "AACAvszMzL2ZmRk+AAAAAAAAAIAAAACAAACAPwAAgD8AAIA/AACAPwAAgD7MzMw9mpkZvhDXIzwI1yM8ENcjPA==", "AACAvvfFnL5TgXW+zMzMva9Frr3uXdm9mZkZPpndVj5KR4g9AAAAAAAzHD1mvgK+AAAAgOvZQb7uWhQ+AAAAgKAKdb6HfYk+AACAP6+Ycz9El3E/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "rotation-pivot-offset", "RotationPivot=25,-10,15;RotationOffset=5,7,-9",
+          "mZmZvo/C9byPwnU9AAAAAAAAAIAAAACAAACAPwAAgD8AAIA/AACAPwAAgD7MzMw9mpkZvhDXIzwI1yM8ENcjPA==", "mZmZvpBftr5DWpS+j8L1vDRMd7yLAxS9j8J1PUdp9T2FKsC8AAAAAAAzHD1mvgK+AAAAgOvZQb7uWhQ+AAAAgKAKdb6HfYk+AACAP6+Ycz9El3E/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "scaling-pivot", "ScalingPivot=-12,18,6",
+          "AAAAgAAAAAAAAAAAAAAAAAAAAIAAAACAAACAPwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAArXIzwK1yM8CtcjPA==", "AAAAgMYm7LwC9n07AAAAADyj07ulHqw8AAAAAFV1XDvXC7+8AAAAAAAzHD1mvgK+AAAAgOvZQb7uWhQ+AAAAgKAKdb6HfYk+AACAP6+Ycz9El3E/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "scaling-pivot-offset", "ScalingPivot=-12,18,6;ScalingOffset=4,-8,10",
+          "AAAAgAAAAAAAAAAAAAAAAAAAAIAAAACAAACAPwAAgD8AAIA/AACAPwrXI70K16O9zMzMPQjXIzwQ1yM8CNcjPA==", "AAAAgGKk6ru7a308AAAAACTGqzsqWn48AAAAACZHp7xf9Qk8AAAAAAAzHD1mvgK+AAAAgOvZQb7uWhQ+AAAAgKAKdb6HfYk+AACAP6+Ycz9El3E/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "geometric-helper", "GeometricTranslation=12,-8,20;GeometricRotation=15,25,-10;GeometricScaling=1.5,0.75,2",
+          "AAAAgAAAAAAAAAAAAAAAAAAAAIAAAACAAACAPwAAgD8AAIA/AACAP4/C9b0K16O9zMxMPggauTzA/YE86MXRPA==", "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8AAAAAAAzHD1mvgK+AAAAgOvZQb7uWhQ+AAAAgKAKdb6HfYk+AACAP6+Ycz9El3E/AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+    };
+
+    [Theory]
+    [MemberData(nameof(TransformStackUnitySamples))]
+    public void PrePostRotationsPivotsAndGeometryMatchUnity2022TransformStack(
+        string caseName, string propertyOverrides,
+        string expectedStaticBase64, string expectedSamplesBase64)
+    {
+        var imported = ReimportTransformStack(caseName, propertyOverrides);
+        var bounds = imported.Mesh.bounds;
+        AssertUnitySamples(expectedStaticBase64, new[]
+        {
+            imported.Root.transform.localPosition.x,
+            imported.Root.transform.localPosition.y,
+            imported.Root.transform.localPosition.z,
+            imported.Root.transform.localRotation.x,
+            imported.Root.transform.localRotation.y,
+            imported.Root.transform.localRotation.z,
+            imported.Root.transform.localRotation.w,
+            imported.Root.transform.localScale.x,
+            imported.Root.transform.localScale.y,
+            imported.Root.transform.localScale.z,
+            bounds.center.x, bounds.center.y, bounds.center.z,
+            bounds.size.x, bounds.size.y, bounds.size.z,
+        }, caseName + ":static");
+
+        var sampledValues = new List<float>(TransformProperties.Length * 3);
+        foreach (var property in TransformProperties)
+        {
+            var binding = imported.Clip.bindings.Single(candidate =>
+                string.Equals(candidate.propertyName, property, StringComparison.Ordinal));
+            Assert.Equal(string.Empty, binding.path);
+            Assert.Equal(Enumerable.Range(0, 24), Frames(binding.curve, imported.Clip.frameRate));
+            sampledValues.Add(binding.curve.keys[0].value);
+            sampledValues.Add(binding.curve.keys[13].value);
+            sampledValues.Add(binding.curve.keys[23].value);
+        }
+        AssertUnitySamples(expectedSamplesBase64, sampledValues, caseName + ":curves");
+    }
+
+    public static TheoryData<string, string, string, string> TransformStackRawUnitySamples => new()
+    {
+        { "pre-x", "PreRotation=10,0,0",
+          "m_LocalPosition.x:3,m_LocalPosition.y:3,m_LocalPosition.z:3,m_LocalRotation.w:24,m_LocalRotation.x:24,m_LocalRotation.y:24,m_LocalRotation.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8ngZ/P5HRcT80hXM/tX6yPSam9z2hFji9AAAAAL/BK74qpvc9AAAAAI2Agr6hbo8+AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "pre-mixed", "PreRotation=10,20,30",
+          "m_LocalPosition.x:3,m_LocalPosition.y:3,m_LocalPosition.z:3,m_LocalRotation.w:24,m_LocalRotation.x:24,m_LocalRotation.y:24,m_LocalRotation.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8sJhzP2+WTz+Nmn4//jIcPZOhlD1ZOdC97NlBvnl1uL7Ex6e8oAp1vj4r6b7vCTU8AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "post-y", "PostRotation=0,25,0",
+          "m_LocalPosition.x:3,m_LocalPosition.y:3,m_LocalPosition.z:3,m_LocalRotation.w:24,m_LocalRotation.x:24,m_LocalRotation.y:24,m_LocalRotation.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8ie55P75PeD801mM/AAAAAFtStj1MKTu+WaJdPqMdrTy8/7A+AAAAAPfHZr4YKnA+AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "post-mixed", "PostRotation=-15,25,-35",
+          "m_LocalPosition.x:3,m_LocalPosition.y:3,m_LocalPosition.z:3,m_LocalRotation.w:24,m_LocalRotation.x:24,m_LocalRotation.y:24,m_LocalRotation.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW87n9uP4n7XT+cFWw/jX9pPY+qSj77tiy+o854PpD9UT1yFLE+GTuHvu+N6L4/Hx29AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "pre-post", "PreRotation=10,20,30;PostRotation=-15,25,-35",
+          "m_LocalPosition.x:3,m_LocalPosition.y:3,m_LocalPosition.z:3,m_LocalRotation.w:24,m_LocalRotation.x:24,m_LocalRotation.y:24,m_LocalRotation.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "AAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8iftdP2P0Nz8otHA/j6pKPtSooz4xmBC9kP1RPS3mFL7VDkk+743ovuKrGb/sRY2+AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "rotation-pivot", "RotationPivot=25,-10,15",
+          "localEulerAnglesRaw.x:24,localEulerAnglesRaw.y:24,localEulerAnglesRaw.z:24,m_LocalPosition.x:24,m_LocalPosition.y:24,m_LocalPosition.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "AAAAAAAAIEEAACDBAAAAgAAAoMEAAKBBAAAAgAAA8MEAAPBBAAAAgNiNNT3FK/m9AAAAAMIw5b345wI9AAAAAEBxEj6KD/e9AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "rotation-pivot-offset", "RotationPivot=25,-10,15;RotationOffset=5,7,-9",
+          "m_LocalPosition.x:24,m_LocalPosition.y:24,m_LocalPosition.z:24,m_LocalRotation.w:24,m_LocalRotation.x:24,m_LocalRotation.y:24,m_LocalRotation.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "zMxMvaT3ubsWyS++KVyPPTOpK70l0NA961G4vSkhWT27sFe+AACAP7CYcz9El3E/AAAAAP4yHD1nvgK+AAAAAOzZQb7wWhQ+AAAAAKAKdb6IfYk+AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "scaling-pivot", "ScalingPivot=-12,18,6",
+          "localEulerAnglesRaw.x:24,localEulerAnglesRaw.y:24,localEulerAnglesRaw.z:24,m_LocalPosition.x:24,m_LocalPosition.y:24,m_LocalPosition.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "AAAAAAAAIEEAACDBAAAAgAAAoMEAAKBBAAAAgAAA8MEAAPBBAAAAgMYm7LwC9n07AAAAADyj07ulHqw8AAAAAFV1XDvXC7+8AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "scaling-pivot-offset", "ScalingPivot=-12,18,6;ScalingOffset=4,-8,10",
+          "localEulerAnglesRaw.x:24,localEulerAnglesRaw.y:24,localEulerAnglesRaw.z:24,m_LocalPosition.x:24,m_LocalPosition.y:24,m_LocalPosition.z:24,m_LocalScale.x:24,m_LocalScale.y:24,m_LocalScale.z:24",
+          "AAAAAAAAIEEAACDBAAAAgAAAoMEAAKBBAAAAgAAA8MEAAPBBCtcjvay8Cb5JqRA9CtejvQ9KZ70NFAK9zMzMPV+pjT1LhMQ9AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+        { "geometric-helper", "GeometricTranslation=12,-8,20;GeometricRotation=15,25,-10;GeometricScaling=1.5,0.75,2",
+          "localEulerAnglesRaw.x:3,localEulerAnglesRaw.y:3,localEulerAnglesRaw.z:3,m_LocalPosition.x:3,m_LocalPosition.y:3,m_LocalPosition.z:3,m_LocalScale.x:3,m_LocalScale.y:3,m_LocalScale.z:3",
+          "AAAAAAAAIEEAACDBAAAAgAAAoMEAAKBBAAAAgAAA8MEAAPBBAAAAgArXI7wK1yM8AAAAAArXozwK16O8AAAAAI/C9TyPwvW8AACAP83MjD9mZmY/AACAP5qZmT/NzEw/AACAP2Zmpj8zMzM/" },
+    };
+
+    [Theory]
+    [MemberData(nameof(TransformStackRawUnitySamples))]
+    public void TransformStackWithoutResamplingMatchesUnity2022BindingStrategy(
+        string caseName, string propertyOverrides,
+        string expectedLayout, string expectedSamplesBase64)
+    {
+        var imported = ReimportTransformStack(caseName, propertyOverrides, false);
+        var bindings = imported.Clip.bindings
+            .OrderBy(binding => binding.propertyName, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(expectedLayout, string.Join(",", bindings.Select(binding =>
+            binding.propertyName + ":" + binding.curve.length.ToString(CultureInfo.InvariantCulture))));
+
+        var sampledValues = new List<float>();
+        foreach (var binding in bindings)
+        {
+            var keys = binding.curve.keys;
+            if (keys.Length <= 3)
+                sampledValues.AddRange(keys.Select(key => key.value));
+            else
+            {
+                sampledValues.Add(keys[0].value);
+                sampledValues.Add(keys[13].value);
+                sampledValues.Add(keys[23].value);
+            }
+        }
+        AssertUnitySamples(expectedSamplesBase64, sampledValues,
+            caseName + ":raw-curves", 2e-5f);
+    }
+
     private static void AssertQuaternionBits(
         AnimationClip clip, string expectedSamplesBase64)
     {
@@ -604,8 +730,63 @@ public sealed class NativeModelImportTests : IDisposable
             AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single());
     }
 
+    private (GameObject Root, AnimationClip Clip, Mesh Mesh) ReimportTransformStack(
+        string caseName, string propertyOverrides, bool resampleCurves = true)
+    {
+        var path = CopyAnimatedFixture();
+        var fullPath = FullPath(path);
+        var fixture = File.ReadAllText(fullPath);
+        foreach (var propertyOverride in propertyOverrides.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = propertyOverride.IndexOf('=');
+            Assert.True(separator > 0, caseName + ": invalid property override");
+            var property = propertyOverride[..separator];
+            var value = propertyOverride[(separator + 1)..];
+            var prefix = $"Property: \"{property}\", \"Vector3D\", \"\",";
+            var line = fixture.Split('\n').Single(candidate => candidate.Contains(prefix, StringComparison.Ordinal));
+            var replacement = line[..line.IndexOf(prefix, StringComparison.Ordinal)] + prefix + value;
+            fixture = fixture.Replace(line, replacement, StringComparison.Ordinal);
+        }
+        File.WriteAllText(fullPath, fixture);
+        AssetDatabase.ImportAsset(path);
+        var importer = ModelImporter.GetAtPath(path);
+        importer.resampleCurves = resampleCurves;
+        importer.animationCompression = ModelImporterAnimationCompression.Off;
+        importer.SaveAndReimport();
+        return (
+            AssetDatabase.LoadAssetAtPath<GameObject>(path)!,
+            AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single(),
+            AssetDatabase.LoadAllAssetsAtPath(path).OfType<Mesh>().Single());
+    }
+
+    private static void AssertUnitySamples(
+        string expectedBase64, IReadOnlyList<float> actual, string context,
+        float maxAbsoluteError = 1e-6f)
+    {
+        var expectedBytes = Convert.FromBase64String(expectedBase64);
+        Assert.Equal(actual.Count * sizeof(float), expectedBytes.Length);
+        var mismatches = new List<string>();
+        for (var index = 0; index < actual.Count; ++index)
+        {
+            var expectedBits = BinaryPrimitives.ReadInt32LittleEndian(
+                expectedBytes.AsSpan(index * sizeof(float), sizeof(float)));
+            var expected = BitConverter.Int32BitsToSingle(expectedBits);
+            var error = MathF.Abs(expected - actual[index]);
+            if (!float.IsFinite(actual[index]) || error > maxAbsoluteError)
+                mismatches.Add($"{context}[{index}]={expected:R}/{actual[index]:R} ({error:R})");
+        }
+        Assert.True(mismatches.Count == 0, string.Join(", ", mismatches));
+    }
+
     private static AnimationCurve Curve(AnimationClip clip, string property) =>
         clip.bindings.Single(binding => string.Equals(binding.propertyName, property, StringComparison.Ordinal)).curve;
+
+    private static readonly string[] TransformProperties =
+    {
+        "m_LocalPosition.x", "m_LocalPosition.y", "m_LocalPosition.z",
+        "m_LocalRotation.x", "m_LocalRotation.y", "m_LocalRotation.z", "m_LocalRotation.w",
+        "m_LocalScale.x", "m_LocalScale.y", "m_LocalScale.z",
+    };
 
     private static readonly string[] QuaternionProperties =
     {
