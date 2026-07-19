@@ -382,6 +382,12 @@ public class MonoBehaviour : Behaviour
 
   private object? InvokeUnityMessage(string methodName)
   {
+    MethodInfo? method = FindUnityMessage(methodName);
+    return method?.Invoke(this, null);
+  }
+
+  private MethodInfo? FindUnityMessage(string methodName)
+  {
     for (Type? current = GetType(); current is not null && current != typeof(MonoBehaviour); current = current.BaseType)
     {
       MethodInfo? method = current.GetMethod(
@@ -391,9 +397,17 @@ public class MonoBehaviour : Behaviour
         Type.EmptyTypes,
         null);
       if (method is not null)
-        return method.Invoke(this, null);
+        return method;
     }
     return null;
+  }
+
+  internal bool HasUnityMessage(string methodName) => FindUnityMessage(methodName) is not null;
+
+  internal void InternalAnimatorMove()
+  {
+    if (!isActiveAndEnabled) return;
+    try { InvokeUnityMessage("OnAnimatorMove"); } catch { }
   }
 
   internal void InternalAwake()

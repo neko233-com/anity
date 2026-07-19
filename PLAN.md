@@ -1,5 +1,27 @@
 # PLAN
 
+## 2026-07-20 — Animator.OnAnimatorMove / builtin root motion callback parity
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 在独立 batchmode + Play Mode fixture 中逐帧探测 `OnAnimatorMove`。确认同一 GameObject 上只要存在该消息方法就会抑制自动 root motion，接收组件即使 disabled 也一样；只有 active + enabled 的同对象组件实际收到回调，child 接收器既不抑制也不收消息。Play Mode 的 `Animator.Update(0)` 也回调；edit-mode 手动 `Update` 不回调，但仍按方法存在性抑制自动应用并暴露 motion delta。
+- `Animator` 现于 animation pose 求值后发现同对象 `MonoBehaviour` 的继承层级消息，并在 Play Mode 派发 `OnAnimatorMove`。有 handler 时不论 `applyRootMotion` true/false 都暴露 `deltaPosition` / `deltaRotation` / `velocity` / `angularVelocity`；无 handler 且 apply=false 仍保持 Unity 的全零 delta。消息查找复用 `MonoBehaviour` 现有 private/base Unity-message 规则，没有把公开 API 面扩大。
+- 回调期间 `rootPosition` / `rootRotation` 暴露待应用的绝对 world pose；若 handler 不应用，回调结束后 accessor 回到实际 Transform。下一帧从实际 Transform 重新建立 frame anchor，已按 Unity probe 固化 quarter 未应用后 half-frame 的 rebased delta，避免沿旧 world anchor 暗中累计。
+- `ApplyBuiltinRootMotion` 现只在 `OnAnimatorMove` 派发期间应用 pending absolute pose，`applyRootMotion` 开关不限制它；同一回调重复调用幂等，回调外调用无效果。手动 `transform.position += deltaPosition` 与 `deltaRotation * transform.rotation` 的结果和 builtin 路径逐值一致。
+- `ImportedRootMotionRuntimeTests` 从 **16** 增至 **30/30**（新增 14 个展开用例），覆盖 zero-delta callback、apply true/false、builtin 两种开关、重复幂等、手动等价、disabled/child/edit-mode/outside-callback、pending root accessor、未应用重基准及 inherited private message。强制 native 八工程门禁 **4425/4425**（Core **3403/3403**），0 失败、0 跳过；`bash _scripts/build-all.sh Release` 全产品 0 编译错误。
+- 发布前 legacy/obsolete/deprecated 复审覆盖 tracked 文件名、C# / C++ 精确符号、公开反射面、C ABI/PInvoke、serialized upgrader 与测试反向引用。没有 tracked backup，也没有新的零调用 legacy 实现可安全删除；命中的 removed networking shell、AssetBundle/Animation obsolete API、ufbx legacy parser、Canvas/VFX compatibility ABI 与 Shader Graph upgrader 均仍由 Unity 2022.3 公开兼容面、运行路径或行为/资产测试要求，删除会破坏兼容，因此保留而不伪装成“清理”。
+- `/Applications/Anity.app` 已从最终源码重装；Host 与 `libanity_native.dylib` 均为 ARM64，deep/strict codesign 通过，Host 的 `-batchmode -quit -nographics -logFile -` 真实进程以 0 退出并确认四项参数。
+- 最终门禁后确认 Git ignored、内部零 tracked 且无 Unity 进程占用，再可恢复地移出 **39 个 / 375888 KiB** repo-local `bin/obj/build` 目录与 **6 个 / 362336 KiB** 本轮 `/private/tmp/anity-animator-move-*` 工程/日志，合计 **738224 KiB（约 720.9 MiB）**；内容位于废纸篓 `/Users/solarisneko/.Trash/anity-animator-move-final.JyJAiF`，两类目标最终复扫均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 权威逐帧证据仍来自当前可用的 Unity 2022.3.51f1；目标 Unity 2022.3.61f1 Pro 尚未安装，不能把本轮结果表述为 61f1 已实测。
+- 本轮闭环 Generic imported motion 的 callback/builtin 主语义；Humanoid body/root retarget、root-lock/keep-original 的有效运动结果、additive/masked root motion、transition interruption 和 Player 平台逐帧 A/B 仍未完成。
+- 本轮不代表完整 Animator、Editor GUI、IL2CPP、全部官方包或完整 Unity 2022.3 Pro 已完成，整体目标继续推进。
+
+### 下一优先项
+1. 构造 Humanoid 与 Generic root-lock/keep-original 权威 fixture，闭环 body/root retarget 和 lock/filter 的实际运动结果。
+2. 扩展 imported root motion 到 transition interruption、layer/mask/additive、BlendTree 多子节点及负速/倒放的 Unity 逐帧 A/B。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑，并在 Windows 11 x64、WebGL 与 Android Vulkan Player 实跑对应门禁。
+
 ## 2026-07-20 — Imported Generic root motion / native rigid transform runtime
 
 ### 已完成

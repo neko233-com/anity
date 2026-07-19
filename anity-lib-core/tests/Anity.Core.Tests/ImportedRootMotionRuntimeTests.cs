@@ -236,6 +236,242 @@ public sealed class ImportedRootMotionRuntimeTests : IDisposable
         AssertVector(runtime.Animator.deltaPosition, 0f, 0f, 0f);
     }
 
+    [Fact]
+    public void PlayModeAnimatorMoveRunsOnZeroDeltaUpdate()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true, prime: false,
+                configureRoot: root => receiver = root.AddComponent<AnimatorMoveRecorder>());
+            runtime.Animator.Update(0f);
+            Assert.Equal(1, receiver.Calls);
+            AssertVector(receiver.DeltaSeen, 0f, 0f, 0f);
+            AssertVector(receiver.RootSeen, 10f, 20f, 30f);
+        });
+    }
+
+    [Fact]
+    public void SameObjectAnimatorMoveSuppressesAutomaticMotionAndExposesDelta()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true,
+                configureRoot: root => receiver = root.AddComponent<AnimatorMoveRecorder>());
+            receiver.ResetObservations();
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            Assert.Equal(1, receiver.Calls);
+            AssertVector(runtime.Root.transform.position, 10f, 20f, 30f);
+            AssertVector(runtime.Animator.deltaPosition, -0.2541165f, 0.23958334f, 0.4235275f, 3e-4f);
+            AssertVector(receiver.DeltaSeen, -0.2541165f, 0.23958334f, 0.4235275f, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void ApplyRootMotionFalseStillDispatchesAnimatorMoveAndExposesDelta()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: false,
+                configureRoot: root => receiver = root.AddComponent<AnimatorMoveRecorder>());
+            receiver.ResetObservations();
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            Assert.Equal(1, receiver.Calls);
+            AssertVector(runtime.Root.transform.position, 10f, 20f, 30f);
+            AssertVector(runtime.Animator.deltaPosition, -0.2541165f, 0.23958334f, 0.4235275f, 3e-4f);
+            AssertVector(runtime.Animator.velocity, -1.06066f, 1f, 1.7677671f, 4e-4f);
+        });
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ApplyBuiltinRootMotionInsideCallbackAppliesPendingPose(bool applyRootMotion)
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion,
+                configureRoot: root =>
+                {
+                    receiver = root.AddComponent<AnimatorMoveRecorder>();
+                    receiver.ApplyBuiltin = true;
+                });
+            receiver.ResetObservations();
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            Assert.Equal(1, receiver.Calls);
+            AssertVector(runtime.Root.transform.position, 9.745884f, 20.239584f, 30.423527f, 3e-4f);
+            AssertVector(runtime.Animator.rootPosition, 9.745884f, 20.239584f, 30.423527f, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void ApplyBuiltinRootMotionTwiceInsideCallbackIsIdempotent()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: false,
+                configureRoot: root =>
+                {
+                    receiver = root.AddComponent<AnimatorMoveRecorder>();
+                    receiver.ApplyBuiltin = true;
+                    receiver.ApplyBuiltinTwice = true;
+                });
+            receiver.ResetObservations();
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            AssertVector(receiver.AfterFirstBuiltin, 9.745884f, 20.239584f, 30.423527f, 3e-4f);
+            AssertVector(receiver.AfterSecondBuiltin, 9.745884f, 20.239584f, 30.423527f, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void ManualDeltaApplicationMatchesBuiltinRootMotion()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder builtinReceiver = null!;
+            Runtime builtin = CreateRuntime(Import(), applyRootMotion: false,
+                configureRoot: root =>
+                {
+                    builtinReceiver = root.AddComponent<AnimatorMoveRecorder>();
+                    builtinReceiver.ApplyBuiltin = true;
+                });
+            AnimatorMoveRecorder manualReceiver = null!;
+            Runtime manual = CreateRuntime(Import(), applyRootMotion: false,
+                configureRoot: root =>
+                {
+                    manualReceiver = root.AddComponent<AnimatorMoveRecorder>();
+                    manualReceiver.ApplyManual = true;
+                });
+            builtin.Animator.Update(builtin.Clip.length / 4f);
+            manual.Animator.Update(manual.Clip.length / 4f);
+            AssertVector(manual.Root.transform.position,
+                builtin.Root.transform.position.x,
+                builtin.Root.transform.position.y,
+                builtin.Root.transform.position.z, 3e-4f);
+            AssertQuaternion(manual.Root.transform.rotation,
+                builtin.Root.transform.rotation.x,
+                builtin.Root.transform.rotation.y,
+                builtin.Root.transform.rotation.z,
+                builtin.Root.transform.rotation.w, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void DisabledSameObjectReceiverSuppressesAutomaticMotionWithoutCallback()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true,
+                configureRoot: root =>
+                {
+                    receiver = root.AddComponent<AnimatorMoveRecorder>();
+                    receiver.enabled = false;
+                });
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            Assert.Equal(0, receiver.Calls);
+            AssertVector(runtime.Root.transform.position, 10f, 20f, 30f);
+            AssertVector(runtime.Animator.deltaPosition, -0.2541165f, 0.23958334f, 0.4235275f, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void ChildReceiverNeitherSuppressesRootMotionNorReceivesCallback()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true,
+                configureRoot: root =>
+                    receiver = root.transform.Find("InstanceA")!.gameObject.AddComponent<AnimatorMoveRecorder>());
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            Assert.Equal(0, receiver.Calls);
+            AssertVector(runtime.Root.transform.position, 9.745884f, 20.239584f, 30.423527f, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void EditModeReceiverSuppressesAutomaticMotionWithoutCallback()
+    {
+        OutsidePlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true,
+                configureRoot: root => receiver = root.AddComponent<AnimatorMoveRecorder>());
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            Assert.Equal(0, receiver.Calls);
+            AssertVector(runtime.Root.transform.position, 10f, 20f, 30f);
+            AssertVector(runtime.Animator.deltaPosition, -0.2541165f, 0.23958334f, 0.4235275f, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void ApplyBuiltinRootMotionOutsideCallbackDoesNothing()
+    {
+        InPlayMode(() =>
+        {
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true,
+                configureRoot: root => root.AddComponent<AnimatorMoveRecorder>());
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            runtime.Animator.ApplyBuiltinRootMotion();
+            AssertVector(runtime.Root.transform.position, 10f, 20f, 30f);
+            AssertVector(runtime.Animator.deltaPosition, -0.2541165f, 0.23958334f, 0.4235275f, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void CallbackSeesPendingRootPoseButAccessorRevertsToActualPoseAfterward()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true,
+                configureRoot: root => receiver = root.AddComponent<AnimatorMoveRecorder>());
+            receiver.ResetObservations();
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            AssertVector(receiver.RootSeen, 9.745884f, 20.239584f, 30.423527f, 3e-4f);
+            AssertQuaternion(receiver.RootRotationSeen, 0f, 0.20310721f, 0f, 0.97915655f, 3e-4f);
+            AssertVector(runtime.Animator.rootPosition, 10f, 20f, 30f);
+            AssertQuaternion(runtime.Animator.rootRotation, 0f, 0.38268343f, 0f, 0.9238795f, 3e-4f);
+        });
+    }
+
+    [Fact]
+    public void UnappliedMotionRebasesNextDeltaFromActualTransform()
+    {
+        InPlayMode(() =>
+        {
+            AnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true,
+                configureRoot: root => receiver = root.AddComponent<AnimatorMoveRecorder>());
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            receiver.ResetObservations();
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            AssertVector(runtime.Root.transform.position, 10f, 20f, 30f);
+            AssertVector(runtime.Animator.deltaPosition, -0.080679f, 0.23958334f, 0.48727983f, 4e-4f);
+            AssertVector(receiver.RootSeen, 9.919321f, 20.239584f, 30.48728f, 4e-4f);
+        });
+    }
+
+    [Fact]
+    public void InheritedPrivateAnimatorMoveIsDetectedAndInvoked()
+    {
+        InPlayMode(() =>
+        {
+            DerivedAnimatorMoveRecorder receiver = null!;
+            Runtime runtime = CreateRuntime(Import(), applyRootMotion: true,
+                configureRoot: root => receiver = root.AddComponent<DerivedAnimatorMoveRecorder>());
+            receiver.Calls = 0;
+            runtime.Animator.Update(runtime.Clip.length / 4f);
+            Assert.Equal(1, receiver.Calls);
+            AssertVector(runtime.Root.transform.position, 10f, 20f, 30f);
+        });
+    }
+
     private Imported Import(
         bool loop = false,
         string motionNodeName = "InstanceA",
@@ -270,11 +506,16 @@ public sealed class ImportedRootMotionRuntimeTests : IDisposable
             Assert.Single(AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>()));
     }
 
-    private static Runtime CreateRuntime(Imported imported, bool applyRootMotion, bool prime = true)
+    private static Runtime CreateRuntime(
+        Imported imported,
+        bool applyRootMotion,
+        bool prime = true,
+        Action<GameObject>? configureRoot = null)
     {
         GameObject root = imported.Root;
         root.transform.position = new Vector3(10f, 20f, 30f);
         root.transform.rotation = Quaternion.Euler(0f, 45f, 0f);
+        configureRoot?.Invoke(root);
         var controller = new AnimatorController();
         AnimatorState state = controller.layers[0].stateMachine.AddState(imported.Clip.name);
         state.motion = imported.Clip;
@@ -287,6 +528,24 @@ public sealed class ImportedRootMotionRuntimeTests : IDisposable
         if (prime) animator.Update(0f);
         Transform child = root.transform.Find("InstanceA")!;
         return new Runtime(root, child, imported.Clip, animator);
+    }
+
+    private static void InPlayMode(Action action) => WithPlayMode(true, action);
+
+    private static void OutsidePlayMode(Action action) => WithPlayMode(false, action);
+
+    private static void WithPlayMode(bool isPlaying, Action action)
+    {
+        bool previous = EditorApplication.isPlaying;
+        try
+        {
+            EditorApplication.isPlaying = isPlaying;
+            action();
+        }
+        finally
+        {
+            EditorApplication.isPlaying = previous;
+        }
     }
 
     private static string AddRootMotionAnimation(string source)
@@ -510,4 +769,62 @@ public sealed class ImportedRootMotionRuntimeTests : IDisposable
     private readonly record struct Imported(GameObject Root, AnimationClip Clip);
     private readonly record struct Runtime(
         GameObject Root, Transform Child, AnimationClip Clip, Animator Animator);
+}
+
+public sealed class AnimatorMoveRecorder : MonoBehaviour
+{
+    public int Calls;
+    public bool ApplyBuiltin;
+    public bool ApplyBuiltinTwice;
+    public bool ApplyManual;
+    public Vector3 DeltaSeen;
+    public Vector3 RootSeen;
+    public Quaternion RootRotationSeen = Quaternion.identity;
+    public Vector3 AfterFirstBuiltin;
+    public Vector3 AfterSecondBuiltin;
+
+    public void ResetObservations()
+    {
+        Calls = 0;
+        DeltaSeen = Vector3.zero;
+        RootSeen = Vector3.zero;
+        RootRotationSeen = Quaternion.identity;
+        AfterFirstBuiltin = Vector3.zero;
+        AfterSecondBuiltin = Vector3.zero;
+    }
+
+    private void OnAnimatorMove()
+    {
+        Calls++;
+        Animator animator = GetComponent<Animator>();
+        DeltaSeen = animator.deltaPosition;
+        RootSeen = animator.rootPosition;
+        RootRotationSeen = animator.rootRotation;
+        if (ApplyManual)
+        {
+            transform.position += animator.deltaPosition;
+            transform.rotation = animator.deltaRotation * transform.rotation;
+            return;
+        }
+        if (!ApplyBuiltin) return;
+        animator.ApplyBuiltinRootMotion();
+        AfterFirstBuiltin = transform.position;
+        if (!ApplyBuiltinTwice) return;
+        animator.ApplyBuiltinRootMotion();
+        AfterSecondBuiltin = transform.position;
+    }
+}
+
+public class AnimatorMoveBaseRecorder : MonoBehaviour
+{
+    public int Calls;
+
+    private void OnAnimatorMove()
+    {
+        Calls++;
+    }
+}
+
+public sealed class DerivedAnimatorMoveRecorder : AnimatorMoveBaseRecorder
+{
 }

@@ -29,8 +29,10 @@ public class Animator : Behaviour
     private Vector3 _velocity;
     private Vector3 _angularVelocity;
     private bool _rootMotionInitialized;
-    private AnimationRootMotionPose _rootMotionAnchor = AnimationRootMotionPose.Identity;
     private AnimationRootMotionPose _previousRootMotion = AnimationRootMotionPose.Identity;
+    private AnimationRootMotionPose _pendingBuiltinRootMotion = AnimationRootMotionPose.Identity;
+    private bool _dispatchingAnimatorMove;
+    private bool _builtinRootMotionApplied;
     private float _lookAtWeight;
     private float _bodyWeight;
     private float _headWeight;
@@ -767,9 +769,6 @@ public class Animator : Behaviour
         if (_rootMotionInitialized || transform is null) return;
         AnimationRootMotionPose? rootMotion = SampleCurrentRootMotion();
         if (!rootMotion.HasValue) return;
-        _rootMotionAnchor = AnimationRootMotionPose.CalculateAnchor(
-            new AnimationRootMotionPose(transform.position, transform.rotation),
-            rootMotion.Value);
         _previousRootMotion = rootMotion.Value;
         _rootMotionInitialized = true;
         _rootPosition = transform.position;
@@ -800,30 +799,44 @@ public class Animator : Behaviour
     private void ApplyRootMotion(AnimationRootMotionPose? sampledRootMotion, float deltaTime)
     {
         if (transform is null) return;
+        List<MonoBehaviour> animatorMoveReceivers = GetAnimatorMoveReceivers();
         if (!sampledRootMotion.HasValue)
         {
             _rootMotionInitialized = false;
+            _deltaPosition = Vector3.zero;
+            _deltaRotation = Quaternion.identity;
+            _velocity = Vector3.zero;
+            _angularVelocity = Vector3.zero;
             _rootPosition = transform.position;
             _rootRotation = transform.rotation;
+            if (animatorMoveReceivers.Count > 0)
+                DispatchAnimatorMove(animatorMoveReceivers,
+                    new AnimationRootMotionPose(transform.position, transform.rotation));
             return;
         }
         if (!_rootMotionInitialized)
         {
-            _rootMotionAnchor = AnimationRootMotionPose.CalculateAnchor(
-                new AnimationRootMotionPose(transform.position, transform.rotation),
-                sampledRootMotion.Value);
             _previousRootMotion = sampledRootMotion.Value;
             _rootMotionInitialized = true;
         }
 
-        AnimationRootMotionPose previousWorld = AnimationRootMotionPose.Anchor(
-            _rootMotionAnchor, _previousRootMotion);
+        AnimationRootMotionPose previousWorld = new(transform.position, transform.rotation);
+        AnimationRootMotionPose frameAnchor = AnimationRootMotionPose.CalculateAnchor(
+            previousWorld, _previousRootMotion);
         AnimationRootMotionPose currentWorld = AnimationRootMotionPose.Anchor(
-            _rootMotionAnchor, sampledRootMotion.Value);
+            frameAnchor, sampledRootMotion.Value);
         AnimationRootMotionDelta delta = AnimationRootMotionPose.CalculateDelta(
             previousWorld, currentWorld, deltaTime);
 
-        if (_applyRootMotion)
+        if (animatorMoveReceivers.Count > 0)
+        {
+            _deltaPosition = delta.Position;
+            _deltaRotation = delta.Rotation;
+            _velocity = delta.Velocity;
+            _angularVelocity = delta.AngularVelocity;
+            DispatchAnimatorMove(animatorMoveReceivers, currentWorld);
+        }
+        else if (_applyRootMotion)
         {
             transform.position = currentWorld.Position;
             transform.rotation = currentWorld.Rotation;
@@ -832,7 +845,51 @@ public class Animator : Behaviour
             _velocity = delta.Velocity;
             _angularVelocity = delta.AngularVelocity;
         }
+        else
+        {
+            _deltaPosition = Vector3.zero;
+            _deltaRotation = Quaternion.identity;
+            _velocity = Vector3.zero;
+            _angularVelocity = Vector3.zero;
+        }
         _previousRootMotion = sampledRootMotion.Value;
+        _rootPosition = transform.position;
+        _rootRotation = transform.rotation;
+    }
+
+    private List<MonoBehaviour> GetAnimatorMoveReceivers()
+    {
+        var receivers = new List<MonoBehaviour>();
+        if (gameObject is null) return receivers;
+        foreach (MonoBehaviour receiver in gameObject.GetComponents<MonoBehaviour>())
+        {
+            if (receiver is not null && receiver.HasUnityMessage("OnAnimatorMove"))
+                receivers.Add(receiver);
+        }
+        return receivers;
+    }
+
+    private void DispatchAnimatorMove(
+        List<MonoBehaviour> receivers,
+        AnimationRootMotionPose pendingRootMotion)
+    {
+        _pendingBuiltinRootMotion = pendingRootMotion;
+        _builtinRootMotionApplied = false;
+        _rootPosition = pendingRootMotion.Position;
+        _rootRotation = pendingRootMotion.Rotation;
+        if (Application.isPlaying)
+        {
+            _dispatchingAnimatorMove = true;
+            try
+            {
+                foreach (MonoBehaviour receiver in receivers)
+                    receiver.InternalAnimatorMove();
+            }
+            finally
+            {
+                _dispatchingAnimatorMove = false;
+            }
+        }
         _rootPosition = transform.position;
         _rootRotation = transform.rotation;
     }
@@ -848,8 +905,10 @@ public class Animator : Behaviour
     private void ResetRootMotionRuntime()
     {
         _rootMotionInitialized = false;
-        _rootMotionAnchor = AnimationRootMotionPose.Identity;
         _previousRootMotion = AnimationRootMotionPose.Identity;
+        _pendingBuiltinRootMotion = AnimationRootMotionPose.Identity;
+        _dispatchingAnimatorMove = false;
+        _builtinRootMotionApplied = false;
         _deltaPosition = Vector3.zero;
         _deltaRotation = Quaternion.identity;
         _velocity = Vector3.zero;
@@ -1066,13 +1125,12 @@ public class Animator : Behaviour
 
     public void ApplyBuiltinRootMotion()
     {
-        if (transform != null)
-        {
-            transform.position += _deltaPosition;
-            transform.rotation = _deltaRotation * transform.rotation;
-            _rootPosition = transform.position;
-            _rootRotation = transform.rotation;
-        }
+        if (!_dispatchingAnimatorMove || _builtinRootMotionApplied || transform is null) return;
+        transform.position = _pendingBuiltinRootMotion.Position;
+        transform.rotation = _pendingBuiltinRootMotion.Rotation;
+        _rootPosition = transform.position;
+        _rootRotation = transform.rotation;
+        _builtinRootMotionApplied = true;
     }
 
     public bool HasState(int layerIndex, int stateID)
