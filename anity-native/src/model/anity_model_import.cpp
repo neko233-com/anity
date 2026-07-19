@@ -781,6 +781,18 @@ static double UnityFbxSampleTime(
   return static_cast<double>(ticks) / ticksPerSecond;
 }
 
+static double UnityFbxFrameTime(
+    double playbackTimeBegin, float frameRate, size_t sampleIndex) {
+  constexpr double ticksPerSecond = 141120000.0;
+  const int64_t startTicks = static_cast<int64_t>(
+    std::llround(playbackTimeBegin * ticksPerSecond));
+  const int64_t frameTicks = static_cast<int64_t>(
+    std::llround(ticksPerSecond / static_cast<double>(frameRate)));
+  return static_cast<double>(
+    startTicks + static_cast<int64_t>(sampleIndex) * frameTicks) /
+    ticksPerSecond;
+}
+
 struct UnityFbxConvertedEulerKey {
   ufbx_vec3 value;
   ufbx_vec3 tangentValue;
@@ -1122,11 +1134,12 @@ static void BuildSampledEulerCurves(const ufbx_anim_stack* stack,
     const double factor = RawTransformFactor(curve.property, globalScale);
     double reference = 0.0;
     for (size_t index = 0; index < sampleCount; ++index) {
-      const double absoluteTime = UnityFbxSampleTime(trimStart, frameRate, index);
-      const double sourceValue = value->curves[axis]
-        ? ufbx_evaluate_curve(value->curves[axis], absoluteTime,
-            value->default_value.v[axis])
-        : value->default_value.v[axis];
+      // MatrixConverter installs destination keys on the exact FbxTime frame
+      // grid. This differs from ExtractQuaternionFromFBXEulerOld's legacy
+      // float frame-to-seconds resampling by several ticks at common rates.
+      const double absoluteTime = UnityFbxFrameTime(trimStart, frameRate, index);
+      const double sourceValue = EvaluateUnityCompatibleCurve(
+        value->curves[axis], absoluteTime, value->default_value.v[axis]);
       const double sampled = WrapAngleNear(sourceValue * factor, reference);
       reference = sampled;
       float relativeTime = Real(absoluteTime) - Real(trimStart);
@@ -1148,7 +1161,7 @@ static void BuildRetainedPivotPositionCurves(const ufbx_baked_node* retainedNode
       static_cast<int>(ANITY_MODEL_POSITION_X) + axis);
     curve.keys.reserve(sampleCount);
     for (size_t index = 0; index < sampleCount; ++index) {
-      const double absoluteTime = UnityFbxSampleTime(trimStart, frameRate, index);
+      const double absoluteTime = UnityFbxFrameTime(trimStart, frameRate, index);
       const double bakedTime = absoluteTime - trimStart;
       const ufbx_vec3 value = ufbx_evaluate_baked_vec3(
         retainedNode->translation_keys, bakedTime);

@@ -1,5 +1,22 @@
 # PLAN
 
+## 2026-07-19 — Unity FBX pivot raw Euler exact-bit
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对 positive/negative/fractional/large rotation pivot、scaling pivot 与 scaling offset 构造 **10 组**新 fixture；每组 `localEulerAnglesRaw.x/y/z` 均为 24 keys，并确认 pivot 数值不改变源 rotation curve 的 Unity payload。共固化 **10 × 24 × 3 = 720 个 Unity float**。
+- 定位原最大约 `1.335e-5` 差异来自错误复用了 quaternion extraction 的 legacy float frame-to-seconds 网格，并且直接调用通用 `ufbx_evaluate_curve()`。Unity 的 raw pivot Euler 实际由 MatrixConverter 放在 exact `FbxTime` frame grid，再经 `KFCurve::EvaluateIndex` 的 tick、unweighted handle 与逐级 float 舍入求值。
+- `anity-native` 新增独立 `UnityFbxFrameTime()`，pivot raw Euler 与 retained-pivot position 使用 exact frame tick；raw Euler 接入既有 `EvaluateUnityCompatibleCurve()`，同时保留 resampled quaternion 的 `UnityFbxSampleTime()`，不再把两条可观测时间路径混用。
+- 新增 **10 个**全曲线 bit-pattern 回归，每例检查 X/Y/Z 各 24 个 key，**720/720 float 逐 bit 一致**；既有 10 组 mixed raw binding/sample 门禁从 `2e-5` 收紧到 `1e-6`。`NativeModelImportTests` **122/122**，与 skin/blend-shape 联合 **164/164**；`_scripts/build-native.sh Release`、`_scripts/build-all.sh Release` 均通过且产品工程 0 编译错误，统一 native-required 八工程矩阵 **4164/4164**（Core **3155/3155**），0 失败、0 跳过。
+
+### 尚未完成
+- raw Euler 已 exact-bit，但 retained-pivot position 仍有少量 1 ULP 与 Y/Z signed-zero 差异；pre/post rotation 继续使用安全 baked quaternion，部分样本与 Unity 相差 1–5 ULP。二者已通过 bit 诊断与 raw Euler 根因分离，不能将本轮 720/720 外推为整个 transform stack exact-bit。
+- Unity raw 导入的 3-key `Renderer.m_Enabled` visibility binding 仍缺失；多 animation layer、constant/stepped/weighted/broken tangent、instanced/helper topology、skinned pivot/bindpose、loop/root motion/additive/mask 与 Unity 2022.3.61f1 Pro Editor/Player A/B 仍未闭环。
+
+### 下一优先项
+1. 对齐 retained-pivot position 的 FBX matrix/float 舍入和 signed-zero，并收紧 position 24-key A/B 到 exact-bit。
+2. 对齐 pre/post rotation baked quaternion 的 MatrixConverter stack 与 normalize 舍入，消除剩余 1–5 ULP。
+3. 增加 Renderer visibility property binding，输出 Unity 同语义 `m_Enabled` 曲线并补 ≥10 个 importer/runtime/Animator 用例。
+
 ## 2026-07-19 — Unity FBX pre/post rotation、pivot 与 geometry transform
 
 ### 已完成
@@ -9,12 +26,12 @@
 - 新增 resampled/raw 各 **10 个**永久回归：前者逐例校验 16 个静态值、10 条 24 帧共享网格及 30 个 Unity curve sample，后者逐字校验 Transform binding/key-count 并校验 source/0/13/23 sample；新增合计 **20/20**，`NativeModelImportTests` **112/112**，与 skin/blend-shape 联合聚焦门禁 **154/154**。`_scripts/build-native.sh Release`、`_scripts/build-all.sh Release` 均通过且产品工程 0 编译错误；统一 native-required 八工程矩阵 **4154/4154**（Core **3145/3145**），0 失败、0 跳过。
 
 ### 尚未完成
-- resampled 静态/曲线当前以绝对误差 `1e-6` 验收，raw sampled Euler 以 `2e-5` 验收；raw Euler 已观测最大差异约 `1.335e-5`，仍需继续复刻 FBX `KFCurve`/MatrixConverter 的精确求值顺序。少量 quaternion ULP 与 signed-zero 也尚未逐 bit 闭环。
+- resampled 静态/曲线与 mixed raw position/quaternion/scale 当前以绝对误差 `1e-6` 验收；raw pivot Euler 已在后续 10 组、720-float 门禁中 exact-bit。retained position 与 pre/post quaternion 的少量 ULP/signed-zero 尚未逐 bit 闭环。
 - Unity raw 导入还会生成 3-key `Renderer.m_Enabled` visibility curve；Anity 当前缺该 Renderer binding，不能把 Transform curve 主链通过冒充为完整 AnimationClip 对齐。
 - 多 animation layer、constant/stepped/weighted/broken tangent、真正的 instanced/helper-node topology、skinned pivot/bindpose、loop/root motion/additive/mask、stable sub-asset fileID/type-tree/artifact cache，以及 Unity 2022.3.61f1 Pro Editor/Player A/B 仍未完成，因此 ModelImporter/AnimationClip 保持 🟡。
 
 ### 下一优先项
-1. 复刻 raw Euler 的 FBX `KFCurve` 精确求值与 signed-zero/quaternion ULP，收紧 10 组 pivot fixture 到 exact-bit。
+1. 收紧 retained-pivot position 与 pre/post quaternion 的 ULP/signed-zero 到 exact-bit。
 2. 增加 Renderer visibility property binding，输出 Unity 同语义 `m_Enabled` 曲线并补 ≥10 个 importer/runtime/Animator 用例。
 3. 补多 animation layer、constant/stepped/weighted/broken tangent、instanced/helper 与 skinned pivot/bindpose fixture，再推进 loop/root motion/additive/mask。
 

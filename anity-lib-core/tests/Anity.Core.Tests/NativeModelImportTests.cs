@@ -295,7 +295,43 @@ public sealed class NativeModelImportTests : IDisposable
             }
         }
         AssertUnitySamples(expectedSamplesBase64, sampledValues,
-            caseName + ":raw-curves", 2e-5f);
+            caseName + ":raw-curves");
+    }
+
+    public static TheoryData<string, string> PivotRawEulerUnitySamples => new()
+    {
+        { "rotation-positive", "RotationPivot=25,-10,15" },
+        { "rotation-negative", "RotationPivot=-35,20,-5" },
+        { "rotation-fractional", "RotationPivot=0.5,-0.75,1.25" },
+        { "scaling-positive", "ScalingPivot=30,20,10" },
+        { "scaling-negative", "ScalingPivot=-12,-18,-6" },
+        { "scaling-fractional", "ScalingPivot=-0.5,0.75,-1.25" },
+        { "scaling-offset-positive", "ScalingPivot=-12,18,6;ScalingOffset=4,-8,10" },
+        { "scaling-offset-negative", "ScalingPivot=12,-18,-6;ScalingOffset=-4,8,-10" },
+        { "rotation-large", "RotationPivot=1250,-750,500" },
+        { "scaling-large", "ScalingPivot=-900,1100,-1300" },
+    };
+
+    [Theory]
+    [MemberData(nameof(PivotRawEulerUnitySamples))]
+    public void PivotRawEulerUsesUnity2022KfCurveBits(
+        string caseName, string propertyOverrides)
+    {
+        var imported = ReimportTransformStack(caseName, propertyOverrides, false);
+        var x = Curve(imported.Clip, "localEulerAnglesRaw.x");
+        var y = Curve(imported.Clip, "localEulerAnglesRaw.y");
+        var z = Curve(imported.Clip, "localEulerAnglesRaw.z");
+        foreach (var curve in new[] { x, y, z })
+            Assert.Equal(Enumerable.Range(0, 24), Frames(curve, imported.Clip.frameRate));
+        AssertUnityBits(UnityRawEulerXBase64,
+            x.keys.Select(key => key.value).ToArray(),
+            caseName + ":euler-x");
+        AssertUnityBits(UnityRawEulerYBase64,
+            y.keys.Select(key => key.value).ToArray(),
+            caseName + ":euler-y");
+        AssertUnityBits(UnityRawEulerZBase64,
+            z.keys.Select(key => key.value).ToArray(),
+            caseName + ":euler-z");
     }
 
     private static void AssertQuaternionBits(
@@ -778,6 +814,23 @@ public sealed class NativeModelImportTests : IDisposable
         Assert.True(mismatches.Count == 0, string.Join(", ", mismatches));
     }
 
+    private static void AssertUnityBits(
+        string expectedBase64, IReadOnlyList<float> actual, string context)
+    {
+        var expectedBytes = Convert.FromBase64String(expectedBase64);
+        Assert.Equal(actual.Count * sizeof(float), expectedBytes.Length);
+        var mismatches = new List<string>();
+        for (var index = 0; index < actual.Count; ++index)
+        {
+            var expectedBits = BinaryPrimitives.ReadInt32LittleEndian(
+                expectedBytes.AsSpan(index * sizeof(float), sizeof(float)));
+            var actualBits = BitConverter.SingleToInt32Bits(actual[index]);
+            if (expectedBits != actualBits)
+                mismatches.Add($"{context}[{index}]={expectedBits:X8}/{actualBits:X8}");
+        }
+        Assert.True(mismatches.Count == 0, string.Join(", ", mismatches));
+    }
+
     private static AnimationCurve Curve(AnimationClip clip, string property) =>
         clip.bindings.Single(binding => string.Equals(binding.propertyName, property, StringComparison.Ordinal)).curve;
 
@@ -787,6 +840,13 @@ public sealed class NativeModelImportTests : IDisposable
         "m_LocalRotation.x", "m_LocalRotation.y", "m_LocalRotation.z", "m_LocalRotation.w",
         "m_LocalScale.x", "m_LocalScale.y", "m_LocalScale.z",
     };
+
+    private const string UnityRawEulerXBase64 =
+        "AAAAAA90LD6tISM/NAmtP+p8EEB0MlNAK5ONQNVsskDGZtZAi8H3QNpeCkHlzRVBME4dQQAAIEE+ChdBpHD9QI/CtUCkcD1AAAAAAKVwPcCPwrXAo3D9wD4KF8EAACDB";
+    private const string UnityRawEulerYBase64 =
+        "AAAAgA90rL6tIaO/NAktwOp8kMB0MtPAK5MNwdVsMsHGZlbBi8F3wdpeisHlzZXBME6dwQAAoME+CpfBpHB9wY/CNcGkcL3AAAAAgKVwvUCPwjVBo3B9QT4Kl0EAAKBB";
+    private const string UnityRawEulerZBase64 =
+        "AAAAgAtXAb+DsvS/58aBwF672MDXZR7BwFxUwaDRhcEUzaDBKNG5wUaOz8HXtODBSPXrwQAA8MFcj+LBexS+wexRiMF7FA7BAAAAgHsUDkHsUYhBexS+QVyP4kEAAPBB";
 
     private static readonly string[] QuaternionProperties =
     {
