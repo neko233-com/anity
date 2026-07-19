@@ -6,15 +6,16 @@
 - 用本机 Unity 2022.3.51f1 batchmode 新增长区间 `720° / 1080°` 多圈、混合轴 wrap、`±180°` tie、13.5/14.5 非整帧 source key 共 **10 组**权威 fixture，固化 24 帧 × 4 quaternion 分量 × 10 组共 **960 个 Unity float**；另以 LLDB 在 `ExtractQuaternionFromFBXEulerOld` 入口采集实际 MatrixConverter Euler 输入，确认多圈 `V2VRef` 分支与非整帧缺样行为。
 - `anity-native` 的 transform bake 改为 position/rotation/scale 共用同一帧数，ufbx 在非整帧 Euler key 处缺失 quaternion sample 时会按 Unity 的 24 帧网格补算；baked quaternion 查找使用相对 take 时间并以单调 cursor 线性扫描，避免数组错位和 O(n²) 搜索。
 - 非 XYZ 连续 Euler 结果现按 MatrixConverter destination curve 的 float key 边界保存；Apple 路径使用与 FBX SDK 相同的联合 `__sincos`，quaternion 兼容校验接受 `q/-q` 等价，输出按前一 key 做 hemisphere continuity。13.5/14.5 fixture 均稳定输出 24 个同步 quaternion key，不再丢失中间/末尾样本。
+- 继续反汇编并以 LLDB 读取 `FbxAnimCurveFilterUnroll::Apply`、`FbxRotationOrder::V2VRef` 与 `KFCurve::EvaluateIndex` 的运行时对象/寄存器：确认 Unroll 使用 `quality=0.25`、`testForPath=false`，普通 continuous 分支保持 MatrixConverter 的 double-derived user handle；只有选择等价 alternate XYZ 分支的 key 会按最终 float curve 邻键重算 auto/clamped handle，分支边界允许左右两侧混合。native 已按每个 key 的 branch 状态复刻该规则；严格诊断由原先 **1/10** 提升为 **5/10 fixture、480/480 float exact-bit**，另 5 组只各剩 1 个非 key KTime 采样帧不一致。
 - 新增 **10 个** wrap/tie/subframe 权威回归；连同 10 个 exact-bit gimbal 与 5 个 identity/signed-zero 既有用例，聚焦门禁 **25/25**。新极值组当前以 Unity float 的 `2e-5` 最大绝对误差作明确的临时门槛，没有标为 exact-bit 完成。`_scripts/build-all.sh Release` 全部 0 编译错误；统一 native-required 八工程矩阵 **4134/4134**（Core **3125/3125**），均 0 失败、0 跳过。
 
 ### 尚未完成
-- 新增 10 组极值 fixture 尚未逐 bit 一致：剩余差异集中在 MatrixConverter destination curve 的 user-tangent 生成/非 key KTime 求值，以及极值曲线 identity key 的 `+0/-0` 符号；已有 ±90° gimbal 960/960 exact-bit 证据不受影响。该项继续保持 🟡，不得把近似门槛表述为完全对齐。
+- 新增 10 组极值 fixture 尚未全部逐 bit 一致：`o4-half-frame[13]`、`o5-wrap-offset[16]`、`o3-wrap-triple[15]` 各剩一个 quaternion sample，两个 ±180° tie 在 frame 13 各剩一个约 `1e-14` 的近零分量 ULP；其它 5 组已 480/480 exact-bit。已有 ±90° gimbal 960/960 exact-bit 证据不受影响。该项继续保持 🟡，不得把近似门槛表述为完全对齐。
 - 仍需覆盖 pre/post rotation、rotation/scaling pivot、helper transform、多 animation layer，以及 constant/stepped/weighted/broken tangent；正式版本仍需 Unity 2022.3.61f1 Pro Editor/Player A/B。
 
 ### 下一优先项
-1. 在 Unity 随附 FBX SDK 中锁定 `SetDestFCurveTangeant` 对 smooth/user tangent 的真实模式和导数，再把 10 组极值门禁从 `2e-5` 收紧到 960/960 exact-bit。
-2. 对齐 MatrixConverter identity key 的 signed-zero 传播，分别覆盖普通、wrap、tie 与 hemisphere flip。
+1. 对剩余 5 个 frame 13/15/16 采样捕获最终 destination Euler 与 ExtractQuaternion 输入，补齐 alternate-branch 邻接更新和半帧 key 的最后 float 指令顺序，再把极值门禁从 `2e-5` 收紧到 960/960 exact-bit。
+2. 对齐 ±180° tie 的近零 ULP 与 MatrixConverter identity key signed-zero 传播，分别覆盖普通、wrap、tie 与 hemisphere flip。
 3. 增加 pre/post rotation、pivot/helper、多 layer 与 weighted/broken tangent fixture，逐项替换 ufbx baked 安全 fallback。
 
 ## 2026-07-19 — Unity FBX 非 XYZ rotation-order 转换

@@ -639,19 +639,35 @@ static ufbx_quat UnityFbxEulerToQuaternion(
 }
 
 static float EvaluateUnityConvertedFrameSegment(
-    float leftValue, float rightValue,
+    float previousValue, float leftValue, float rightValue, float nextValue,
     double leftTangentValue, double rightTangentValue,
+    bool leftUsesAutoTangent, bool rightUsesAutoTangent,
     double sourceT, double frameStep) {
-  // MatrixConverter stores each converted Euler key as float-expanded double,
-  // calculates its user-tangent derivative in double, then converts the
-  // derivative to float. KFCurve evaluates the unweighted Hermite segment
-  // through the same float-rounded De Casteljau stages as the source curves.
-  const float slope = static_cast<float>(
-    (rightTangentValue - leftTangentValue) / frameStep);
   const float duration = static_cast<float>(frameStep);
-  const float handle = slope * duration / 3.0f;
+  const auto autoHandle = [duration](float previous, float current, float next) {
+    const float leftDelta = current - previous;
+    const float rightDelta = next - current;
+    if (leftDelta == 0.0f || rightDelta == 0.0f ||
+        (leftDelta < 0.0f) != (rightDelta < 0.0f))
+      return 0.0f;
+    const float span = duration + duration;
+    const float slope = (next - previous) / span;
+    return slope * duration / 3.0f;
+  };
+  // MatrixConverter initially installs a shared user tangent for each segment.
+  // When Unroll selects the alternate XYZ Euler representation, KFCurve
+  // recalculates that key's side as a clamped automatic tangent. A transition
+  // therefore intentionally mixes a user handle on one side and auto on the
+  // other side.
+  const float userSlope = static_cast<float>(
+    (rightTangentValue - leftTangentValue) / frameStep);
+  const float userHandle = userSlope * duration / 3.0f;
+  const float outHandle = leftUsesAutoTangent
+    ? autoHandle(previousValue, leftValue, rightValue) : userHandle;
+  const float inHandle = rightUsesAutoTangent
+    ? autoHandle(leftValue, rightValue, nextValue) : userHandle;
   return EvaluateUnityFbxUnweightedCubic(
-    leftValue, rightValue, handle, handle, sourceT);
+    leftValue, rightValue, outHandle, inHandle, sourceT);
 }
 
 static double UnityFbxWrapEulerNear(double value, double reference) {
@@ -665,7 +681,8 @@ static double UnityFbxWrapEulerNear(double value, double reference) {
 }
 
 static ufbx_vec3 UnityFbxContinuousXyzEuler(
-    const ufbx_vec3& value, const ufbx_vec3& reference) {
+    const ufbx_vec3& value, const ufbx_vec3& reference,
+    bool* usedAlternate = nullptr) {
   const ufbx_vec3 direct = {
     UnityFbxWrapEulerNear(value.x, reference.x),
     UnityFbxWrapEulerNear(value.y, reference.y),
@@ -693,7 +710,9 @@ static ufbx_vec3 UnityFbxContinuousXyzEuler(
   volatile double alternateSquareXy = alternateSquareX + alternateSquareY;
   const double directDistance = directSquareXy + directSquareZ;
   const double alternateDistance = alternateSquareXy + alternateSquareZ;
-  ufbx_vec3 result = directDistance < alternateDistance ? direct : alternate;
+  const bool selectAlternate = !(directDistance < alternateDistance);
+  if (usedAlternate) *usedAlternate = selectAlternate;
+  ufbx_vec3 result = selectAlternate ? alternate : direct;
 
   // At XYZ gimbal lock X and Z are coupled. FbxGetContinuousRotation splits
   // their residual equally so the continuous destination key stays closest
@@ -729,10 +748,16 @@ static double UnityFbxSampleTime(
   return static_cast<double>(ticks) / ticksPerSecond;
 }
 
-static std::vector<ufbx_vec3> BuildUnityFbxConvertedEulerKeys(
+struct UnityFbxConvertedEulerKey {
+  ufbx_vec3 value;
+  ufbx_vec3 tangentValue;
+  bool usesAutoTangent;
+};
+
+static std::vector<UnityFbxConvertedEulerKey> BuildUnityFbxConvertedEulerKeys(
     const ufbx_anim_value* rawRotation, ufbx_rotation_order rotationOrder,
     double playbackTimeBegin, float frameRate, size_t keyCount) {
-  std::vector<ufbx_vec3> result;
+  std::vector<UnityFbxConvertedEulerKey> result;
   if (!rawRotation || rotationOrder == UFBX_ROTATION_ORDER_XYZ ||
       rotationOrder == UFBX_ROTATION_ORDER_SPHERIC || !(frameRate > 0.0f))
     return result;
@@ -756,17 +781,19 @@ static std::vector<ufbx_vec3> BuildUnityFbxConvertedEulerKeys(
       rawRotation->curves[2], time, source.z));
     ufbx_vec3 stored{};
     UnityFbxEulerToQuaternion(source, rotationOrder, &stored);
+    bool usesAutoTangent = false;
     const ufbx_vec3 continuous = key == 0
-      ? stored : UnityFbxContinuousXyzEuler(stored, previous);
+      ? stored : UnityFbxContinuousXyzEuler(
+          stored, previous, &usesAutoTangent);
     // MatrixConverter writes its continuous destination Euler result into
-    // float curve keys. Extraction later reads those float-expanded values;
-    // retaining the full M2V/V2VRef value here changes large wrapped angles.
+    // float curve keys. Extraction later reads those float-expanded values,
+    // while tangent construction retains the full V2VRef result.
     const ufbx_vec3 storedContinuous = {
       static_cast<float>(continuous.x),
       static_cast<float>(continuous.y),
       static_cast<float>(continuous.z),
     };
-    result.push_back(storedContinuous);
+    result.push_back({storedContinuous, continuous, usesAutoTangent});
     previous = continuous;
   }
   return result;
@@ -775,7 +802,8 @@ static std::vector<ufbx_vec3> BuildUnityFbxConvertedEulerKeys(
 static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     const ufbx_node* node, const ufbx_anim_value* rawRotation,
     double absoluteTime, double orderedConversionTime, float frameRate,
-    size_t sampleIndex, const std::vector<ufbx_vec3>* convertedEulerKeys,
+    size_t sampleIndex,
+    const std::vector<UnityFbxConvertedEulerKey>* convertedEulerKeys,
     bool allowMissingBakedSample, bool* matchedBakedRotation) {
   const AnityModelQuaternionKey fallback = QuaternionKey(source, node);
   if (matchedBakedRotation) *matchedBakedRotation = false;
@@ -805,8 +833,9 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     // Unity evaluates the converted destination curve on its float-derived
     // KTime even when that sample is only a few ticks away from a source key.
     if (convertedEulerKeys && sampleIndex < convertedEulerKeys->size()) {
-      const ufbx_vec3 currentReference = (*convertedEulerKeys)[sampleIndex];
-      unityXyzEuler = currentReference;
+      const UnityFbxConvertedEulerKey& currentKey =
+        (*convertedEulerKeys)[sampleIndex];
+      unityXyzEuler = currentKey.value;
       if (timeOffset != 0.0) {
         constexpr double ticksPerSecond = 141120000.0;
         const int64_t sampleTicks = static_cast<int64_t>(
@@ -826,33 +855,37 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
         const size_t neighborKey = static_cast<size_t>(std::clamp<int64_t>(
           neighborIndex, 0,
           static_cast<int64_t>(convertedEulerKeys->size() - 1)));
-        const ufbx_vec3 neighborReference = (*convertedEulerKeys)[neighborKey];
         const double interpolation = static_cast<double>(
           std::abs(sampleTicks - orderedTicks)) / static_cast<double>(frameTicks);
         const bool usesFollowingFrame = timeOffset > 0.0;
         const double sourceT = usesFollowingFrame ? interpolation : 1.0 - interpolation;
-        const auto evaluateComponent = [usesFollowingFrame, sourceT, frameStep](
-            double current, double neighbor,
-            double currentTangent, double neighborTangent) {
-          return usesFollowingFrame
-            ? EvaluateUnityConvertedFrameSegment(
-                static_cast<float>(current), static_cast<float>(neighbor),
-                currentTangent, neighborTangent,
-                sourceT, frameStep)
-            : EvaluateUnityConvertedFrameSegment(
-                static_cast<float>(neighbor), static_cast<float>(current),
-                neighborTangent, currentTangent,
-                sourceT, frameStep);
-        };
-        unityXyzEuler.x = evaluateComponent(
-          currentReference.x, neighborReference.x,
-          currentReference.x, neighborReference.x);
-        unityXyzEuler.y = evaluateComponent(
-          currentReference.y, neighborReference.y,
-          currentReference.y, neighborReference.y);
-        unityXyzEuler.z = evaluateComponent(
-          currentReference.z, neighborReference.z,
-          currentReference.z, neighborReference.z);
+        const size_t segmentLeft = usesFollowingFrame ? sampleIndex : neighborKey;
+        const size_t segmentRight = usesFollowingFrame ? neighborKey : sampleIndex;
+        const size_t beforeLeft = segmentLeft > 0 ? segmentLeft - 1 : segmentLeft;
+        const size_t afterRight = std::min(
+          segmentRight + 1, convertedEulerKeys->size() - 1);
+        const UnityFbxConvertedEulerKey& previous = (*convertedEulerKeys)[beforeLeft];
+        const UnityFbxConvertedEulerKey& left = (*convertedEulerKeys)[segmentLeft];
+        const UnityFbxConvertedEulerKey& right = (*convertedEulerKeys)[segmentRight];
+        const UnityFbxConvertedEulerKey& next = (*convertedEulerKeys)[afterRight];
+        unityXyzEuler.x = EvaluateUnityConvertedFrameSegment(
+          static_cast<float>(previous.value.x), static_cast<float>(left.value.x),
+          static_cast<float>(right.value.x), static_cast<float>(next.value.x),
+          left.tangentValue.x, right.tangentValue.x,
+          left.usesAutoTangent, right.usesAutoTangent,
+          sourceT, frameStep);
+        unityXyzEuler.y = EvaluateUnityConvertedFrameSegment(
+          static_cast<float>(previous.value.y), static_cast<float>(left.value.y),
+          static_cast<float>(right.value.y), static_cast<float>(next.value.y),
+          left.tangentValue.y, right.tangentValue.y,
+          left.usesAutoTangent, right.usesAutoTangent,
+          sourceT, frameStep);
+        unityXyzEuler.z = EvaluateUnityConvertedFrameSegment(
+          static_cast<float>(previous.value.z), static_cast<float>(left.value.z),
+          static_cast<float>(right.value.z), static_cast<float>(next.value.z),
+          left.tangentValue.z, right.tangentValue.z,
+          left.usesAutoTangent, right.usesAutoTangent,
+          sourceT, frameStep);
       }
     }
   }
@@ -868,9 +901,17 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     std::abs(node->adjust_pre_rotation.y) < 1e-9 &&
     std::abs(node->adjust_pre_rotation.z) < 1e-9 &&
     std::abs(node->adjust_pre_rotation.w) < 1e-9;
+  // ExtractQuaternionFromFBXEulerOld receives FbxVector4 values expanded from
+  // the float destination curves, including values evaluated between keys.
+  // Preserve that final curve-output rounding before SetROnly/GetQ.
+  const ufbx_vec3 extractedEuler = {
+    static_cast<float>(unityXyzEuler.x),
+    static_cast<float>(unityXyzEuler.y),
+    static_cast<float>(unityXyzEuler.z),
+  };
   const ufbx_quat compatible = xAxisBasis
     ? UnityFbxEulerToQuaternion(
-        {unityXyzEuler.x, -unityXyzEuler.y, -unityXyzEuler.z},
+        {extractedEuler.x, -extractedEuler.y, -extractedEuler.z},
         UFBX_ROTATION_ORDER_XYZ)
     : ufbx_quat_mul(
         ufbx_quat_mul(node->adjust_pre_rotation, compatibleRaw), inverseAdjustment);
@@ -1241,7 +1282,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             ? source->nodes.data[bakedNode.typed_id] : nullptr;
           const ufbx_anim_value* rawRotation = sourceNode
             ? FindSingleRawValue(stack, &sourceNode->element, UFBX_Lcl_Rotation) : nullptr;
-          const std::vector<ufbx_vec3> convertedEulerKeys =
+          const std::vector<UnityFbxConvertedEulerKey> convertedEulerKeys =
             BuildUnityFbxConvertedEulerKeys(
               rawRotation,
               sourceNode ? sourceNode->rotation_order : UFBX_ROTATION_ORDER_XYZ,
