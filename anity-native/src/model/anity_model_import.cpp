@@ -1642,20 +1642,129 @@ static float EvaluateUnityVisibilityStep(
   return Real(value);
 }
 
+static double UnityVisibilityDefaultValue(const ufbx_anim_value* value) {
+  if (!value) return 1.0;
+  const ufbx_prop* property = ufbx_find_prop(
+    &value->props, "d|Visibility");
+  return property ? property->value_real : value->default_value.x;
+}
+
+struct UnityVisibilitySource {
+  const ufbx_anim_stack* stack = nullptr;
+  const ufbx_element* element = nullptr;
+  const ufbx_anim_value* value = nullptr;
+  const ufbx_anim_curve* curve = nullptr;
+  bool layered = false;
+};
+
+static bool FindUnityVisibilitySource(
+    const ufbx_anim_stack* stack, const ufbx_element* element,
+    UnityVisibilitySource& source) {
+  size_t propertyCount = 0;
+  size_t propertyLayerIndex = 0;
+  const ufbx_anim_value* value = nullptr;
+  for (size_t layerIndex = 0; layerIndex < stack->layers.count; ++layerIndex) {
+    const ufbx_anim_prop* property = ufbx_find_anim_prop(
+      stack->layers.data[layerIndex], element, UFBX_Visibility);
+    if (!property || !property->anim_value) continue;
+    ++propertyCount;
+    propertyLayerIndex = layerIndex;
+    value = property->anim_value;
+  }
+  if (propertyCount == 0) return false;
+  const ufbx_anim_curve* curve = value ? value->curves[0] : nullptr;
+  const bool layered = propertyCount > 1 || propertyLayerIndex > 0;
+  if (!layered && (!curve || curve->keyframes.count == 0)) return false;
+  source = {stack, element, value, curve, layered};
+  return true;
+}
+
+static void CollectUnityVisibilitySources(
+    const ufbx_anim_stack* stack, const ufbx_node* node,
+    std::vector<UnityVisibilitySource>& sources) {
+  for (const ufbx_node* current = node; current; current = current->parent) {
+    UnityVisibilitySource source;
+    if (FindUnityVisibilitySource(stack, &current->element, source))
+      sources.push_back(source);
+  }
+}
+
+static float EvaluateUnityLayeredVisibility(
+    const UnityVisibilitySource& source, double time) {
+  const ufbx_prop* visibility = ufbx_find_prop(
+    &source.element->props, UFBX_Visibility);
+  float result = visibility ? Real(visibility->value_real) : 1.0f;
+  for (size_t layerIndex = 0;
+       layerIndex < source.stack->layers.count; ++layerIndex) {
+    const ufbx_anim_layer* layer = source.stack->layers.data[layerIndex];
+    const ufbx_anim_prop* property = ufbx_find_anim_prop(
+      layer, source.element, UFBX_Visibility);
+    if (!property || !property->anim_value) continue;
+    const ufbx_anim_value* value = property->anim_value;
+    const float layerValue = EvaluateUnityVisibilityStep(
+      value->curves[0], time, UnityVisibilityDefaultValue(value));
+    if (layerIndex == 0) {
+      result = layerValue;
+      continue;
+    }
+    float weight = Real(layer->weight);
+    if (layer->weight_is_animated && layer->blended) {
+      const ufbx_anim_prop* weightProperty = ufbx_find_anim_prop(
+        layer, &layer->element, "Weight");
+      if (weightProperty && weightProperty->anim_value) {
+        weight = Real(EvaluateUnityCompatibleCurve(
+          weightProperty->anim_value->curves[0], time,
+          weightProperty->anim_value->default_value.x) / 100.0);
+        weight = std::clamp(weight, 0.0f, 1.0f);
+      }
+    }
+    if (layer->additive) {
+      result += layerValue * weight;
+    } else if (layer->blended) {
+      result = result * (1.0f - weight) + layerValue * weight;
+    } else {
+      result = layerValue;
+    }
+  }
+  return result;
+}
+
+static float EvaluateUnityVisibilitySource(
+    const UnityVisibilitySource& source, double time) {
+  return source.layered
+    ? EvaluateUnityLayeredVisibility(source, time)
+    : EvaluateUnityVisibilityStep(
+      source.curve, time, UnityVisibilityDefaultValue(source.value));
+}
+
+static float EvaluateUnityVisibilityProduct(
+    const std::vector<UnityVisibilitySource>& sources, double time) {
+  float value = 1.0f;
+  for (const UnityVisibilitySource& source : sources)
+    value *= EvaluateUnityVisibilitySource(source, time);
+  return value;
+}
+
 static bool BuildUnityVisibilityKeys(
     const ufbx_anim_stack* stack, const ufbx_node* node,
     double trimStart, double playbackDuration, float frameRate,
     bool resampleCurves, std::vector<AnityModelScalarKey>& destination) {
-  const ufbx_anim_value* value = FindSingleRawValue(
-    stack, &node->element, UFBX_Visibility);
-  const ufbx_anim_curve* curve = value ? value->curves[0] : nullptr;
-  if (!value || !curve || curve->keyframes.count == 0) return false;
+  std::vector<UnityVisibilitySource> sources;
+  CollectUnityVisibilitySources(stack, node, sources);
+  if (sources.empty()) return false;
 
+  const bool layered = std::any_of(
+    sources.begin(), sources.end(), [](const UnityVisibilitySource& source) {
+      return source.layered;
+    });
   if (resampleCurves) {
     if (!(frameRate > 0.0f) || !(playbackDuration >= 0.0)) return false;
-    const double visibilityDuration = std::max(
-      0.0, curve->keyframes.data[curve->keyframes.count - 1].time - trimStart);
-    playbackDuration = std::max(playbackDuration, visibilityDuration);
+    for (const UnityVisibilitySource& source : sources) {
+      if (!source.curve) continue;
+      const double visibilityDuration = std::max(
+        0.0, source.curve->keyframes.data[source.curve->keyframes.count - 1].time - trimStart);
+      playbackDuration = std::max(playbackDuration, visibilityDuration);
+    }
     const int64_t lastFrame = static_cast<int64_t>(
       std::floor(playbackDuration * static_cast<double>(frameRate) + 0.5));
     destination.reserve(static_cast<size_t>(lastFrame + 1));
@@ -1666,7 +1775,7 @@ static bool BuildUnityVisibilityKeys(
       if (std::abs(relativeTime) < 1e-7f) relativeTime = 0.0f;
       destination.push_back({
         relativeTime,
-        EvaluateUnityVisibilityStep(curve, absoluteTime, value->default_value.x),
+        EvaluateUnityVisibilityProduct(sources, absoluteTime),
         0.0f, 0.0f,
       });
     }
@@ -1676,13 +1785,36 @@ static bool BuildUnityVisibilityKeys(
 
   constexpr float stepEpsilon = 1e-5f;
   constexpr float stepTangent = -std::numeric_limits<float>::infinity();
-  destination.reserve(curve->keyframes.count * 2);
-  float previousValue = Real(curve->keyframes.data[0].value);
-  for (size_t index = 0; index < curve->keyframes.count; ++index) {
-    const ufbx_keyframe& source = curve->keyframes.data[index];
-    float relativeTime = Real(source.time) - Real(trimStart);
+  constexpr double ticksPerSecond = 141120000.0;
+  std::vector<int64_t> keyTicks;
+  if (layered) {
+    if (!(frameRate > 0.0f) || !(playbackDuration >= 0.0)) return false;
+    const int64_t lastFrame = static_cast<int64_t>(
+      std::floor(playbackDuration * static_cast<double>(frameRate) + 0.5));
+    keyTicks.reserve(static_cast<size_t>(lastFrame + 1));
+    for (int64_t frame = 0; frame <= lastFrame; ++frame) {
+      keyTicks.push_back(static_cast<int64_t>(std::llround(
+        UnityFbxSampleTime(trimStart, frameRate, static_cast<size_t>(frame)) *
+        ticksPerSecond)));
+    }
+  } else {
+    for (const UnityVisibilitySource& source : sources) {
+      keyTicks.reserve(keyTicks.size() + source.curve->keyframes.count);
+      for (size_t index = 0; index < source.curve->keyframes.count; ++index) {
+        keyTicks.push_back(static_cast<int64_t>(std::llround(
+          source.curve->keyframes.data[index].time * ticksPerSecond)));
+      }
+    }
+  }
+  std::sort(keyTicks.begin(), keyTicks.end());
+  keyTicks.erase(std::unique(keyTicks.begin(), keyTicks.end()), keyTicks.end());
+  destination.reserve(keyTicks.size() * 2);
+  float previousValue = 0.0f;
+  for (size_t index = 0; index < keyTicks.size(); ++index) {
+    const double absoluteTime = static_cast<double>(keyTicks[index]) / ticksPerSecond;
+    float relativeTime = Real(absoluteTime) - Real(trimStart);
     if (std::abs(relativeTime) < 1e-7f) relativeTime = 0.0f;
-    const float currentValue = Real(source.value);
+    const float currentValue = EvaluateUnityVisibilityProduct(sources, absoluteTime);
     if (index > 0 && currentValue != previousValue) {
       const float beforeTime = relativeTime - stepEpsilon;
       if (destination.empty() || beforeTime > destination.back().time) {
@@ -1811,10 +1943,16 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
       Node destination;
       destination.name = String(node->name);
       destination.meshIndex = node->mesh ? static_cast<int32_t>(node->mesh->typed_id) : -1;
-      const ufbx_prop* visibility = ufbx_find_prop(&node->props, "Visibility");
-      destination.visible = visibility
-        ? (visibility->value_real != 0.0 ? 1 : 0)
-        : (node->visible ? 1 : 0);
+      destination.visible = 1;
+      for (const ufbx_node* current = node; current; current = current->parent) {
+        const ufbx_prop* visibility = ufbx_find_prop(&current->props, "Visibility");
+        const bool currentVisible = visibility
+          ? visibility->value_real != 0.0 : current->visible;
+        if (!currentVisible) {
+          destination.visible = 0;
+          break;
+        }
+      }
       destination.transform = node->local_transform;
       destination.transform.rotation = RemoveRootAxisRotation(destination.transform.rotation, node);
       destination.transform.translation.x *= options->globalScale;
@@ -1872,13 +2010,24 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             rawTransformSource->anim_stacks.data[clipIndex];
         }
 
+        double playbackTimeBegin = baked->playback_time_begin;
+        double playbackTimeEnd = baked->playback_time_end;
+        const bool useDeclaredTakeDuration = source->metadata.version >= 7000 &&
+            std::isfinite(stack->time_begin) && std::isfinite(stack->time_end) &&
+            stack->time_end > stack->time_begin;
+        if (useDeclaredTakeDuration) {
+          playbackTimeBegin = stack->time_begin;
+          playbackTimeEnd = stack->time_end;
+        }
+
         Clip clip;
         clip.name = String(stack->name);
         if (clip.name.empty()) clip.name = "Default Take";
-        clip.duration = 0.0f;
+        clip.duration = useDeclaredTakeDuration
+          ? Real(playbackTimeEnd - playbackTimeBegin) : 0.0f;
         clip.frameRate = scene->frameRate;
-        clip.firstFrame = Real(baked->playback_time_begin * scene->frameRate);
-        clip.lastFrame = Real(baked->playback_time_end * scene->frameRate);
+        clip.firstFrame = Real(playbackTimeBegin * scene->frameRate);
+        clip.lastFrame = Real(playbackTimeEnd * scene->frameRate);
         clip.tracks.reserve(baked->nodes.count);
         for (size_t trackIndex = 0; trackIndex < baked->nodes.count; ++trackIndex) {
           const ufbx_baked_node& bakedNode = baked->nodes.data[trackIndex];
@@ -1910,7 +2059,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             BuildUnityFbxConvertedEulerKeys(
               rawRotation, sourceNode,
               sourceNode ? sourceNode->rotation_order : UFBX_ROTATION_ORDER_XYZ,
-              baked->playback_time_begin, scene->frameRate,
+              playbackTimeBegin, scene->frameRate,
               rotationSampleCount);
           const bool preserveUnrolledZeroSigns =
             UnityFbxPreservesUnrolledQuaternionZeroSigns(rawRotation);
@@ -1919,10 +2068,10 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           size_t bakedRotationCursor = 0;
           for (size_t key = 0; key < rotationSampleCount; ++key) {
             const double sampleTime = UnityFbxSampleTime(
-              baked->playback_time_begin, scene->frameRate, key);
+              playbackTimeBegin, scene->frameRate, key);
             constexpr double ticksPerSecond = 141120000.0;
             const int64_t orderedStartTicks = static_cast<int64_t>(
-              std::llround(baked->playback_time_begin * ticksPerSecond));
+              std::llround(playbackTimeBegin * ticksPerSecond));
             const int64_t orderedFrameTicks = static_cast<int64_t>(
               std::llround(ticksPerSecond / static_cast<double>(scene->frameRate)));
             const double orderedConversionTime = static_cast<double>(
@@ -1932,8 +2081,8 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             sourceKey.time = sampleTime;
             const double bakedEvaluationTime = sourceNode &&
                 sourceNode->rotation_order != UFBX_ROTATION_ORDER_XYZ
-              ? orderedConversionTime - baked->playback_time_begin
-              : sampleTime - baked->playback_time_begin;
+              ? orderedConversionTime - playbackTimeBegin
+              : sampleTime - playbackTimeBegin;
             while (bakedRotationCursor < bakedNode.rotation_keys.count &&
                 bakedNode.rotation_keys.data[bakedRotationCursor].time <
                   bakedEvaluationTime - 1e-9)
@@ -1958,7 +2107,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
               rawRotationTrackCompatible = rawRotationTrackCompatible &&
                 matchedBakedRotation;
             }
-            rotationKey.time = Real(sampleTime) - Real(baked->playback_time_begin);
+            rotationKey.time = Real(sampleTime) - Real(playbackTimeBegin);
             if (!track.rotationKeys.empty()) {
               const AnityModelQuaternionKey& previous = track.rotationKeys.back();
               const float dot = previous.x * rotationKey.x +
@@ -1979,7 +2128,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           if (options->resampleCurves == 0 && sourceNode)
             BuildUnityRawTransformCurves(stack, sourceNode, &bakedNode,
               retainedPivotStack, retainedPivotNode,
-              baked->playback_time_begin, scene->frameRate,
+              playbackTimeBegin, scene->frameRate,
               rotationSampleCount, options->globalScale, track);
           if (!track.positionKeys.empty()) clip.duration = std::max(clip.duration, track.positionKeys.back().time);
           if (!track.rotationKeys.empty()) clip.duration = std::max(clip.duration, track.rotationKeys.back().time);
@@ -1995,7 +2144,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           VisibilityTrack track;
           track.nodeIndex = found->second;
           if (!BuildUnityVisibilityKeys(
-                stack, animatedNode, baked->playback_time_begin,
+                stack, animatedNode, playbackTimeBegin,
                 clip.duration, scene->frameRate,
                 options->resampleCurves != 0, track.keys))
             continue;
@@ -2021,7 +2170,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
                 track.nodeIndex = found->second;
                 track.name = String(prop.name);
                 if (options->resampleCurves == 0 &&
-                    BuildRawScalarKeys(stack, element, prop.name, baked->playback_time_begin, track.keys)) {
+                    BuildRawScalarKeys(stack, element, prop.name, playbackTimeBegin, track.keys)) {
                   // Preserve source Bezier tangents when Unity's Resample Curves option is disabled.
                 } else {
                   const double duration = prop.keys.data[prop.keys.count - 1].time;
@@ -2030,13 +2179,13 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
                   for (int64_t frame = 0; frame <= lastFrame; ++frame) {
                     const double time = static_cast<double>(frame) / scene->frameRate;
                     const ufbx_prop value = ufbx_evaluate_prop_len(stack->anim, element,
-                      prop.name.data, prop.name.length, baked->playback_time_begin + time);
+                      prop.name.data, prop.name.length, playbackTimeBegin + time);
                     track.keys.push_back({Real(time), Real(value.value_real), 0.0f, 0.0f});
                   }
                   const double sampledEnd = static_cast<double>(lastFrame) / scene->frameRate;
                   if (duration - sampledEnd > 1e-8) {
                     const ufbx_prop value = ufbx_evaluate_prop_len(stack->anim, element,
-                      prop.name.data, prop.name.length, baked->playback_time_begin + duration);
+                      prop.name.data, prop.name.length, playbackTimeBegin + duration);
                     track.keys.push_back({Real(duration), Real(value.value_real), 0.0f, 0.0f});
                   }
                   BuildCentralScalarTangents(track.keys);

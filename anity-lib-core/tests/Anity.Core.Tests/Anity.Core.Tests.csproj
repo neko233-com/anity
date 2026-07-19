@@ -31,6 +31,12 @@
     <None Update="Fixtures\Models\BlendShapeCube.fbx"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\LayeredVisibilityCube.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\LayeredConstantVisibilityCube.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(AnityRequireNative)' == 'true'">

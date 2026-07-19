@@ -714,6 +714,223 @@ public sealed class NativeModelImportTests : IDisposable
     }
 
     [Fact]
+    public void ParentVisibilityPropagatesToNestedMeshRenderer()
+    {
+        var imported = ReimportVisibilityTopology(false, new[] { 1f, 0f, 1f }, null, true);
+        var rootCurve = VisibilityCurve(imported.Clip, string.Empty);
+        var childCurve = VisibilityCurve(imported.Clip, "Child");
+        Assert.Equal(Enumerable.Range(0, 24), Frames(rootCurve, imported.Clip.frameRate));
+        Assert.Equal(rootCurve.keys.Select(key => key.value), childCurve.keys.Select(key => key.value));
+    }
+
+    [Fact]
+    public void NullParentVisibilityPropagatesToDescendantRenderer()
+    {
+        var imported = ReimportVisibilityTopology(true, new[] { 1f, 0f, 1f }, null, true);
+        var binding = Assert.Single(imported.Clip.bindings.Where(candidate =>
+            candidate.propertyName == "m_Enabled"));
+        Assert.Equal("Child", binding.path);
+        Assert.Equal(Enumerable.Range(0, 24).Select(frame => frame <= 12 ? 1f : frame <= 22 ? 0f : 1f),
+            binding.curve.keys.Select(key => key.value));
+    }
+
+    [Fact]
+    public void ChildVisibilityDoesNotPropagateToParentRenderer()
+    {
+        var imported = ReimportVisibilityTopology(false, null, new[] { 1f, 0f, 1f }, true);
+        var binding = Assert.Single(imported.Clip.bindings.Where(candidate =>
+            candidate.propertyName == "m_Enabled"));
+        Assert.Equal("Child", binding.path);
+    }
+
+    [Fact]
+    public void AncestorAndChildVisibilityMultiplySourceNumbers()
+    {
+        var imported = ReimportVisibilityTopology(false,
+            new[] { -1f, 0f, 2f }, new[] { 0.25f, -2f, 0f }, true);
+        var parent = VisibilityCurve(imported.Clip, string.Empty);
+        var child = VisibilityCurve(imported.Clip, "Child");
+        Assert.Equal(Enumerable.Range(0, 24).Select(frame => frame <= 12 ? -1f : frame <= 22 ? 0f : 2f),
+            parent.keys.Select(key => key.value));
+        Assert.Equal(Enumerable.Range(0, 24).Select(frame => frame <= 12 ? -0.25f : 0f),
+            child.keys.Select(key => key.value));
+    }
+
+    [Fact]
+    public void StaggeredVisibilityCurvesComposeAtEveryResampledFrame()
+    {
+        var imported = ReimportVisibilityTopology(false,
+            new[] { 1f, 0f, 1f }, new[] { 1f, 0f, 1f }, true,
+            parentFrames: new[] { 0, 13, 23 }, childFrames: new[] { 0, 7, 19 });
+        var child = VisibilityCurve(imported.Clip, "Child");
+        Assert.Equal(Enumerable.Range(0, 24).Select(frame => frame <= 6 || frame == 23 ? 1f : 0f),
+            child.keys.Select(key => key.value));
+    }
+
+    [Fact]
+    public void NonResampledParentVisibilityPropagatesUnityFiveKeyStepLayout()
+    {
+        var imported = ReimportVisibilityTopology(false, new[] { 1f, 0f, 1f }, null, false);
+        foreach (var path in new[] { string.Empty, "Child" })
+        {
+            var keys = VisibilityCurve(imported.Clip, path).keys;
+            Assert.Equal(5, keys.Length);
+            Assert.Equal(new[] { 1f, 1f, 0f, 0f, 1f }, keys.Select(key => key.value));
+            Assert.True(float.IsNegativeInfinity(keys[1].outTangent));
+            Assert.True(float.IsNegativeInfinity(keys[2].inTangent));
+            Assert.True(float.IsNegativeInfinity(keys[3].outTangent));
+            Assert.True(float.IsNegativeInfinity(keys[4].inTangent));
+        }
+    }
+
+    [Fact]
+    public void NonResampledStaggeredVisibilityKeepsSourceTimeUnion()
+    {
+        var imported = ReimportVisibilityTopology(false,
+            new[] { 1f, 0f, 1f }, new[] { 1f, 0f, 1f }, false,
+            parentFrames: new[] { 0, 13, 23 }, childFrames: new[] { 0, 7, 19 });
+        var keys = VisibilityCurve(imported.Clip, "Child").keys;
+        Assert.Equal(7, keys.Length);
+        var expectedTimes = new[]
+        {
+            0f, 7f / 24f - 0.00001f, 7f / 24f,
+            13f / 24f, 19f / 24f, 23f / 24f - 0.00001f, 23f / 24f,
+        };
+        for (var index = 0; index < keys.Length; ++index)
+            Assert.InRange(MathF.Abs(keys[index].time - expectedTimes[index]), 0f, 0.000002f);
+        Assert.Equal(new[] { 1f, 1f, 0f, 0f, 0f, 0f, 1f },
+            keys.Select(key => key.value));
+    }
+
+    [Fact]
+    public void StaticHiddenParentDisablesEveryDescendantRenderer()
+    {
+        var imported = ReimportVisibilityTopology(false, null, null, true, parentDefault: 0f);
+        Assert.All(imported.Root.GetComponentsInChildren<Renderer>(true), renderer =>
+            Assert.False(renderer.enabled));
+    }
+
+    [Fact]
+    public void StaticHiddenChildDoesNotDisableParentRenderer()
+    {
+        var imported = ReimportVisibilityTopology(false, null, null, true, childDefault: 0f);
+        Assert.True(imported.Root.GetComponent<Renderer>()!.enabled);
+        Assert.False(imported.Root.GetComponentsInChildren<Renderer>(true)
+            .Single(renderer => renderer.gameObject.name == "Child").enabled);
+    }
+
+    [Fact]
+    public void AnimatedParentVisibilityOverridesStaticHiddenChildWhenSampled()
+    {
+        var imported = ReimportVisibilityTopology(false, new[] { 1f, 0f, 1f }, null, true,
+            childDefault: 0f);
+        var child = imported.Root.GetComponentsInChildren<Renderer>(true)
+            .Single(renderer => renderer.gameObject.name == "Child");
+        Assert.False(child.enabled);
+        imported.Clip.SampleAnimation(imported.Root, 0f);
+        Assert.True(child.enabled);
+        imported.Clip.SampleAnimation(imported.Root, 13f / 24f);
+        Assert.False(child.enabled);
+    }
+
+    [Fact]
+    public void StaticHiddenParentDoesNotMultiplyChildAnimationCurve()
+    {
+        var imported = ReimportVisibilityTopology(false, null, new[] { 1f, 0f, 1f }, true,
+            parentDefault: 0f);
+        var child = VisibilityCurve(imported.Clip, "Child");
+        Assert.Equal(1f, child.keys[0].value);
+        Assert.Equal(0f, child.keys[13].value);
+        Assert.Equal(1f, child.keys[23].value);
+    }
+
+    [Fact]
+    public void NestedImportVisibilityOffRestoresRenderersAndDropsBindings()
+    {
+        var imported = ReimportVisibilityTopology(false, new[] { 0f, 1f, 0f }, null, true,
+            parentDefault: 0f, importVisibility: false);
+        Assert.All(imported.Root.GetComponentsInChildren<Renderer>(true), renderer =>
+            Assert.True(renderer.enabled));
+        Assert.DoesNotContain(imported.Clip.bindings, binding => binding.propertyName == "m_Enabled");
+    }
+
+    [Fact]
+    public void LayeredAdditiveVisibilityMatchesUnity2022FrameSamples()
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
+        foreach (var (frame, expected) in new[]
+        {
+            (0, 2f), (1, 2.00372767f), (7, 2.39445376f),
+            (8, 2.56706977f), (13, 2.92984843f), (19, 3f), (119, 3f),
+        })
+            Assert.InRange(MathF.Abs(keys[frame].value - expected), 0f, 0.00005f);
+    }
+
+    [Fact]
+    public void LayeredVisibilityWeightUsesSmoothFbxWeightCurve()
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.True(keys[1].value > keys[0].value);
+        Assert.True(keys[8].value > keys[7].value);
+        Assert.InRange(MathF.Abs(keys[8].inTangent - 4.142785f), 0f, 0.001f);
+        Assert.InRange(MathF.Abs(keys[19].outTangent), 0f, 0.0001f);
+    }
+
+    [Fact]
+    public void NonResampledLayeredVisibilityStillBakesUnityFrameGridAsSteps()
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", false).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(139, keys.Length);
+        Assert.Equal(0f, keys[0].time);
+        Assert.Equal(2f, keys[0].value);
+        Assert.InRange(MathF.Abs(keys[1].time - (1f / 24f - 0.00001f)), 0f, 0.000002f);
+        Assert.Equal(2f, keys[1].value);
+        Assert.InRange(MathF.Abs(keys[2].time - 1f / 24f), 0f, 0.000002f);
+        Assert.InRange(MathF.Abs(keys[2].value - 2.00372767f), 0f, 0.000001f);
+        Assert.True(float.IsNegativeInfinity(keys[1].outTangent));
+        Assert.True(float.IsNegativeInfinity(keys[2].inTangent));
+        Assert.InRange(MathF.Abs(keys[^1].time - 119f / 24f), 0f, 0.000002f);
+        Assert.Equal(3f, keys[^1].value);
+    }
+
+    [Fact]
+    public void LayeredOverridePassthroughVisibilityMatchesUnity2022Blend()
+    {
+        var imported = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true, source =>
+            source.Replace(
+                "P: \"Weight\", \"Number\", \"\", \"A+\",0\n\t\t\tP: \"Color\"",
+                "P: \"Weight\", \"Number\", \"\", \"A+\",0\n" +
+                "\t\t\tP: \"BlendMode\", \"enum\", \"\", \"\",2\n\t\t\tP: \"Color\"",
+                StringComparison.Ordinal));
+        var keys = VisibilityCurve(imported.Clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
+        foreach (var (frame, expected) in new[]
+        {
+            (0, 2f), (1, 1.99627233f), (7, 1.60554624f),
+            (8, 1.43293023f), (13, 1.07015169f), (19, 1f), (119, 1f),
+        })
+            Assert.InRange(MathF.Abs(keys[frame].value - expected), 0f, 0.00005f);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ConstantMultiLayerVisibilityKeepsUnityFrameGrid(bool resampleCurves)
+    {
+        var clip = ReimportLayeredVisibility(
+            "LayeredConstantVisibilityCube.fbx", resampleCurves).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
+        Assert.All(keys, key =>
+            Assert.InRange(MathF.Abs(key.value - 1.31851852f), 0f, 0.000001f));
+        Assert.Equal(Enumerable.Range(0, 120), Frames(new AnimationCurve(keys), clip.frameRate));
+    }
+
+    [Fact]
     public void NonResampledTransformSamplesUnityConvertedPose()
     {
         var imported = ImportNonResampledAnimation();
@@ -964,6 +1181,124 @@ public sealed class NativeModelImportTests : IDisposable
             AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single());
     }
 
+    private (GameObject Root, AnimationClip Clip) ReimportVisibilityTopology(
+        bool nullParent, float[]? parentValues, float[]? childValues, bool resampleCurves,
+        float parentDefault = 1f, float childDefault = 1f,
+        int[]? parentFrames = null, int[]? childFrames = null,
+        bool importVisibility = true)
+    {
+        var path = CopyAnimatedFixture();
+        var fullPath = FullPath(path);
+        var fixture = File.ReadAllText(fullPath);
+        var model = FbxBraceBlock(fixture, "\tModel: \"Model::pCube1\", \"Mesh\" {");
+        var takes = fixture.IndexOf("Takes:", StringComparison.Ordinal);
+        var take = FbxBraceBlock(fixture, "\t\tModel: \"Model::pCube1\" {", takes);
+        var parent = RenameFbxModel(model, "Parent", nullParent ? "Null" : "Mesh");
+        if (nullParent)
+        {
+            var properties = FbxBraceBlock(parent, "\t\tProperties60:  {");
+            parent = "\tModel: \"Model::Parent\", \"Null\" {\n\t\tVersion: 232\n" +
+                properties + "\n\t\tMultiLayer: 0\n\t\tMultiTake: 0\n\t\tShading: T\n" +
+                "\t\tCulling: \"CullingOff\"\n\t}";
+        }
+        var child = RenameFbxModel(model, "Child", "Mesh");
+        parent = SetFbxDefaultVisibility(parent, parentDefault);
+        child = SetFbxDefaultVisibility(child, childDefault);
+        fixture = fixture.Replace(model, parent + "\n" + child, StringComparison.Ordinal)
+            .Replace("\tCount: 4", "\tCount: 5", StringComparison.Ordinal)
+            .Replace("\t\tCount: 1\n\t}\n\tObjectType: \"Material\"",
+                "\t\tCount: 2\n\t}\n\tObjectType: \"Material\"", StringComparison.Ordinal)
+            .Replace("\tConnect: \"OO\", \"Model::pCube1\", \"Model::Scene\"\n" +
+                "\tConnect: \"OO\", \"Material::lambert1\", \"Model::pCube1\"",
+                "\tConnect: \"OO\", \"Model::Parent\", \"Model::Scene\"\n" +
+                "\tConnect: \"OO\", \"Model::Child\", \"Model::Parent\"\n" +
+                "\tConnect: \"OO\", \"Material::lambert1\", \"Model::Child\"" +
+                (nullParent ? string.Empty :
+                    "\n\tConnect: \"OO\", \"Material::lambert1\", \"Model::Parent\""),
+                StringComparison.Ordinal);
+        var parentTake = RewriteFbxVisibilityTake(take, "Parent", parentValues, parentFrames);
+        var childTake = RewriteFbxVisibilityTake(take, "Child", childValues, childFrames);
+        fixture = fixture.Replace(take, parentTake + "\n" + childTake, StringComparison.Ordinal);
+        File.WriteAllText(fullPath, fixture);
+        AssetDatabase.ImportAsset(path);
+        var importer = ModelImporter.GetAtPath(path);
+        importer.importVisibility = importVisibility;
+        importer.resampleCurves = resampleCurves;
+        importer.animationCompression = ModelImporterAnimationCompression.Off;
+        importer.SaveAndReimport();
+        return (
+            AssetDatabase.LoadAssetAtPath<GameObject>(path)!,
+            AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single());
+    }
+
+    private (GameObject Root, AnimationClip Clip) ReimportLayeredVisibility(
+        string fixtureName, bool resampleCurves, Func<string, string>? rewrite = null)
+    {
+        var path = "Assets/Models/Layered-" + Guid.NewGuid().ToString("N") + ".fbx";
+        var fullPath = FullPath(path);
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Models", fixtureName), fullPath);
+        if (rewrite is not null)
+        {
+            var source = File.ReadAllText(fullPath);
+            var rewritten = rewrite(source);
+            Assert.NotEqual(source, rewritten);
+            File.WriteAllText(fullPath, rewritten);
+        }
+        AssetDatabase.ImportAsset(path);
+        var importer = ModelImporter.GetAtPath(path);
+        importer.importVisibility = true;
+        importer.resampleCurves = resampleCurves;
+        importer.animationCompression = ModelImporterAnimationCompression.Off;
+        importer.SaveAndReimport();
+        return (
+            AssetDatabase.LoadAssetAtPath<GameObject>(path)!,
+            AssetDatabase.LoadAllAssetsAtPath(path).OfType<AnimationClip>().Single());
+    }
+
+    private static string RenameFbxModel(string block, string name, string type) =>
+        block.Replace("Model::pCube1\", \"Mesh", "Model::" + name + "\", \"" + type,
+            StringComparison.Ordinal);
+
+    private static string SetFbxDefaultVisibility(string block, float value) =>
+        block.Replace("Property: \"Visibility\", \"Visibility\", \"A+\",1",
+            "Property: \"Visibility\", \"Visibility\", \"A+\"," +
+            value.ToString("R", CultureInfo.InvariantCulture), StringComparison.Ordinal);
+
+    private static string RewriteFbxVisibilityTake(
+        string block, string name, float[]? values, int[]? frames)
+    {
+        block = block.Replace("Model::pCube1", "Model::" + name, StringComparison.Ordinal);
+        const string marker = "\t\t\tChannel: \"Visibility\" {";
+        var channel = FbxBraceBlock(block, marker);
+        if (values is null) return block.Replace(channel, string.Empty, StringComparison.Ordinal);
+        frames ??= new[] { 0, 13, 23 };
+        Assert.Equal(values.Length, frames.Length);
+        const long frameTicks = 1_924_423_250L;
+        var keys = string.Join(",", values.Select((value, index) =>
+            ((frames[index] + 1L) * frameTicks).ToString(CultureInfo.InvariantCulture) + "," +
+            value.ToString("R", CultureInfo.InvariantCulture) + ",C,s"));
+        var replacement = marker + "\n\t\t\t\tDefault: " +
+            values[0].ToString("R", CultureInfo.InvariantCulture) +
+            "\n\t\t\t\tKeyVer: 4005\n\t\t\t\tKeyCount: " + values.Length +
+            "\n\t\t\t\tKey: " + keys + "\n\t\t\t\tColor: 1,1,1\n\t\t\t}";
+        return block.Replace(channel, replacement, StringComparison.Ordinal);
+    }
+
+    private static string FbxBraceBlock(string source, string marker, int searchStart = 0)
+    {
+        var start = source.IndexOf(marker, searchStart, StringComparison.Ordinal);
+        Assert.True(start >= 0, "Missing FBX marker: " + marker);
+        var brace = source.IndexOf('{', start);
+        var depth = 0;
+        for (var index = brace; index < source.Length; ++index)
+        {
+            if (source[index] == '{') ++depth;
+            else if (source[index] == '}' && --depth == 0)
+                return source.Substring(start, index - start + 1);
+        }
+        throw new InvalidDataException("Unterminated FBX block: " + marker);
+    }
+
     private (GameObject Root, AnimationClip Clip) ReimportOrderedAnimation(
         int rotationOrder, Action<ModelImporter> configure)
     {
@@ -1092,6 +1427,11 @@ public sealed class NativeModelImportTests : IDisposable
 
     private static AnimationCurve Curve(AnimationClip clip, string property) =>
         clip.bindings.Single(binding => string.Equals(binding.propertyName, property, StringComparison.Ordinal)).curve;
+
+    private static AnimationCurve VisibilityCurve(AnimationClip clip, string path) =>
+        clip.bindings.Single(binding => binding.type == typeof(Renderer) &&
+            string.Equals(binding.path, path, StringComparison.Ordinal) &&
+            string.Equals(binding.propertyName, "m_Enabled", StringComparison.Ordinal)).curve;
 
     private static readonly string[] TransformProperties =
     {
