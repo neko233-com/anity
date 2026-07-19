@@ -898,11 +898,20 @@ public sealed class AssetDatabase
     var diskPath = Path.Combine(_projectRoot, path);
     if (!File.Exists(diskPath)) return;
 
+    var bytes = File.ReadAllBytes(diskPath);
+    var metaPath = diskPath + ".meta";
+    var metaBytes = File.Exists(metaPath) ? File.ReadAllBytes(metaPath) : Array.Empty<byte>();
+    if (TryGetUnityMetaGuid(metaBytes, out var metaGuid)) _assetGuid[path] = metaGuid;
+    var importer = EnsureImporterForPath(path);
+    ApplyPersistedImporterSettings(importer, metaBytes);
+
     var processors = CreateAssetPostprocessors();
     try
     {
       PrepareAssetPostprocessors(processors, path, null);
       foreach (var processor in processors) InvokeAssetPostprocessor(processor, "OnPreprocessAsset");
+      if (importer is ModelImporter)
+        foreach (var processor in processors) InvokeAssetPostprocessor(processor, "OnPreprocessModel");
     }
     catch (Exception exception)
     {
@@ -910,15 +919,55 @@ public sealed class AssetDatabase
       return;
     }
 
-    var bytes = File.ReadAllBytes(diskPath);
-    var metaPath = diskPath + ".meta";
-    var metaBytes = File.Exists(metaPath) ? File.ReadAllBytes(metaPath) : Array.Empty<byte>();
-    if (TryGetUnityMetaGuid(metaBytes, out var metaGuid)) _assetGuid[path] = metaGuid;
-    var asset = CreateImportedAsset(new UnityPackageAsset(GuidFromPath(path), path, bytes, metaBytes));
+    UnityEngine.Object asset;
+    ImportedModelAsset? importedModel = null;
+    var modelError = string.Empty;
+    if (importer is ModelImporter modelImporter && ModelAssetImportPipeline.TryImport(diskPath, path, modelImporter, out var decodedModel, out modelError))
+    {
+      importedModel = decodedModel;
+      asset = decodedModel.MainObject;
+      try
+      {
+        PrepareAssetPostprocessors(processors, path, asset);
+        var gameObjectArguments = new object[] { decodedModel.MainObject };
+        var gameObjectTypes = new[] { typeof(GameObject) };
+        foreach (var processor in processors)
+          InvokeAssetPostprocessor(processor, "OnPostprocessMeshHierarchy", gameObjectTypes, gameObjectArguments);
+        foreach (var processor in processors) InvokeAssetPostprocessor(processor, "OnPreprocessAnimation");
+        ModelAssetImportPipeline.ImportAnimations(decodedModel, modelImporter);
+        foreach (var clip in decodedModel.AnimationClips)
+        {
+          var animationArguments = new object[] { decodedModel.MainObject, clip };
+          var animationTypes = new[] { typeof(GameObject), typeof(AnimationClip) };
+          foreach (var processor in processors)
+            InvokeAssetPostprocessor(processor, "OnPostprocessAnimation", animationTypes, animationArguments);
+        }
+        foreach (var processor in processors)
+          InvokeAssetPostprocessor(processor, "OnPostprocessModel", gameObjectTypes, gameObjectArguments);
+      }
+      catch (Exception exception)
+      {
+        Debug.LogError("Model import postprocessing failed: " + exception.Message);
+        return;
+      }
+    }
+    else
+    {
+      if (importer is ModelImporter) Debug.LogError("Model import failed: " + modelError);
+      if (importer is ModelImporter && _assets.TryGetValue(path, out var previousModel) && previousModel is GameObject)
+      {
+        // Unity keeps the last successfully imported artifact when a source
+        // update cannot be decoded. Do not replace a usable model with bytes.
+        return;
+      }
+      // Invalid model sources retain the legacy binary TextAsset only as a
+      // diagnostic carrier. Successfully decoded model files never enter this path.
+      asset = CreateImportedAsset(new UnityPackageAsset(GuidFromPath(path), path, bytes, metaBytes));
+    }
+
     _assets[path] = asset;
-    _subAssets.Remove(path);
-    var importer = GetImporterAtPath(path) ?? EnsureImporter(path, asset);
-    ApplyPersistedImporterSettings(importer, metaBytes);
+    if (importedModel is not null) _subAssets[path] = importedModel.SubAssets;
+    else _subAssets.Remove(path);
     EnsureImportedModelAvatarSubAsset(path, importer);
     importer.importSettingsMissing = false;
     EnsureImporter(path, asset);
@@ -3471,6 +3520,14 @@ public sealed class AssetDatabase
     var callback = FindAssetPostprocessorCallback(postprocessor.GetType(), callbackName, false, Type.EmptyTypes);
     if (callback is null) return;
     InvokeAssetPostprocessorMethod(callback, postprocessor, Array.Empty<object>());
+  }
+
+  private static void InvokeAssetPostprocessor(
+    AssetPostprocessor postprocessor, string callbackName, Type[] parameterTypes, object[] arguments)
+  {
+    var callback = FindAssetPostprocessorCallback(postprocessor.GetType(), callbackName, false, parameterTypes);
+    if (callback is null) return;
+    InvokeAssetPostprocessorMethod(callback, postprocessor, arguments);
   }
 
   private static void InvokePostprocessAllAssets(

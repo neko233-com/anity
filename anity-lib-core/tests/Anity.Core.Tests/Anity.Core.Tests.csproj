@@ -21,6 +21,12 @@
     <ProjectReference Include="..\..\src\Anity.Core\Anity.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Fixtures\Models\AnimatedCube.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(AnityRequireNative)' == 'true'">
     <None Include="..\..\..\anity-native\build\libanity_native*.dylib"
           Link="%(Filename)%(Extension)"

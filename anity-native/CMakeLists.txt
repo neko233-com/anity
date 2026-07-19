@@ -35,6 +35,7 @@ target_include_directories(anity_native
     $<INSTALL_INTERFACE:include>
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ufbx
 )
 
 target_sources(anity_native PRIVATE
@@ -58,6 +59,8 @@ target_sources(anity_native PRIVATE
   src/media/anity_media.cpp
   src/jobs/anity_jobs.cpp
   src/texture/anity_texture_compress.cpp
+  src/model/anity_model_import.cpp
+  third_party/ufbx/ufbx.c
 )
 
 if(APPLE AND ANITY_ENABLE_METAL)

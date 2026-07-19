@@ -49,6 +49,8 @@ public class ModelImporter : AssetImporter
   public float animationScaleError { get; set; } = 0.5f;
   public bool resampleCurves { get; set; } = true;
   public ModelImporterClipAnimation[] clipAnimations { get; set; }
+  private ModelImporterClipAnimation[] _defaultClipAnimations = Array.Empty<ModelImporterClipAnimation>();
+  public ModelImporterClipAnimation[] defaultClipAnimations => (ModelImporterClipAnimation[])_defaultClipAnimations.Clone();
   public bool bakeSimulation { get; set; }
   public bool bakeIK { get; set; }
   public bool removeConstantScaleCurves { get; set; }
@@ -94,6 +96,12 @@ public class ModelImporter : AssetImporter
   {
     SourceAvatarGuid = guid ?? string.Empty;
     _sourceAvatar = string.IsNullOrEmpty(SourceAvatarGuid) ? null : AssetDatabase.ResolveAvatarByGuid(SourceAvatarGuid);
+  }
+
+  internal void SetImportedModelMetadata(float importedFileScale, ModelImporterClipAnimation[] defaultClips)
+  {
+    fileScale = importedFileScale > 0f && float.IsFinite(importedFileScale) ? importedFileScale : 1f;
+    _defaultClipAnimations = defaultClips ?? Array.Empty<ModelImporterClipAnimation>();
   }
 
   public static new ModelImporter GetAtPath(string path)

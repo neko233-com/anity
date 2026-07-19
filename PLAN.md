@@ -1,5 +1,24 @@
 # PLAN
 
+## 2026-07-19 — Native ModelImporter hierarchy / mesh / animation 主链
+
+### 已完成
+- 依据本机 Unity 2022.3.51f1 batchmode 对真实 FBX/OBJ 的黑盒导入结果，确认有效模型主资源为 `GameObject`、几何为 `Mesh` 子资源、FBX animation stack 为 `AnimationClip`，并记录默认米制换算、`fileScale`、root hierarchy、curve binding 及 `OnPreprocessModel → OnPostprocessMeshHierarchy → OnPreprocessAnimation → OnPostprocessAnimation → OnPostprocessModel` 专用消息顺序。
+- `anity-native` 新增 model importer C ABI，固定 vendored ufbx `v0.23.0`（源码提交 `fcc5d6ba444cfd3eb80677dba5e37e493941abe5`，MIT/Unlicense 双许可证）。C++ 负责 FBX/OBJ 解析、左手 Y-up/米制换算、hierarchy/TRS、polygon triangulation、split-attribute vertex/index buffer、submesh、animation stack bake 与 position/quaternion/scale keys；托管层仅负责 P/Invoke 生命周期和 Unity 对象组装。
+- `AssetDatabase.ImportAsset` 对有效模型不再生成 `TextAsset`：现建立可加载的 `GameObject` hierarchy、`MeshFilter`/`MeshRenderer`、indexed `Mesh`、`AnimationClip` curve 和 `defaultClipAnimations`/`fileScale` metadata。`globalScale`、`useFileUnits`、`importAnimation`、`animationType`、index format、readability、normal/tangent/UV 主路径已进入构建；损坏重导入保持最后一次成功 artifact，不用原始 bytes 覆盖可用模型。
+- 专用 ModelImporter callback 现按实测顺序按名称分发；`OnPreprocessAnimation` 在 clip 构建前运行并可关闭动画导入，postprocess mutation 保留在最终资源。新增 native-required 真实 fixture/OBJ suite **14/14**，覆盖 main/sub-asset 类型、24 顶点/36 索引拓扑、厘米到米、bounds、hierarchy component、take/curve、运行时 sampling、关闭动画、全局缩放、损坏事务、OBJ quad triangulation、专用 callback 顺序与默认 take metadata；既有 ModelImporter/Avatar/AssetPostprocessor 组合 **160/160** 通过。
+- `_scripts/build-native.sh Release`、`_scripts/build-all.sh Release` 与统一 Release 测试门禁通过；Core **3005/3005**、全矩阵 **4003/4003**，均为 0 失败、0 跳过。
+
+### 尚未完成
+- 本轮是可用的 static mesh + transform animation 主链，不是完整 ModelImporter：skin cluster/bindpose/bone weight、blend shape、material/texture extraction/remap、camera/light/visibility/custom properties、constraint、LOD、collider、secondary/multi-UV 与 swapUV、Mikk tangent、hierarchy sorting、mesh compression/optimization，以及 DAE/3DS/DXF/Blend 的真实转换仍需补齐。
+- `clipAnimations` 当前只应用 take 选择、重命名与 wrap mode；first/last frame 裁切、loop pose/root locks/mirror/cycle offset/additive reference/mask、preview clip、Mecanim imported-data 持久化、humanoid Avatar/T-pose/muscle/retargeting/root-motion rotation尚未闭环。Unity package 导入仍需复用同一 native model transaction；sub-asset fileID/type-tree/artifact cache 与跨 session 序列化也未完成。
+- 本机证据版本为 2022.3.51f1；目标 2022.3.61f1 Pro 的最终 hierarchy/mesh/animation/sub-asset 顺序、importer callback 参数与逐帧 Player A/B 尚未执行，因此本项保持 🟡。
+
+### 下一优先项
+1. 接通 skin/bindpose/bone weights、blend shapes 与 imported Avatar，完成 Humanoid/Generic Mecanim、root motion、AvatarMask/additive clip 的真实资源重载和逐帧 A/B。
+2. 完成 material/texture slot、custom clip frame slicing/loop/root locks/mirror、Mikk tangent/secondary UV/mesh optimization，并用 Unity 2022 fixtures 覆盖多 mesh、多 material、instancing、negative scale 与异常文件。
+3. 让 UnityPackage/Refresh/cache worker 共用 native model transaction，补 sub-asset fileID/type-tree/artifact 持久化和 RunBefore/RunAfter callback dependency，最终在 2022.3.61f1 Pro 重跑反射与 Player 门禁。
+
 ## 2026-07-19 — AssetPostprocessor 精确公开面与消息分发
 
 ### 已完成
