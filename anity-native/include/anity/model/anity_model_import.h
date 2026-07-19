@@ -13,7 +13,9 @@ typedef struct AnityModelImportOptions {
   uint8_t useFileUnits;
   uint8_t importAnimation;
   uint8_t generateMissingNormals;
-  uint8_t reserved;
+  uint8_t importBlendShapes;
+  int32_t maxBonesPerVertex;
+  float minBoneWeight;
 } AnityModelImportOptions;
 
 typedef struct AnityModelSceneInfo {
@@ -45,7 +47,43 @@ typedef struct AnityModelMeshInfo {
   int32_t vertexCount;
   int32_t indexCount;
   int32_t subMeshCount;
+  int32_t boneCount;
+  int32_t skinWeightCount;
+  int32_t blendShapeCount;
 } AnityModelMeshInfo;
+
+typedef struct AnityModelBoneInfo {
+  const char* name;
+  int32_t nodeIndex;
+  float m00, m01, m02, m03;
+  float m10, m11, m12, m13;
+  float m20, m21, m22, m23;
+  float m30, m31, m32, m33;
+} AnityModelBoneInfo;
+
+typedef struct AnityModelSkinVertexInfo {
+  int32_t weightStart;
+  int32_t weightCount;
+} AnityModelSkinVertexInfo;
+
+typedef struct AnityModelBoneWeight {
+  int32_t boneIndex;
+  float weight;
+} AnityModelBoneWeight;
+
+typedef struct AnityModelBlendShapeInfo {
+  const char* name;
+  int32_t frameCount;
+} AnityModelBlendShapeInfo;
+
+typedef struct AnityModelBlendShapeFrameInfo {
+  float weight;
+} AnityModelBlendShapeFrameInfo;
+
+typedef struct AnityModelBlendShapeDelta {
+  float positionX, positionY, positionZ;
+  float normalX, normalY, normalZ;
+} AnityModelBlendShapeDelta;
 
 typedef struct AnityModelSubMeshInfo {
   int32_t indexStart;
@@ -87,6 +125,12 @@ ANITY_API AnityResult ANITY_CALL AnityModel_GetMeshInfo(const AnityModelScene* s
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyMeshVertices(const AnityModelScene* scene, int32_t meshIndex, AnityModelVertex* vertices, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyMeshIndices(const AnityModelScene* scene, int32_t meshIndex, uint32_t* indices, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_GetSubMeshInfo(const AnityModelScene* scene, int32_t meshIndex, int32_t subMeshIndex, AnityModelSubMeshInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityModel_GetBoneInfo(const AnityModelScene* scene, int32_t meshIndex, int32_t boneIndex, AnityModelBoneInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityModel_CopySkinVertices(const AnityModelScene* scene, int32_t meshIndex, AnityModelSkinVertexInfo* vertices, int32_t capacity);
+ANITY_API AnityResult ANITY_CALL AnityModel_CopyBoneWeights(const AnityModelScene* scene, int32_t meshIndex, AnityModelBoneWeight* weights, int32_t capacity);
+ANITY_API AnityResult ANITY_CALL AnityModel_GetBlendShapeInfo(const AnityModelScene* scene, int32_t meshIndex, int32_t shapeIndex, AnityModelBlendShapeInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityModel_GetBlendShapeFrameInfo(const AnityModelScene* scene, int32_t meshIndex, int32_t shapeIndex, int32_t frameIndex, AnityModelBlendShapeFrameInfo* outInfo);
+ANITY_API AnityResult ANITY_CALL AnityModel_CopyBlendShapeFrameDeltas(const AnityModelScene* scene, int32_t meshIndex, int32_t shapeIndex, int32_t frameIndex, AnityModelBlendShapeDelta* deltas, int32_t capacity);
 ANITY_API AnityResult ANITY_CALL AnityModel_GetClipInfo(const AnityModelScene* scene, int32_t clipIndex, AnityModelClipInfo* outInfo);
 ANITY_API AnityResult ANITY_CALL AnityModel_GetTrackInfo(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelTrackInfo* outInfo);
 ANITY_API AnityResult ANITY_CALL AnityModel_CopyPositionKeys(const AnityModelScene* scene, int32_t clipIndex, int32_t trackIndex, AnityModelVectorKey* keys, int32_t capacity);

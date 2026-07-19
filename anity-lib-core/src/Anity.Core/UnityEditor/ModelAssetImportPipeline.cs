@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Anity.Core.Runtime.Native;
+using Unity.Collections;
 using UnityEngine;
+using Unity.Jobs;
 
 namespace UnityEditor;
 
@@ -29,6 +31,9 @@ internal static class ModelAssetImportPipeline
       // can still enable or disable clip construction, matching Unity's phase order.
       importAnimation = 1,
       generateMissingNormals = importer.importNormals != ModelImporterNormals.None ? (byte)1 : (byte)0,
+      importBlendShapes = importer.importBlendShapes ? (byte)1 : (byte)0,
+      maxBonesPerVertex = importer.skinWeights == ModelImporterSkinWeights.Unlimited ? 8 : Math.Clamp(importer.maxBonesPerVertex, 1, 8),
+      minBoneWeight = Math.Clamp(importer.minBoneWeight, 0f, 1f),
     };
     if (!NativeModelDecoder.TryLoad(fullPath, options, out var decoded, out error)) return false;
 
@@ -48,6 +53,8 @@ internal static class ModelAssetImportPipeline
       root.hideFlags = HideFlags.NotEditable;
       var subAssets = new List<UnityEngine.Object>(meshes.Length + decoded.Clips.Length);
       subAssets.AddRange(meshes);
+      var avatar = BuildAvatar(root, assetPath, importer);
+      if (avatar is not null) subAssets.Add(avatar);
       imported = new ImportedModelAsset
       {
         MainObject = root,
@@ -62,6 +69,22 @@ internal static class ModelAssetImportPipeline
       error = "Could not construct imported model assets: " + exception.Message;
       return false;
     }
+  }
+
+  private static Avatar? BuildAvatar(GameObject root, string assetPath, ModelImporter importer)
+  {
+    if (importer.animationType == ModelImporterAnimationType.None || importer.avatarSetup == ModelImporterAvatarSetup.NoAvatar)
+      return null;
+    Avatar avatar;
+    if (importer.avatarSetup == ModelImporterAvatarSetup.CopyFromOther && importer.sourceAvatar is { } source)
+      avatar = Avatar.Create(source.isValid, source.isHuman, source.humanDescription, source.ValidationFlags);
+    else if (importer.animationType == ModelImporterAnimationType.Human)
+      avatar = AvatarBuilder.BuildHumanAvatar(root, importer.humanDescription);
+    else
+      avatar = AvatarBuilder.BuildGenericAvatar(root, string.Empty);
+    avatar.name = Path.GetFileNameWithoutExtension(assetPath) + "Avatar";
+    avatar.hideFlags = HideFlags.NotEditable;
+    return avatar;
   }
 
   internal static void ImportAnimations(ImportedModelAsset imported, ModelImporter importer)
@@ -118,6 +141,55 @@ internal static class ModelAssetImportPipeline
         mesh.SetTriangles(indices, subMeshIndex);
       }
       mesh.RecalculateBounds();
+      if (source.Bones.Length != 0)
+      {
+        var bindposes = new Matrix4x4[source.Bones.Length];
+        for (var boneIndex = 0; boneIndex < bindposes.Length; boneIndex++)
+        {
+          var values = source.Bones[boneIndex].Bindpose;
+          if (values.Length != 16) throw new InvalidDataException("Native model bindpose must contain 16 values.");
+          bindposes[boneIndex] = new Matrix4x4
+          {
+            m00 = values[0], m01 = values[1], m02 = values[2], m03 = values[3],
+            m10 = values[4], m11 = values[5], m12 = values[6], m13 = values[7],
+            m20 = values[8], m21 = values[9], m22 = values[10], m23 = values[11],
+            m30 = values[12], m31 = values[13], m32 = values[14], m33 = values[15],
+          };
+        }
+        mesh.bindposes = bindposes;
+        var counts = new byte[source.SkinVertices.Length];
+        for (var vertexIndex = 0; vertexIndex < counts.Length; vertexIndex++)
+        {
+          var skinVertex = source.SkinVertices[vertexIndex];
+          if (skinVertex.weightCount < 0 || skinVertex.weightCount > 8 ||
+              skinVertex.weightStart < 0 || skinVertex.weightStart + skinVertex.weightCount > source.BoneWeights.Length)
+            throw new InvalidDataException("Native model skin influence range is invalid.");
+          counts[vertexIndex] = checked((byte)skinVertex.weightCount);
+        }
+        var weights = new BoneWeight1[source.BoneWeights.Length];
+        for (var weightIndex = 0; weightIndex < weights.Length; weightIndex++)
+          weights[weightIndex] = new BoneWeight1 { boneIndex = source.BoneWeights[weightIndex].boneIndex, weight = source.BoneWeights[weightIndex].weight };
+        using var nativeCounts = new NativeArray<byte>(counts, Allocator.Temp);
+        using var nativeWeights = new NativeArray<BoneWeight1>(weights, Allocator.Temp);
+        mesh.SetBoneWeights(nativeCounts, nativeWeights);
+      }
+      foreach (var shape in source.BlendShapes)
+      {
+        foreach (var frame in shape.Frames)
+        {
+          if (frame.Deltas.Length != vertices.Length) throw new InvalidDataException("Native model blend shape vertex count does not match the mesh.");
+          var deltaVertices = new Vector3[vertices.Length];
+          var deltaNormals = new Vector3[vertices.Length];
+          var deltaTangents = new Vector3[vertices.Length];
+          for (var vertexIndex = 0; vertexIndex < vertices.Length; vertexIndex++)
+          {
+            var delta = frame.Deltas[vertexIndex];
+            deltaVertices[vertexIndex] = new Vector3(delta.positionX, delta.positionY, delta.positionZ);
+            deltaNormals[vertexIndex] = new Vector3(delta.normalX, delta.normalY, delta.normalZ);
+          }
+          mesh.AddBlendShapeFrame(shape.Name, frame.Weight, deltaVertices, deltaNormals, deltaTangents);
+        }
+      }
       meshes[meshIndex] = mesh;
     }
     return meshes;
@@ -129,6 +201,7 @@ internal static class ModelAssetImportPipeline
     var topNodes = Enumerable.Range(0, decoded.Nodes.Length).Where(index => decoded.Nodes[index].ParentIndex < 0).ToArray();
     var adoptedNode = topNodes.Length == 1 ? topNodes[0] : -1;
     var root = new GameObject(assetName);
+    root.transform.name = root.name;
     if (adoptedNode >= 0)
     {
       nodeObjects[adoptedNode] = root;
@@ -140,8 +213,10 @@ internal static class ModelAssetImportPipeline
       if (nodeIndex == adoptedNode) continue;
       var name = string.IsNullOrEmpty(decoded.Nodes[nodeIndex].Name) ? $"Node{nodeIndex}" : decoded.Nodes[nodeIndex].Name;
       nodeObjects[nodeIndex] = new GameObject(name);
+      nodeObjects[nodeIndex].transform.name = name;
     }
 
+    var hierarchyNodes = nodeObjects;
     for (var nodeIndex = 0; nodeIndex < decoded.Nodes.Length; nodeIndex++)
     {
       if (nodeIndex == adoptedNode) continue;
@@ -156,11 +231,36 @@ internal static class ModelAssetImportPipeline
     {
       var source = decoded.Nodes[nodeIndex];
       if (source.MeshIndex < 0 || source.MeshIndex >= meshes.Length) continue;
-      var filter = nodeObjects[nodeIndex].AddComponent<MeshFilter>();
-      filter.sharedMesh = meshes[source.MeshIndex];
-      nodeObjects[nodeIndex].AddComponent<MeshRenderer>();
+      var decodedMesh = decoded.Meshes[source.MeshIndex];
+      if (decodedMesh.Bones.Length != 0 || decodedMesh.BlendShapes.Length != 0)
+      {
+        var renderer = nodeObjects[nodeIndex].AddComponent<SkinnedMeshRenderer>();
+        renderer.sharedMesh = meshes[source.MeshIndex];
+        renderer.localBounds = renderer.sharedMesh.bounds;
+        if (decodedMesh.Bones.Length != 0)
+        {
+          renderer.bones = decodedMesh.Bones.Select(bone => bone.NodeIndex >= 0 && bone.NodeIndex < hierarchyNodes.Length
+            ? hierarchyNodes[bone.NodeIndex].transform : null!).ToArray();
+          renderer.rootBone = CommonBoneAncestor(renderer.bones);
+        }
+      }
+      else
+      {
+        var filter = nodeObjects[nodeIndex].AddComponent<MeshFilter>();
+        filter.sharedMesh = meshes[source.MeshIndex];
+        nodeObjects[nodeIndex].AddComponent<MeshRenderer>();
+      }
     }
     return root;
+  }
+
+  private static Transform? CommonBoneAncestor(Transform[] bones)
+  {
+    var valid = bones.Where(bone => bone is not null).ToArray();
+    if (valid.Length == 0) return null;
+    for (var candidate = valid[0]; candidate is not null; candidate = candidate.parent)
+      if (valid.All(bone => ReferenceEquals(bone, candidate) || bone.IsChildOf(candidate))) return candidate;
+    return null;
   }
 
   private static void ApplyTransform(Transform transform, NativeModelDecoder.Node source)

@@ -25,6 +25,12 @@
     <None Update="Fixtures\Models\AnimatedCube.fbx"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\SkinnedPlane.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\BlendShapeCube.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(AnityRequireNative)' == 'true'">

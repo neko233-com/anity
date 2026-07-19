@@ -1,5 +1,24 @@
 # PLAN
 
+## 2026-07-19 — Native FBX skin / blend shape / imported Avatar 主链
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对真实 Blender skinned FBX 与 Maya blend-shape FBX 做黑盒校准：确认 skin 的 `SkinnedMeshRenderer`、bone/rootBone、bindpose、未显式绑定顶点的 bone-0 权重，及纯 blend-shape 网格仍使用无 bones 的 `SkinnedMeshRenderer`；确认 blend frame 以百分比 `100` 暴露、split vertex 共享逻辑顶点 delta、`importBlendShapes=false` 回到静态 renderer。
+- `anity-native` model C ABI 现输出 skin cluster、bone node index、16-float bindpose、每顶点 variable influence range、归一化 weight，以及 blend deformer/channel/frame/position-normal delta。index generation 同时压缩逻辑顶点 stream，避免 UV/normal seam 拆点后 skin/morph 映射错位；`maxBonesPerVertex`、`minBoneWeight` 与最多 8 influence 进入 native import options。
+- 托管 importer 现构造 `Mesh.bindposes` / `SetBoneWeights` / `AddBlendShapeFrame`，按解码 node index 绑定 bones、计算共同 `rootBone`、建立 `SkinnedMeshRenderer`/localBounds，并从真实 decoded hierarchy 经 native AvatarBuilder validation 生成 Generic Avatar。blend-only `BakeMesh` 无需虚构 bones 即可输出实际形变；导入 Transform 保留 FBX node name。
+- 新增两份真实 FBX fixture 与 skin/blend/imported-Avatar 专项 **13/13**；连同既有 native model 与 AvatarBuilder 聚焦回归 **50/50** 通过。
+- `_scripts/build-native.sh Release` 与 `_scripts/build-all.sh Release` 通过；Core **3018/3018**、统一 native-required 矩阵 **4016/4016**，均为 0 失败、0 跳过。
+
+### 尚未完成
+- FBX blend-shape 动画的 `blendShape.<name>` curve、多个 skin deformer/dual-quaternion skinning、shape tangent delta、importer Optimize Bones、Humanoid Avatar mapping/T-pose/muscle/retargeting 与 root motion 尚未闭环。
+- material/texture extraction/remap、完整 clip frame slicing/loop/root locks/mirror/additive/mask、camera/light/visibility/constraint/LOD/collider、多 UV/Mikk tangent/secondary UV/mesh optimization，以及 DAE/3DS/DXF/Blend 转换仍需补齐。
+- 黑盒证据仍来自本机 2022.3.51f1；目标 2022.3.61f1 Pro 的正式 sub-asset/fileID、逐帧 skin/morph/animation 与 Player 渲染 A/B 尚未执行，故 ModelImporter 保持 🟡。
+
+### 下一优先项
+1. 从 ufbx baked element/property 接通 `blendShape.<channel>` AnimationClip curve，并完成 first/last frame slicing、loop/root locks/mirror/additive reference 与 root motion。
+2. 完成 material/texture slot/remap、多 skin deformer与 Humanoid mapping/T-pose/retargeting，用多骨骼、多材质、多 mesh、negative scale fixture 做 Unity A/B。
+3. 补 sub-asset stable fileID/type-tree/artifact cache 与 UnityPackage/import worker 共用事务，并在 2022.3.61f1 Pro 重跑 importer/Player 全门禁。
+
 ## 2026-07-19 — Native ModelImporter hierarchy / mesh / animation 主链
 
 ### 已完成

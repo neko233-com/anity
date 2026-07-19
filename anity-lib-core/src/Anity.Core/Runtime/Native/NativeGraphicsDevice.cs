@@ -392,27 +392,44 @@ public sealed class NativeGraphicsDevice : IDisposable
         Matrix4x4[] bindposes = mesh.bindposes;
         Transform[] bones = renderer.bones;
         Transform? rendererTransform = renderer.transform;
-        if (!AnityNative.Available || rendererTransform is null || positions.Length == 0 ||
-            weights.Length != positions.Length || bones.Length == 0 || bindposes.Length == 0)
+        if (rendererTransform is null || positions.Length == 0) return false;
+        var source = new AnityNative.GraphicsSkinVertex[positions.Length];
+        for (int i = 0; i < positions.Length; i++)
+        {
+            Vector3 normal = i < normals.Length ? normals[i] : Vector3.forward;
+            Vector4 tangent = i < tangents.Length ? tangents[i] : new Vector4(1f, 0f, 0f, 1f);
+            Vector3 position = positions[i];
+            source[i] = new AnityNative.GraphicsSkinVertex { px = position.x, py = position.y, pz = position.z,
+                nx = normal.x, ny = normal.y, nz = normal.z, tx = tangent.x, ty = tangent.y, tz = tangent.z, tw = tangent.w };
+        }
+        if (!TryApplyBlendShapeDeltas(mesh, renderer, source)) return false;
+        if (bones.Length == 0 && bindposes.Length == 0 && weights.Length == 0)
+        {
+            if (mesh.blendShapeCount == 0) return false;
+            positions = new Vector3[source.Length]; normals = new Vector3[source.Length]; tangents = new Vector4[source.Length];
+            for (int i = 0; i < source.Length; i++)
+            {
+                AnityNative.GraphicsSkinVertex vertex = source[i];
+                positions[i] = new Vector3(vertex.px, vertex.py, vertex.pz);
+                normals[i] = new Vector3(vertex.nx, vertex.ny, vertex.nz);
+                tangents[i] = new Vector4(vertex.tx, vertex.ty, vertex.tz, vertex.tw);
+            }
+            return true;
+        }
+        if (!AnityNative.Available || weights.Length != positions.Length || bones.Length == 0 || bindposes.Length == 0)
             return false;
         int boneCount = Math.Min(bones.Length, bindposes.Length);
         if (boneCount <= 0) return false;
-        var source = new AnityNative.GraphicsSkinVertex[positions.Length];
         var nativeWeights = new AnityNative.GraphicsBoneWeight[positions.Length];
         var matrices = new float[boneCount * 16];
         var output = new AnityNative.GraphicsSkinVertex[positions.Length];
         for (int i = 0; i < positions.Length; i++)
         {
-            Vector3 normal = i < normals.Length ? normals[i] : Vector3.forward;
-            Vector4 tangent = i < tangents.Length ? tangents[i] : new Vector4(1f, 0f, 0f, 1f);
-            Vector3 position = positions[i]; BoneWeight weight = weights[i];
-            source[i] = new AnityNative.GraphicsSkinVertex { px = position.x, py = position.y, pz = position.z,
-                nx = normal.x, ny = normal.y, nz = normal.z, tx = tangent.x, ty = tangent.y, tz = tangent.z, tw = tangent.w };
+            BoneWeight weight = weights[i];
             nativeWeights[i] = new AnityNative.GraphicsBoneWeight { w0 = weight.weight0, w1 = weight.weight1,
                 w2 = weight.weight2, w3 = weight.weight3, i0 = weight.boneIndex0, i1 = weight.boneIndex1,
                 i2 = weight.boneIndex2, i3 = weight.boneIndex3 };
         }
-        if (!TryApplyBlendShapeDeltas(mesh, renderer, source)) return false;
         bool useVariableInfluences = mesh.TryGetVariableBoneWeights(out var bonesPerVertex, out var allBoneWeights);
         if (useVariableInfluences && (bonesPerVertex.Length != source.Length || allBoneWeights.Length == 0)) return false;
         var variableWeights = new AnityNative.GraphicsBoneWeight1[allBoneWeights.Length];
