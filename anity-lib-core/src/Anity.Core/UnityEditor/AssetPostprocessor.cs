@@ -1,158 +1,76 @@
 using System;
-using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using UnityEditor.AssetImporters;
 using UnityEngine;
 
 namespace UnityEditor;
 
-public abstract class AssetPostprocessor
+/// <summary>
+/// Base class for import pipeline messages. Unity discovers callbacks such as
+/// OnPreprocessAsset by name on derived classes; those callbacks are deliberately
+/// not members of this public API surface.
+/// </summary>
+public class AssetPostprocessor
 {
-  public string? assetPath;
+  private AssetImportContext m_Context;
+  private string m_PathName;
 
-  public virtual int GetAssetLoadPriority() => 0;
-
-  public virtual int GetPostprocessOrder()
+  public string assetPath
   {
-    return 0;
+    get => m_PathName;
+    set => m_PathName = value;
   }
 
-  public virtual void OnPreprocessAsset()
+  public AssetImporter assetImporter => AssetDatabase.GetImporterAtPath(assetPath);
+
+  public AssetImportContext context
   {
+    get => m_Context;
+    internal set => m_Context = value;
   }
 
-  public virtual void OnPostprocessAssetbundleNameChanged(string assetPath, string previous, string next)
+  [Obsolete("To set or get the preview, call EditorUtility.SetAssetPreview or AssetPreview.GetAssetPreview instead", true)]
+  public Texture2D preview
   {
-    _ = assetPath;
-    _ = previous;
-    _ = next;
+    get => AssetPostprocessorPreviewStore.Get(this);
+    set => AssetPostprocessorPreviewStore.Set(this, value);
   }
 
-  public virtual uint GetVersion()
+  public virtual int GetPostprocessOrder() => 0;
+
+  public virtual uint GetVersion() => 0u;
+
+  public void LogWarning(string warning) => Debug.LogWarning(warning);
+
+  public void LogWarning(string warning, UnityEngine.Object context) => Debug.LogWarning((object)warning, context);
+
+  public void LogError(string warning) => Debug.LogError(warning);
+
+  public void LogError(string warning, UnityEngine.Object context) => Debug.LogError((object)warning, context);
+}
+
+internal static class AssetPostprocessorPreviewStore
+{
+  private sealed class PreviewHolder
   {
-    return 0u;
+    internal Texture2D Value;
   }
 
-  public virtual void OnPostprocessAllAssets(string[] importedAssets, string[] deletedAssets, string[] movedAssets, string[] movedFromAssetPaths)
+  private static readonly ConditionalWeakTable<AssetPostprocessor, PreviewHolder> Previews = new();
+
+  internal static Texture2D Get(AssetPostprocessor processor)
   {
-    _ = importedAssets;
-    _ = deletedAssets;
-    _ = movedAssets;
-    _ = movedFromAssetPaths;
+    return Previews.TryGetValue(processor, out var holder) ? holder.Value : null;
   }
 
-  public virtual void OnPreprocessTexture()
+  internal static void Set(AssetPostprocessor processor, Texture2D preview)
   {
-  }
-
-  public virtual void OnPostprocessTexture(Texture2D texture)
-  {
-    _ = texture;
-  }
-
-  public virtual void OnPreprocessModel()
-  {
-  }
-
-  public virtual void OnPostprocessModel(GameObject root)
-  {
-    _ = root;
-  }
-
-  public virtual void OnPreprocessAnimation()
-  {
-  }
-
-  public virtual void OnPostprocessAnimation(GameObject root, AnimationClip clip)
-  {
-    _ = root;
-    _ = clip;
-  }
-
-  public virtual void OnPreprocessAudio()
-  {
-  }
-
-  public virtual void OnPostprocessAudio(AudioClip clip)
-  {
-    _ = clip;
-  }
-
-  public virtual void OnPreprocessHumanoid()
-  {
-  }
-
-  public virtual void OnPostprocessHumanoid(GameObject root, AvatarMask avatarMask, float humanScale)
-  {
-    _ = root;
-    _ = avatarMask;
-    _ = humanScale;
-  }
-
-  public virtual void OnPreprocessSpeedTree()
-  {
-  }
-
-  public virtual void OnPostprocessSpeedTree(GameObject root)
-  {
-    _ = root;
-  }
-
-  public virtual void OnPostprocessSprite(Texture2D texture, Sprite[] sprites)
-  {
-    _ = texture;
-    _ = sprites;
-  }
-
-  public virtual void OnPostprocessMaterial(Material material)
-  {
-    _ = material;
-  }
-
-  public virtual void OnPostprocessGameObjectWithUserProperties(GameObject root, string[] propNames, object[] values)
-  {
-    _ = root;
-    _ = propNames;
-    _ = values;
-  }
-
-  public virtual void OnPostprocessRenderTexture(RenderTexture renderTexture)
-  {
-    _ = renderTexture;
-  }
-
-  public virtual void OnPostprocessCubemap(Cubemap cubemap)
-  {
-    _ = cubemap;
-  }
-
-  public virtual void OnPostprocessFont(Font font)
-  {
-    _ = font;
-  }
-
-  public virtual void OnPostprocessLightmap(LightmapData lightmapData)
-  {
-    _ = lightmapData;
-  }
-
-  public virtual void OnPostprocessMesh(Mesh mesh)
-  {
-    _ = mesh;
-  }
-
-  public virtual void OnPostprocessAvatar(RawAvatar avatar)
-  {
-    _ = avatar;
-  }
-
-  public virtual void OnPreprocessShader()
-  {
-  }
-
-  public virtual void OnPostprocessShader(Shader shader, ShaderSnippetData snippet, ShaderCompilerData compilerData)
-  {
-    _ = shader;
-    _ = snippet;
-    _ = compilerData;
+    if (preview is null)
+    {
+      Previews.Remove(processor);
+      return;
+    }
+    Previews.GetValue(processor, _ => new PreviewHolder()).Value = preview;
   }
 }
 

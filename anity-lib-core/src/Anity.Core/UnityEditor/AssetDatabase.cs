@@ -4,9 +4,12 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using UnityEditor.AssetImporters;
 using UnityEngine;
 using Bindings = UnityEngine.Bindings;
 
@@ -799,19 +802,19 @@ public sealed class AssetDatabase
     if (TryReadUnityPackage(fullPath, out var packageAssets, out var error))
     {
       var postprocessors = CreateAssetPostprocessors();
+      var newlyCreatedImporters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
       try
       {
         foreach (var imported in packageAssets)
         {
-          foreach (var postprocessor in postprocessors)
-          {
-            postprocessor.assetPath = imported.Path;
-            postprocessor.OnPreprocessAsset();
-          }
+          if (!_importers.ContainsKey(imported.Path)) newlyCreatedImporters.Add(imported.Path);
+          PrepareAssetPostprocessors(postprocessors, imported.Path, null);
+          foreach (var postprocessor in postprocessors) InvokeAssetPostprocessor(postprocessor, "OnPreprocessAsset");
         }
       }
       catch (Exception exception)
       {
+        foreach (var importedPath in newlyCreatedImporters) _importers.Remove(importedPath);
         importPackageFailed?.Invoke(name, "Asset preprocessing failed: " + exception.Message);
         return;
       }
@@ -839,19 +842,11 @@ public sealed class AssetDatabase
 
       onImportPackageItemsCompleted?.Invoke(packageAssets.Select(asset => asset.Path).ToArray());
 
-      foreach (var postprocessor in postprocessors)
-      {
-        try
-        {
-          postprocessor.OnPostprocessAllAssets(
-            packageAssets.Select(asset => asset.Path).ToArray(),
-            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>());
-        }
-        catch (Exception exception)
-        {
-          Debug.LogError("Asset postprocessor failed after package import: " + exception.Message);
-        }
-      }
+      InvokePostprocessAllAssets(
+        postprocessors,
+        packageAssets.Select(asset => asset.Path).ToArray(),
+        Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), false,
+        "Asset postprocessor failed after package import: ");
     }
     else if (error is not null)
     {
@@ -906,11 +901,8 @@ public sealed class AssetDatabase
     var processors = CreateAssetPostprocessors();
     try
     {
-      foreach (var processor in processors)
-      {
-        processor.assetPath = path;
-        processor.OnPreprocessAsset();
-      }
+      PrepareAssetPostprocessors(processors, path, null);
+      foreach (var processor in processors) InvokeAssetPostprocessor(processor, "OnPreprocessAsset");
     }
     catch (Exception exception)
     {
@@ -931,11 +923,9 @@ public sealed class AssetDatabase
     importer.importSettingsMissing = false;
     EnsureImporter(path, asset);
 
-    foreach (var processor in processors)
-    {
-      try { processor.OnPostprocessAllAssets(new[] { path }, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>()); }
-      catch (Exception exception) { Debug.LogError("Asset postprocessor failed after reimport: " + exception.Message); }
-    }
+    InvokePostprocessAllAssets(
+      processors, new[] { path }, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), false,
+      "Asset postprocessor failed after reimport: ");
   }
 
   public static void ImportAsset(string path, ImportAssetOptions options)
@@ -1626,12 +1616,33 @@ public sealed class AssetDatabase
     {
       Texture2D => new TextureImporter(),
       AudioClip => new AudioImporter(),
-      _ when Path.GetExtension(assetPath).ToLowerInvariant() is ".fbx" or ".obj" or ".dae" or ".blend" or ".3ds" or ".dxf" => new ModelImporter(),
-      _ => new AssetImporter(),
+      _ => CreateImporterForPath(assetPath),
     };
     importer.assetPath = assetPath;
     _importers[assetPath] = importer;
     return importer;
+  }
+
+  private static AssetImporter EnsureImporterForPath(string assetPath)
+  {
+    assetPath = Normalize(assetPath);
+    if (_importers.TryGetValue(assetPath, out var existing)) return existing;
+    var importer = CreateImporterForPath(assetPath);
+    importer.assetPath = assetPath;
+    _importers[assetPath] = importer;
+    return importer;
+  }
+
+  private static AssetImporter CreateImporterForPath(string assetPath)
+  {
+    return Path.GetExtension(assetPath).ToLowerInvariant() switch
+    {
+      ".png" or ".jpg" or ".jpeg" or ".tga" or ".bmp" or ".gif" or ".psd" or ".exr" or ".hdr" => new TextureImporter(),
+      ".wav" or ".mp3" or ".ogg" or ".aac" or ".m4a" or ".flac" => new AudioImporter(),
+      ".fbx" or ".obj" or ".dae" or ".blend" or ".3ds" or ".dxf" => new ModelImporter(),
+      ".shader" => new ShaderImporter(),
+      _ => new AssetImporter(),
+    };
   }
 
   private static void EnsureImportedModelAvatarSubAsset(string assetPath, AssetImporter importer)
@@ -3439,6 +3450,98 @@ public sealed class AssetDatabase
       .OrderBy(processor => processor.GetPostprocessOrder())
       .ThenBy(processor => processor.GetType().FullName, StringComparer.Ordinal)
       .ToList();
+  }
+
+  private static void PrepareAssetPostprocessors(
+    IEnumerable<AssetPostprocessor> postprocessors,
+    string assetPath,
+    UnityEngine.Object mainObject)
+  {
+    _ = EnsureImporterForPath(assetPath);
+    var context = AssetImportContext.Create(assetPath, mainObject);
+    foreach (var postprocessor in postprocessors)
+    {
+      postprocessor.assetPath = assetPath;
+      postprocessor.context = context;
+    }
+  }
+
+  private static void InvokeAssetPostprocessor(AssetPostprocessor postprocessor, string callbackName)
+  {
+    var callback = FindAssetPostprocessorCallback(postprocessor.GetType(), callbackName, false, Type.EmptyTypes);
+    if (callback is null) return;
+    InvokeAssetPostprocessorMethod(callback, postprocessor, Array.Empty<object>());
+  }
+
+  private static void InvokePostprocessAllAssets(
+    IReadOnlyList<AssetPostprocessor> postprocessors,
+    string[] importedAssets,
+    string[] deletedAssets,
+    string[] movedAssets,
+    string[] movedFromAssetPaths,
+    bool didDomainReload,
+    string errorPrefix)
+  {
+    var fourArgumentTypes = new[] { typeof(string[]), typeof(string[]), typeof(string[]), typeof(string[]) };
+    var fiveArgumentTypes = new[] { typeof(string[]), typeof(string[]), typeof(string[]), typeof(string[]), typeof(bool) };
+    var fourArguments = new object[] { importedAssets, deletedAssets, movedAssets, movedFromAssetPaths };
+    var fiveArguments = new object[] { importedAssets, deletedAssets, movedAssets, movedFromAssetPaths, didDomainReload };
+
+    // Unity explicitly excludes OnPostprocessAllAssets from
+    // GetPostprocessOrder. Keep its otherwise unspecified order deterministic;
+    // callback dependency attributes are handled separately from import order.
+    foreach (var postprocessor in postprocessors.OrderBy(
+      processor => processor.GetType().FullName, StringComparer.Ordinal))
+    {
+      var type = postprocessor.GetType();
+      try
+      {
+        var fiveArgumentCallback = FindAssetPostprocessorCallback(type, "OnPostprocessAllAssets", true, fiveArgumentTypes);
+        if (fiveArgumentCallback is not null) InvokeAssetPostprocessorMethod(fiveArgumentCallback, null, fiveArguments);
+
+        var fourArgumentCallback = FindAssetPostprocessorCallback(type, "OnPostprocessAllAssets", true, fourArgumentTypes);
+        if (fourArgumentCallback is not null) InvokeAssetPostprocessorMethod(fourArgumentCallback, null, fourArguments);
+      }
+      catch (Exception exception)
+      {
+        Debug.LogError(errorPrefix + exception.Message);
+      }
+    }
+  }
+
+  private static MethodInfo? FindAssetPostprocessorCallback(Type processorType, string callbackName, bool isStatic, Type[] parameterTypes)
+  {
+    var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly |
+      (isStatic ? BindingFlags.Static : BindingFlags.Instance);
+    for (var type = processorType; type is not null && type != typeof(AssetPostprocessor); type = type.BaseType)
+    {
+      var callback = type.GetMethods(flags).FirstOrDefault(method =>
+        method.Name == callbackName && method.ReturnType == typeof(void) &&
+        ParametersMatch(method.GetParameters(), parameterTypes));
+      if (callback is not null) return callback;
+    }
+    return null;
+  }
+
+  private static bool ParametersMatch(ParameterInfo[] parameters, Type[] parameterTypes)
+  {
+    if (parameters.Length != parameterTypes.Length) return false;
+    for (var index = 0; index < parameters.Length; index++)
+      if (parameters[index].ParameterType != parameterTypes[index]) return false;
+    return true;
+  }
+
+  private static void InvokeAssetPostprocessorMethod(MethodInfo callback, object? target, object[] arguments)
+  {
+    try
+    {
+      callback.Invoke(target, arguments);
+    }
+    catch (TargetInvocationException exception) when (exception.InnerException is not null)
+    {
+      ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+      throw;
+    }
   }
 
   private sealed class UnityPackageAsset

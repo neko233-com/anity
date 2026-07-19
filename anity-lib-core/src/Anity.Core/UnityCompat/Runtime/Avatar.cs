@@ -215,17 +215,6 @@ public class AvatarBuilder
   }
 }
 
-public struct RawAvatar
-{
-  public string name { get; set; }
-  public Transform rootBone { get; set; }
-  public HumanBone[] human { get; set; }
-  public SkeletonBone[] skeleton { get; set; }
-  public float humanScale { get; set; }
-  public bool isHuman { get; set; }
-  public bool hasTranslationDoF { get; set; }
-}
-
 [UnityEngine.Bindings.NativeHeader("Modules/Animation/HumanDescription.h")]
 [UnityEngine.Bindings.NativeType(1, "MonoHumanBone")]
 [UnityEngine.Scripting.RequiredByNativeCode]

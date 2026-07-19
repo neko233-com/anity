@@ -2228,8 +2228,11 @@ public sealed class NativeGraphicsDevice : IDisposable
                     }
                     return true;
                 }
-                if (LastSwapchainResult == AnityNative.Result.DeviceLost)
-                    return false;
+                // Once a native device accepted creation, surface every native
+                // swapchain validation/capability failure to the caller. Falling
+                // through to a managed headless swapchain would turn an invalid
+                // Metal/Vulkan attachment into a false success.
+                return false;
             }
             catch
             {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEditor.AssetImporters;
 using UnityEngine;
 
 namespace UnityEditor;
@@ -35,27 +36,5 @@ public class ShaderImporter : AssetImporter
     public static new ShaderImporter GetAtPath(string path)
     {
         return new ShaderImporter { assetPath = path };
-    }
-}
-
-public class AssetImportContext
-{
-    public string assetPath { get; set; } = string.Empty;
-    public UnityEngine.Object mainObject { get; set; }
-
-    public void AddObjectToAsset(string identifier, UnityEngine.Object obj)
-    {
-        _ = identifier;
-        _ = obj;
-    }
-
-    public void SetMainObject(UnityEngine.Object obj)
-    {
-        mainObject = obj;
-    }
-
-    public void DependsOnSourceAsset(string path)
-    {
-        _ = path;
     }
 }

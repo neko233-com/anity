@@ -788,6 +788,9 @@ AnityResult ANITY_CALL AnityGraphics_CreateSwapchain(
     const AnitySwapchainDesc* desc,
     AnitySwapchain** outSwapchain) {
   if (!device || !desc || !outSwapchain) return ANITY_ERR_INVALID_ARG;
+  if (device->msaaSamples != 1 && device->msaaSamples != 2 &&
+      device->msaaSamples != 4 && device->msaaSamples != 8)
+    return ANITY_ERR_NOT_SUPPORTED;
   if (device->swapchain) {
     AnityGraphics_DestroySwapchain(device->swapchain);
     device->swapchain = nullptr;

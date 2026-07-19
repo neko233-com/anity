@@ -1,5 +1,22 @@
 # PLAN
 
+## 2026-07-19 — AssetPostprocessor 精确公开面与消息分发
+
+### 已完成
+- 本机 Unity 2022.3.51f1 batchmode 反射确认 `AssetPostprocessor` 是可构造 class，官方公开面仅含 `assetPath`、`assetImporter`、`context`、obsolete-error `preview`、`GetPostprocessOrder`、`GetVersion` 与四个 Log 重载；`OnPreprocessAsset` / `OnPostprocessAllAssets` 等均是派生类型按名称声明的导入消息，不属于基类 API。已移除错误的 abstract 基类、`GetAssetLoadPriority`、全部 public virtual callback，以及 Unity 不存在的 `RawAvatar`。
+- 资源导入器改为反射分发私有/公开实例 `OnPreprocessAsset()` 和私有/公开静态 4/5 参数 `OnPostprocessAllAssets`；严格忽略错误返回值、错误参数与实例 batch callback。逐资产预处理按 `GetPostprocessOrder` 升序；batch callback 按官方规则不受该 order 影响，并采用稳定类型顺序。预处理阶段已提供稳定 `assetPath`、`assetImporter` 与 `UnityEditor.AssetImporters.AssetImportContext`，package 异常会回滚本轮临时 importer。
+- `AssetImportContext` 已迁入官方命名空间并采用非公开构造器，主对象/子对象、source dependency、日志与 selected build target 具备实际状态；ShaderImporter 同步引用官方类型。新增 AssetPostprocessor 专项 **17/17**，覆盖精确公开面、默认值、obsolete metadata、私有消息、4/5 参数 batch、顺序、内部类型、错误签名、异常中止、上下文与 `RawAvatar` 不存在；连同 UnityPackage archive 为 **32/32**。
+- 全门禁暴露并修复既有 native swapchain capability 漏洞：非法 3x MSAA 现在在通用 C++ 入口拒绝，原生设备返回的任何 swapchain 创建错误不再被托管 headless fallback 伪装为成功。`_scripts/build-native.sh Release`、Core **2991/2991**、全矩阵 **3989/3989** 均 0 失败、0 跳过。
+
+### 尚未完成
+- 当前通用导入链只在已有真实对象的范围内闭环 `OnPreprocessAsset` 与 batch callback；ModelImporter 仍把 FBX/OBJ 主资源建成 `TextAsset`，尚无 decoded hierarchy、真实 AnimationClip curve/Mecanim 数据，因此不能伪造调用 `OnPostprocessModel` / `OnPostprocessAnimation` 或生成空 clip 子资源。
+- `AssetImportContext` 的 GUID/ArtifactKey artifact dependency、custom dependency、output artifact 路径、完整 importer log/file-line 语义仍未补齐；batch callback 的 RunBefore/RunAfter class/assembly/package dependency attributes，以及 texture/audio/model/shader 各专用 preprocess/postprocess 消息，也需随真实 importer/decoder 接入。目标 2022.3.61f1 Pro 最终反射与导入 A/B 仍待完成，本轮 2022.3.51f1 仅为预备证据。
+
+### 下一优先项
+1. 在 native importer 接入真实 FBX/OBJ hierarchy 与 animation take/curve 解码，产出可重载 AnimationClip/Avatar 子资源及 Mecanim additive reference/mask/source Avatar 数据，再分发 model/animation 消息。
+2. 补齐 `AssetImportContext` 的 Unity 2022.3 公开面、artifact/GUID/custom dependency 与 importer log 行为，并接通 texture/audio/shader 专用回调及 AssetImportContext 子资源提交。
+3. 将 imported humanoid clip 接入 native muscle/finger/IK stream、AvatarMaskBodyPart、root motion/retargeting，并以 Unity Player 逐帧 A/B 验证。
+
 ## 2026-07-19 — Animator AvatarMask native layer pose 合成
 
 ### 已完成

@@ -70,14 +70,14 @@ public sealed class PackageImportProbe : AssetPostprocessor
 
     public static void Reset() { Enabled = false; ThrowOnPreprocess = false; Calls.Clear(); }
     public override int GetPostprocessOrder() => -100;
-    public override void OnPreprocessAsset()
+    private void OnPreprocessAsset()
     {
         if (!Enabled) return;
         Calls.Add("pre:" + assetPath);
         if (ThrowOnPreprocess) throw new InvalidOperationException("intentional preprocess failure");
     }
 
-    public override void OnPostprocessAllAssets(string[] importedAssets, string[] deletedAssets, string[] movedAssets, string[] movedFromAssetPaths)
+    private static void OnPostprocessAllAssets(string[] importedAssets, string[] deletedAssets, string[] movedAssets, string[] movedFromAssetPaths)
     {
         if (Enabled) Calls.Add("post:" + Assert.Single(importedAssets));
     }
