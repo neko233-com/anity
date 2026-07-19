@@ -831,6 +831,7 @@ public sealed class AssetDatabase
         _subAssets.Remove(imported.Path);
         var importer = EnsureImporter(imported.Path, importedObject);
         ApplyPersistedImporterSettings(importer, imported.MetaBytes);
+        EnsureImportedModelAvatarSubAsset(imported.Path, importer);
         _assetGuid[imported.Path] = imported.Guid;
         _importedPackageMetadata[imported.Path] = imported.MetaBytes;
         IndexChild(Path.GetDirectoryName(imported.Path), imported.Path);
@@ -926,6 +927,7 @@ public sealed class AssetDatabase
     _subAssets.Remove(path);
     var importer = GetImporterAtPath(path) ?? EnsureImporter(path, asset);
     ApplyPersistedImporterSettings(importer, metaBytes);
+    EnsureImportedModelAvatarSubAsset(path, importer);
     importer.importSettingsMissing = false;
     EnsureImporter(path, asset);
 
@@ -1341,6 +1343,14 @@ public sealed class AssetDatabase
     return string.IsNullOrEmpty(path) ? null : FindAssetAtPath(path);
   }
 
+  internal static Avatar? ResolveAvatarByGuid(string guid)
+  {
+    var path = GUIDToAssetPath(guid);
+    if (string.IsNullOrEmpty(path)) return null;
+    if (FindAssetAtPath(path) is Avatar mainAvatar) return mainAvatar;
+    return _subAssets.TryGetValue(path, out var subAssets) ? subAssets.OfType<Avatar>().FirstOrDefault() : null;
+  }
+
   public static object? GetMainObjectAtGUID(string guid)
   {
     return LoadAssetByGUID(guid);
@@ -1622,6 +1632,27 @@ public sealed class AssetDatabase
     importer.assetPath = assetPath;
     _importers[assetPath] = importer;
     return importer;
+  }
+
+  private static void EnsureImportedModelAvatarSubAsset(string assetPath, AssetImporter importer)
+  {
+    if (importer is not ModelImporter model || model.animationType == ModelImporterAnimationType.None || model.avatarSetup == ModelImporterAvatarSetup.NoAvatar) return;
+    if (!_subAssets.TryGetValue(assetPath, out var subAssets))
+    {
+      subAssets = new List<Object>();
+      _subAssets[assetPath] = subAssets;
+    }
+    if (subAssets.OfType<Avatar>().Any()) return;
+    var source = model.sourceAvatar;
+    var description = source is not null ? source.humanDescription : model.humanDescription;
+    subAssets.Add(new Avatar
+    {
+      name = Path.GetFileNameWithoutExtension(assetPath) + "Avatar",
+      isValid = true,
+      isHuman = model.animationType == ModelImporterAnimationType.Human,
+      hasTransformHierarchy = description.skeleton is { Length: > 0 },
+      humanDescription = description,
+    });
   }
 
   private static bool TryGetProjectAssetFilePath(string assetPath, out string fullPath)
@@ -1921,6 +1952,7 @@ public sealed class AssetDatabase
       if (TryGetYamlBool(values, "ModelImporter/importBlendShapeDeformPercent", out var importBlendShapeDeformPercent)) model.importBlendShapeDeformPercent = importBlendShapeDeformPercent;
       if (TryGetYamlEnum(values, "ModelImporter/avatarSetup", out ModelImporterAvatarSetup avatarSetup)) model.avatarSetup = avatarSetup;
       if (TryGetYamlBool(values, "ModelImporter/autoGenerateAvatarMappingIfUnspecified", out var autoAvatarMapping)) model.autoGenerateAvatarMappingIfUnspecified = autoAvatarMapping;
+      if (values.TryGetValue("ModelImporter/humanDescription/rootMotionBoneName", out var motionNodeName)) model.motionNodeName = motionNodeName;
       var humanDescription = model.humanDescription;
       var hasHumanDescription = false;
       if (TryGetYamlFloat(values, "ModelImporter/humanDescription/armTwist", out var armTwist)) { humanDescription.upperArmTwist = armTwist; hasHumanDescription = true; }
@@ -1934,6 +1966,7 @@ public sealed class AssetDatabase
       if (hasHumanDescription) model.humanDescription = humanDescription;
       ApplyUnityHumanDescriptionBones(model, content);
       ApplyUnityHumanDescriptionSkeleton(model, content);
+      ApplyUnityModelAvatarSource(model, content);
       if (TryGetYamlEnum(values, "ModelImporter/animationType", out ModelImporterAnimationType animationType)) model.animationType = animationType;
       if (values.TryGetValue("ModelImporter/userData", out var modelUserData)) importer.editorUserSettingsData = modelUserData;
       ApplyUnityModelClipAnimations(model, content);
@@ -2101,6 +2134,49 @@ public sealed class AssetDatabase
     }
     if (!values.TryGetValue("x", out var x) || !values.TryGetValue("y", out var y) || !values.TryGetValue("z", out var z) || !values.TryGetValue("w", out var w)) return false;
     quaternion = new Quaternion(x, y, z, w);
+    return true;
+  }
+
+  private static void ApplyUnityModelAvatarSource(ModelImporter model, string content)
+  {
+    var lines = content.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+    var inModelImporter = false;
+    for (var index = 0; index < lines.Length; index++)
+    {
+      var source = lines[index];
+      var indent = source.Length - source.TrimStart(' ').Length;
+      var line = source.Trim();
+      if (indent == 0 && line.EndsWith(":", StringComparison.Ordinal))
+      {
+        inModelImporter = line == "ModelImporter:";
+        continue;
+      }
+      if (!inModelImporter || indent != 2 || !line.StartsWith("lastHumanDescriptionAvatarSource:", StringComparison.Ordinal)) continue;
+      var reference = new StringBuilder(line[(line.IndexOf(':') + 1)..].Trim());
+      while (!reference.ToString().Contains('}') && index + 1 < lines.Length)
+      {
+        var continuation = lines[index + 1];
+        var continuationIndent = continuation.Length - continuation.TrimStart(' ').Length;
+        if (continuationIndent <= 2) break;
+        reference.Append(' ').Append(continuation.Trim());
+        index++;
+      }
+      model.SetSourceAvatarReference(TryExtractUnityGuid(reference.ToString(), out var guid) ? guid : string.Empty);
+      return;
+    }
+  }
+
+  private static bool TryExtractUnityGuid(string value, out string guid)
+  {
+    guid = string.Empty;
+    var marker = value.IndexOf("guid:", StringComparison.Ordinal);
+    if (marker < 0) return false;
+    var start = marker + "guid:".Length;
+    while (start < value.Length && char.IsWhiteSpace(value[start])) start++;
+    if (start + 32 > value.Length) return false;
+    var candidate = value.Substring(start, 32);
+    if (candidate.Length != 32 || candidate.Any(character => !Uri.IsHexDigit(character))) return false;
+    guid = candidate.ToLowerInvariant();
     return true;
   }
 
@@ -2381,6 +2457,7 @@ public sealed class AssetDatabase
       values[prefix + "humanDescription/legStretch"] = humanDescription.legStretch.ToString("R", CultureInfo.InvariantCulture);
       values[prefix + "humanDescription/feetSpacing"] = humanDescription.feetSpacing.ToString("R", CultureInfo.InvariantCulture);
       values[prefix + "humanDescription/hasTranslationDoF"] = UnityYamlBool(humanDescription.hasTranslationDoF);
+      values[prefix + "humanDescription/rootMotionBoneName"] = EncodeUnityYamlScalar(model.motionNodeName);
       values[prefix + "animationType"] = ((int)model.animationType).ToString(CultureInfo.InvariantCulture);
       values[prefix + "userData"] = EncodeUnityYamlScalar(importer.editorUserSettingsData);
     }
@@ -2395,6 +2472,8 @@ public sealed class AssetDatabase
     {
       WriteExistingUnityHumanDescriptionBones(lines, modelWithClips);
       WriteExistingUnityHumanDescriptionSkeleton(lines, modelWithClips);
+      WriteExistingUnityModelMotionNodeName(lines, modelWithClips);
+      WriteExistingUnityModelAvatarSource(lines, modelWithClips);
       WriteExistingUnityModelClipAnimations(lines, modelWithClips);
     }
   }
@@ -2754,6 +2833,105 @@ public sealed class AssetDatabase
     }
     if (start >= 0 && (ranges.Count == 0 || ranges[^1].Start != start)) ranges.Add((start, lines.Count - start));
     return ranges;
+  }
+
+  private static void WriteExistingUnityModelAvatarSource(List<string> lines, ModelImporter model)
+  {
+    var guid = GetModelSourceAvatarGuid(model);
+    var replacement = string.IsNullOrEmpty(guid)
+      ? "  lastHumanDescriptionAvatarSource: {instanceID: 0}"
+      : "  lastHumanDescriptionAvatarSource: {fileID: 9000000, guid: " + guid + ", type: 3}";
+    var inModelImporter = false;
+    var sourceLine = -1;
+    var sourceLength = 0;
+    var insertAt = -1;
+    for (var index = 0; index < lines.Count; index++)
+    {
+      var source = lines[index];
+      var indent = source.Length - source.TrimStart(' ').Length;
+      var line = source.Trim();
+      if (indent == 0 && line.EndsWith(":", StringComparison.Ordinal))
+      {
+        inModelImporter = line == "ModelImporter:";
+        continue;
+      }
+      if (!inModelImporter) continue;
+      if (indent == 2 && line.StartsWith("lastHumanDescriptionAvatarSource:", StringComparison.Ordinal))
+      {
+        sourceLine = index;
+        sourceLength = 1;
+        var reference = line[(line.IndexOf(':') + 1)..].Trim();
+        while (!reference.Contains('}') && sourceLine + sourceLength < lines.Count)
+        {
+          var continuation = lines[sourceLine + sourceLength];
+          var continuationIndent = continuation.Length - continuation.TrimStart(' ').Length;
+          if (continuationIndent <= 2) break;
+          reference += " " + continuation.Trim();
+          sourceLength++;
+        }
+        break;
+      }
+      if (indent == 2 && (line.StartsWith("autoGenerateAvatarMappingIfUnspecified:", StringComparison.Ordinal) || line.StartsWith("animationType:", StringComparison.Ordinal)))
+        insertAt = insertAt < 0 ? index : insertAt;
+    }
+    if (sourceLine >= 0)
+    {
+      lines.RemoveRange(sourceLine, sourceLength);
+      lines.Insert(sourceLine, replacement);
+      return;
+    }
+    if (insertAt < 0)
+    {
+      insertAt = lines.FindLastIndex(line => line.StartsWith("  assetBundleName:", StringComparison.Ordinal));
+      if (insertAt < 0) insertAt = lines.Count;
+    }
+    lines.Insert(insertAt, replacement);
+  }
+
+  private static void WriteExistingUnityModelMotionNodeName(List<string> lines, ModelImporter model)
+  {
+    var inModelImporter = false;
+    var inHumanDescription = false;
+    var insertAt = -1;
+    for (var index = 0; index < lines.Count; index++)
+    {
+      var source = lines[index];
+      var indent = source.Length - source.TrimStart(' ').Length;
+      var line = source.Trim();
+      if (indent == 0 && line.EndsWith(":", StringComparison.Ordinal))
+      {
+        inModelImporter = line == "ModelImporter:";
+        inHumanDescription = false;
+        continue;
+      }
+      if (!inModelImporter) continue;
+      if (indent == 2 && line == "humanDescription:") { inHumanDescription = true; continue; }
+      if (!inHumanDescription) continue;
+      if (indent <= 2)
+      {
+        if (insertAt < 0) insertAt = index;
+        break;
+      }
+      if (indent == 4 && line.StartsWith("rootMotionBoneName:", StringComparison.Ordinal)) return;
+      if (indent == 4 && (line.StartsWith("rootMotionBoneRotation:", StringComparison.Ordinal) || line.StartsWith("hasTranslationDoF:", StringComparison.Ordinal)))
+      {
+        insertAt = index;
+        break;
+      }
+      insertAt = index + 1;
+    }
+    if (insertAt >= 0) lines.Insert(insertAt, "    rootMotionBoneName: " + EncodeUnityYamlScalar(model.motionNodeName));
+  }
+
+  private static string GetModelSourceAvatarGuid(ModelImporter model)
+  {
+    var avatar = model.sourceAvatar;
+    if (avatar is not null)
+    {
+      var path = GetAssetPath(avatar);
+      if (!string.IsNullOrEmpty(path)) return AssetPathToGUID(path);
+    }
+    return model.SourceAvatarGuid;
   }
 
   private static void WriteExistingUnityModelClipAnimations(List<string> lines, ModelImporter model)

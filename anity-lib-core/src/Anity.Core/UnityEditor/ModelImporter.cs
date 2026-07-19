@@ -2,6 +2,9 @@ using UnityEngine;
 
 namespace UnityEditor;
 
+[UnityEngine.Bindings.NativeHeader("Modules/Animation/ScriptBindings/AvatarBuilder.bindings.h")]
+[UnityEngine.Bindings.NativeHeader("Modules/AssetPipelineEditor/Public/ModelImporting/ModelImporter.bindings.h")]
+[UnityEngine.Bindings.NativeType(Header = "Modules/AssetPipelineEditor/Public/ModelImporting/ModelImporter.h")]
 public class ModelImporter : AssetImporter
 {
   public ModelImporterMeshCompression meshCompression { get; set; }
@@ -27,7 +30,7 @@ public class ModelImporter : AssetImporter
   public bool isReadable { get; set; }
   public float globalScale { get; set; } = 1f;
   public bool useFileScale { get; set; } = true;
-  public float fileScale { get; set; } = 1f;
+  public float fileScale { get; private set; } = 1f;
   public bool useFileUnits { get; set; } = true;
   public ModelImporterNormals importNormals { get; set; } = ModelImporterNormals.Import;
   public ModelImporterTangents importTangents { get; set; } = ModelImporterTangents.CalculateMikk;
@@ -56,22 +59,42 @@ public class ModelImporter : AssetImporter
   public bool strictVertexDataChecks { get; set; }
   public bool importPhysicalCameras { get; set; } = true;
   public HumanDescription humanDescription { get; set; }
-  public bool isHuman { get; set; }
-  public string sourceAvatar { get; set; } = string.Empty;
-  public Avatar avatar { get; set; }
+  public string motionNodeName { get; set; } = string.Empty;
+  private Avatar _sourceAvatar;
+  internal string SourceAvatarGuid { get; private set; } = string.Empty;
+  public Avatar sourceAvatar
+  {
+    get
+    {
+      if (_sourceAvatar is not null && AssetDatabase.Contains(_sourceAvatar)) return _sourceAvatar;
+      _sourceAvatar = string.IsNullOrEmpty(SourceAvatarGuid) ? null : AssetDatabase.ResolveAvatarByGuid(SourceAvatarGuid);
+      return _sourceAvatar;
+    }
+    set
+    {
+      _sourceAvatar = value;
+      var path = value is null ? string.Empty : AssetDatabase.GetAssetPath(value);
+      SourceAvatarGuid = string.IsNullOrEmpty(path) ? string.Empty : AssetDatabase.AssetPathToGUID(path);
+    }
+  }
   public ModelImporterRigImportMode rigImportMode { get; set; } = ModelImporterRigImportMode.Default;
-  public bool skinWeights { get; set; } = true;
-  public ModelImporterSkinWeights skinWeightsMode { get; set; } = ModelImporterSkinWeights.Standard;
+  public ModelImporterSkinWeights skinWeights { get; set; } = ModelImporterSkinWeights.Standard;
   public int maxBonesPerVertex { get; set; } = 4;
   public float minBoneWeight { get; set; } = 0.001f;
   public bool optimizeBones { get; set; } = true;
-  public bool extraExposedTransformPaths { get; set; }
+  public string[] extraExposedTransformPaths { get; set; } = Array.Empty<string>();
   public bool importConstraints { get; set; }
   public bool keepQuads { get; set; }
   public bool weldVertices { get; set; } = true;
   public ModelImporterIndexFormat indexFormat { get; set; } = ModelImporterIndexFormat.Auto;
   public bool sortHierarchyByName { get; set; } = true;
   public ModelImporterMeshCompression meshCompressionOption { get => meshCompression; set => meshCompression = value; }
+
+  internal void SetSourceAvatarReference(string guid)
+  {
+    SourceAvatarGuid = guid ?? string.Empty;
+    _sourceAvatar = string.IsNullOrEmpty(SourceAvatarGuid) ? null : AssetDatabase.ResolveAvatarByGuid(SourceAvatarGuid);
+  }
 
   public static new ModelImporter GetAtPath(string path)
   {
