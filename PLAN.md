@@ -1,5 +1,26 @@
 # PLAN
 
+## 2026-07-20 — Unity FBX multiple animated layer weights / legacy cleanup
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 构造两条同时动画的 AnimationLayer Weight：X 为 `0→100`、Y 为 `100→0`，层值分别为 `2/4`；对 Additive / Override / Override Passthrough 的 8 种交叉组合及 X→Y / Y→X 两种连接顺序形成 **16 组**权威 fixture。frame `1/10/13/19` 共 64 个 imported float 均固化为 exact-bit 门禁。
+- A/B 定位并修复两个真实语义差异：Override 会丢弃下层 accumulator，但仍输出 `layerValue * currentWeight`；动画 Weight 对 Override、Additive 与 Passthrough 三种模式都生效。原实现只在 Passthrough 读取动画 Weight，并让 Override 无权重直接覆盖。
+- 依据 Unity 随附 Autodesk FBX SDK 2020.3.7 ARM64 `KFCurve::KeyFind/EvaluateIndex` 的线性分支复刻运算顺序：先以 float 相减 key value，再把 delta 提升为 double 乘 FbxTime ratio，最后一次回写 float。由此消除 ufbx generic linear 路径在普通 Weight 样本上的 1 ULP 偏差；16/16 组合全部逐 bit 一致，不依赖样例硬编码。
+- 新增 **16 个**多动画权重/层顺序回归，`NativeModelImportTests` 从 **228/228** 增至 **244/244**。删后重跑 `bash _scripts/build-all.sh Release`，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与 URP sample 均 0 编译错误；强制 native 八工程矩阵 **4299/4299**（Core **3277/3277**），0 失败、0 跳过。
+- 对 tracked C#/C++、测试、反射字符串、C ABI/PInvoke 和构建入口再次做 legacy/obsolete/deprecated 反向引用审计。删除内部 `LegacyCanvasRenderer` 与 `LegacyCanvasRaycastFilter` 两份只有定义、零调用、零反射字符串、零导出的重复实现；现行 `UnityEngine.CanvasRenderer` / `UnityEngine.ICanvasRaycastFilter` 已完整替代。Unity 2022 公开 `[Obsolete]` API、旧 serialized asset upgrader 与 FBX 6.x parser 均仍被公开面、导入路径或行为测试使用，保留以避免破坏兼容。
+- `/Applications/Anity.app` 已从最终删后源码重新安装；Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，深度签名、Info.plist、图标逐 byte 及 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过。
+- 最终门禁后确认并可恢复地移出 **39 个 / 375,256 KiB** Git ignored、内部零 tracked 的 repo-local `bin/obj/build` 目录，以及 **21 个 / 291,200 KiB** 本轮 `/private/tmp/anity-*` Unity 工程、fixture、日志和诊断目标，合计 **666,456 KiB（约 650.8 MiB）**。内容位于废纸篓 `/Users/solarisneko/.Trash/anity-multi-layer-final.5mIsTR`；最终复扫仓库缓存目录与 Anity 临时目标均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 权威 exact-bit 证据仍来自当前可用的 Unity 2022.3.51f1；目标 Unity 2022.3.61f1 Pro 尚未安装，不能把 51f1 证据表述为 61f1 已实测。
+- 首个有效 property layer 自带静态/动画 Weight 与 Mute 组合、instanced/skinned/非 Mesh Renderer topology、custom clip/loop/root motion/crossfade/mask 仍需独立 Unity fixture；ModelImporter/AnimationClip 继续为 🟡。
+- 本轮数值和 dead-code 清理不代表 Editor GUI、IL2CPP、各 Player、Package Manager 或完整 Unity 2022.3 Pro 已完成，整体目标仍继续推进。
+
+### 下一优先项
+1. 补首个有效 property layer 的静态/动画 Weight、mode、Mute 与超范围权重交叉 A/B。
+2. 扩展 visibility 到 instanced/skinned/非 Mesh Renderer，并联测 custom clip、loop/root motion、Animator crossfade/layer/mask。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑 ModelImporter/AnimationClip A/B，并在 Windows 11 x64 与 Linux x64 实跑 CLI/Player 门禁。
+
 ## 2026-07-20 — Unity FBX weighted tangent extremes / extrapolation exact-bit
 
 ### 已完成

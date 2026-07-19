@@ -567,8 +567,3 @@ public class Image : MaskableGraphic, ILayoutElement, ICanvasRaycastFilter
     base.OnDestroy();
   }
 }
-
-internal interface LegacyCanvasRaycastFilter
-{
-  bool IsRaycastLocationValid(Vector2 sp, Camera eventCamera);
-}

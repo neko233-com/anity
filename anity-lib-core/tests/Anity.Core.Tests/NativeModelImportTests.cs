@@ -940,6 +940,37 @@ public sealed class NativeModelImportTests : IDisposable
     }
 
     [Theory]
+    [InlineData("AddAddXY", 1084006831, 1081909679, 1080585162, 1077936128)]
+    [InlineData("AddPassXY", 1081491410, 1077831561, 1077448148, 1077936128)]
+    [InlineData("PassAddXY", 1083896454, 1079702151, 1077715375, 1073741824)]
+    [InlineData("PassPassXY", 1081479792, 1076669704, 1075484610, 1073741824)]
+    [InlineData("OverrideAddXY", 1081688926, 1077715375, 1076390858, 1073741824)]
+    [InlineData("AddOverrideXY", 1081247420, 1072858812, 1067560744, 0)]
+    [InlineData("OverridePassXY", 1081270657, 1075624032, 1074578361, 1073741824)]
+    [InlineData("PassOverrideXY", 1081247420, 1072858812, 1067560744, 0)]
+    [InlineData("AddAddYX", 1084006831, 1081909679, 1080585162, 1077936128)]
+    [InlineData("AddPassYX", 1081909679, 1079922904, 1079260645, 1077936128)]
+    [InlineData("PassAddYX", 1083478186, 1075519465, 1074090381, 1073741824)]
+    [InlineData("PassPassYX", 1081061523, 1074578361, 1073602401, 1073741824)]
+    [InlineData("OverrideAddYX", 1037538358, 1065794722, 1068443756, 1073741824)]
+    [InlineData("AddOverrideYX", 1081688926, 1077715375, 1076390858, 1073741824)]
+    [InlineData("OverridePassYX", 1037538358, 1065794722, 1068443756, 1073741824)]
+    [InlineData("PassOverrideYX", 1080852389, 1073323555, 1071789904, 1073741824)]
+    public void MultipleAnimatedLayerWeightsAndOrderMatchUnity2022FrameBits(
+        string variant, int expected1, int expected10, int expected13, int expected19)
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true,
+            source => RewriteFbxMultipleAnimatedLayerWeights(source, variant)).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
+        foreach (var (frame, expected) in new[]
+        {
+            (1, expected1), (10, expected10), (13, expected13), (19, expected19),
+        })
+            Assert.Equal(expected, BitConverter.SingleToInt32Bits(keys[frame].value));
+    }
+
+    [Theory]
     [InlineData("Baseline", 0, 0, 0, 0, 0, 0, 2f, 2.92984843f, 3f)]
     [InlineData("MuteBase", 1, 0, 0, 0, 0, 0, 1f, 1.92984831f, 2f)]
     [InlineData("MuteX", 0, 0, 1, 0, 0, 0, 1f, 1.92984831f, 2f)]
@@ -1509,6 +1540,176 @@ public sealed class NativeModelImportTests : IDisposable
             rewritten = AddFbxCurveExtrapolation(rewritten, "Post-Extrapolation", config.Item5.Value);
         Assert.NotEqual(block, rewritten);
         return source.Replace(block, rewritten, StringComparison.Ordinal);
+    }
+
+    private static string RewriteFbxMultipleAnimatedLayerWeights(
+        string source, string variant)
+    {
+        const long stackId = 2425829828848;
+        const long xLayerId = 2425581317088;
+        const long yLayerId = 2425581322864;
+        const long yWeightCurveId = 2425217120608;
+        const long yWeightNodeId = 2425829827184;
+        const long xWeightCurveId = 9000000000001;
+        const long xWeightNodeId = 9000000000002;
+        var config = variant switch
+        {
+            "AddAddXY" => (0, 0, false),
+            "AddPassXY" => (0, 2, false),
+            "PassAddXY" => (2, 0, false),
+            "PassPassXY" => (2, 2, false),
+            "OverrideAddXY" => (1, 0, false),
+            "AddOverrideXY" => (0, 1, false),
+            "OverridePassXY" => (1, 2, false),
+            "PassOverrideXY" => (2, 1, false),
+            "AddAddYX" => (0, 0, true),
+            "AddPassYX" => (0, 2, true),
+            "PassAddYX" => (2, 0, true),
+            "PassPassYX" => (2, 2, true),
+            "OverrideAddYX" => (1, 0, true),
+            "AddOverrideYX" => (0, 1, true),
+            "OverridePassYX" => (1, 2, true),
+            "PassOverrideYX" => (2, 1, true),
+            _ => throw new ArgumentOutOfRangeException(nameof(variant), variant, null),
+        };
+
+        source = ReplaceRequired(source, "\tCount: 38", "\tCount: 40");
+        source = ReplaceRequired(source,
+            "ObjectType: \"AnimationCurveNode\" {\n\t\tCount: 13",
+            "ObjectType: \"AnimationCurveNode\" {\n\t\tCount: 14");
+        source = ReplaceRequired(source,
+            "ObjectType: \"AnimationCurve\" {\n\t\tCount: 17",
+            "ObjectType: \"AnimationCurve\" {\n\t\tCount: 18");
+        source = RewriteFbxVisibilityNode(source, 2425829830304, 2);
+        source = RewriteFbxVisibilityNode(source, 2425829827392, 4);
+        source = RewriteFbxVisibilityCurve(source, 2425217126208, 4);
+        source = RewriteFbxLayerBlend(source, "X", config.Item1, true);
+        source = RewriteFbxLayerBlend(source, "Y", config.Item2, false);
+
+        var yCurveMarker = "\tAnimationCurve: " +
+            yWeightCurveId.ToString(CultureInfo.InvariantCulture);
+        var yCurve = FbxBraceBlock(source, yCurveMarker);
+        var linearY = RewriteFbxLinearWeightCurve(
+            yCurve, yWeightCurveId, 100, 0);
+        source = source.Replace(yCurve, linearY, StringComparison.Ordinal);
+        var xCurve = RewriteFbxLinearWeightCurve(
+            yCurve, xWeightCurveId, 0, 100);
+        var firstNode = source.IndexOf(
+            "\tAnimationCurveNode: " +
+            yWeightNodeId.ToString(CultureInfo.InvariantCulture),
+            StringComparison.Ordinal);
+        Assert.True(firstNode >= 0);
+        source = source.Insert(firstNode, xCurve + "\n");
+
+        var yNodeMarker = "\tAnimationCurveNode: " +
+            yWeightNodeId.ToString(CultureInfo.InvariantCulture);
+        var yNode = FbxBraceBlock(source, yNodeMarker);
+        var xNode = ReplaceRequired(yNode,
+            yWeightNodeId.ToString(CultureInfo.InvariantCulture),
+            xWeightNodeId.ToString(CultureInfo.InvariantCulture));
+        var firstLayer = source.IndexOf("\tAnimationLayer:", StringComparison.Ordinal);
+        Assert.True(firstLayer >= 0);
+        source = source.Insert(firstLayer, xNode + "\n");
+
+        const string connections = "Connections:  {\n";
+        var connectionStart = source.IndexOf(connections, StringComparison.Ordinal);
+        Assert.True(connectionStart >= 0);
+        var inv = CultureInfo.InvariantCulture;
+        var weightConnections =
+            "\t;AnimCurveNode::Weight, AnimLayer::X\n" +
+            "\tC: \"OO\"," + xWeightNodeId.ToString(inv) + "," +
+            xLayerId.ToString(inv) + "\n\n" +
+            "\tC: \"OP\"," + xWeightNodeId.ToString(inv) + "," +
+            xLayerId.ToString(inv) + ", \"Weight\"\n\n" +
+            "\tC: \"OP\"," + xWeightCurveId.ToString(inv) + "," +
+            xWeightNodeId.ToString(inv) + ", \"d|Weight\"\n\n";
+        source = source.Insert(
+            connectionStart + connections.Length, weightConnections);
+
+        if (config.Item3)
+        {
+            var xConnection = "\tC: \"OO\"," + xLayerId.ToString(inv) + "," +
+                stackId.ToString(inv);
+            var yConnection = "\tC: \"OO\"," + yLayerId.ToString(inv) + "," +
+                stackId.ToString(inv);
+            const string placeholder = "\tC: \"OO\",9999999999999,9999999999998";
+            source = ReplaceRequired(source, xConnection, placeholder);
+            source = ReplaceRequired(source, yConnection, xConnection);
+            source = ReplaceRequired(source, placeholder, yConnection);
+        }
+        return source;
+    }
+
+    private static string RewriteFbxLayerBlend(
+        string source, string layerName, int blendMode, bool addWeight)
+    {
+        const string layerMarker = "\tAnimationLayer:";
+        var nameIndex = source.IndexOf(
+            "\"AnimLayer::" + layerName + "\"", StringComparison.Ordinal);
+        Assert.True(nameIndex >= 0);
+        var start = source.LastIndexOf(
+            layerMarker, nameIndex, StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var block = FbxBraceBlock(source, layerMarker, start);
+        const string properties = "\t\tProperties70:  {";
+        Assert.Contains(properties, block, StringComparison.Ordinal);
+        var additions = "\n\t\t\tP: \"BlendMode\", \"enum\", \"\", \"\"," +
+            blendMode.ToString(CultureInfo.InvariantCulture);
+        if (addWeight)
+            additions = "\n\t\t\tP: \"Weight\", \"Number\", \"\", \"A+\",0" +
+                additions;
+        var rewritten = block.Replace(properties, properties + additions,
+            StringComparison.Ordinal);
+        Assert.NotEqual(block, rewritten);
+        return source.Substring(0, start) + rewritten +
+            source.Substring(start + block.Length);
+    }
+
+    private static string RewriteFbxVisibilityNode(
+        string source, long nodeId, int value)
+    {
+        var marker = "\tAnimationCurveNode: " +
+            nodeId.ToString(CultureInfo.InvariantCulture);
+        var block = FbxBraceBlock(source, marker);
+        var rewritten = ReplaceRequired(block,
+            "P: \"d|Visibility\", \"Visibility\", \"\", \"A\",1",
+            "P: \"d|Visibility\", \"Visibility\", \"\", \"A\"," +
+            value.ToString(CultureInfo.InvariantCulture));
+        return source.Replace(block, rewritten, StringComparison.Ordinal);
+    }
+
+    private static string RewriteFbxVisibilityCurve(
+        string source, long curveId, int value)
+    {
+        var marker = "\tAnimationCurve: " +
+            curveId.ToString(CultureInfo.InvariantCulture);
+        var block = FbxBraceBlock(source, marker);
+        var rewritten = ReplaceRequired(block,
+            "\t\t\ta: 1\n", "\t\t\ta: " +
+            value.ToString(CultureInfo.InvariantCulture) + "\n");
+        return source.Replace(block, rewritten, StringComparison.Ordinal);
+    }
+
+    private static string RewriteFbxLinearWeightCurve(
+        string block, long curveId, int firstValue, int secondValue)
+    {
+        if (curveId != 2425217120608)
+            block = ReplaceRequired(block, "2425217120608",
+                curveId.ToString(CultureInfo.InvariantCulture));
+        if (firstValue != 0 || secondValue != 100)
+            block = ReplaceRequired(block, "\t\t\ta: 0,100\n",
+                "\t\t\ta: " + firstValue.ToString(CultureInfo.InvariantCulture) + "," +
+                secondValue.ToString(CultureInfo.InvariantCulture) + "\n");
+        return ReplaceRequired(block, "\t\t\ta: 50332680,1032\n",
+            "\t\t\ta: 4,4\n");
+    }
+
+    private static string ReplaceRequired(
+        string source, string original, string replacement)
+    {
+        var rewritten = source.Replace(original, replacement, StringComparison.Ordinal);
+        Assert.NotEqual(source, rewritten);
+        return rewritten;
     }
 
     private static string AddFbxCurveExtrapolation(string block, string name, char type)

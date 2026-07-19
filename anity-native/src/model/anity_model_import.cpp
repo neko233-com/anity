@@ -564,8 +564,6 @@ static double EvaluateUnityCompatibleCurve(
   }
   if (time == left->time) return left->value;
   if (time == right->time) return right->value;
-  if (left->interpolation != UFBX_INTERPOLATION_CUBIC)
-    return ufbx_evaluate_curve(curve, time, defaultValue);
 
   // KFCurve derives both the segment duration and local parameter from
   // FbxTime's integer tick subtraction, not from the rounded seconds exposed
@@ -593,6 +591,19 @@ static double EvaluateUnityCompatibleCurve(
   // integer index again. Preserve the intervening double rounding.
   const double curveIndex = static_cast<double>(leftIndex) + segmentRatio;
   const double sourceT = curveIndex - static_cast<double>(leftIndex);
+  if (left->interpolation == UFBX_INTERPOLATION_LINEAR) {
+    // KFCurve first subtracts the source float key values in float, promotes
+    // that rounded delta to double, then evaluates the segment in double and
+    // rounds the final sum to float. ufbx's generic linear path performs a
+    // different arithmetic sequence and differs from Unity by one float ULP
+    // for ordinary layer-weight samples.
+    const float p0 = Real(left->value);
+    const float delta = Real(right->value) - p0;
+    volatile double scaled = sourceT * static_cast<double>(delta);
+    return Real(scaled + static_cast<double>(p0));
+  }
+  if (left->interpolation != UFBX_INTERPOLATION_CUBIC)
+    return ufbx_evaluate_curve(curve, time, defaultValue);
   const float durationFloat = static_cast<float>(duration);
   // ufbx stores Bezier control vectors, but dy = dx * slope rounds away one
   // bit of the original FBX derivative for some weighted handles. Use the
@@ -1880,7 +1891,7 @@ static float EvaluateUnityLayeredVisibility(
       continue;
     }
     double weight = layer->weight;
-    if (layer->weight_is_animated && layer->blended) {
+    if (layer->weight_is_animated) {
       const ufbx_anim_prop* weightProperty = ufbx_find_anim_prop(
         layer, &layer->element, "Weight");
       if (weightProperty && weightProperty->anim_value) {
@@ -1894,7 +1905,11 @@ static float EvaluateUnityLayeredVisibility(
     } else if (layer->blended) {
       result = result * (1.0 - weight) + layerValue * weight;
     } else {
-      result = layerValue;
+      // FBX Override discards the prior accumulator but still applies the
+      // layer's static or animated weight to its own value. Unity preserves
+      // this behavior even though it does not interpolate with the value
+      // underneath as Override Passthrough does.
+      result = layerValue * weight;
     }
   }
   return Real(result);
