@@ -315,6 +315,75 @@ public class AnimationClip : Motion
         return true;
     }
 
+    internal bool TryEvaluateRootMotion(float time, out AnimationRootMotionPose pose)
+    {
+        if (!TryGetRootMotionCurves(
+                out AnimationCurve? tx, out AnimationCurve? ty, out AnimationCurve? tz,
+                out AnimationCurve? qx, out AnimationCurve? qy,
+                out AnimationCurve? qz, out AnimationCurve? qw))
+        {
+            pose = AnimationRootMotionPose.Identity;
+            return false;
+        }
+
+        float duration = length;
+        float animatorTime = float.IsFinite(time) ? time : 0f;
+        animatorTime += _cycleOffset * duration;
+        long completedLoops = 0;
+        float sampleTime;
+        if (_isLooping && duration > 0f)
+        {
+            double cycles = Math.Floor((double)animatorTime / duration);
+            completedLoops = cycles <= long.MinValue ? long.MinValue
+                : cycles >= long.MaxValue ? long.MaxValue : (long)cycles;
+            sampleTime = animatorTime - (float)(cycles * duration);
+            if (sampleTime < 0f) sampleTime = 0f;
+            else if (sampleTime >= duration) sampleTime = 0f;
+        }
+        else sampleTime = duration > 0f ? Math.Clamp(animatorTime, 0f, duration) : 0f;
+
+        AnimationRootMotionPose start = EvaluateRawRootMotion(
+            0f, tx, ty, tz, qx, qy, qz, qw);
+        AnimationRootMotionPose end = EvaluateRawRootMotion(
+            duration, tx, ty, tz, qx, qy, qz, qw);
+        AnimationRootMotionPose sample = EvaluateRawRootMotion(
+            sampleTime, tx, ty, tz, qx, qy, qz, qw);
+        pose = AnimationRootMotionPose.ResolveLooped(
+            start, end, sample, _isLooping ? completedLoops : 0);
+        return true;
+    }
+
+    private bool TryGetRootMotionCurves(
+        out AnimationCurve? tx, out AnimationCurve? ty, out AnimationCurve? tz,
+        out AnimationCurve? qx, out AnimationCurve? qy,
+        out AnimationCurve? qz, out AnimationCurve? qw)
+    {
+        tx = GetCurve(string.Empty, typeof(Animator), "MotionT.x");
+        ty = GetCurve(string.Empty, typeof(Animator), "MotionT.y");
+        tz = GetCurve(string.Empty, typeof(Animator), "MotionT.z");
+        qx = GetCurve(string.Empty, typeof(Animator), "MotionQ.x");
+        qy = GetCurve(string.Empty, typeof(Animator), "MotionQ.y");
+        qz = GetCurve(string.Empty, typeof(Animator), "MotionQ.z");
+        qw = GetCurve(string.Empty, typeof(Animator), "MotionQ.w");
+        bool hasPosition = tx is not null && ty is not null && tz is not null;
+        bool hasRotation = qx is not null && qy is not null && qz is not null && qw is not null;
+        return hasPosition || hasRotation;
+    }
+
+    private static AnimationRootMotionPose EvaluateRawRootMotion(
+        float time,
+        AnimationCurve? tx, AnimationCurve? ty, AnimationCurve? tz,
+        AnimationCurve? qx, AnimationCurve? qy, AnimationCurve? qz, AnimationCurve? qw)
+    {
+        Vector3 position = tx is not null && ty is not null && tz is not null
+            ? new Vector3(tx.Evaluate(time), ty.Evaluate(time), tz.Evaluate(time))
+            : Vector3.zero;
+        Quaternion rotation = qx is not null && qy is not null && qz is not null && qw is not null
+            ? new Quaternion(qx.Evaluate(time), qy.Evaluate(time), qz.Evaluate(time), qw.Evaluate(time))
+            : Quaternion.identity;
+        return new AnimationRootMotionPose(position, rotation);
+    }
+
     private float ResolveSampleTime(float time, bool animatorPlayback, out float loopPhase)
     {
         float duration = length;

@@ -19,6 +19,18 @@ typedef struct AnityAnimationTransformPose {
     uint32_t flags;
 } AnityAnimationTransformPose;
 
+typedef struct AnityAnimationRootMotionPose {
+    float positionX, positionY, positionZ;
+    float rotationX, rotationY, rotationZ, rotationW;
+} AnityAnimationRootMotionPose;
+
+typedef struct AnityAnimationRootMotionDelta {
+    float positionX, positionY, positionZ;
+    float rotationX, rotationY, rotationZ, rotationW;
+    float velocityX, velocityY, velocityZ;
+    float angularVelocityX, angularVelocityY, angularVelocityZ;
+} AnityAnimationRootMotionDelta;
+
 /* Unity Mecanim transform-layer composition. Additive mode requires referencePose. */
 ANITY_API AnityResult ANITY_CALL AnityAnimation_BlendTransformPose(
     const AnityAnimationTransformPose* basePose,
@@ -27,6 +39,40 @@ ANITY_API AnityResult ANITY_CALL AnityAnimation_BlendTransformPose(
     float weight,
     int32_t additive,
     AnityAnimationTransformPose* outPose);
+
+/* Resolves MotionT/MotionQ relative to the first sample and accumulates complete loops. */
+ANITY_API AnityResult ANITY_CALL AnityAnimation_ResolveRootMotion(
+    const AnityAnimationRootMotionPose* startPose,
+    const AnityAnimationRootMotionPose* endPose,
+    const AnityAnimationRootMotionPose* samplePose,
+    int64_t completedLoops,
+    AnityAnimationRootMotionPose* outPose);
+
+/* Mecanim transition/blend-tree root-motion interpolation. */
+ANITY_API AnityResult ANITY_CALL AnityAnimation_BlendRootMotion(
+    const AnityAnimationRootMotionPose* basePose,
+    const AnityAnimationRootMotionPose* layerPose,
+    float weight,
+    AnityAnimationRootMotionPose* outPose);
+
+/* Applies the Animator GameObject's captured world-space anchor to relative motion. */
+ANITY_API AnityResult ANITY_CALL AnityAnimation_AnchorRootMotion(
+    const AnityAnimationRootMotionPose* anchorPose,
+    const AnityAnimationRootMotionPose* motionPose,
+    AnityAnimationRootMotionPose* outPose);
+
+/* Computes the anchor that maps a sampled motion pose onto the current world pose. */
+ANITY_API AnityResult ANITY_CALL AnityAnimation_CalculateRootMotionAnchor(
+    const AnityAnimationRootMotionPose* worldPose,
+    const AnityAnimationRootMotionPose* motionPose,
+    AnityAnimationRootMotionPose* outAnchorPose);
+
+/* Computes Unity-style world delta, linear velocity and angular velocity. */
+ANITY_API AnityResult ANITY_CALL AnityAnimation_CalculateRootMotionDelta(
+    const AnityAnimationRootMotionPose* previousPose,
+    const AnityAnimationRootMotionPose* currentPose,
+    float deltaTime,
+    AnityAnimationRootMotionDelta* outDelta);
 
 #ifdef __cplusplus
 }

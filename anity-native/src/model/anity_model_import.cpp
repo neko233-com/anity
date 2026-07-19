@@ -324,8 +324,15 @@ static bool BuildMesh(const ufbx_mesh* source, float scale, int32_t maxBonesPerV
   return true;
 }
 
-static AnityModelVectorKey VectorKey(const ufbx_baked_vec3& source, float scale) {
-  return { Real(source.time), Real(source.value.x * scale), Real(source.value.y * scale), Real(source.value.z * scale) };
+static AnityModelVectorKey VectorKey(
+    const ufbx_baked_vec3& source, float scale,
+    bool flipYAxisAndZAxis = false) {
+  return {
+    Real(source.time),
+    Real(source.value.x * scale),
+    Real((flipYAxisAndZAxis ? -source.value.y : source.value.y) * scale),
+    Real((flipYAxisAndZAxis ? -source.value.z : source.value.z) * scale),
+  };
 }
 
 static ufbx_quat RemoveRootAxisRotation(ufbx_quat rotation, const ufbx_node* node) {
@@ -1259,7 +1266,8 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     size_t sampleIndex,
     const std::vector<UnityFbxConvertedEulerKey>* convertedEulerKeys,
     bool preserveUnrolledZeroSigns,
-    bool allowMissingBakedSample, bool* matchedBakedRotation) {
+    bool allowMissingBakedSample, bool modernUnityFbxBasis,
+    bool* matchedBakedRotation) {
   const AnityModelQuaternionKey fallback = QuaternionKey(source, node);
   if (matchedBakedRotation) *matchedBakedRotation = false;
   if (!node || !rawRotation || node->rotation_order == UFBX_ROTATION_ORDER_SPHERIC) return fallback;
@@ -1354,6 +1362,7 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
   // normalization. Unity converts the FBX quaternion to float first and only
   // then normalizes it below.
   const bool xAxisBasis = UsesUnityFbxXAxisBasis(node);
+  const bool rawAxisBasis = xAxisBasis || modernUnityFbxBasis;
   // ExtractQuaternionFromFBXEulerOld receives FbxVector4 values expanded from
   // the float destination curves, including values evaluated between keys.
   // Preserve that final curve-output rounding before SetROnly/GetQ.
@@ -1364,7 +1373,7 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
   };
   const ufbx_quat extractedRaw = UnityFbxEulerToQuaternion(
     extractedEuler, UFBX_ROTATION_ORDER_XYZ);
-  const ufbx_quat compatible = xAxisBasis
+  const ufbx_quat compatible = rawAxisBasis
     ? UnityFbxEulerToQuaternion(
         {extractedEuler.x, -extractedEuler.y, -extractedEuler.z},
         UFBX_ROTATION_ORDER_XYZ)
@@ -1390,7 +1399,11 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     std::min(dx * dx + dy * dy + dz * dz + dw * dw,
       sx * sx + sy * sy + sz * sz + sw * sw) <= 1e-10;
   if (matchedBakedRotation) *matchedBakedRotation = matchesBakedRotation;
-  if (!matchesBakedRotation && !allowMissingBakedSample) return fallback;
+  // Unity FBX Exporter files carry a 180-degree X basis adjustment. ufbx's
+  // baked quaternion remains in that adjusted basis, so it cannot validate
+  // the MatrixConverter result component-for-component even though the raw
+  // Euler track is authoritative. Unity emits the compatible quaternion.
+  if (!matchesBakedRotation && !allowMissingBakedSample && !modernUnityFbxBasis) return fallback;
   float x = Real(compatible.x);
   float y = Real(compatible.y);
   float z = Real(compatible.z);
@@ -2359,8 +2372,11 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           Track track;
           track.nodeIndex = found->second;
           track.positionKeys.reserve(bakedNode.translation_keys.count);
+          const bool modernUnityFbxBasis = source->metadata.version >= 7000;
           for (size_t key = 0; key < bakedNode.translation_keys.count; ++key)
-            track.positionKeys.push_back(VectorKey(bakedNode.translation_keys.data[key], options->globalScale));
+            track.positionKeys.push_back(VectorKey(
+              bakedNode.translation_keys.data[key], options->globalScale,
+              modernUnityFbxBasis));
           // Unity resamples a node's transform channels on one shared frame
           // grid. ufbx may omit the last quaternion when an Euler source key is
           // between frames, while translation and scale still retain the full
@@ -2422,6 +2438,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
               preserveUnrolledZeroSigns,
               !hasExactBakedSample && validatedRawRotation &&
                 rawRotationTrackCompatible,
+              modernUnityFbxBasis,
               &matchedBakedRotation);
             if (hasExactBakedSample) {
               validatedRawRotation = true;

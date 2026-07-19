@@ -64,6 +64,129 @@ internal struct AnimationTransformSample
     }
 }
 
+internal readonly struct AnimationRootMotionPose
+{
+    internal AnimationRootMotionPose(Vector3 position, Quaternion rotation)
+    {
+        Position = position;
+        Rotation = rotation.normalized;
+    }
+
+    internal Vector3 Position { get; }
+    internal Quaternion Rotation { get; }
+    internal static AnimationRootMotionPose Identity => new(Vector3.zero, Quaternion.identity);
+
+    internal AnityNative.AnimationRootMotionPose ToNative() => new()
+    {
+        positionX = Position.x,
+        positionY = Position.y,
+        positionZ = Position.z,
+        rotationX = Rotation.x,
+        rotationY = Rotation.y,
+        rotationZ = Rotation.z,
+        rotationW = Rotation.w,
+    };
+
+    internal static AnimationRootMotionPose FromNative(in AnityNative.AnimationRootMotionPose pose)
+        => new(
+            new Vector3(pose.positionX, pose.positionY, pose.positionZ),
+            new Quaternion(pose.rotationX, pose.rotationY, pose.rotationZ, pose.rotationW));
+
+    internal static AnimationRootMotionPose ResolveLooped(
+        AnimationRootMotionPose start,
+        AnimationRootMotionPose end,
+        AnimationRootMotionPose sample,
+        long completedLoops)
+    {
+        AnityNative.AnimationRootMotionPose nativeStart = start.ToNative();
+        AnityNative.AnimationRootMotionPose nativeEnd = end.ToNative();
+        AnityNative.AnimationRootMotionPose nativeSample = sample.ToNative();
+        if (!AnityNative.TryResolveAnimationRootMotion(
+                in nativeStart, in nativeEnd, in nativeSample, completedLoops,
+                out AnityNative.AnimationRootMotionPose result))
+            throw new InvalidOperationException("anity-native root-motion loop resolution failed.");
+        return FromNative(in result);
+    }
+
+    internal static AnimationRootMotionPose Blend(
+        AnimationRootMotionPose lower,
+        AnimationRootMotionPose upper,
+        float weight)
+    {
+        AnityNative.AnimationRootMotionPose nativeLower = lower.ToNative();
+        AnityNative.AnimationRootMotionPose nativeUpper = upper.ToNative();
+        if (!AnityNative.TryBlendAnimationRootMotion(
+                in nativeLower, in nativeUpper, weight,
+                out AnityNative.AnimationRootMotionPose result))
+            throw new InvalidOperationException("anity-native root-motion blend failed.");
+        return FromNative(in result);
+    }
+
+    internal static AnimationRootMotionPose Anchor(
+        AnimationRootMotionPose anchor,
+        AnimationRootMotionPose motion)
+    {
+        AnityNative.AnimationRootMotionPose nativeAnchor = anchor.ToNative();
+        AnityNative.AnimationRootMotionPose nativeMotion = motion.ToNative();
+        if (!AnityNative.TryAnchorAnimationRootMotion(
+                in nativeAnchor, in nativeMotion,
+                out AnityNative.AnimationRootMotionPose result))
+            throw new InvalidOperationException("anity-native root-motion anchoring failed.");
+        return FromNative(in result);
+    }
+
+    internal static AnimationRootMotionPose CalculateAnchor(
+        AnimationRootMotionPose world,
+        AnimationRootMotionPose motion)
+    {
+        AnityNative.AnimationRootMotionPose nativeWorld = world.ToNative();
+        AnityNative.AnimationRootMotionPose nativeMotion = motion.ToNative();
+        if (!AnityNative.TryCalculateAnimationRootMotionAnchor(
+                in nativeWorld, in nativeMotion,
+                out AnityNative.AnimationRootMotionPose result))
+            throw new InvalidOperationException("anity-native root-motion anchor calculation failed.");
+        return FromNative(in result);
+    }
+
+    internal static AnimationRootMotionDelta CalculateDelta(
+        AnimationRootMotionPose previous,
+        AnimationRootMotionPose current,
+        float deltaTime)
+    {
+        AnityNative.AnimationRootMotionPose nativePrevious = previous.ToNative();
+        AnityNative.AnimationRootMotionPose nativeCurrent = current.ToNative();
+        if (!AnityNative.TryCalculateAnimationRootMotionDelta(
+                in nativePrevious, in nativeCurrent, deltaTime,
+                out AnityNative.AnimationRootMotionDelta result))
+            throw new InvalidOperationException("anity-native root-motion delta calculation failed.");
+        return new AnimationRootMotionDelta(
+            new Vector3(result.positionX, result.positionY, result.positionZ),
+            new Quaternion(result.rotationX, result.rotationY, result.rotationZ, result.rotationW),
+            new Vector3(result.velocityX, result.velocityY, result.velocityZ),
+            new Vector3(result.angularVelocityX, result.angularVelocityY, result.angularVelocityZ));
+    }
+}
+
+internal readonly struct AnimationRootMotionDelta
+{
+    internal AnimationRootMotionDelta(
+        Vector3 position,
+        Quaternion rotation,
+        Vector3 velocity,
+        Vector3 angularVelocity)
+    {
+        Position = position;
+        Rotation = rotation;
+        Velocity = velocity;
+        AngularVelocity = angularVelocity;
+    }
+
+    internal Vector3 Position { get; }
+    internal Quaternion Rotation { get; }
+    internal Vector3 Velocity { get; }
+    internal Vector3 AngularVelocity { get; }
+}
+
 internal sealed class AnimationPose
 {
     private readonly Dictionary<Transform, AnimationTransformSample> _samples = new();

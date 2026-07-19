@@ -1,5 +1,27 @@
 # PLAN
 
+## 2026-07-20 — Imported Generic root motion / native rigid transform runtime
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode 对显式 Generic `motionNodeName=InstanceA` 的 FBX 做 importer + Animator 权威探针。确认 importer 生成空 path、`Animator` 类型的 `MotionT.x/y/z` 与 `MotionQ.x/y/z/w`，同时保留普通 child Transform curves；clip 为 `23/24s @ 24fps`，`hasMotionCurves=true`、`hasMotionFloatCurves=true`，但该 Generic fixture 的 `Animator.hasRootMotion=false`。`applyRootMotion=false` 时 world root 与全部 delta/velocity 保持零；启用后 quarter、non-loop clamp、loop endpoint 和第二圈 rigid composition 的 world pose、delta、velocity、angular velocity 已逐值固化。
+- `anity-native` animation 模块新增 root-motion pose/delta C ABI：起点归一化、完整圈刚体幂、transition/blend-tree 插值、world anchor、frame delta、linear/angular velocity 均在 C++ 执行；C# 只负责 Unity API 生命周期、采样编排和 P/Invoke。负圈数与 `int64` 最小值使用安全 exponentiation-by-squaring，不引入托管重计算替代。
+- `ModelImporter` 现按 motion node 名称或 path 选择 decoded FBX track，写入 Unity-compatible MotionT/MotionQ curves 和只读 motion metadata。native FBX 7.x resample 同步修正 Unity 坐标基下 baked translation 与 raw Euler quaternion 转换，同时保持旧 FBX 6.1 已验证路径；相关 model/import/runtime 聚焦矩阵 **327/327** 通过。
+- `AnimationClip` 支持 root curve 求值、cycleOffset、non-loop clamp 与跨圈刚体累计；`Animator` 把 root motion 接入 state transition、BlendTree 和非 additive layer，维护 `rootPosition/rootRotation`、`deltaPosition/deltaRotation`、`velocity/angularVelocity`，并在 Rebind、Play、controller/applyRootMotion 切换时基于当前 sampled motion 重新捕获 world anchor，避免回跳。`hasRootMotion` 保持 Unity 探针确认的 getter-only 与 Generic false 语义。
+- 新增 `ImportedRootMotionRuntimeTests` **16/16**，覆盖 binding/metadata、missing motion node、只读 API、apply off、quarter world pose/delta/velocity、absolute root accessors、non-loop clamp、loop endpoint/第二圈、Update(0)、首帧推进、apply toggle、Rebind、root-lock settings round-trip 与 manual builtin no-op。强制 `ANITY_REQUIRE_NATIVE=1` 的八工程总门禁 **4411/4411**（Core **3389/3389**），0 失败、0 跳过；`bash _scripts/build-all.sh Release` 全产品 0 编译错误。
+- legacy/obsolete/deprecated 复审覆盖 tracked 文件名、精确符号引用、C ABI/PInvoke、测试与备份文件。命中的 removed networking、AssetBundle fallback、Mesh legacy bone-weight bridge、Shader Graph legacy upgrader和 VFX compatibility ABI 均有现行公开面、运行时调用或资产测试依赖；本轮没有新的零调用 legacy 实现可安全删除，也没有 tracked backup，避免误删 Unity 2022 仍要求的兼容表面。
+- `/Applications/Anity.app` 已从最终源码重装；Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，新 root-motion 符号存在，deep/strict codesign、Info.plist/图标逐 byte 和两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过。
+- 最终门禁后确认 Git ignored、内部零 tracked，再可恢复地移出 **39 个 / 375864 KiB** repo-local `bin/obj/build` 目录与 **14 个 / 7672 KiB** 本轮 `/private/tmp/anity-root-motion-*` 工程/日志，合计 **383536 KiB（约 374.5 MiB）**；内容位于废纸篓 `/Users/solarisneko/.Trash/anity-root-motion-final.vKoRNH`，两类目标最终复扫均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 权威逐帧证据仍来自当前可用的 Unity 2022.3.51f1；目标 Unity 2022.3.61f1 Pro 尚未安装，不能把本轮结果表述为 61f1 已实测。
+- 本轮闭环的是显式 Generic motion node。Humanoid retarget/root body motion、`OnAnimatorMove` 回调与 `ApplyBuiltinRootMotion` 完整语义、会实际改变结果的 root lock/keep-original fixture、additive/masked root motion 和复杂 transition interruption 尚未完成。
+- Windows/WebGL/Android Vulkan Player 的 root-motion 产物与逐帧证据尚缺；本轮不代表 Editor GUI、IL2CPP、全部官方包或完整 Unity 2022.3 Pro 已完成，整体目标继续推进。
+
+### 下一优先项
+1. 构造 Humanoid + Generic root-lock/keep-original 权威 fixture，闭环 body/root retarget、`OnAnimatorMove` 与 builtin root motion。
+2. 扩展 imported root motion 到 transition interruption、layer/mask/additive、BlendTree 多子节点及负速/倒放的 Unity 逐帧 A/B。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑，并在 Windows 11 x64、WebGL 与 Android Vulkan Player 实跑对应门禁。
+
 ## 2026-07-20 — Imported AnimationClip loop / slicing / CrossFade runtime
 
 ### 已完成

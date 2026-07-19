@@ -28,6 +28,9 @@ public class Animator : Behaviour
     private Quaternion _deltaRotation = Quaternion.identity;
     private Vector3 _velocity;
     private Vector3 _angularVelocity;
+    private bool _rootMotionInitialized;
+    private AnimationRootMotionPose _rootMotionAnchor = AnimationRootMotionPose.Identity;
+    private AnimationRootMotionPose _previousRootMotion = AnimationRootMotionPose.Identity;
     private float _lookAtWeight;
     private float _bodyWeight;
     private float _headWeight;
@@ -45,18 +48,22 @@ public class Animator : Behaviour
     private readonly struct SampledAnimationPose
     {
         public SampledAnimationPose(AnimationPose pose, AnimationFloatPose floatProperties,
-            AnimationPose? additiveReferencePose = null, AnimationFloatPose? additiveReferenceFloatProperties = null)
+            AnimationPose? additiveReferencePose = null,
+            AnimationFloatPose? additiveReferenceFloatProperties = null,
+            AnimationRootMotionPose? rootMotion = null)
         {
             Pose = pose;
             FloatProperties = floatProperties;
             AdditiveReferencePose = additiveReferencePose;
             AdditiveReferenceFloatProperties = additiveReferenceFloatProperties;
+            RootMotion = rootMotion;
         }
 
         public AnimationPose Pose { get; }
         public AnimationFloatPose FloatProperties { get; }
         public AnimationPose? AdditiveReferencePose { get; }
         public AnimationFloatPose? AdditiveReferenceFloatProperties { get; }
+        public AnimationRootMotionPose? RootMotion { get; }
         public static SampledAnimationPose Empty => new(new AnimationPose(), new AnimationFloatPose());
     }
 
@@ -83,7 +90,12 @@ public class Animator : Behaviour
     public bool applyRootMotion
     {
         get => _applyRootMotion;
-        set => _applyRootMotion = value;
+        set
+        {
+            if (_applyRootMotion == value) return;
+            _applyRootMotion = value;
+            ResetRootMotionRuntime();
+        }
     }
 
     public float speed
@@ -95,7 +107,7 @@ public class Animator : Behaviour
     public bool isHuman { get; set; }
     public bool isOptimizable { get; set; }
     public bool keepAnimatorControllerStateOnDisable { get; set; }
-    public bool hasRootMotion { get; set; }
+    public bool hasRootMotion => HasHumanoidRootMotion();
     public float humanScale { get; set; } = 1f;
     public bool isInitialized => _initialized;
     public bool hasAvatarMask { get; set; }
@@ -363,6 +375,7 @@ public class Animator : Behaviour
         _initialized = true;
         ClearStateMachineRuntime();
         InitializeDefaultState();
+        ResetRootMotionRuntime();
     }
 
     public void Update(float deltaTime)
@@ -376,18 +389,24 @@ public class Animator : Behaviour
 
         _deltaPosition = Vector3.zero;
         _deltaRotation = Quaternion.identity;
+        _velocity = Vector3.zero;
+        _angularVelocity = Vector3.zero;
+        EnsureRootMotionTracking();
 
         var accumulatedPose = new AnimationPose();
         var accumulatedFloatProperties = new AnimationFloatPose();
+        AnimationRootMotionPose? accumulatedRootMotion = null;
         int layers = layerCount;
         for (int i = 0; i < layers; i++)
         {
             SampledAnimationPose layerPose = UpdateLayer(i, dt);
             accumulatedPose = ComposeLayer(accumulatedPose, layerPose, i);
             accumulatedFloatProperties = ComposeFloatLayer(accumulatedFloatProperties, layerPose, i);
+            accumulatedRootMotion = ComposeRootMotionLayer(accumulatedRootMotion, layerPose, i);
         }
         accumulatedPose.Apply();
         accumulatedFloatProperties.Apply();
+        ApplyRootMotion(accumulatedRootMotion, dt);
     }
 
     private SampledAnimationPose UpdateLayer(int layerIndex, float deltaTime)
@@ -560,6 +579,7 @@ public class Animator : Behaviour
         _currentStateTimes[layerIndex] = time;
         ClearTransition(layerIndex);
         OnStateEnter(state, layerIndex);
+        ResetRootMotionRuntime();
     }
 
     private void ClearTransition(int layerIndex)
@@ -595,7 +615,10 @@ public class Animator : Behaviour
         AnimationFloatPose? referenceProperties = first.AdditiveReferenceFloatProperties is not null && second.AdditiveReferenceFloatProperties is not null
             ? AnimationFloatPose.Blend(first.AdditiveReferenceFloatProperties, second.AdditiveReferenceFloatProperties, weight2)
             : null;
-        return new SampledAnimationPose(pose, properties, reference, referenceProperties);
+        AnimationRootMotionPose? rootMotion = first.RootMotion.HasValue && second.RootMotion.HasValue
+            ? AnimationRootMotionPose.Blend(first.RootMotion.Value, second.RootMotion.Value, weight2)
+            : first.RootMotion ?? second.RootMotion;
+        return new SampledAnimationPose(pose, properties, reference, referenceProperties, rootMotion);
     }
 
     private SampledAnimationPose SampleMotion(Motion motion, float time)
@@ -606,8 +629,10 @@ public class Animator : Behaviour
             AnimationFloatPose properties = clip.EvaluateFloatProperties(gameObject, time, true);
             clip.TryEvaluateAdditiveReferencePose(gameObject, out AnimationPose referencePose);
             clip.TryEvaluateAdditiveReferenceFloatProperties(gameObject, out AnimationFloatPose referenceProperties);
+            AnimationRootMotionPose? rootMotion = clip.TryEvaluateRootMotion(time, out AnimationRootMotionPose sampledRoot)
+                ? sampledRoot : null;
             return new SampledAnimationPose(pose, properties, referencePose.Count > 0 ? referencePose : null,
-                referenceProperties.Count > 0 ? referenceProperties : null);
+                referenceProperties.Count > 0 ? referenceProperties : null, rootMotion);
         }
         if (motion is BlendTree blendTree) return SampleBlendTree(blendTree, time);
         return SampledAnimationPose.Empty;
@@ -626,6 +651,7 @@ public class Animator : Behaviour
         var accumulatedProperties = new AnimationFloatPose();
         AnimationPose? accumulatedReference = null;
         AnimationFloatPose? accumulatedReferenceProperties = null;
+        AnimationRootMotionPose? accumulatedRootMotion = null;
         float accumulatedWeight = 0f;
         bool allHaveTransformReference = true;
         bool allHaveFloatReference = true;
@@ -641,6 +667,11 @@ public class Animator : Behaviour
             float blendWeight = accumulatedWeight <= 0f ? 1f : childWeight / combinedWeight;
             accumulated = AnimationPose.Blend(accumulated, child.Pose, blendWeight);
             accumulatedProperties = AnimationFloatPose.Blend(accumulatedProperties, child.FloatProperties, blendWeight);
+            if (child.RootMotion.HasValue)
+                accumulatedRootMotion = accumulatedRootMotion.HasValue
+                    ? AnimationRootMotionPose.Blend(
+                        accumulatedRootMotion.Value, child.RootMotion.Value, blendWeight)
+                    : child.RootMotion;
             if (child.AdditiveReferencePose is null)
             {
                 allHaveTransformReference = false;
@@ -660,7 +691,8 @@ public class Animator : Behaviour
         }
         return new SampledAnimationPose(accumulated, accumulatedProperties,
             allHaveTransformReference ? accumulatedReference : null,
-            allHaveFloatReference ? accumulatedReferenceProperties : null);
+            allHaveFloatReference ? accumulatedReferenceProperties : null,
+            accumulatedRootMotion);
     }
 
     private AnimationPose ComposeLayer(AnimationPose accumulated, SampledAnimationPose sampled, int layerIndex)
@@ -709,6 +741,129 @@ public class Animator : Behaviour
                 sampled.AdditiveReferenceFloatProperties, pathActive);
         }
         return AnimationFloatPose.Blend(accumulated, sampled.FloatProperties, weight, pathActive: pathActive);
+    }
+
+    private AnimationRootMotionPose? ComposeRootMotionLayer(
+        AnimationRootMotionPose? accumulated,
+        SampledAnimationPose sampled,
+        int layerIndex)
+    {
+        if (!sampled.RootMotion.HasValue) return accumulated;
+        if (!(_controller is AnimatorController controller) || layerIndex <= 0 || layerIndex >= controller.layers.Length)
+            return sampled.RootMotion;
+        AnimatorControllerLayer layer = controller.layers[layerIndex];
+        float weight = float.IsNaN(layer.weight)
+            ? 0f
+            : layer.weight < 0f || layer.weight > 1f ? 1f : layer.weight;
+        if (weight <= 0f || layer.blendingMode == AnimatorLayerBlendingMode.Additive) return accumulated;
+        if (layer.avatarMask is not null && !layer.avatarMask.IsTransformPathActive(string.Empty)) return accumulated;
+        return accumulated.HasValue
+            ? AnimationRootMotionPose.Blend(accumulated.Value, sampled.RootMotion.Value, weight)
+            : sampled.RootMotion;
+    }
+
+    private void EnsureRootMotionTracking()
+    {
+        if (_rootMotionInitialized || transform is null) return;
+        AnimationRootMotionPose? rootMotion = SampleCurrentRootMotion();
+        if (!rootMotion.HasValue) return;
+        _rootMotionAnchor = AnimationRootMotionPose.CalculateAnchor(
+            new AnimationRootMotionPose(transform.position, transform.rotation),
+            rootMotion.Value);
+        _previousRootMotion = rootMotion.Value;
+        _rootMotionInitialized = true;
+        _rootPosition = transform.position;
+        _rootRotation = transform.rotation;
+    }
+
+    private AnimationRootMotionPose? SampleCurrentRootMotion()
+    {
+        AnimationRootMotionPose? accumulated = null;
+        for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
+        {
+            if (!_currentStates.TryGetValue(layerIndex, out AnimatorState? currentState) || currentState is null)
+                continue;
+            _currentStateTimes.TryGetValue(layerIndex, out float currentTime);
+            SampledAnimationPose sampled;
+            if (_nextStates.TryGetValue(layerIndex, out AnimatorState? nextState) && nextState is not null)
+            {
+                _nextStateTimes.TryGetValue(layerIndex, out float nextTime);
+                sampled = SampleBlendStates(
+                    currentState, currentTime, nextState, nextTime, TransitionWeight(layerIndex));
+            }
+            else sampled = SampleState(currentState, currentTime);
+            accumulated = ComposeRootMotionLayer(accumulated, sampled, layerIndex);
+        }
+        return accumulated;
+    }
+
+    private void ApplyRootMotion(AnimationRootMotionPose? sampledRootMotion, float deltaTime)
+    {
+        if (transform is null) return;
+        if (!sampledRootMotion.HasValue)
+        {
+            _rootMotionInitialized = false;
+            _rootPosition = transform.position;
+            _rootRotation = transform.rotation;
+            return;
+        }
+        if (!_rootMotionInitialized)
+        {
+            _rootMotionAnchor = AnimationRootMotionPose.CalculateAnchor(
+                new AnimationRootMotionPose(transform.position, transform.rotation),
+                sampledRootMotion.Value);
+            _previousRootMotion = sampledRootMotion.Value;
+            _rootMotionInitialized = true;
+        }
+
+        AnimationRootMotionPose previousWorld = AnimationRootMotionPose.Anchor(
+            _rootMotionAnchor, _previousRootMotion);
+        AnimationRootMotionPose currentWorld = AnimationRootMotionPose.Anchor(
+            _rootMotionAnchor, sampledRootMotion.Value);
+        AnimationRootMotionDelta delta = AnimationRootMotionPose.CalculateDelta(
+            previousWorld, currentWorld, deltaTime);
+
+        if (_applyRootMotion)
+        {
+            transform.position = currentWorld.Position;
+            transform.rotation = currentWorld.Rotation;
+            _deltaPosition = delta.Position;
+            _deltaRotation = delta.Rotation;
+            _velocity = delta.Velocity;
+            _angularVelocity = delta.AngularVelocity;
+        }
+        _previousRootMotion = sampledRootMotion.Value;
+        _rootPosition = transform.position;
+        _rootRotation = transform.rotation;
+    }
+
+    private bool HasHumanoidRootMotion()
+    {
+        if (!isHuman || _controller is null) return false;
+        foreach (AnimationClip clip in _controller.animationClips)
+            if (clip is not null && clip.hasMotionCurves) return true;
+        return false;
+    }
+
+    private void ResetRootMotionRuntime()
+    {
+        _rootMotionInitialized = false;
+        _rootMotionAnchor = AnimationRootMotionPose.Identity;
+        _previousRootMotion = AnimationRootMotionPose.Identity;
+        _deltaPosition = Vector3.zero;
+        _deltaRotation = Quaternion.identity;
+        _velocity = Vector3.zero;
+        _angularVelocity = Vector3.zero;
+        if (transform is not null)
+        {
+            _rootPosition = transform.position;
+            _rootRotation = transform.rotation;
+        }
+        else
+        {
+            _rootPosition = Vector3.zero;
+            _rootRotation = Quaternion.identity;
+        }
     }
 
     private AnimatorState FindState(int hash, int layerIndex)
@@ -786,6 +941,7 @@ public class Animator : Behaviour
         _transitionTimes.Clear();
         _transitionDurations.Clear();
         _transitionDurationSeconds.Clear();
+        ResetRootMotionRuntime();
     }
 
     private void OnStateEnter(AnimatorState state, int layerIndex)
@@ -912,13 +1068,11 @@ public class Animator : Behaviour
     {
         if (transform != null)
         {
-            transform.localPosition += _rootPosition;
-            transform.localRotation = _rootRotation * transform.localRotation;
+            transform.position += _deltaPosition;
+            transform.rotation = _deltaRotation * transform.rotation;
+            _rootPosition = transform.position;
+            _rootRotation = transform.rotation;
         }
-        _deltaPosition = _rootPosition;
-        _deltaRotation = _rootRotation;
-        _rootPosition = Vector3.zero;
-        _rootRotation = Quaternion.identity;
     }
 
     public bool HasState(int layerIndex, int stateID)

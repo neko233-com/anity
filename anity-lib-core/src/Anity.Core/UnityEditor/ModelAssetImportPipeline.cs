@@ -331,10 +331,15 @@ internal static class ModelAssetImportPipeline
         hideFlags = HideFlags.NotEditable,
       };
       clip.SetImportedLength(rangeEnd - rangeStart);
+      NativeModelDecoder.Track? motionTrack = null;
       foreach (var track in source.Tracks)
       {
         if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length) continue;
         var path = RelativePath(root.transform, nodes[track.NodeIndex].transform);
+        if (!clip.legacy && !string.IsNullOrEmpty(importer.motionNodeName) &&
+            (string.Equals(decoded.Nodes[track.NodeIndex].Name, importer.motionNodeName, StringComparison.Ordinal) ||
+             string.Equals(path, importer.motionNodeName, StringComparison.Ordinal)))
+          motionTrack ??= track;
         var hasRawPosition = track.TransformCurves.Any(curve => curve.Property <= NativeModelDecoder.TransformCurveProperty.PositionZ);
         var hasRawEuler = track.TransformCurves.Any(curve => curve.Property is >= NativeModelDecoder.TransformCurveProperty.EulerX and <= NativeModelDecoder.TransformCurveProperty.EulerZ);
         var hasRawScale = track.TransformCurves.Any(curve => curve.Property >= NativeModelDecoder.TransformCurveProperty.ScaleX);
@@ -353,6 +358,9 @@ internal static class ModelAssetImportPipeline
           AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd,
             importer.animationCompression, importer.animationScaleError);
       }
+      var hasMotion = motionTrack is not null && AddRootMotionCurves(
+        clip, motionTrack, rangeStart, rangeEnd, importer, frameRate,
+        source.FirstFrame / frameRate);
       if (importer.importVisibility)
         foreach (var track in source.VisibilityTracks)
         {
@@ -377,8 +385,8 @@ internal static class ModelAssetImportPipeline
       clip.SetImportedMotionMetadata(
         importer.animationType == ModelImporterAnimationType.Human,
         hasGenericRoot: false,
-        hasMotion: false,
-        hasMotionFloat: false,
+        hasMotion: hasMotion,
+        hasMotionFloat: hasMotion,
         hasRoot: false);
       AnimationUtility.SetAnimationClipSettings(clip, new AnimationClipSettings
       {
@@ -416,6 +424,48 @@ internal static class ModelAssetImportPipeline
     clip.SetCurve(path, typeof(Transform), property + ".x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end, compression, error));
     clip.SetCurve(path, typeof(Transform), property + ".y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end, compression, error));
     clip.SetCurve(path, typeof(Transform), property + ".z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end, compression, error));
+  }
+
+  private static bool AddRootMotionCurves(
+    AnimationClip clip,
+    NativeModelDecoder.Track track,
+    float start,
+    float end,
+    ModelImporter importer,
+    float sampleRate,
+    float reductionTimeOffset)
+  {
+    var added = false;
+    if (track.PositionKeys.Length > 0)
+    {
+      clip.SetCurve(string.Empty, typeof(Animator), "MotionT.x",
+        CurveForRange(track.PositionKeys.Select(key => (key.time, key.x)).ToArray(),
+          start, end, importer.animationCompression, importer.animationPositionError));
+      clip.SetCurve(string.Empty, typeof(Animator), "MotionT.y",
+        CurveForRange(track.PositionKeys.Select(key => (key.time, key.y)).ToArray(),
+          start, end, importer.animationCompression, importer.animationPositionError));
+      clip.SetCurve(string.Empty, typeof(Animator), "MotionT.z",
+        CurveForRange(track.PositionKeys.Select(key => (key.time, key.z)).ToArray(),
+          start, end, importer.animationCompression, importer.animationPositionError));
+      added = true;
+    }
+    if (track.RotationKeys.Length > 0)
+    {
+      var curves = CompressQuaternionCurves(new[]
+      {
+        Curve(track.RotationKeys.Select(key => (key.time, key.x)).ToArray()),
+        Curve(track.RotationKeys.Select(key => (key.time, key.y)).ToArray()),
+        Curve(track.RotationKeys.Select(key => (key.time, key.z)).ToArray()),
+        Curve(track.RotationKeys.Select(key => (key.time, key.w)).ToArray()),
+      }, importer.animationCompression, importer.animationRotationError,
+        sampleRate, reductionTimeOffset);
+      clip.SetCurve(string.Empty, typeof(Animator), "MotionQ.x", SliceCurve(curves[0], start, end));
+      clip.SetCurve(string.Empty, typeof(Animator), "MotionQ.y", SliceCurve(curves[1], start, end));
+      clip.SetCurve(string.Empty, typeof(Animator), "MotionQ.z", SliceCurve(curves[2], start, end));
+      clip.SetCurve(string.Empty, typeof(Animator), "MotionQ.w", SliceCurve(curves[3], start, end));
+      added = true;
+    }
+    return added;
   }
 
   private static string TransformCurvePropertyName(NativeModelDecoder.TransformCurveProperty property) => property switch

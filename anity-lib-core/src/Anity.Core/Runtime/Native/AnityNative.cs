@@ -98,6 +98,22 @@ public static class AnityNative
         public AnimationPoseFlags flags;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AnimationRootMotionPose
+    {
+        public float positionX, positionY, positionZ;
+        public float rotationX, rotationY, rotationZ, rotationW;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AnimationRootMotionDelta
+    {
+        public float positionX, positionY, positionZ;
+        public float rotationX, rotationY, rotationZ, rotationW;
+        public float velocityX, velocityY, velocityZ;
+        public float angularVelocityX, angularVelocityY, angularVelocityZ;
+    }
+
     public enum GraphicsDeviceTypeNative
     {
         Null = 4,
@@ -474,6 +490,127 @@ public static class AnityNative
         if (NativeTransformRequired)
             throw new DllNotFoundException("anity-native animation pose entry points are required but unavailable.");
         return false;
+    }
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl,
+        EntryPoint = "AnityAnimation_ResolveRootMotion")]
+    private static extern Result Animation_ResolveRootMotion(
+        in AnimationRootMotionPose startPose,
+        in AnimationRootMotionPose endPose,
+        in AnimationRootMotionPose samplePose,
+        long completedLoops,
+        out AnimationRootMotionPose outPose);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl,
+        EntryPoint = "AnityAnimation_BlendRootMotion")]
+    private static extern Result Animation_BlendRootMotion(
+        in AnimationRootMotionPose basePose,
+        in AnimationRootMotionPose layerPose,
+        float weight,
+        out AnimationRootMotionPose outPose);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl,
+        EntryPoint = "AnityAnimation_AnchorRootMotion")]
+    private static extern Result Animation_AnchorRootMotion(
+        in AnimationRootMotionPose anchorPose,
+        in AnimationRootMotionPose motionPose,
+        out AnimationRootMotionPose outPose);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl,
+        EntryPoint = "AnityAnimation_CalculateRootMotionAnchor")]
+    private static extern Result Animation_CalculateRootMotionAnchor(
+        in AnimationRootMotionPose worldPose,
+        in AnimationRootMotionPose motionPose,
+        out AnimationRootMotionPose outAnchorPose);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl,
+        EntryPoint = "AnityAnimation_CalculateRootMotionDelta")]
+    private static extern Result Animation_CalculateRootMotionDelta(
+        in AnimationRootMotionPose previousPose,
+        in AnimationRootMotionPose currentPose,
+        float deltaTime,
+        out AnimationRootMotionDelta outDelta);
+
+    public static bool TryResolveAnimationRootMotion(
+        in AnimationRootMotionPose startPose,
+        in AnimationRootMotionPose endPose,
+        in AnimationRootMotionPose samplePose,
+        long completedLoops,
+        out AnimationRootMotionPose result)
+    {
+        result = default;
+        if (!_animationPoseNativeAvailable) return false;
+        try
+        {
+            return Animation_ResolveRootMotion(
+                in startPose, in endPose, in samplePose, completedLoops, out result) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAnimationPoseNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAnimationPoseNative(); }
+    }
+
+    public static bool TryBlendAnimationRootMotion(
+        in AnimationRootMotionPose basePose,
+        in AnimationRootMotionPose layerPose,
+        float weight,
+        out AnimationRootMotionPose result)
+    {
+        result = default;
+        if (!_animationPoseNativeAvailable) return false;
+        try
+        {
+            return Animation_BlendRootMotion(in basePose, in layerPose, weight, out result) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAnimationPoseNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAnimationPoseNative(); }
+    }
+
+    public static bool TryAnchorAnimationRootMotion(
+        in AnimationRootMotionPose anchorPose,
+        in AnimationRootMotionPose motionPose,
+        out AnimationRootMotionPose result)
+    {
+        result = default;
+        if (!_animationPoseNativeAvailable) return false;
+        try
+        {
+            return Animation_AnchorRootMotion(in anchorPose, in motionPose, out result) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAnimationPoseNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAnimationPoseNative(); }
+    }
+
+    public static bool TryCalculateAnimationRootMotionAnchor(
+        in AnimationRootMotionPose worldPose,
+        in AnimationRootMotionPose motionPose,
+        out AnimationRootMotionPose result)
+    {
+        result = default;
+        if (!_animationPoseNativeAvailable) return false;
+        try
+        {
+            return Animation_CalculateRootMotionAnchor(
+                in worldPose, in motionPose, out result) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAnimationPoseNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAnimationPoseNative(); }
+    }
+
+    public static bool TryCalculateAnimationRootMotionDelta(
+        in AnimationRootMotionPose previousPose,
+        in AnimationRootMotionPose currentPose,
+        float deltaTime,
+        out AnimationRootMotionDelta result)
+    {
+        result = default;
+        if (!_animationPoseNativeAvailable) return false;
+        try
+        {
+            return Animation_CalculateRootMotionDelta(
+                in previousPose, in currentPose, deltaTime, out result) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAnimationPoseNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAnimationPoseNative(); }
     }
 
     // --- Graphics device ---
