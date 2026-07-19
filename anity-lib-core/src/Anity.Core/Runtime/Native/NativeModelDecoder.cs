@@ -24,6 +24,20 @@ internal static class NativeModelDecoder
         internal float PositionX, PositionY, PositionZ;
         internal float RotationX, RotationY, RotationZ, RotationW;
         internal float ScaleX, ScaleY, ScaleZ;
+        internal NodeAttributeType AttributeType;
+        internal bool CameraOrthographic;
+        internal float CameraFieldOfView, CameraNearClip, CameraFarClip;
+        internal int LightType;
+        internal float LightColorR, LightColorG, LightColorB;
+        internal float LightIntensity, LightRange, LightSpotAngle;
+        internal bool LightCastShadows;
+    }
+
+    internal enum NodeAttributeType
+    {
+        None = 0,
+        Camera = 1,
+        Light = 2,
     }
 
     internal sealed class Mesh
@@ -133,6 +147,13 @@ internal static class NativeModelDecoder
         internal float positionX, positionY, positionZ;
         internal float rotationX, rotationY, rotationZ, rotationW;
         internal float scaleX, scaleY, scaleZ;
+        internal int attributeType;
+        internal int cameraOrthographic;
+        internal float cameraFieldOfView, cameraNearClip, cameraFarClip;
+        internal int lightType;
+        internal float lightColorR, lightColorG, lightColorB;
+        internal float lightIntensity, lightRange, lightSpotAngle;
+        internal int lightCastShadows;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -274,6 +295,19 @@ internal static class NativeModelDecoder
                     PositionX = native.positionX, PositionY = native.positionY, PositionZ = native.positionZ,
                     RotationX = native.rotationX, RotationY = native.rotationY, RotationZ = native.rotationZ, RotationW = native.rotationW,
                     ScaleX = native.scaleX, ScaleY = native.scaleY, ScaleZ = native.scaleZ,
+                    AttributeType = (NodeAttributeType)native.attributeType,
+                    CameraOrthographic = native.cameraOrthographic != 0,
+                    CameraFieldOfView = native.cameraFieldOfView,
+                    CameraNearClip = native.cameraNearClip,
+                    CameraFarClip = native.cameraFarClip,
+                    LightType = native.lightType,
+                    LightColorR = native.lightColorR,
+                    LightColorG = native.lightColorG,
+                    LightColorB = native.lightColorB,
+                    LightIntensity = native.lightIntensity,
+                    LightRange = native.lightRange,
+                    LightSpotAngle = native.lightSpotAngle,
+                    LightCastShadows = native.lightCastShadows != 0,
                 };
             }
 

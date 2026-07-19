@@ -45,28 +45,6 @@ public enum BlockingObjects
   All = 3
 }
 
-internal struct LegacyUIVertex
-{
-  public Vector3 position;
-  public Vector3 normal;
-  public Vector4 tangent;
-  public Color32 color;
-  public Vector2 uv0;
-  public Vector2 uv1;
-  public Vector2 uv2;
-  public Vector2 uv3;
-
-  public static LegacyUIVertex simpleVert = new()
-  {
-    position = Vector3.zero,
-    normal = new Vector3(0f, 0f, -1f),
-    tangent = new Vector4(1f, 0f, 0f, -1f),
-    color = new Color32(255, 255, 255, 255),
-    uv0 = new Vector2(0f, 0f),
-    uv1 = new Vector2(0f, 0f)
-  };
-}
-
 public abstract class Graphic : UIBehaviour, ICanvasElement
 {
   private Color _color = Color.white;

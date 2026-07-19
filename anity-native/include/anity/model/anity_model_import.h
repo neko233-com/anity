@@ -27,6 +27,12 @@ typedef struct AnityModelSceneInfo {
   float frameRate;
 } AnityModelSceneInfo;
 
+typedef enum AnityModelNodeAttributeType {
+  ANITY_MODEL_NODE_ATTRIBUTE_NONE = 0,
+  ANITY_MODEL_NODE_ATTRIBUTE_CAMERA = 1,
+  ANITY_MODEL_NODE_ATTRIBUTE_LIGHT = 2,
+} AnityModelNodeAttributeType;
+
 typedef struct AnityModelNodeInfo {
   const char* name;
   int32_t parentIndex;
@@ -35,6 +41,17 @@ typedef struct AnityModelNodeInfo {
   float positionX, positionY, positionZ;
   float rotationX, rotationY, rotationZ, rotationW;
   float scaleX, scaleY, scaleZ;
+  int32_t attributeType;
+  int32_t cameraOrthographic;
+  float cameraFieldOfView;
+  float cameraNearClip;
+  float cameraFarClip;
+  int32_t lightType;
+  float lightColorR, lightColorG, lightColorB;
+  float lightIntensity;
+  float lightRange;
+  float lightSpotAngle;
+  int32_t lightCastShadows;
 } AnityModelNodeInfo;
 
 typedef struct AnityModelVertex {

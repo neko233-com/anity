@@ -12,7 +12,7 @@ public class Light : Behaviour
   public float intensity { get; set; } = 1f;
   public float range { get; set; } = 10f;
   public float spotAngle { get; set; } = 30f;
-  public float innerSpotAngle { get; set; } = 20f;
+  public float innerSpotAngle { get; set; } = 21.80208f;
   public float cookieSize { get; set; } = 10f;
   public Texture? cookie { get; set; }
   public LightShadows shadows { get; set; } = LightShadows.None;

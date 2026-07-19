@@ -1,5 +1,26 @@
 # PLAN
 
+## 2026-07-20 — Unity FBX renderer topology / Camera-Light import / legacy cleanup
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 batchmode、`com.unity.formats.fbx` 4.2.1 与 Autodesk FBX SDK 构造并反复导入 instanced mesh、SkinnedMeshRenderer、LOD/helper、Camera、Light 及非 mesh Renderer 权威 fixture；另用 ufbx v0.23.0 官方 Maya LOD fixture 交叉验证。确认两个 mesh instance 共享唯一 Mesh subasset、各自生成 `Renderer.m_Enabled` binding；SkinnedMeshRenderer 忽略静态 FBX Visibility 但保留动画 binding；Maya/Exporter LOD 只保留 Transform/Renderer 层级，不凭名称创建 `LODGroup`；LineRenderer/ParticleSystemRenderer 不会被 FBX 表达为 Renderer 组件。
+- 补齐 native model node attribute ABI 与托管映射：FBX Camera 现在导入 perspective/orthographic、FOV、near/far clip，并按 Unity 固定 4:3 importer aspect；FBX Light 导入 Spot/Directional/Point/Area、RGB、intensity、unit-aware range、outer spot angle 与 hard/no shadows。`importCameras` / `importLights` 独立控制组件但不删除节点，`globalScale` 同步缩放 camera clip planes 与 light range；Camera/Light 的 FBX Visibility 不会错误禁用组件或生成 Renderer binding。
+- 按 Unity 实测修正 `Light.innerSpotAngle` 默认值为 `21.80208`，并让 SkinnedMeshRenderer 的静态 enabled 不再误用 mesh visibility。native animation bake 现在排除只因 Visibility 等无关属性产生的恒定 transform track；只有真实 transform、mesh visibility、blend-shape source 时才建立 clip，因此 Camera/Light-only visibility 不再产出空 `AnimationClip`，同时保留 `importBlendShapes=false` 时 Unity 仍创建 take clip 的行为。
+- 新增 4 份 test-only ASCII FBX fixture 与 `NativeModelTopologyImportTests` **27/27**：覆盖 Camera/Light 默认值、flags、visibility、scale，instanced shared mesh/独立 binding，skinned static/animated/import-off，以及 LOD 普通层级/shared mesh/static/animated visibility。新增 2 个 legacy 防回归用例；相关 importer/legacy 聚焦矩阵 **398/398** 通过。
+- 再次对 tracked C#/C++、测试、反射字符串、C ABI/PInvoke、构建入口做 legacy/obsolete/deprecated 反向引用审计。删除零调用且已由正式 `UnityEngine.UIVertex` 替代的内部 `LegacyUIVertex`，以及 Unity 2022.3 反射基线明确不存在、调用为 0 的 `FindObjectsSortMode.NoneLegacy`；反射测试保证两者不再输出。Unity 公开 `[Obsolete]` API、removed networking、旧 FBX 解析与 Shader/VFX serialized upgrader 均仍有公开面、导入路径或行为测试依赖，继续保留以保证兼容。
+- `bash _scripts/build-all.sh Release` 全产品 0 编译错误；强制 native 八工程门禁 **4370/4370**（Core **3348/3348**），0 失败、0 跳过。`/Applications/Anity.app` 已从最终源码重新安装；Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，深度签名、Info.plist、图标逐 byte 及 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过。
+- 最终门禁后逐项确认并可恢复地移出 **39 个 / 375,348 KiB** Git ignored、内部零 tracked 的 repo-local `bin/obj/build` 目录，以及 **15 个 / 93,672 KiB** 本轮 `/private/tmp/anity-*` Unity 工程、结果、探针与进程日志，合计 **469,020 KiB（约 458.0 MiB）**。内容位于废纸篓 `/Users/solarisneko/.Trash/anity-topology-final.S2YLox`；最终复扫仓库缓存目录与 Anity 临时目标均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 权威行为证据仍来自当前可用的 Unity 2022.3.51f1；目标 Unity 2022.3.61f1 Pro 尚未安装，不能把 51f1 结果表述为 61f1 已实测。
+- 本轮闭环的是 FBX 可表达的 MeshRenderer/SkinnedMeshRenderer/LOD-helper/Camera/Light topology。FBX 不携带 Unity LineRenderer/ParticleSystemRenderer 组件语义；Camera aperture/focal/gate-fit、全部 light 类型与 unit/axis 组合、material extraction、custom clip/loop/root motion/Animator crossfade/layer/mask 仍需独立 Unity fixture。
+- 本轮不代表 Editor GUI、IL2CPP、各 Player、Package Manager 或完整 Unity 2022.3 Pro 已完成，整体目标继续推进。
+
+### 下一优先项
+1. 联测 custom clip slicing、loop/root motion 与 Animator crossfade/layer/mask 对 imported visibility 的逐帧语义。
+2. 扩大 Camera/Light aperture、unit/axis/type 及 material extraction 的 Unity FBX A/B，并补齐对应 native importer 行为。
+3. 安装 Unity 2022.3.61f1 Pro 后复跑 ModelImporter/AnimationClip A/B，并在 Windows 11 x64 与 Linux x64 实跑 CLI/Player 门禁。
+
 ## 2026-07-20 — Unity FBX later static layer unbounded weight
 
 ### 已完成

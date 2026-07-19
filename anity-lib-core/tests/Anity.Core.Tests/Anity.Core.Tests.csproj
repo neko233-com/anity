@@ -37,6 +37,18 @@
     <None Update="Fixtures\Models\LayeredConstantVisibilityCube.fbx"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\CameraLight.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\InstancedVisibility.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\SkinnedVisibility.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\LodVisibility.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(AnityRequireNative)' == 'true'">

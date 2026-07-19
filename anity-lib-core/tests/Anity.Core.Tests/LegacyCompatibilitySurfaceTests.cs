@@ -13,6 +13,19 @@ public sealed class LegacyCompatibilitySurfaceTests
 
     private static readonly Assembly CoreAssembly = typeof(UnityEngine.Object).Assembly;
 
+    [Fact]
+    public void FindObjectsSortModeHasOnlyUnity2022Members()
+    {
+        Assert.Equal(new[] { "None", "InstanceID" }, Enum.GetNames<FindObjectsSortMode>());
+    }
+
+    [Fact]
+    public void ReplacedInternalLegacyUiVertexIsNotEmitted()
+    {
+        Assert.Null(CoreAssembly.GetType("UnityEngine.UI.LegacyUIVertex", false));
+        Assert.NotNull(CoreAssembly.GetType("UnityEngine.UIVertex", false));
+    }
+
     public static TheoryData<string, string> ComponentLegacyProperties => new()
     {
         { "rigidbody", "Rigidbody" },

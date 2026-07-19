@@ -232,6 +232,25 @@ internal static class ModelAssetImportPipeline
     for (var nodeIndex = 0; nodeIndex < decoded.Nodes.Length; nodeIndex++)
     {
       var source = decoded.Nodes[nodeIndex];
+      if (source.AttributeType == NativeModelDecoder.NodeAttributeType.Camera && importer.importCameras)
+      {
+        var camera = nodeObjects[nodeIndex].AddComponent<Camera>();
+        camera.orthographic = source.CameraOrthographic;
+        camera.fieldOfView = source.CameraFieldOfView;
+        camera.nearClipPlane = source.CameraNearClip;
+        camera.farClipPlane = source.CameraFarClip;
+        camera.aspect = 4f / 3f;
+      }
+      else if (source.AttributeType == NativeModelDecoder.NodeAttributeType.Light && importer.importLights)
+      {
+        var light = nodeObjects[nodeIndex].AddComponent<Light>();
+        light.type = (LightType)source.LightType;
+        light.color = new Color(source.LightColorR, source.LightColorG, source.LightColorB, 1f);
+        light.intensity = source.LightIntensity;
+        light.range = source.LightRange;
+        light.spotAngle = source.LightSpotAngle;
+        light.shadows = source.LightCastShadows ? LightShadows.Hard : LightShadows.None;
+      }
       if (source.MeshIndex < 0 || source.MeshIndex >= meshes.Length) continue;
       var decodedMesh = decoded.Meshes[source.MeshIndex];
       if (decodedMesh.Bones.Length != 0 || decodedMesh.BlendShapes.Length != 0)
@@ -239,7 +258,10 @@ internal static class ModelAssetImportPipeline
         var renderer = nodeObjects[nodeIndex].AddComponent<SkinnedMeshRenderer>();
         renderer.sharedMesh = meshes[source.MeshIndex];
         renderer.localBounds = renderer.sharedMesh.bounds;
-        renderer.enabled = !importer.importVisibility || source.Visible;
+        // Unity 2022's FBX importer does not apply the static Visibility
+        // property to SkinnedMeshRenderer.enabled, although it still imports
+        // animated visibility as Renderer.m_Enabled.
+        renderer.enabled = true;
         if (decodedMesh.Bones.Length != 0)
         {
           renderer.bones = decodedMesh.Bones.Select(bone => bone.NodeIndex >= 0 && bone.NodeIndex < hierarchyNodes.Length
@@ -254,6 +276,7 @@ internal static class ModelAssetImportPipeline
         var renderer = nodeObjects[nodeIndex].AddComponent<MeshRenderer>();
         renderer.enabled = !importer.importVisibility || source.Visible;
       }
+
     }
     return root;
   }

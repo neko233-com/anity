@@ -20,6 +20,19 @@ struct Node {
   int32_t meshIndex = -1;
   int32_t visible = 1;
   ufbx_transform transform{};
+  AnityModelNodeAttributeType attributeType = ANITY_MODEL_NODE_ATTRIBUTE_NONE;
+  int32_t cameraOrthographic = 0;
+  float cameraFieldOfView = 60.0f;
+  float cameraNearClip = 0.3f;
+  float cameraFarClip = 1000.0f;
+  int32_t lightType = 2;
+  float lightColorR = 1.0f;
+  float lightColorG = 1.0f;
+  float lightColorB = 1.0f;
+  float lightIntensity = 1.0f;
+  float lightRange = 10.0f;
+  float lightSpotAngle = 45.0f;
+  int32_t lightCastShadows = 0;
 };
 
 struct SubMesh {
@@ -336,6 +349,25 @@ static bool HasBlendShape(const Mesh& mesh, ufbx_string name) {
   return false;
 }
 
+static bool HasSourceBlendShape(const ufbx_mesh* mesh, ufbx_string name) {
+  if (!mesh) return false;
+  for (size_t deformerIndex = 0;
+      deformerIndex < mesh->blend_deformers.count; ++deformerIndex) {
+    const ufbx_blend_deformer* deformer =
+      mesh->blend_deformers.data[deformerIndex];
+    for (size_t channelIndex = 0;
+        channelIndex < deformer->channels.count; ++channelIndex) {
+      const ufbx_string channelName =
+        deformer->channels.data[channelIndex]->name;
+      if (channelName.length == name.length &&
+          (name.length == 0 ||
+            std::memcmp(channelName.data, name.data, name.length) == 0))
+        return true;
+    }
+  }
+  return false;
+}
+
 static bool SameString(ufbx_string left, ufbx_string right) {
   return left.length == right.length &&
     (left.length == 0 || std::memcmp(left.data, right.data, left.length) == 0);
@@ -368,6 +400,42 @@ static const ufbx_anim_value* FindSingleRawValue(
     result = property->anim_value;
   }
   return result;
+}
+
+static bool HasRawTransformAnimation(
+    const ufbx_anim_stack* stack, const ufbx_element* element) {
+  static const char* const transformProperties[] = {
+    UFBX_Lcl_Translation,
+    UFBX_Lcl_Rotation,
+    UFBX_Lcl_Scaling,
+    UFBX_RotationOffset,
+    UFBX_RotationPivot,
+    UFBX_ScalingOffset,
+    UFBX_ScalingPivot,
+    UFBX_PreRotation,
+    UFBX_PostRotation,
+  };
+  for (size_t layerIndex = 0; layerIndex < stack->layers.count; ++layerIndex) {
+    const ufbx_anim_layer* layer = stack->layers.data[layerIndex];
+    for (const char* property : transformProperties) {
+      const ufbx_anim_prop* animated =
+        ufbx_find_anim_prop(layer, element, property);
+      if (animated && animated->anim_value) return true;
+    }
+  }
+  return false;
+}
+
+static bool HasNodeTransformAnimation(
+    const ufbx_anim_stack* stack, const ufbx_node* sourceNode,
+    const ufbx_baked_node& bakedNode) {
+  // Constant authored curves still need to survive import. Conversely, ufbx
+  // supplies constant baked transforms for nodes affected only by unrelated
+  // properties such as Visibility; Unity does not emit those curves.
+  if (sourceNode && HasRawTransformAnimation(stack, &sourceNode->element))
+    return true;
+  return !bakedNode.constant_translation || !bakedNode.constant_rotation ||
+    !bakedNode.constant_scale;
 }
 
 static float EvaluateUnityFbxUnweightedCubic(
@@ -2156,6 +2224,49 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
       destination.transform.translation.x *= options->globalScale;
       destination.transform.translation.y *= options->globalScale;
       destination.transform.translation.z *= options->globalScale;
+      if (node->camera) {
+        const ufbx_camera* camera = node->camera;
+        destination.attributeType = ANITY_MODEL_NODE_ATTRIBUTE_CAMERA;
+        destination.cameraOrthographic =
+          camera->projection_mode == UFBX_PROJECTION_MODE_ORTHOGRAPHIC ? 1 : 0;
+        if (!destination.cameraOrthographic &&
+            std::isfinite(camera->field_of_view_deg.y) &&
+            camera->field_of_view_deg.y > 0.0)
+          destination.cameraFieldOfView = Real(camera->field_of_view_deg.y);
+        if (std::isfinite(camera->near_plane))
+          destination.cameraNearClip = Real(std::abs(camera->near_plane) * options->globalScale);
+        if (std::isfinite(camera->far_plane))
+          destination.cameraFarClip = Real(std::abs(camera->far_plane) * options->globalScale);
+      } else if (node->light) {
+        const ufbx_light* light = node->light;
+        destination.attributeType = ANITY_MODEL_NODE_ATTRIBUTE_LIGHT;
+        switch (light->type) {
+          case UFBX_LIGHT_SPOT: destination.lightType = 0; break;
+          case UFBX_LIGHT_DIRECTIONAL: destination.lightType = 1; break;
+          case UFBX_LIGHT_POINT: destination.lightType = 2; break;
+          case UFBX_LIGHT_AREA: destination.lightType = 3; break;
+          default: destination.lightType = 2; break;
+        }
+        destination.lightColorR = Real(light->color.x);
+        destination.lightColorG = Real(light->color.y);
+        destination.lightColorB = Real(light->color.z);
+        destination.lightIntensity = Real(light->intensity);
+        const double sourceUnitScale = options->useFileUnits &&
+            source->settings.original_unit_meters > 0.0
+          ? source->settings.original_unit_meters : 1.0;
+        const ufbx_prop* farAttenuation =
+          ufbx_find_prop(&light->props, "FarAttenuationEnd");
+        if (farAttenuation && std::isfinite(farAttenuation->value_real) &&
+            farAttenuation->value_real >= 0.0)
+          destination.lightRange = Real(
+            farAttenuation->value_real * sourceUnitScale * options->globalScale);
+        else
+          destination.lightRange = 10.0f * options->globalScale;
+        if (light->type == UFBX_LIGHT_SPOT &&
+            std::isfinite(light->outer_angle) && light->outer_angle > 0.0)
+          destination.lightSpotAngle = Real(light->outer_angle);
+        destination.lightCastShadows = light->cast_shadows ? 1 : 0;
+      }
       scene->nodes.push_back(std::move(destination));
     }
     for (size_t index = 0; index < source->nodes.count; ++index) {
@@ -2231,6 +2342,9 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           const ufbx_baked_node& bakedNode = baked->nodes.data[trackIndex];
           const auto found = nodeMap.find(bakedNode.typed_id);
           if (found == nodeMap.end()) continue;
+          const ufbx_node* sourceNode = bakedNode.typed_id < source->nodes.count
+            ? source->nodes.data[bakedNode.typed_id] : nullptr;
+          if (!HasNodeTransformAnimation(stack, sourceNode, bakedNode)) continue;
           Track track;
           track.nodeIndex = found->second;
           track.positionKeys.reserve(bakedNode.translation_keys.count);
@@ -2246,8 +2360,6 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             bakedNode.scale_keys.count,
           });
           track.rotationKeys.reserve(rotationSampleCount);
-          const ufbx_node* sourceNode = bakedNode.typed_id < source->nodes.count
-            ? source->nodes.data[bakedNode.typed_id] : nullptr;
           const ufbx_node* retainedPivotNode = rawTransformSource &&
               bakedNode.typed_id < rawTransformSource->nodes.count
             ? rawTransformSource->nodes.data[bakedNode.typed_id] : nullptr;
@@ -2349,6 +2461,27 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           clip.duration = std::max(clip.duration, track.keys.back().time);
           clip.visibilityTracks.push_back(std::move(track));
         }
+        bool hasAuthoredBlendShapeAnimation = false;
+        for (size_t elementIndex = 0;
+            elementIndex < baked->elements.count &&
+            !hasAuthoredBlendShapeAnimation; ++elementIndex) {
+          const ufbx_baked_element& bakedElement =
+            baked->elements.data[elementIndex];
+          if (bakedElement.element_id >= source->elements.count) continue;
+          const ufbx_mesh* animatedMesh =
+            ufbx_as_mesh(source->elements.data[bakedElement.element_id]);
+          if (!animatedMesh) continue;
+          for (size_t propIndex = 0;
+              propIndex < bakedElement.props.count; ++propIndex) {
+            const ufbx_baked_prop& prop =
+              bakedElement.props.data[propIndex];
+            if (prop.keys.count != 0 &&
+                HasSourceBlendShape(animatedMesh, prop.name)) {
+              hasAuthoredBlendShapeAnimation = true;
+              break;
+            }
+          }
+        }
         if (options->importBlendShapes != 0) {
           for (size_t elementIndex = 0; elementIndex < baked->elements.count; ++elementIndex) {
             const ufbx_baked_element& bakedElement = baked->elements.data[elementIndex];
@@ -2394,9 +2527,13 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             }
           }
         }
-        if (clip.duration <= 0.0f) clip.duration = Real(baked->playback_duration);
+        const bool hasUnityClipSource = !clip.tracks.empty() ||
+          !clip.visibilityTracks.empty() || !clip.blendShapeTracks.empty() ||
+          hasAuthoredBlendShapeAnimation;
+        if (hasUnityClipSource && clip.duration <= 0.0f)
+          clip.duration = Real(baked->playback_duration);
         ufbx_free_baked_anim(baked);
-        scene->clips.push_back(std::move(clip));
+        if (hasUnityClipSource) scene->clips.push_back(std::move(clip));
       }
     }
   } catch (const std::bad_alloc&) {
@@ -2431,7 +2568,12 @@ AnityResult ANITY_CALL AnityModel_GetNodeInfo(const AnityModelScene* scene, int3
   *outInfo = { node.name.c_str(), node.parentIndex, node.meshIndex, node.visible,
     Real(node.transform.translation.x), Real(node.transform.translation.y), Real(node.transform.translation.z),
     Real(node.transform.rotation.x), Real(node.transform.rotation.y), Real(node.transform.rotation.z), Real(node.transform.rotation.w),
-    Real(node.transform.scale.x), Real(node.transform.scale.y), Real(node.transform.scale.z) };
+    Real(node.transform.scale.x), Real(node.transform.scale.y), Real(node.transform.scale.z),
+    static_cast<int32_t>(node.attributeType), node.cameraOrthographic,
+    node.cameraFieldOfView, node.cameraNearClip, node.cameraFarClip,
+    node.lightType, node.lightColorR, node.lightColorG, node.lightColorB,
+    node.lightIntensity, node.lightRange, node.lightSpotAngle,
+    node.lightCastShadows };
   return ANITY_OK;
 }
 

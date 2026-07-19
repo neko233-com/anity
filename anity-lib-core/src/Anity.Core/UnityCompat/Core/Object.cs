@@ -730,8 +730,7 @@ internal struct InstantiateParameters
 public enum FindObjectsSortMode
 {
   None,
-  InstanceID,
-  NoneLegacy
+  InstanceID
 }
 
 public enum FindObjectsInactive
