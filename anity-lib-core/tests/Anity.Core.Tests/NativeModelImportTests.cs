@@ -971,6 +971,42 @@ public sealed class NativeModelImportTests : IDisposable
     }
 
     [Theory]
+    [InlineData(0, -50, false, -1082130432, -1082380592, 1074359287, 1076759178, 1077936128)]
+    [InlineData(0, 0, false, 0, 1014254618, 1078553591, 1080953482, 1082130432)]
+    [InlineData(0, 25, false, 1056964608, 1057214768, 1080650743, 1082590533, 1083179008)]
+    [InlineData(0, 100, false, 1073741824, 1073804364, 1084536316, 1085736261, 1086324736)]
+    [InlineData(0, 150, false, 1077936128, 1077998668, 1086633468, 1087833413, 1088421888)]
+    [InlineData(0, 0, true, -1082130432, -1085912638, 1082659916, 1085184379, 1088421888)]
+    [InlineData(1, -50, false, -1082130432, -1082380592, 1074359287, 1076759178, 1077936128)]
+    [InlineData(1, 0, false, 0, 1014254618, 1078553591, 1080953482, 1082130432)]
+    [InlineData(1, 25, false, 1056964608, 1057214768, 1080650743, 1082590533, 1083179008)]
+    [InlineData(1, 100, false, 1073741824, 1073804364, 1084536316, 1085736261, 1086324736)]
+    [InlineData(1, 150, false, 1077936128, 1077998668, 1086633468, 1087833413, 1088421888)]
+    [InlineData(1, 0, true, -1082130432, -1085912638, 1082659916, 1085184379, 1088421888)]
+    [InlineData(2, -50, false, -1082130432, -1082380592, 1074359287, 1076759178, 1077936128)]
+    [InlineData(2, 0, false, 0, 1014254618, 1078553591, 1080953482, 1082130432)]
+    [InlineData(2, 25, false, 1056964608, 1057214768, 1080650743, 1082590533, 1083179008)]
+    [InlineData(2, 100, false, 1073741824, 1073804364, 1084536316, 1085736261, 1086324736)]
+    [InlineData(2, 150, false, 1077936128, 1077998668, 1086633468, 1087833413, 1088421888)]
+    [InlineData(2, 0, true, -1082130432, -1085912638, 1082659916, 1085184379, 1088421888)]
+    public void FirstActiveLayerWeightModeAndMuteMatchUnity2022FrameBits(
+        int blendMode, int staticWeight, bool animated, int expected0,
+        int expected1, int expected10, int expected13, int expected19)
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true,
+            source => RewriteFbxFirstActiveLayerWeight(
+                source, blendMode, staticWeight, animated)).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
+        foreach (var (frame, expected) in new[]
+        {
+            (0, expected0), (1, expected1), (10, expected10),
+            (13, expected13), (19, expected19),
+        })
+            Assert.Equal(expected, BitConverter.SingleToInt32Bits(keys[frame].value));
+    }
+
+    [Theory]
     [InlineData("Baseline", 0, 0, 0, 0, 0, 0, 2f, 2.92984843f, 3f)]
     [InlineData("MuteBase", 1, 0, 0, 0, 0, 0, 1f, 1.92984831f, 2f)]
     [InlineData("MuteX", 0, 0, 1, 0, 0, 0, 1f, 1.92984831f, 2f)]
@@ -1638,6 +1674,86 @@ public sealed class NativeModelImportTests : IDisposable
             source = ReplaceRequired(source, placeholder, yConnection);
         }
         return source;
+    }
+
+    private static string RewriteFbxFirstActiveLayerWeight(
+        string source, int blendMode, int staticWeight, bool animated)
+    {
+        const long xLayerId = 2425581317088;
+        const long yWeightCurveId = 2425217120608;
+        const long yWeightNodeId = 2425829827184;
+        const long xWeightCurveId = 9000000000001;
+        const long xWeightNodeId = 9000000000002;
+        source = RewriteFbxVisibilityNode(source, 2425829830304, 2);
+        source = RewriteFbxVisibilityNode(source, 2425829827392, 4);
+        source = RewriteFbxVisibilityCurve(source, 2425217126208, 4);
+        source = SetFbxLayerMuteSolo(source, "BaseLayer", 1, 0);
+        source = RewriteFbxLayerBlend(source, "X", blendMode, true);
+        if (staticWeight != 0)
+            source = RewriteFbxLayerStaticWeight(source, "X", staticWeight);
+        if (!animated)
+            return source;
+
+        source = ReplaceRequired(source, "\tCount: 38", "\tCount: 40");
+        source = ReplaceRequired(source,
+            "ObjectType: \"AnimationCurveNode\" {\n\t\tCount: 13",
+            "ObjectType: \"AnimationCurveNode\" {\n\t\tCount: 14");
+        source = ReplaceRequired(source,
+            "ObjectType: \"AnimationCurve\" {\n\t\tCount: 17",
+            "ObjectType: \"AnimationCurve\" {\n\t\tCount: 18");
+
+        var yCurve = FbxBraceBlock(source, "\tAnimationCurve: " +
+            yWeightCurveId.ToString(CultureInfo.InvariantCulture));
+        var xCurve = RewriteFbxLinearWeightCurve(
+            yCurve, xWeightCurveId, -50, 150);
+        var firstNode = source.IndexOf("\tAnimationCurveNode: " +
+            yWeightNodeId.ToString(CultureInfo.InvariantCulture),
+            StringComparison.Ordinal);
+        Assert.True(firstNode >= 0);
+        source = source.Insert(firstNode, xCurve + "\n");
+
+        var yNode = FbxBraceBlock(source, "\tAnimationCurveNode: " +
+            yWeightNodeId.ToString(CultureInfo.InvariantCulture));
+        var xNode = ReplaceRequired(yNode,
+            yWeightNodeId.ToString(CultureInfo.InvariantCulture),
+            xWeightNodeId.ToString(CultureInfo.InvariantCulture));
+        var firstLayer = source.IndexOf("\tAnimationLayer:", StringComparison.Ordinal);
+        Assert.True(firstLayer >= 0);
+        source = source.Insert(firstLayer, xNode + "\n");
+
+        const string connections = "Connections:  {\n";
+        var connectionStart = source.IndexOf(connections, StringComparison.Ordinal);
+        Assert.True(connectionStart >= 0);
+        var inv = CultureInfo.InvariantCulture;
+        var weightConnections =
+            "\t;AnimCurveNode::Weight, AnimLayer::X\n" +
+            "\tC: \"OO\"," + xWeightNodeId.ToString(inv) + "," +
+            xLayerId.ToString(inv) + "\n\n" +
+            "\tC: \"OP\"," + xWeightNodeId.ToString(inv) + "," +
+            xLayerId.ToString(inv) + ", \"Weight\"\n\n" +
+            "\tC: \"OP\"," + xWeightCurveId.ToString(inv) + "," +
+            xWeightNodeId.ToString(inv) + ", \"d|Weight\"\n\n";
+        return source.Insert(
+            connectionStart + connections.Length, weightConnections);
+    }
+
+    private static string RewriteFbxLayerStaticWeight(
+        string source, string layerName, int staticWeight)
+    {
+        const string layerMarker = "\tAnimationLayer:";
+        var nameIndex = source.IndexOf(
+            "\"AnimLayer::" + layerName + "\"", StringComparison.Ordinal);
+        Assert.True(nameIndex >= 0);
+        var start = source.LastIndexOf(
+            layerMarker, nameIndex, StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var block = FbxBraceBlock(source, layerMarker, start);
+        var rewritten = ReplaceRequired(block,
+            "P: \"Weight\", \"Number\", \"\", \"A+\",0",
+            "P: \"Weight\", \"Number\", \"\", \"A+\"," +
+            staticWeight.ToString(CultureInfo.InvariantCulture));
+        return source.Substring(0, start) + rewritten +
+            source.Substring(start + block.Length);
     }
 
     private static string RewriteFbxLayerBlend(

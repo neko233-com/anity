@@ -1881,16 +1881,14 @@ static float EvaluateUnityLayeredVisibility(
     const ufbx_anim_value* value = property->anim_value;
     const double layerValue = EvaluateUnityVisibilityStep(
       value->curves[0], time, UnityVisibilityDefaultValue(value));
-    // The first non-muted layer that contains the property supplies the base
-    // value. FBX Solo is a DCC playback/UI state and Unity's model importer
-    // intentionally ignores it; Mute is serialized import state and wins even
-    // if the same layer is also Solo.
-    if (!hasActiveLayerValue) {
-      result = layerValue;
-      hasActiveLayerValue = true;
-      continue;
-    }
-    double weight = layer->weight;
+    // ufbx clamps the convenience `layer->weight` field to [0,1], while Unity
+    // preserves an unbounded static Weight for the first active property layer.
+    // Read the raw FBX property only for that proven special case; later static
+    // layer extrapolation remains on the independently verified ufbx path.
+    const ufbx_prop* rawWeight = ufbx_find_prop(&layer->props, "Weight");
+    double weight = !hasActiveLayerValue && rawWeight
+      ? rawWeight->value_real / 100.0
+      : layer->weight;
     if (layer->weight_is_animated) {
       const ufbx_anim_prop* weightProperty = ufbx_find_anim_prop(
         layer, &layer->element, "Weight");
@@ -1899,6 +1897,17 @@ static float EvaluateUnityLayeredVisibility(
           weightProperty->anim_value->curves[0], time,
           weightProperty->anim_value->default_value.x) / 100.0;
       }
+    }
+    // The first non-muted layer that contains the property supplies the base
+    // value multiplied by its unbounded static or animated weight. Its blend
+    // mode has no effect until there is a prior active property layer. FBX Solo
+    // is a DCC playback/UI state and Unity's model importer intentionally
+    // ignores it; Mute is serialized import state and wins even if the same
+    // layer is also Solo.
+    if (!hasActiveLayerValue) {
+      result = layerValue * weight;
+      hasActiveLayerValue = true;
+      continue;
     }
     if (layer->additive) {
       result += layerValue * weight;
