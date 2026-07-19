@@ -562,10 +562,15 @@ static ufbx_quat UnityFbxEulerToQuaternion(
   const double canonicalZ = projection > singularThreshold
     ? std::atan2(m01, m00) : 0.0;
   if (xyzEquivalent) {
-    const auto storeFbxEuler = [](double value) {
-      // M2V canonicalizes the exact identity matrix to positive zero even
-      // when atan2 observes subnormal trigonometric residue.
-      return std::abs(value) < 1e-12 ? 0.0f : static_cast<float>(value);
+    const bool exactIdentityMatrix =
+      m00 == 1.0 && m01 == 0.0 && m02 == 0.0 &&
+      m10 == 0.0 && m11 == 1.0 && m12 == 0.0 &&
+      m20 == 0.0 && m21 == 0.0 && m22 == 1.0;
+    const auto storeFbxEuler = [exactIdentityMatrix](double value) {
+      // M2V canonicalizes a bit-exact identity matrix to positive zero. Keep
+      // the signed trigonometric residue of rotations that are only
+      // mathematically equivalent to identity, such as the +/-180 tie.
+      return exactIdentityMatrix ? 0.0f : static_cast<float>(value);
     };
     xyzEquivalent->x = storeFbxEuler(canonicalX * radiansToDegrees);
     xyzEquivalent->y = storeFbxEuler(canonicalY * radiansToDegrees);
@@ -652,13 +657,20 @@ static float EvaluateUnityConvertedFrameSegment(
       return 0.0f;
     const float span = duration + duration;
     const float slope = (next - previous) / span;
-    return slope * duration / 3.0f;
+    const float centeredHandle = slope * duration / 3.0f;
+    const float clampedMagnitude = std::min({
+      std::abs(centeredHandle), std::abs(leftDelta), std::abs(rightDelta),
+    });
+    return std::copysign(clampedMagnitude, centeredHandle);
   };
   // MatrixConverter initially installs a shared user tangent for each segment.
   // When Unroll selects the alternate XYZ Euler representation, KFCurve
   // recalculates that key's side as a clamped automatic tangent. A transition
   // therefore intentionally mixes a user handle on one side and auto on the
   // other side.
+  // SetDestFCurveTangeant divides the double V2VRef delta by its exact FbxTime
+  // period before storing a float derivative. EvaluateIndex multiplies that
+  // derivative by the float-expanded key duration.
   const float userSlope = static_cast<float>(
     (rightTangentValue - leftTangentValue) / frameStep);
   const float userHandle = userSlope * duration / 3.0f;
@@ -754,6 +766,23 @@ struct UnityFbxConvertedEulerKey {
   bool usesAutoTangent;
 };
 
+static bool UnityFbxPreservesUnrolledQuaternionZeroSigns(
+    const ufbx_anim_value* rawRotation) {
+  if (!rawRotation) return false;
+  for (const ufbx_anim_curve* curve : rawRotation->curves) {
+    if (!curve) continue;
+    for (size_t index = 0; index < curve->keyframes.count; ++index) {
+      const ufbx_keyframe& key = curve->keyframes.data[index];
+      // FbxAnimCurveFilterUnroll switches to its half-turn path at the exact
+      // +/-180 tie. Quaternion extraction on that path preserves the signed
+      // zero produced by the FBX basis conversion; ordinary tracks
+      // canonicalize identity components to positive zero.
+      if (std::abs(key.value) >= 180.0) return true;
+    }
+  }
+  return false;
+}
+
 static std::vector<UnityFbxConvertedEulerKey> BuildUnityFbxConvertedEulerKeys(
     const ufbx_anim_value* rawRotation, ufbx_rotation_order rotationOrder,
     double playbackTimeBegin, float frameRate, size_t keyCount) {
@@ -804,6 +833,7 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     double absoluteTime, double orderedConversionTime, float frameRate,
     size_t sampleIndex,
     const std::vector<UnityFbxConvertedEulerKey>* convertedEulerKeys,
+    bool preserveUnrolledZeroSigns,
     bool allowMissingBakedSample, bool* matchedBakedRotation) {
   const AnityModelQuaternionKey fallback = QuaternionKey(source, node);
   if (matchedBakedRotation) *matchedBakedRotation = false;
@@ -957,7 +987,8 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     z /= magnitude;
     w /= magnitude;
   }
-  if (node->rotation_order != UFBX_ROTATION_ORDER_XYZ) {
+  if (node->rotation_order != UFBX_ROTATION_ORDER_XYZ &&
+      !preserveUnrolledZeroSigns) {
     if (x == 0.0f) x = 0.0f;
     if (y == 0.0f) y = 0.0f;
     if (z == 0.0f) z = 0.0f;
@@ -1288,6 +1319,8 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
               sourceNode ? sourceNode->rotation_order : UFBX_ROTATION_ORDER_XYZ,
               baked->playback_time_begin, scene->frameRate,
               rotationSampleCount);
+          const bool preserveUnrolledZeroSigns =
+            UnityFbxPreservesUnrolledQuaternionZeroSigns(rawRotation);
           bool validatedRawRotation = false;
           bool rawRotationTrackCompatible = true;
           size_t bakedRotationCursor = 0;
@@ -1323,6 +1356,7 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
               sourceKey, sourceNode, rawRotation, sampleTime,
               orderedConversionTime, scene->frameRate, key,
               &convertedEulerKeys,
+              preserveUnrolledZeroSigns,
               !hasExactBakedSample && validatedRawRotation &&
                 rawRotationTrackCompatible,
               &matchedBakedRotation);

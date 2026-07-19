@@ -157,7 +157,7 @@ public sealed class NativeModelImportTests : IDisposable
 
     [Theory]
     [MemberData(nameof(WrapAndSubframeUnityQuaternionSamples))]
-    public void NonXyzRotationOrdersStayWithinUnityFloatNoiseAcrossWrapTiesAndSubframes(
+    public void NonXyzRotationOrdersMatchUnityBitsAcrossWrapTiesAndSubframes(
         string caseName, int rotationOrder, double middleFrame,
         float middleX, float middleY, float middleZ,
         string expectedSamplesBase64)
@@ -169,32 +169,7 @@ public sealed class NativeModelImportTests : IDisposable
                 importer.resampleCurves = true;
                 importer.animationCompression = ModelImporterAnimationCompression.Off;
             });
-        AssertQuaternionSamplesNearUnityBits(imported.Clip, expectedSamplesBase64, 2e-5f);
-    }
-
-    private static void AssertQuaternionSamplesNearUnityBits(
-        AnimationClip clip, string expectedSamplesBase64, float maxAbsoluteError)
-    {
-        var expectedBytes = Convert.FromBase64String(expectedSamplesBase64);
-        Assert.Equal(QuaternionProperties.Length * 24 * sizeof(float), expectedBytes.Length);
-        var expectedIndex = 0;
-        var mismatches = new List<string>();
-        foreach (var property in QuaternionProperties)
-        {
-            var keys = Curve(clip, property).keys;
-            Assert.Equal(24, keys.Length);
-            for (var frame = 0; frame < keys.Length; frame++)
-            {
-                var bits = BinaryPrimitives.ReadInt32LittleEndian(
-                    expectedBytes.AsSpan(expectedIndex * sizeof(float), sizeof(float)));
-                var expected = BitConverter.Int32BitsToSingle(bits);
-                var error = MathF.Abs(expected - keys[frame].value);
-                if (!float.IsFinite(keys[frame].value) || error > maxAbsoluteError)
-                    mismatches.Add($"{property}[{frame}]={expected:R}/{keys[frame].value:R} ({error:R})");
-                expectedIndex++;
-            }
-        }
-        Assert.True(mismatches.Count == 0, string.Join(", ", mismatches));
+        AssertQuaternionBits(imported.Clip, expectedSamplesBase64);
     }
 
     private static void AssertQuaternionBits(
