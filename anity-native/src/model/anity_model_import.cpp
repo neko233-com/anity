@@ -444,6 +444,17 @@ static double EvaluateUnityCompatibleCurve(
     p0, p3, outHandle, inHandle, sourceT);
 }
 
+static void UnityFbxSinCos(double angle, double* sine, double* cosine) {
+#if defined(__APPLE__)
+  // Autodesk FBX SDK calls Darwin's joint sin/cos entry point. Calling the
+  // functions separately changes range-reduction rounding for large angles.
+  __sincos(angle, sine, cosine);
+#else
+  *sine = std::sin(angle);
+  *cosine = std::cos(angle);
+#endif
+}
+
 static ufbx_quat UnityFbxEulerToQuaternion(
     ufbx_vec3 euler, ufbx_rotation_order order,
     ufbx_vec3* xyzEquivalent = nullptr) {
@@ -451,9 +462,12 @@ static ufbx_quat UnityFbxEulerToQuaternion(
   const double rx = euler.x * degreesToRadians;
   const double ry = euler.y * degreesToRadians;
   const double rz = euler.z * degreesToRadians;
-  const double sx = std::sin(rx), cx = std::cos(rx);
-  const double sy = std::sin(ry), cy = std::cos(ry);
-  const double sz = std::sin(rz), cz = std::cos(rz);
+  double sx = 0.0, cx = 1.0;
+  double sy = 0.0, cy = 1.0;
+  double sz = 0.0, cz = 1.0;
+  UnityFbxSinCos(rx, &sx, &cx);
+  UnityFbxSinCos(ry, &sy, &cy);
+  UnityFbxSinCos(rz, &sz, &cz);
 
   // FbxAMatrix::SetROnly() uses row-vector Euler matrices. Reconstructing its
   // matrix before GetQ() preserves the rounding Unity receives from FBX SDK;
@@ -501,9 +515,12 @@ static ufbx_quat UnityFbxEulerToQuaternion(
     const double a = angles[i] * parityRadians;
     const double b = angles[j] * parityRadians;
     const double c = angles[k] * parityRadians;
-    const double sinA = std::sin(a), cosA = std::cos(a);
-    const double sinB = std::sin(b), cosB = std::cos(b);
-    const double sinC = std::sin(c), cosC = std::cos(c);
+    double sinA = 0.0, cosA = 1.0;
+    double sinB = 0.0, cosB = 1.0;
+    double sinC = 0.0, cosC = 1.0;
+    UnityFbxSinCos(a, &sinA, &cosA);
+    UnityFbxSinCos(b, &sinB, &cosB);
+    UnityFbxSinCos(c, &sinC, &cosC);
     const double cosASinC = cosA * sinC;
     const double cosACosC = cosA * cosC;
     const double cosCSinA = cosC * sinA;
@@ -557,12 +574,12 @@ static ufbx_quat UnityFbxEulerToQuaternion(
 
   // FbxAMatrix::GetQ() calls GetR(), rebuilds a pure XYZ rotation matrix from
   // that canonical Euler vector, and only then calls GetUnnormalizedQ().
-  const double canonicalSinX = std::sin(canonicalX);
-  const double canonicalCosX = std::cos(canonicalX);
-  const double canonicalSinY = std::sin(canonicalY);
-  const double canonicalCosY = std::cos(canonicalY);
-  const double canonicalSinZ = std::sin(canonicalZ);
-  const double canonicalCosZ = std::cos(canonicalZ);
+  double canonicalSinX = 0.0, canonicalCosX = 1.0;
+  double canonicalSinY = 0.0, canonicalCosY = 1.0;
+  double canonicalSinZ = 0.0, canonicalCosZ = 1.0;
+  UnityFbxSinCos(canonicalX, &canonicalSinX, &canonicalCosX);
+  UnityFbxSinCos(canonicalY, &canonicalSinY, &canonicalCosY);
+  UnityFbxSinCos(canonicalZ, &canonicalSinZ, &canonicalCosZ);
   const double canonicalSinXSinY = canonicalSinX * canonicalSinY;
   const double canonicalCosXSinY = canonicalCosX * canonicalSinY;
   m00 = canonicalCosY * canonicalCosZ;
@@ -741,7 +758,15 @@ static std::vector<ufbx_vec3> BuildUnityFbxConvertedEulerKeys(
     UnityFbxEulerToQuaternion(source, rotationOrder, &stored);
     const ufbx_vec3 continuous = key == 0
       ? stored : UnityFbxContinuousXyzEuler(stored, previous);
-    result.push_back(continuous);
+    // MatrixConverter writes its continuous destination Euler result into
+    // float curve keys. Extraction later reads those float-expanded values;
+    // retaining the full M2V/V2VRef value here changes large wrapped angles.
+    const ufbx_vec3 storedContinuous = {
+      static_cast<float>(continuous.x),
+      static_cast<float>(continuous.y),
+      static_cast<float>(continuous.z),
+    };
+    result.push_back(storedContinuous);
     previous = continuous;
   }
   return result;
@@ -750,8 +775,10 @@ static std::vector<ufbx_vec3> BuildUnityFbxConvertedEulerKeys(
 static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     const ufbx_node* node, const ufbx_anim_value* rawRotation,
     double absoluteTime, double orderedConversionTime, float frameRate,
-    size_t sampleIndex, const std::vector<ufbx_vec3>* convertedEulerKeys) {
+    size_t sampleIndex, const std::vector<ufbx_vec3>* convertedEulerKeys,
+    bool allowMissingBakedSample, bool* matchedBakedRotation) {
   const AnityModelQuaternionKey fallback = QuaternionKey(source, node);
+  if (matchedBakedRotation) *matchedBakedRotation = false;
   if (!node || !rawRotation || node->rotation_order == UFBX_ROTATION_ORDER_SPHERIC) return fallback;
 
   ufbx_vec3 euler = rawRotation->default_value;
@@ -777,54 +804,56 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
     const double timeOffset = absoluteTime - orderedConversionTime;
     // Unity evaluates the converted destination curve on its float-derived
     // KTime even when that sample is only a few ticks away from a source key.
-    if (timeOffset != 0.0 && convertedEulerKeys &&
-        sampleIndex < convertedEulerKeys->size()) {
-      constexpr double ticksPerSecond = 141120000.0;
-      const int64_t sampleTicks = static_cast<int64_t>(
-        std::llround(absoluteTime * ticksPerSecond));
-      const int64_t orderedTicks = static_cast<int64_t>(
-        std::llround(orderedConversionTime * ticksPerSecond));
-      const int64_t frameTicks = static_cast<int64_t>(
-        std::llround(ticksPerSecond / static_cast<double>(frameRate)));
-      const double frameStep = static_cast<double>(frameTicks) / ticksPerSecond;
-      // MatrixConverter runs each direct M2V float through V2VRef before it
-      // writes the destination curve. That continuous float-expanded sequence
-      // defines both the key values and user tangents. Use the track-level
-      // sequence precomputed from the take start.
-      const int64_t neighborIndex = timeOffset > 0.0
-        ? static_cast<int64_t>(sampleIndex) + 1
-        : std::max<int64_t>(static_cast<int64_t>(sampleIndex) - 1, 0);
-      const size_t neighborKey = static_cast<size_t>(std::clamp<int64_t>(
-        neighborIndex, 0,
-        static_cast<int64_t>(convertedEulerKeys->size() - 1)));
+    if (convertedEulerKeys && sampleIndex < convertedEulerKeys->size()) {
       const ufbx_vec3 currentReference = (*convertedEulerKeys)[sampleIndex];
-      const ufbx_vec3 neighborReference = (*convertedEulerKeys)[neighborKey];
-      const double interpolation = static_cast<double>(
-        std::abs(sampleTicks - orderedTicks)) / static_cast<double>(frameTicks);
-      const bool usesFollowingFrame = timeOffset > 0.0;
-      const double sourceT = usesFollowingFrame ? interpolation : 1.0 - interpolation;
-      const auto evaluateComponent = [usesFollowingFrame, sourceT, frameStep](
-          double current, double neighbor,
-          double currentTangent, double neighborTangent) {
-        return usesFollowingFrame
-          ? EvaluateUnityConvertedFrameSegment(
-              static_cast<float>(current), static_cast<float>(neighbor),
-              currentTangent, neighborTangent,
-              sourceT, frameStep)
-          : EvaluateUnityConvertedFrameSegment(
-              static_cast<float>(neighbor), static_cast<float>(current),
-              neighborTangent, currentTangent,
-              sourceT, frameStep);
-      };
-      unityXyzEuler.x = evaluateComponent(
-        currentReference.x, neighborReference.x,
-        currentReference.x, neighborReference.x);
-      unityXyzEuler.y = evaluateComponent(
-        currentReference.y, neighborReference.y,
-        currentReference.y, neighborReference.y);
-      unityXyzEuler.z = evaluateComponent(
-        currentReference.z, neighborReference.z,
-        currentReference.z, neighborReference.z);
+      unityXyzEuler = currentReference;
+      if (timeOffset != 0.0) {
+        constexpr double ticksPerSecond = 141120000.0;
+        const int64_t sampleTicks = static_cast<int64_t>(
+          std::llround(absoluteTime * ticksPerSecond));
+        const int64_t orderedTicks = static_cast<int64_t>(
+          std::llround(orderedConversionTime * ticksPerSecond));
+        const int64_t frameTicks = static_cast<int64_t>(
+          std::llround(ticksPerSecond / static_cast<double>(frameRate)));
+        const double frameStep = static_cast<double>(frameTicks) / ticksPerSecond;
+        // MatrixConverter runs each direct M2V float through V2VRef before it
+        // writes the destination curve. That continuous float-expanded sequence
+        // defines both the key values and user tangents. Use the track-level
+        // sequence precomputed from the take start.
+        const int64_t neighborIndex = timeOffset > 0.0
+          ? static_cast<int64_t>(sampleIndex) + 1
+          : std::max<int64_t>(static_cast<int64_t>(sampleIndex) - 1, 0);
+        const size_t neighborKey = static_cast<size_t>(std::clamp<int64_t>(
+          neighborIndex, 0,
+          static_cast<int64_t>(convertedEulerKeys->size() - 1)));
+        const ufbx_vec3 neighborReference = (*convertedEulerKeys)[neighborKey];
+        const double interpolation = static_cast<double>(
+          std::abs(sampleTicks - orderedTicks)) / static_cast<double>(frameTicks);
+        const bool usesFollowingFrame = timeOffset > 0.0;
+        const double sourceT = usesFollowingFrame ? interpolation : 1.0 - interpolation;
+        const auto evaluateComponent = [usesFollowingFrame, sourceT, frameStep](
+            double current, double neighbor,
+            double currentTangent, double neighborTangent) {
+          return usesFollowingFrame
+            ? EvaluateUnityConvertedFrameSegment(
+                static_cast<float>(current), static_cast<float>(neighbor),
+                currentTangent, neighborTangent,
+                sourceT, frameStep)
+            : EvaluateUnityConvertedFrameSegment(
+                static_cast<float>(neighbor), static_cast<float>(current),
+                neighborTangent, currentTangent,
+                sourceT, frameStep);
+        };
+        unityXyzEuler.x = evaluateComponent(
+          currentReference.x, neighborReference.x,
+          currentReference.x, neighborReference.x);
+        unityXyzEuler.y = evaluateComponent(
+          currentReference.y, neighborReference.y,
+          currentReference.y, neighborReference.y);
+        unityXyzEuler.z = evaluateComponent(
+          currentReference.z, neighborReference.z,
+          currentReference.z, neighborReference.z);
+      }
     }
   }
   const ufbx_quat referenceRaw = ufbx_euler_to_quat(referenceEuler, node->rotation_order);
@@ -855,7 +884,15 @@ static AnityModelQuaternionKey UnityQuaternionKey(const ufbx_baked_quat& source,
   const double dy = static_cast<double>(fallback.y) - reference.y;
   const double dz = static_cast<double>(fallback.z) - reference.z;
   const double dw = static_cast<double>(fallback.w) - reference.w;
-  if (dx * dx + dy * dy + dz * dz + dw * dw > 1e-10) return fallback;
+  const double sx = static_cast<double>(fallback.x) + reference.x;
+  const double sy = static_cast<double>(fallback.y) + reference.y;
+  const double sz = static_cast<double>(fallback.z) + reference.z;
+  const double sw = static_cast<double>(fallback.w) + reference.w;
+  const bool matchesBakedRotation =
+    std::min(dx * dx + dy * dy + dz * dz + dw * dw,
+      sx * sx + sy * sy + sz * sz + sw * sw) <= 1e-10;
+  if (matchedBakedRotation) *matchedBakedRotation = matchesBakedRotation;
+  if (!matchesBakedRotation && !allowMissingBakedSample) return fallback;
   float x = Real(compatible.x);
   float y = Real(compatible.y);
   float z = Real(compatible.z);
@@ -1190,7 +1227,16 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
           track.positionKeys.reserve(bakedNode.translation_keys.count);
           for (size_t key = 0; key < bakedNode.translation_keys.count; ++key)
             track.positionKeys.push_back(VectorKey(bakedNode.translation_keys.data[key], options->globalScale));
-          track.rotationKeys.reserve(bakedNode.rotation_keys.count);
+          // Unity resamples a node's transform channels on one shared frame
+          // grid. ufbx may omit the last quaternion when an Euler source key is
+          // between frames, while translation and scale still retain the full
+          // node interval.
+          const size_t rotationSampleCount = std::max({
+            bakedNode.rotation_keys.count,
+            bakedNode.translation_keys.count,
+            bakedNode.scale_keys.count,
+          });
+          track.rotationKeys.reserve(rotationSampleCount);
           const ufbx_node* sourceNode = bakedNode.typed_id < source->nodes.count
             ? source->nodes.data[bakedNode.typed_id] : nullptr;
           const ufbx_anim_value* rawRotation = sourceNode
@@ -1200,9 +1246,11 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
               rawRotation,
               sourceNode ? sourceNode->rotation_order : UFBX_ROTATION_ORDER_XYZ,
               baked->playback_time_begin, scene->frameRate,
-              bakedNode.rotation_keys.count);
-          for (size_t key = 0; key < bakedNode.rotation_keys.count; ++key) {
-            const ufbx_baked_quat& sourceKey = bakedNode.rotation_keys.data[key];
+              rotationSampleCount);
+          bool validatedRawRotation = false;
+          bool rawRotationTrackCompatible = true;
+          size_t bakedRotationCursor = 0;
+          for (size_t key = 0; key < rotationSampleCount; ++key) {
             const double sampleTime = UnityFbxSampleTime(
               baked->playback_time_begin, scene->frameRate, key);
             constexpr double ticksPerSecond = 141120000.0;
@@ -1213,11 +1261,48 @@ AnityResult ANITY_CALL AnityModel_LoadFile(
             const double orderedConversionTime = static_cast<double>(
               orderedStartTicks + static_cast<int64_t>(key) * orderedFrameTicks) /
               ticksPerSecond;
+            ufbx_baked_quat sourceKey{};
+            sourceKey.time = sampleTime;
+            const double bakedEvaluationTime = sourceNode &&
+                sourceNode->rotation_order != UFBX_ROTATION_ORDER_XYZ
+              ? orderedConversionTime - baked->playback_time_begin
+              : sampleTime - baked->playback_time_begin;
+            while (bakedRotationCursor < bakedNode.rotation_keys.count &&
+                bakedNode.rotation_keys.data[bakedRotationCursor].time <
+                  bakedEvaluationTime - 1e-9)
+              ++bakedRotationCursor;
+            const bool hasExactBakedSample =
+              bakedRotationCursor < bakedNode.rotation_keys.count &&
+              std::abs(bakedNode.rotation_keys.data[bakedRotationCursor].time -
+                bakedEvaluationTime) <= 1e-9;
+            sourceKey.value = ufbx_evaluate_baked_quat(
+              bakedNode.rotation_keys, bakedEvaluationTime);
+            bool matchedBakedRotation = false;
             AnityModelQuaternionKey rotationKey = UnityQuaternionKey(
               sourceKey, sourceNode, rawRotation, sampleTime,
               orderedConversionTime, scene->frameRate, key,
-              &convertedEulerKeys);
+              &convertedEulerKeys,
+              !hasExactBakedSample && validatedRawRotation &&
+                rawRotationTrackCompatible,
+              &matchedBakedRotation);
+            if (hasExactBakedSample) {
+              validatedRawRotation = true;
+              rawRotationTrackCompatible = rawRotationTrackCompatible &&
+                matchedBakedRotation;
+            }
             rotationKey.time = Real(sampleTime) - Real(baked->playback_time_begin);
+            if (!track.rotationKeys.empty()) {
+              const AnityModelQuaternionKey& previous = track.rotationKeys.back();
+              const float dot = previous.x * rotationKey.x +
+                previous.y * rotationKey.y + previous.z * rotationKey.z +
+                previous.w * rotationKey.w;
+              if (dot < 0.0f) {
+                rotationKey.x = -rotationKey.x;
+                rotationKey.y = -rotationKey.y;
+                rotationKey.z = -rotationKey.z;
+                rotationKey.w = -rotationKey.w;
+              }
+            }
             track.rotationKeys.push_back(rotationKey);
           }
           track.scaleKeys.reserve(bakedNode.scale_keys.count);

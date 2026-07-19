@@ -137,21 +137,89 @@ public sealed class NativeModelImportTests : IDisposable
                 importer.resampleCurves = true;
                 importer.animationCompression = ModelImporterAnimationCompression.Off;
             });
+        AssertQuaternionBits(imported.Clip, expectedSamplesBase64);
+    }
+
+    public static TheoryData<string, int, double, float, float, float, string>
+        WrapAndSubframeUnityQuaternionSamples => new()
+    {
+        { "o1-wrap720", 1, 14d, 720f, 0f, 0f, "AAAAAJxO2D1TkMc+cjlAP4MJfT+JVmA/Jze1Pic3tb6KVmC/ggl9v3Y5QL9QkMe+0k7YvY0fnKWnpDW+zUgdv1d5er+VE0i/FekBPXJsTj9idHA/+ZUNP5g1BD4BMxy9AAAAgAAAAIAAAACAAAAAAAAAAIAAAAAAAAAAgAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAKTEjjFZ8WU7EsEfu/wgRb0mKuG9AS+lvfDioD3rpGw+SAeBPlu9PT7vWhQ+AAAAgAAAAIAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAgAAAAIAAAACAAAAAgHcv1jETZgQ8zp0FPR/+Qz0sQxi8FOIIvsrEPb64mpO9y73hPd7LbT6HfYk+AACAP3CRfj/SwGs/xBIpP5ZXGz4jpfa+021vv9Ntb78fpfa+sVcbPsESKT/TwGs/cJF+PwAAgD8b7ns/gc9JP6LgRz65Lx2//rp8v4FfDr/tEHk+zVJJP2Aycj+vmHM/" },
+        { "o2-wrap-mixed", 2, 14d, -720f, 450f, -810f, "AAAAAJhSxr26dXa+0SjOvYRYCD4zZy++PDGTvch+MD91fF4+cVcwv6QiML80K/G+wlHvvgAAAL/d9ei+yh0Vv3+1Q79gjcA+Nrz5Pi5wq70RuFq+sPtZPkRogz5ovgI+AAAAgLgBWL3hhye9SPCrPkKkID+Bbxe+Gk5svzmdLb+OQkK/Zxw5v4U/Jz0oww0/jmkQPwAAAD9ALxU/JZ2lPuteIb+pZSm/TOtUvxW7376zQkG/knfbvnBGKL7r2UG+AAAAgIyH/z2YXvM+mTwvP50QnT3sQC2/mI2xvvamQL6bT9y+Th8mPRXSlj4j25S9Tr/QvgAAAL9+6q++dggcPlsNjj0Yq92+tdjpvVKUPL/Z1JG70UAwvz/F0L6hCnW+AACAPxVtfD+/Ylg/HaAjP49nQz8pVzM/Tq4ZvrtyL77aPeA+2McBvYV1Kb8Jyy6/1IcLvwAAAL/6PRS/md86v8cS7b2lSPc+gx11vgZjAj/euh6/YH8Lv+5YXL9El3G/" },
+        { "o3-wrap-triple", 3, 14d, 1080f, -540f, 900f, "AAAAAFCBKj57ORc/SMkGPz0YCb/uygW/eHCAvke59741iEY7POcsPxiqwz4IeRy/v1x5vwAAgL/bwmy/E7wovb0YLT9ZBQa9mxAXv4OqBr/IIKU+uHs6v1q2I75nvgI+AAAAgIy6aD0aCzi99SQWv0gln77oEVo/XAoQP1chHz8Gew89iBLNPgYE9769Wga/2KYRvsrJU6VjC36+GDkevxalxj6QCVG+U+35Pl2ZUT/+qMw+SsEEPZaSmL7zWhS+AAAAgDNt8L3WD22+f3CTPXlu0T1HX5i8sqZJPxMQk77KM1o/0D7+PleKQT+AP/I+WHrJPTIxjaRHMjY+4944PzQIDj/Ow3A/3KEHPxqjXbvJCGS+/AL7vaLGrr2ZCnW+AACAP1g1ej9+ikU/n3ocP/pORz/JbfQ8M0V/O06ECz+jkwU/amK9Pv4hZD4FirY+Q1wVPtPolCqZRGg+f6WdPljNlD6PFoo+jJW6PrCTa75zIFS/MVssv8zsb7+wmHO/" },
+        { "o4-wrap-triple", 4, 14d, -1080f, 540f, -900f, "AAAAAE+BKr57ORe/SMkGvz0YCT/uygU/dnCAPkG59z63h0a7O+csvxiqw74IeRw/vlx5PwAAgD/HkW0/R6d9PTu6RL8Pi4i93LrVPihERz41iQy/VlQMP6w7kz4HMxw9AAAAgI26aL0YCzg99SQWP0clnz7pEVq/WgoQv1ohH78Tew+9jhLNvgcE9z68WgY/46YRPjIxjSTaC3I+QQoiP/lXiL7/4EY+YG/6vm4BdL9OFsi+kpkiv7X6P77n2UG+AAAAgDNt8D3XD20+gXCTvYFu0b1QX5g8s6ZJvwYQkz7KM1q/xj7+vlWKQb+BP/K+WnrJvTIxjaQKODu+kJk0v65R8L7Y6WG/Kibjvnnya74jq7g9uFmFvgqC4b6GfYm+AACAP1g1ej9+ikU/n3ocP/pORz+rbfQ8DUV/O1GECz+kkwU/dmK9PhAiZD4AirY+OVwVPjIxjaTs1mM+ciSgPl8NsD7Rqdg+ys0fP1liwLzsuzu/5Z30vuRdVL9El3G/" },
+        { "o5-wrap-offset", 5, 14d, 721f, -719f, 1081f, "AAAAAD20sj3lEMA9xzGovpz1Ur7ly9w+oOD0Pesb6L4PCNO+PHZwvYtrIL/r8f2+tBvmvZ42EDyNT1O+VeMpv6qcVj0Ukw0/vzeyPUtqEL/IVZK+kzkLvtkcqT0EMxy9AAAAgP4q9j1jbv8+I6AeP1ElTj04ZNM+VMHnvpKb7z3TK92+0uJQPjlVoT4xnt69EIHIvXu3DbwVyQG+rGccPrGpmr59/MQ+OWfoPGEn0r5jl9s6UWUzP6ICrT7s2UE+AAAAgAPqFL4jb7W+SZGBvjGfCb8INUa/m78vv5XhT78qO0K/VoL7vvbBFT8rdxk/7asiPp42ELw6448+cj47P9z52T73ujg/sf18P8neGj+zmom+i2bUvTC8sjyjCnU+AACAP3doej9NC0k/1JkqPz3sUD9XDle+7msOP7Rjsr4yYYW+00JYv0t90L5PZB4/bdp5P3n4fz9su20/mGcTPXjwWT8HSiM+s8P6vTaDxD6qeWs/4E0xP4/ybz+vmHM/" },
+        { "o1-tie180", 1, 14d, 180f, -180f, 180f, "AAAAAArO0jxBQ7Y92sMhPt7pRD7NdSQ+G6qAPSOqgL3OdSS+3OlEvtzDIb4+Q7a9Oc7SvOTlGrNffjW9cw0PvpJmTr6iDxu+6fo3OrKUEz7h5jQ+eJvSPWWmqzsBMxy9AAAAgArO0jxAQ7Y92sMhPt3pRD7MdSQ+G6qAPSKqgL3OdSS+3ulEvtzDIb4/Q7a9Os7SvPQHDrMK+BW9UczcvWSvAr5B3Li8qh88Po9Juj4H0M8+zOKiPgOXSz7vWhQ+AAAAgJBD3rzC9d69ZrB6vmM+1r58SRa/jFYxv4xWMb98SRa/XT7Wvm2wer6+9d69xUPevEj5O7M2Hlm9ig9WvoC84b4FcCa/R/cyv00NCL8rpnG+VWgmPa+UWT6HfYk+AACAP3K8fz80bnw/7IdxP6bXXT9b60Y/iTg3P4k4Nz9c60Y/qNddP+uHcT80bnw/crx/PwAAgD9cN38/Ajx2P5+CXT98hT4/mecwPy1TQD++dV0/DwtxPwDrdD+vmHM/" },
+        { "o2-tie180", 2, 14d, -180f, 180f, -180f, "AAAAAArO0rxBQ7a92sMhvt3pRL7MdSS+G6qAvSKqgD3NdSQ+3+lEPtzDIT4+Q7Y9Os7SPPruFzN8cyI9t44APlosPD6FXRI+yfE3OsVtIb6dSHK+Bh5fvq8mIr5mvgK+AAAAgArO0rxBQ7a92sMhvt7pRL7MdSS+G6qAvSOqgD3NdSQ+3OlEPtzDIT4+Q7Y9Oc7SPILEJjN9jkE9w/UfPsrygT6NVYg+ox88PtsrpT0sZTE9GguxPbUFID7r2UE+AAAAgJFD3jzC9d49ZrB6PmQ+1j58SRY/jFYxP4xWMT98SRY/XT7WPmqwej6+9d49wkPePHY1FDNmFh494TUjPiwQtz6IixI/R/cyP/dnLD9xtwg/Zm7BPvQ+jD6fCnU+AACAP3K8fz80bnw/7IdxP6bXXT9b60Y/iTg3P4k4Nz9b60Y/qNddP+uHcT80bnw/crx/PwAAgD8+Un8/FXd3P943YT+7IEM/mOcwPzC7Nz/ifU8/NE5lP+SHbz9El3E/" },
+        { "o3-tie-turn", 3, 14d, 540f, 180f, -540f, "AAAAAIwTpj01Z54+hHQRP3SfCz/Dva88OGEavzhhGr/Cva88dJ8LP4R0ET8zZ54+WBOmPbSH9jMTIw4+re77Pr+cHD9q0YS9RmI2v6Eueb6CScM+2aObPoQjf7tmvgK+AAAAgLnao7xBSIe7QLVWPiiJIj/ASF4/OebaPjbm2r7ASF6/KYkiv0S1Vr4YSYc7O9ujPDMxDaWWnQA9dRyMvSuHDL/3yU+/beI3umYCXz9HfjU/umuFPirICD7vWhQ+AAAAgJuDnT1SfYE+E7i7PjBUgD6zUMA7KARgveUDYD2sUMC7NVSAvhO4u75UfYG+YoOdvTExDaUhqO69OtWdvpOoU74mD8s9co55PVXDpT11+PU+DvcaPxkGwj6gCnU+AACAPzVYfj+Tq2o/VMw0P9sM+T4MuP0+CdYrPwrWKz8OuP0+2Az5PlXMND+Tq2o/Nlh+PwAAgD/WoXs/7q9PP5XeBz9vbBI/SfcyP5do1j61LLI+yhwwP2lsaj+vmHM/" },
+        { "o4-half-frame", 4, 13.5d, 315f, -225f, 495f, "AAAAALBbQD2Pfg4+AIEZPi4jEL2zk6i+6nHovhj2nL5tDA6+ORBJvt/U177a6h+/nKY4v54EN7+Xcw+/FFiFviP0db3wsVq+OYDVvuDYgL7FATc9zaDiPTzsizwBMxy9AAAAgEKNIT08wjg+eGrbPqOoJz+H4yY/kG/YPtxqhj4907s+DwwTP5ITJj9BWxI/Z0v0Pn4x+D7lwRw/+dIlPy8h2z6HF2g+/m/NPr65KT9Onhg/+pa2PoxhXz7r2UE+AAAAgPj3o70S4J2++HYbv3M8P7+6Au2+xLlDPs7QRD9NaWs/8OA/P6ucDj8vq/I+HmrsPpAY7T5QGv8+D5EpP3HKZj9CEEg/vXBzPd3CIb/qjiW/Tmhhvg69Ez6IfYk+AACAP92xfj/Nb2w/X+gmP3KW3j26lwC/9rxCv6r0/b6xLMK8pDCHPiSKmj4wO3c+uOBJPjRxSz6aTYA+OSWLPlnFsTyJZgq/pDlQv+AmoL6ag/I+mbNmP/cMdz9El3E/" },
+        { "o5-half-frame", 5, 14.5d, -405f, 585f, -765f, "AAAAANo+gb0+gpe+QUsiv6WJML+8V9C+8L8Fv//zWL/wVY6+MYAYP742JT8st04+ehHFvaugPL40cDa+gYMtPfm/ID/q04Q+OfpIvwYRnr4M7Om+rdcJv++jK77/Mhy9AAAAgPOFlr1pIkW+anLTvZjyWj4141Y+sF/cvWDPUT5nKzk/wL6KPq16Gr/La3m/KABwvyQ7W78nJl6/Kjl8v5uKFr+8hBU/+g6iPmKUCD0+6/Q+ofobPkCNwz3v2UE+AAAAgD6I3T04xtU+xvU1Pwv13z5R0Nu+3A1Pv2GV9r7l9gW/qao+vzsy1r4WDm49z9FlPtxZTT5JrlU+i2cmPrRD4r6EQz2/T9YHv9oOYr+iEhk+6+tHP9UM3j6jCnU+AACAP2VJfT8tWFY/f9CSPro9Cb+zS0e/A4N9vvGWtb3Pg7W+lXUFvnKmVz71eqY9WNx9vr2g4L5IJtS+7vcGvdYigj7HNFm+0QY0vagptL7zIjy/2xKOPs1SYT+vmHM/" },
+    };
+
+    [Theory]
+    [MemberData(nameof(WrapAndSubframeUnityQuaternionSamples))]
+    public void NonXyzRotationOrdersStayWithinUnityFloatNoiseAcrossWrapTiesAndSubframes(
+        string caseName, int rotationOrder, double middleFrame,
+        float middleX, float middleY, float middleZ,
+        string expectedSamplesBase64)
+    {
+        Assert.False(string.IsNullOrEmpty(caseName));
+        var imported = ReimportOrderedAnimation(
+            rotationOrder, middleFrame, middleX, middleY, middleZ, importer =>
+            {
+                importer.resampleCurves = true;
+                importer.animationCompression = ModelImporterAnimationCompression.Off;
+            });
+        AssertQuaternionSamplesNearUnityBits(imported.Clip, expectedSamplesBase64, 2e-5f);
+    }
+
+    private static void AssertQuaternionSamplesNearUnityBits(
+        AnimationClip clip, string expectedSamplesBase64, float maxAbsoluteError)
+    {
         var expectedBytes = Convert.FromBase64String(expectedSamplesBase64);
         Assert.Equal(QuaternionProperties.Length * 24 * sizeof(float), expectedBytes.Length);
         var expectedIndex = 0;
+        var mismatches = new List<string>();
         foreach (var property in QuaternionProperties)
         {
-            var keys = Curve(imported.Clip, property).keys;
+            var keys = Curve(clip, property).keys;
             Assert.Equal(24, keys.Length);
-            foreach (var key in keys)
+            for (var frame = 0; frame < keys.Length; frame++)
             {
                 var bits = BinaryPrimitives.ReadInt32LittleEndian(
                     expectedBytes.AsSpan(expectedIndex * sizeof(float), sizeof(float)));
-                Assert.Equal(bits, BitConverter.SingleToInt32Bits(key.value));
+                var expected = BitConverter.Int32BitsToSingle(bits);
+                var error = MathF.Abs(expected - keys[frame].value);
+                if (!float.IsFinite(keys[frame].value) || error > maxAbsoluteError)
+                    mismatches.Add($"{property}[{frame}]={expected:R}/{keys[frame].value:R} ({error:R})");
                 expectedIndex++;
             }
         }
+        Assert.True(mismatches.Count == 0, string.Join(", ", mismatches));
+    }
+
+    private static void AssertQuaternionBits(
+        AnimationClip clip, string expectedSamplesBase64)
+    {
+        var expectedBytes = Convert.FromBase64String(expectedSamplesBase64);
+        Assert.Equal(QuaternionProperties.Length * 24 * sizeof(float), expectedBytes.Length);
+        var expectedIndex = 0;
+        var mismatches = new List<string>();
+        foreach (var property in QuaternionProperties)
+        {
+            var keys = Curve(clip, property).keys;
+            Assert.True(keys.Length == 24,
+                $"{property} has {keys.Length} keys at {string.Join(",", keys.Select(key => key.time.ToString("R", CultureInfo.InvariantCulture)))}");
+            for (var frame = 0; frame < keys.Length; frame++)
+            {
+                var bits = BinaryPrimitives.ReadInt32LittleEndian(
+                    expectedBytes.AsSpan(expectedIndex * sizeof(float), sizeof(float)));
+                var actualBits = BitConverter.SingleToInt32Bits(keys[frame].value);
+                if (bits != actualBits)
+                    mismatches.Add($"{property}[{frame}]={bits:X8}/{actualBits:X8}");
+                expectedIndex++;
+            }
+        }
+        Assert.True(mismatches.Count == 0, string.Join(", ", mismatches));
     }
 
     [Theory]
@@ -523,6 +591,12 @@ public sealed class NativeModelImportTests : IDisposable
 
     private (GameObject Root, AnimationClip Clip) ReimportOrderedAnimation(
         int rotationOrder, float middleX, float middleY, float middleZ,
+        Action<ModelImporter> configure) =>
+        ReimportOrderedAnimation(rotationOrder, 14d, middleX, middleY, middleZ, configure);
+
+    private (GameObject Root, AnimationClip Clip) ReimportOrderedAnimation(
+        int rotationOrder, double middleFrame,
+        float middleX, float middleY, float middleZ,
         Action<ModelImporter> configure)
     {
         var path = CopyAnimatedFixture();
@@ -532,6 +606,8 @@ public sealed class NativeModelImportTests : IDisposable
             "Property: \"RotationOrder\", \"enum\", \"\",0",
             "Property: \"RotationOrder\", \"enum\", \"\"," + rotationOrder,
             StringComparison.Ordinal);
+        const long frameTicks = 1_924_423_250;
+        var middleTicks = checked((long)(middleFrame * frameTicks));
         foreach (var (original, replacement) in new[]
         {
             (10f, middleX), (20f, middleY), (30f, middleZ),
@@ -539,7 +615,7 @@ public sealed class NativeModelImportTests : IDisposable
         {
             orderedFixture = orderedFixture.Replace(
                 $"26941925500,{original.ToString("R", CultureInfo.InvariantCulture)},U,s,0,0,n",
-                $"26941925500,{replacement.ToString("R", CultureInfo.InvariantCulture)},U,s,0,0,n",
+                $"{middleTicks},{replacement.ToString("R", CultureInfo.InvariantCulture)},U,s,0,0,n",
                 StringComparison.Ordinal);
         }
         Assert.NotEqual(fixture, orderedFixture);
