@@ -3206,6 +3206,11 @@ typedef struct ufbx_keyframe {
 	ufbx_interpolation interpolation;
 	ufbx_tangent left;
 	ufbx_tangent right;
+	// Anity extension: Preserve the source float derivatives before the
+	// tangent-vector multiplication rounds them. Dividing dy by dx cannot
+	// always recover the FBX SDK derivative bit-for-bit.
+	float anity_source_left_slope;
+	float anity_source_right_slope;
 } ufbx_keyframe;
 
 UFBX_LIST_TYPE(ufbx_keyframe_list, ufbx_keyframe);

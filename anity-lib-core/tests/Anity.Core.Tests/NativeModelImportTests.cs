@@ -854,18 +854,69 @@ public sealed class NativeModelImportTests : IDisposable
         Assert.DoesNotContain(imported.Clip.bindings, binding => binding.propertyName == "m_Enabled");
     }
 
-    [Fact]
-    public void LayeredAdditiveVisibilityMatchesUnity2022FrameSamples()
+    [Theory]
+    [InlineData(0, 2f)]
+    [InlineData(1, 2.00372767f)]
+    [InlineData(2, 2.0151732f)]
+    [InlineData(3, 2.037238f)]
+    [InlineData(4, 2.07476544f)]
+    [InlineData(5, 2.13643384f)]
+    [InlineData(6, 2.23788333f)]
+    [InlineData(7, 2.39445376f)]
+    [InlineData(8, 2.56706977f)]
+    [InlineData(9, 2.69721365f)]
+    [InlineData(10, 2.78680372f)]
+    [InlineData(11, 2.85005951f)]
+    [InlineData(12, 2.89599752f)]
+    [InlineData(13, 2.92984843f)]
+    [InlineData(14, 2.95480156f)]
+    [InlineData(15, 2.97292328f)]
+    [InlineData(16, 2.98562264f)]
+    [InlineData(17, 2.99390435f)]
+    [InlineData(18, 2.998509f)]
+    [InlineData(19, 3f)]
+    public void LayeredAdditiveVisibilityMatchesUnity2022WeightedFrameBits(
+        int frame, float expected)
     {
         var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true).Clip;
         var keys = VisibilityCurve(clip, string.Empty).keys;
         Assert.Equal(120, keys.Length);
+        Assert.Equal(
+            BitConverter.SingleToInt32Bits(expected),
+            BitConverter.SingleToInt32Bits(keys[frame].value));
+    }
+
+    [Theory]
+    [InlineData("Baseline", 0, 0, 0, 0, 0, 0, 2f, 2.92984843f, 3f)]
+    [InlineData("MuteBase", 1, 0, 0, 0, 0, 0, 1f, 1.92984831f, 2f)]
+    [InlineData("MuteX", 0, 0, 1, 0, 0, 0, 1f, 1.92984831f, 2f)]
+    [InlineData("MuteY", 0, 0, 0, 0, 1, 0, 2f, 2f, 2f)]
+    [InlineData("MuteAll", 1, 0, 1, 0, 1, 0, 1f, 1f, 1f)]
+    [InlineData("SoloBase", 0, 1, 0, 0, 0, 0, 2f, 2.92984843f, 3f)]
+    [InlineData("SoloX", 0, 0, 0, 1, 0, 0, 2f, 2.92984843f, 3f)]
+    [InlineData("SoloY", 0, 0, 0, 0, 0, 1, 2f, 2.92984843f, 3f)]
+    [InlineData("SoloXY", 0, 0, 0, 1, 0, 1, 2f, 2.92984843f, 3f)]
+    [InlineData("MuteSoloX", 0, 0, 1, 1, 0, 0, 1f, 1.92984831f, 2f)]
+    [InlineData("SoloXMutedY", 0, 0, 0, 1, 1, 0, 2f, 2f, 2f)]
+    [InlineData("SoloBaseY", 0, 1, 0, 0, 0, 1, 2f, 2.92984843f, 3f)]
+    public void LayerMuteAndSoloMatchUnity2022ImportedVisibilityBits(
+        string _, int baseMute, int baseSolo, int xMute, int xSolo,
+        int yMute, int ySolo, float expected0, float expected13, float expected19)
+    {
+        var clip = ReimportLayeredVisibility("LayeredVisibilityCube.fbx", true, source =>
+        {
+            source = SetFbxLayerMuteSolo(source, "BaseLayer", baseMute, baseSolo);
+            source = SetFbxLayerMuteSolo(source, "X", xMute, xSolo);
+            return SetFbxLayerMuteSolo(source, "Y", yMute, ySolo);
+        }).Clip;
+        var keys = VisibilityCurve(clip, string.Empty).keys;
+        Assert.Equal(120, keys.Length);
         foreach (var (frame, expected) in new[]
         {
-            (0, 2f), (1, 2.00372767f), (7, 2.39445376f),
-            (8, 2.56706977f), (13, 2.92984843f), (19, 3f), (119, 3f),
+            (0, expected0), (13, expected13), (19, expected19),
         })
-            Assert.InRange(MathF.Abs(keys[frame].value - expected), 0f, 0.00005f);
+            Assert.Equal(BitConverter.SingleToInt32Bits(expected),
+                BitConverter.SingleToInt32Bits(keys[frame].value));
     }
 
     [Fact]
@@ -1297,6 +1348,38 @@ public sealed class NativeModelImportTests : IDisposable
                 return source.Substring(start, index - start + 1);
         }
         throw new InvalidDataException("Unterminated FBX block: " + marker);
+    }
+
+    private static string SetFbxLayerMuteSolo(
+        string source, string layerName, int mute, int solo)
+    {
+        const string layerMarker = "\tAnimationLayer:";
+        var nameIndex = source.IndexOf(
+            "\"AnimLayer::" + layerName + "\"", StringComparison.Ordinal);
+        Assert.True(nameIndex >= 0, "Missing FBX animation layer: " + layerName);
+        var start = source.LastIndexOf(
+            layerMarker, nameIndex, StringComparison.Ordinal);
+        Assert.True(start >= 0, "Missing FBX animation layer block: " + layerName);
+        var block = FbxBraceBlock(source, layerMarker, start);
+        const string properties = "\t\tProperties70:  {";
+        string rewritten;
+        if (block.Contains(properties, StringComparison.Ordinal))
+        {
+            rewritten = block.Replace(properties, properties +
+                "\n\t\t\tP: \"Mute\", \"bool\", \"\", \"\"," + mute +
+                "\n\t\t\tP: \"Solo\", \"bool\", \"\", \"\"," + solo,
+                StringComparison.Ordinal);
+        }
+        else
+        {
+            rewritten = block.Replace(" {\n\t}", " {\n" + properties +
+                "\n\t\t\tP: \"Mute\", \"bool\", \"\", \"\"," + mute +
+                "\n\t\t\tP: \"Solo\", \"bool\", \"\", \"\"," + solo +
+                "\n\t\t}\n\t}", StringComparison.Ordinal);
+        }
+        Assert.NotEqual(block, rewritten);
+        return source.Substring(0, start) + rewritten +
+            source.Substring(start + block.Length);
     }
 
     private (GameObject Root, AnimationClip Clip) ReimportOrderedAnimation(

@@ -14494,6 +14494,9 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_animation_curve(ufbxi_conte
 
 		// Set the tangents based on weights (dx relative to the time difference
 		// between the previous/next key) and slope (simply d = slope * dx)
+		key->anity_source_left_slope = slope_left;
+		key->anity_source_right_slope = slope_right;
+
 		if (key->time > prev_time) {
 			double delta = key->time - prev_time;
 			key->left.dx = (float)(weight_left * delta);
@@ -15553,6 +15556,9 @@ ufbxi_nodiscard ufbxi_noinline static int ufbxi_read_take_anim_channel(ufbxi_con
 				slope_right = next_slope_left = 0.0f;
 			}
 		}
+
+		key->anity_source_left_slope = slope_left;
+		key->anity_source_right_slope = slope_right;
 
 		if (key->time > prev_time) {
 			double delta = key->time - prev_time;

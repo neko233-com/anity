@@ -409,6 +409,78 @@ static float EvaluateUnityFbxUnweightedCubic(
     scaledFinal + static_cast<double>(secondLeft));
 }
 
+static float UnityFbxWeightedLerp(float left, float right, float reverseT) {
+  // KFCurve's weighted path performs the left product in float, the right
+  // product and addition in double, then stores the result back to float.
+  const float scaledLeft = reverseT * left;
+  const double forwardT = 1.0 - static_cast<double>(reverseT);
+  volatile double scaledRight = forwardT * static_cast<double>(right);
+  return static_cast<float>(
+    static_cast<double>(scaledLeft) + scaledRight);
+}
+
+static float EvaluateUnityFbxWeightedBezier(
+    float p0, float p1, float p2, float p3, float reverseT) {
+  const float q0 = UnityFbxWeightedLerp(p0, p1, reverseT);
+  const float q1 = UnityFbxWeightedLerp(p1, p2, reverseT);
+  const float q2 = UnityFbxWeightedLerp(p2, p3, reverseT);
+  const float r0 = UnityFbxWeightedLerp(q0, q1, reverseT);
+  const float r1 = UnityFbxWeightedLerp(q1, q2, reverseT);
+  return UnityFbxWeightedLerp(r0, r1, reverseT);
+}
+
+static float FindUnityFbxWeightedBezierReverseT(
+    float sourceT, float rightWeight, float leftWeight) {
+  const float leftResidual = 1.0f - sourceT;
+  const float rightResidual = 0.0f - sourceT;
+  float currentT;
+  float currentResidual;
+  float previousT;
+  float previousResidual;
+  if (std::abs(leftResidual) < std::abs(rightResidual)) {
+    currentT = 0.0f;
+    currentResidual = leftResidual;
+    previousT = 1.0f;
+    previousResidual = rightResidual;
+  } else {
+    currentT = 1.0f;
+    currentResidual = rightResidual;
+    previousT = 0.0f;
+    previousResidual = leftResidual;
+  }
+
+  const float x1 = rightWeight;
+  const float x2 = 1.0f - leftWeight;
+  for (int remaining = 14; ; --remaining) {
+    const float oldCurrentT = currentT;
+    const float numerator = (previousT - currentT) * currentResidual;
+    const float denominator = currentResidual - previousResidual;
+    const float delta = numerator / denominator;
+    currentT += delta;
+    if (static_cast<double>(std::abs(delta)) < 1e-6) break;
+
+    const float nextResidual = EvaluateUnityFbxWeightedBezier(
+      0.0f, x1, x2, 1.0f, currentT) - sourceT;
+    if (nextResidual == 0.0f ||
+        nextResidual - currentResidual == 0.0f || remaining == 0)
+      break;
+    previousT = oldCurrentT;
+    previousResidual = currentResidual;
+    currentResidual = nextResidual;
+  }
+  return currentT;
+}
+
+static float UnityFbxTangentWeight(
+    double normalizedWeight, bool weighted) {
+  if (!weighted) return 1.0f / 3.0f;
+  // FBX serializes weights as four-decimal 16-bit integers. Autodesk's
+  // KFCurve divides that integer by 9999.0f (not 10000.0f as ufbx does).
+  const int packedWeight = static_cast<int>(
+    std::llround(normalizedWeight * 10000.0));
+  return static_cast<float>(packedWeight) / 9999.0f;
+}
+
 static double EvaluateUnityCompatibleCurve(
     const ufbx_anim_curve* curve, double time, double defaultValue) {
   if (!curve || curve->keyframes.count < 2 ||
@@ -449,10 +521,6 @@ static double EvaluateUnityCompatibleCurve(
   // Autodesk's evaluator treats these as exact one-third Hermite handles;
   // interpreting the rounded value as a weighted Bezier handle shifts Unity's
   // resampled rotations enough to change the strict rotation-error gate.
-  if (std::abs(rightWeight - 0.333333) > 2e-6 ||
-      std::abs(leftWeight - 0.333333) > 2e-6)
-    return ufbx_evaluate_curve(curve, time, defaultValue);
-
   const double segmentRatio = static_cast<double>(timeTicks - leftTicks) /
     static_cast<double>(durationTicks);
   // KeyFind() returns keyIndex + ratio; EvaluateIndex() then subtracts the
@@ -460,14 +528,40 @@ static double EvaluateUnityCompatibleCurve(
   const double curveIndex = static_cast<double>(leftIndex) + segmentRatio;
   const double sourceT = curveIndex - static_cast<double>(leftIndex);
   const float durationFloat = static_cast<float>(duration);
-  const float outSlope = std::abs(left->right.dx) > 1e-12
-    ? left->right.dy / left->right.dx : 0.0f;
-  const float inSlope = std::abs(right->left.dx) > 1e-12
-    ? right->left.dy / right->left.dx : 0.0f;
+  // ufbx stores Bezier control vectors, but dy = dx * slope rounds away one
+  // bit of the original FBX derivative for some weighted handles. Use the
+  // source float preserved by our vendored parser, matching KFCurve's direct
+  // KeyGetRightDerivative()/KeyGetLeftDerivative() loads.
+  const float outSlope = left->anity_source_right_slope;
+  const float inSlope = right->anity_source_left_slope;
   const float outHandle = outSlope * durationFloat / 3.0f;
   const float inHandle = inSlope * durationFloat / 3.0f;
   const float p0 = Real(left->value);
   const float p3 = Real(right->value);
+  const bool rightWeighted =
+    std::abs(rightWeight - 0.333333) > 2e-6;
+  const bool leftWeighted =
+    std::abs(leftWeight - 0.333333) > 2e-6;
+  if (rightWeighted || leftWeighted) {
+    const float unityRightWeight = UnityFbxTangentWeight(
+      rightWeight, rightWeighted);
+    const float unityLeftWeight = UnityFbxTangentWeight(
+      leftWeight, leftWeighted);
+    const float weightedT = FindUnityFbxWeightedBezierReverseT(
+      static_cast<float>(sourceT), unityRightWeight, unityLeftWeight);
+    // KFCurve rounds both products before adding/subtracting the key value.
+    // Keep the compiler from contracting the final multiply/add into FMA.
+    volatile float scaledOutSlope = outSlope * durationFloat;
+    volatile float weightedOutHandle =
+      unityRightWeight * scaledOutSlope;
+    volatile float scaledInSlope = inSlope * durationFloat;
+    volatile float weightedInHandle =
+      unityLeftWeight * scaledInSlope;
+    const float p1 = p0 + weightedOutHandle;
+    const float p2 = p3 - weightedInHandle;
+    return EvaluateUnityFbxWeightedBezier(
+      p0, p1, p2, p3, weightedT);
+  }
   return EvaluateUnityFbxUnweightedCubic(
     p0, p3, outHandle, inHandle, sourceT);
 }
@@ -1693,40 +1787,52 @@ static float EvaluateUnityLayeredVisibility(
     const UnityVisibilitySource& source, double time) {
   const ufbx_prop* visibility = ufbx_find_prop(
     &source.element->props, UFBX_Visibility);
-  float result = visibility ? Real(visibility->value_real) : 1.0f;
+  // Unity keeps the FBX layer accumulator and normalized layer weight in
+  // double precision, converting to the imported float curve only once after
+  // all layers are composed. Converting Weight/100 to float early changes
+  // midpoint rounding (for example at frame 13 of the weighted fixture).
+  double result = visibility ? visibility->value_real : 1.0;
+  bool hasActiveLayerValue = false;
   for (size_t layerIndex = 0;
        layerIndex < source.stack->layers.count; ++layerIndex) {
     const ufbx_anim_layer* layer = source.stack->layers.data[layerIndex];
+    const ufbx_prop* mute = ufbx_find_prop(&layer->props, "Mute");
+    if (mute && mute->value_int != 0) continue;
     const ufbx_anim_prop* property = ufbx_find_anim_prop(
       layer, source.element, UFBX_Visibility);
     if (!property || !property->anim_value) continue;
     const ufbx_anim_value* value = property->anim_value;
-    const float layerValue = EvaluateUnityVisibilityStep(
+    const double layerValue = EvaluateUnityVisibilityStep(
       value->curves[0], time, UnityVisibilityDefaultValue(value));
-    if (layerIndex == 0) {
+    // The first non-muted layer that contains the property supplies the base
+    // value. FBX Solo is a DCC playback/UI state and Unity's model importer
+    // intentionally ignores it; Mute is serialized import state and wins even
+    // if the same layer is also Solo.
+    if (!hasActiveLayerValue) {
       result = layerValue;
+      hasActiveLayerValue = true;
       continue;
     }
-    float weight = Real(layer->weight);
+    double weight = layer->weight;
     if (layer->weight_is_animated && layer->blended) {
       const ufbx_anim_prop* weightProperty = ufbx_find_anim_prop(
         layer, &layer->element, "Weight");
       if (weightProperty && weightProperty->anim_value) {
-        weight = Real(EvaluateUnityCompatibleCurve(
+        weight = EvaluateUnityCompatibleCurve(
           weightProperty->anim_value->curves[0], time,
-          weightProperty->anim_value->default_value.x) / 100.0);
-        weight = std::clamp(weight, 0.0f, 1.0f);
+          weightProperty->anim_value->default_value.x) / 100.0;
+        weight = std::clamp(weight, 0.0, 1.0);
       }
     }
     if (layer->additive) {
       result += layerValue * weight;
     } else if (layer->blended) {
-      result = result * (1.0f - weight) + layerValue * weight;
+      result = result * (1.0 - weight) + layerValue * weight;
     } else {
       result = layerValue;
     }
   }
-  return result;
+  return Real(result);
 }
 
 static float EvaluateUnityVisibilitySource(

@@ -10,18 +10,20 @@
 - 新一轮 Unity topology 探针确认：静态 visibility 沿祖先向下做 bool AND；动画 visibility 沿祖先与自身做原始数值乘积，子节点不会反向影响父节点；null/helper 父节点同样参与；动画曲线采样可覆盖初始静态 hidden。非 resample 路径取全部 source key 时间并集，仅在合成值变化处生成 `T-1e-5` step，未变化的 union key 保留单个 exact-time key。
 - 以 ufbx 官方 `maya_anim_layers*` fixture 在 Unity 2022.3.51f1 做多层 A/B：实现 base/additive/override/override-passthrough、动画 layer weight、现代 FBX `d|Visibility` property default、逐帧 layered bake，以及 FBX 7.x 声明 AnimationStack range；FBX 6.1 继续按实际曲线末端，避免把旧 Takes 的 120 帧声明错误外推。多层 non-resample 仍按 Unity 每帧 bake，并在变化帧生成 stepped pair。
 - 新增 **18 个** hierarchy/layer 深度回归（parent/null/helper/child direction、静态与动画组合、数值乘积、staggered union、import off、additive/override/animated weight/constant layer、resample 开关）；`NativeModelImportTests` 从 **157/157** 增至 **175/175**，0 失败、0 跳过。新增两份 test-only layered FBX fixture，来源为 ufbx 官方测试数据集。
-- `bash _scripts/build-all.sh Release` 全产品通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与 URP sample 均 0 编译错误；强制 native 八工程矩阵为 **4230/4230**（Core **3208/3208**），0 失败、0 跳过。
+- 反汇编 Unity 随附 Autodesk FBX SDK 2020.3.7 的 `KFCurve::EvaluateIndex`，复刻 weighted tangent 的 `packed / 9999.0f` 解码、float secant 反解、逐级 float/double De Casteljau 与禁止 FMA 的控制柄舍入。vendored ufbx 现在保留乘控制柄前的原始 float derivative，避免 `dy / dx` 无法恢复 source bit；动画层 weight 与累加器保持 double，所有层合成后才落到 imported float。原先最大约 `4.3e-5` value / `8.3e-4` tangent 的偏差已消除，Unity 20 帧 weighted layer 样本达到 **20/20 exact-bit**。
+- 新增 Unity batchmode 的 12 组 AnimationLayer `Mute` / `Solo` 权威 A/B：`Mute` 会排除该层，第一个未静音且含目标属性的层成为 base；`Solo` 仅为 DCC 播放/UI 状态，Unity importer 忽略；同层同时 Mute+Solo 时 Mute 生效。新增 **32 个**理论回归（20 个 weighted exact-bit + 12 个 mute/solo 组合），`NativeModelImportTests` 从 **175/175** 增至 **206/206**，0 失败、0 跳过。
+- `bash _scripts/build-all.sh Release` 全产品通过，native、Core、Agent、Shader Graph、VFX Graph、CLI、API auditor、WebGL、Hub、Editor 与 URP sample 均 0 编译错误；补齐 weighted/mute/solo 后的强制 native 八工程矩阵为 **4261/4261**（Core **3239/3239**），0 失败、0 跳过。
 - `/Applications/Anity.app` 已重新安装；Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，深度签名、Info.plist、图标逐 byte 及 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过，tracked lockfile 无 RID restore 漂移。
-- 最终门禁后逐项确认并移出 **39 个** Git ignored、内部零 tracked 的 repo-local `bin/obj/build` 目录，共 **399,540 KiB（约 390.2 MiB）**；本轮 `/tmp` Unity probe、ufbx sparse clone、inspect binary/source 与结果文本也已一并可恢复地移走。所有内容可从废纸篓 `/Users/solarisneko/.Trash/anity-visibility-layers-final.rIoTtC` 恢复；复扫 `node_modules/bin/obj/build/dist/Library/Temp/Logs/UserSettings/.cache/.vite/packages/Generated` 为 0。全机共享 NuGet/Homebrew/Unity 缓存未越界删除。
+- 最终门禁后逐项确认并移出 **39 个** Git ignored、内部零 tracked 的 repo-local `bin/obj/build` 目录，共 **399,548 KiB（约 390.2 MiB）**；本轮 `/tmp` mute/solo Unity 结果与日志也已一并可恢复地移走。内容位于废纸篓 `/Users/solarisneko/.Trash/anity-weighted-layer-final.H426eU`，复扫 `node_modules/bin/obj/build/dist/Library/Temp/Logs/UserSettings/.cache/.vite/packages/Generated` 为 0；Unity A/B 工程继续隔离在既有废纸篓证据目录，不污染仓库。全机共享 NuGet/Homebrew/Unity 缓存未越界删除。
 
 ### 尚未完成
-- 权威证据来自当前可用的 Unity 2022.3.51f1，目标 2022.3.61f1 Pro 尚未安装；instanced/skinned/非 Mesh Renderer topology、layer mute/solo、custom clip slicing/loop、Animator crossfade/override/additive 对 visibility 的逐帧官方 A/B 仍未闭环。
-- ufbx 对 weighted Bezier layer-weight 的求值与 Unity FBX SDK 样本仍有最大约 **4.3e-5** value、**8.3e-4** generated tangent 差；现有回归明确用 `5e-5` / `0.001` 容差保护，尚未达到 exact-bit，必须继续复刻 FBX SDK weighted curve inversion/evaluation。
+- 权威证据来自当前可用的 Unity 2022.3.51f1，目标 2022.3.61f1 Pro 尚未安装；instanced/skinned/非 Mesh Renderer topology、custom clip slicing/loop、Animator crossfade/override/additive 对 visibility 的逐帧官方 A/B 仍未闭环。
+- 当前 weighted exact-bit fixture 覆盖双端非对称 user tangent 与 0→100 动画 layer weight；更多 packed weight 极值、单端 weighted、broken/auto/TCB tangent、超范围 weight、pre/post extrapolation 与多个动画 weight 层组合仍需独立 Unity fixture，不能从本轮 20 帧外推为所有 FBX 曲线完成。
 - Visibility hierarchy/layer 主链完成不代表整个 ModelImporter/AnimationClip/Mecanim 已完全对齐；material extraction、其余 weighted/broken tangent、root motion、Humanoid、artifact/fileID/type-tree 与跨平台 importer 仍是 🟡。
 - 该模块进展不代表 Editor GUI、IL2CPP、各 Player、Package Manager 或全套 Unity 2022.3 Pro 已完成；整体目标继续推进。
 
 ### 下一优先项
-1. 复刻 FBX SDK weighted Bezier 精确求值，并补 layer mute/solo、更多 animated weight/mode 权威 fixture。
+1. 补 packed weight 极值、单端 weighted、broken/auto/TCB、超范围/extrapolation 与多动画 weight 层的 Unity 权威 fixture。
 2. 扩展 visibility 到 instanced/skinned/非 Mesh Renderer topology，并对齐 custom clip、loop/root motion、Animator crossfade/layer/mask 的联合语义。
 3. 安装 Unity 2022.3.61f1 Pro 后复跑 ModelImporter/AnimationClip A/B，并在 Windows 11 x64 与 Linux x64 实跑 CLI/Player 分发门禁。
 
