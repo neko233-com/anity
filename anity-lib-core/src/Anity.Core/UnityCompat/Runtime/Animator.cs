@@ -96,6 +96,7 @@ public class Animator : Behaviour
         {
             if (ReferenceEquals(_avatar, value)) return;
             _avatar = value;
+            _humanScale = value?.isHuman == true ? value.HumanScale : 1f;
             ResetRootMotionRuntime();
         }
     }

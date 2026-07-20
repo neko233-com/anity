@@ -14,6 +14,7 @@ internal sealed class ImportedModelAsset
   internal GameObject MainObject { get; init; } = null!;
   internal List<UnityEngine.Object> SubAssets { get; init; } = new();
   internal AnimationClip[] AnimationClips { get; set; } = Array.Empty<AnimationClip>();
+  internal Avatar? Avatar { get; init; }
   internal NativeModelDecoder.Scene DecodedScene { get; init; } = null!;
   internal GameObject[] NodeObjects { get; init; } = Array.Empty<GameObject>();
 }
@@ -55,11 +56,20 @@ internal static class ModelAssetImportPipeline
       var subAssets = new List<UnityEngine.Object>(meshes.Length + decoded.Clips.Length);
       subAssets.AddRange(meshes);
       var avatar = BuildAvatar(root, assetPath, importer);
-      if (avatar is not null) subAssets.Add(avatar);
+      if (avatar is not null)
+      {
+        subAssets.Add(avatar);
+        if (importer.animationType == ModelImporterAnimationType.Human)
+        {
+          var animator = root.GetComponent<Animator>() ?? root.AddComponent<Animator>();
+          animator.avatar = avatar;
+        }
+      }
       imported = new ImportedModelAsset
       {
         MainObject = root,
         SubAssets = subAssets,
+        Avatar = avatar,
         DecodedScene = decoded,
         NodeObjects = nodes,
       };
@@ -78,7 +88,7 @@ internal static class ModelAssetImportPipeline
       return null;
     Avatar avatar;
     if (importer.avatarSetup == ModelImporterAvatarSetup.CopyFromOther && importer.sourceAvatar is { } source)
-      avatar = Avatar.Create(source.isValid, source.isHuman, source.humanDescription, source.ValidationFlags);
+      avatar = Avatar.Create(source.isValid, source.isHuman, source.humanDescription, source.ValidationFlags, source.HumanScale);
     else if (importer.animationType == ModelImporterAnimationType.Human)
       avatar = AvatarBuilder.BuildHumanAvatar(root, importer.humanDescription);
     else
@@ -92,7 +102,7 @@ internal static class ModelAssetImportPipeline
   {
     foreach (var oldClip in imported.AnimationClips) imported.SubAssets.Remove(oldClip);
     imported.AnimationClips = BuildAnimationClips(
-      imported.DecodedScene, importer, imported.MainObject, imported.NodeObjects);
+      imported.DecodedScene, importer, imported.MainObject, imported.NodeObjects, imported.Avatar);
     imported.SubAssets.AddRange(imported.AnimationClips);
   }
 
@@ -298,7 +308,7 @@ internal static class ModelAssetImportPipeline
   }
 
   private static AnimationClip[] BuildAnimationClips(
-    NativeModelDecoder.Scene decoded, ModelImporter importer, GameObject root, GameObject[] nodes)
+    NativeModelDecoder.Scene decoded, ModelImporter importer, GameObject root, GameObject[] nodes, Avatar? avatar)
   {
     if (!importer.importAnimation || !importer.importAnimations || importer.animationType == ModelImporterAnimationType.None)
       return Array.Empty<AnimationClip>();
@@ -331,11 +341,17 @@ internal static class ModelAssetImportPipeline
         hideFlags = HideFlags.NotEditable,
       };
       clip.SetImportedLength(rangeEnd - rangeStart);
+      var humanRootNodeIndex = importer.animationType == ModelImporterAnimationType.Human
+        ? FindHumanRootNodeIndex(decoded, avatar?.humanDescription ?? importer.humanDescription)
+        : -1;
       NativeModelDecoder.Track? motionTrack = null;
+      NativeModelDecoder.Track? humanRootTrack = null;
       foreach (var track in source.Tracks)
       {
         if (track.NodeIndex < 0 || track.NodeIndex >= nodes.Length) continue;
         var path = RelativePath(root.transform, nodes[track.NodeIndex].transform);
+        var isHumanRoot = track.NodeIndex == humanRootNodeIndex;
+        if (isHumanRoot) humanRootTrack ??= track;
         if (!clip.legacy && !string.IsNullOrEmpty(importer.motionNodeName) &&
             (string.Equals(decoded.Nodes[track.NodeIndex].Name, importer.motionNodeName, StringComparison.Ordinal) ||
              string.Equals(path, importer.motionNodeName, StringComparison.Ordinal)))
@@ -344,13 +360,20 @@ internal static class ModelAssetImportPipeline
         var hasRawEuler = track.TransformCurves.Any(curve => curve.Property is >= NativeModelDecoder.TransformCurveProperty.EulerX and <= NativeModelDecoder.TransformCurveProperty.EulerZ);
         var hasRawScale = track.TransformCurves.Any(curve => curve.Property >= NativeModelDecoder.TransformCurveProperty.ScaleX);
         foreach (var curve in track.TransformCurves)
+        {
+          if (isHumanRoot && curve.Property <= NativeModelDecoder.TransformCurveProperty.EulerZ) continue;
           clip.SetCurve(path, typeof(Transform), TransformCurvePropertyName(curve.Property),
             ScalarCurveForRange(curve.Keys, rangeStart, rangeEnd,
               ModelImporterAnimationCompression.Off, 0f));
-        if (!hasRawPosition)
+        }
+        if (!hasRawPosition && !isHumanRoot)
           AddVectorCurves(clip, path, "m_LocalPosition", track.PositionKeys, rangeStart, rangeEnd,
             importer.animationCompression, importer.animationPositionError);
-        if (!hasRawEuler)
+        if (isHumanRoot)
+          AddHumanoidResidualRotationCurves(clip, path, track.RotationKeys, rangeStart, rangeEnd,
+            importer.animationCompression, importer.animationRotationError,
+            frameRate, source.FirstFrame / frameRate);
+        else if (!hasRawEuler)
           AddQuaternionCurves(clip, path, track.RotationKeys, rangeStart, rangeEnd,
             importer.animationCompression, importer.animationRotationError,
             frameRate, source.FirstFrame / frameRate);
@@ -358,9 +381,12 @@ internal static class ModelAssetImportPipeline
           AddVectorCurves(clip, path, "m_LocalScale", track.ScaleKeys, rangeStart, rangeEnd,
             importer.animationCompression, importer.animationScaleError);
       }
-      var hasMotion = motionTrack is not null && AddRootMotionCurves(
-        clip, motionTrack, rangeStart, rangeEnd, importer, frameRate,
-        source.FirstFrame / frameRate);
+      var hasRoot = importer.animationType == ModelImporterAnimationType.Human && humanRootTrack is not null &&
+        AddHumanoidRootCurves(clip, humanRootTrack, decoded.Nodes[humanRootNodeIndex], rangeStart, rangeEnd,
+          importer, frameRate, source.FirstFrame / frameRate, avatar?.HumanScale ?? 1f);
+      var hasMotion = importer.animationType != ModelImporterAnimationType.Human && motionTrack is not null &&
+        AddRootMotionCurves(clip, motionTrack, rangeStart, rangeEnd, importer, frameRate,
+          source.FirstFrame / frameRate);
       if (importer.importVisibility)
         foreach (var track in source.VisibilityTracks)
         {
@@ -387,7 +413,7 @@ internal static class ModelAssetImportPipeline
         hasGenericRoot: false,
         hasMotion: hasMotion,
         hasMotionFloat: hasMotion,
-        hasRoot: false);
+        hasRoot: hasRoot);
       AnimationUtility.SetAnimationClipSettings(clip, new AnimationClipSettings
       {
         loopTime = clipSettings?.loopTime ?? false,
@@ -408,6 +434,16 @@ internal static class ModelAssetImportPipeline
     }
   }
 
+  private static int FindHumanRootNodeIndex(NativeModelDecoder.Scene decoded, HumanDescription description)
+  {
+    var hips = (description.human ?? Array.Empty<HumanBone>()).FirstOrDefault(mapping =>
+      string.Equals(mapping.humanName, "Hips", StringComparison.Ordinal));
+    if (string.IsNullOrEmpty(hips.boneName)) return -1;
+    for (var index = 0; index < decoded.Nodes.Length; index++)
+      if (string.Equals(decoded.Nodes[index].Name, hips.boneName, StringComparison.Ordinal)) return index;
+    return -1;
+  }
+
   private static string RelativePath(Transform root, Transform target)
   {
     if (ReferenceEquals(root, target)) return string.Empty;
@@ -424,6 +460,91 @@ internal static class ModelAssetImportPipeline
     clip.SetCurve(path, typeof(Transform), property + ".x", CurveForRange(keys.Select(key => (key.time, key.x)).ToArray(), start, end, compression, error));
     clip.SetCurve(path, typeof(Transform), property + ".y", CurveForRange(keys.Select(key => (key.time, key.y)).ToArray(), start, end, compression, error));
     clip.SetCurve(path, typeof(Transform), property + ".z", CurveForRange(keys.Select(key => (key.time, key.z)).ToArray(), start, end, compression, error));
+  }
+
+  private static bool AddHumanoidRootCurves(
+    AnimationClip clip,
+    NativeModelDecoder.Track track,
+    NativeModelDecoder.Node restNode,
+    float start,
+    float end,
+    ModelImporter importer,
+    float sampleRate,
+    float reductionTimeOffset,
+    float humanScale)
+  {
+    var added = false;
+    var scale = float.IsFinite(humanScale) && humanScale > 0f ? humanScale : 1f;
+    if (track.PositionKeys.Length > 0)
+    {
+      var reference = track.PositionKeys[0];
+      var positions = track.PositionKeys.Select(key => new NativeModelDecoder.VectorKey
+      {
+        time = key.time,
+        x = restNode.PositionX + (key.x - reference.x) / scale,
+        y = restNode.PositionY + (key.y - reference.y) / scale,
+        z = restNode.PositionZ + (key.z - reference.z) / scale,
+      }).ToArray();
+      clip.SetCurve(string.Empty, typeof(Animator), "RootT.x",
+        CurveForRange(positions.Select(key => (key.time, key.x)).ToArray(),
+          start, end, importer.animationCompression, importer.animationPositionError));
+      clip.SetCurve(string.Empty, typeof(Animator), "RootT.y",
+        CurveForRange(positions.Select(key => (key.time, key.y)).ToArray(),
+          start, end, importer.animationCompression, importer.animationPositionError));
+      clip.SetCurve(string.Empty, typeof(Animator), "RootT.z",
+        CurveForRange(positions.Select(key => (key.time, key.z)).ToArray(),
+          start, end, importer.animationCompression, importer.animationPositionError));
+      added = true;
+    }
+    if (track.RotationKeys.Length > 0)
+    {
+      var curves = CompressQuaternionCurves(new[]
+      {
+        Curve(track.RotationKeys.Select(key => (key.time, key.x)).ToArray()),
+        Curve(track.RotationKeys.Select(key => (key.time, key.y)).ToArray()),
+        Curve(track.RotationKeys.Select(key => (key.time, key.z)).ToArray()),
+        Curve(track.RotationKeys.Select(key => (key.time, key.w)).ToArray()),
+      }, importer.animationCompression, importer.animationRotationError,
+        sampleRate, reductionTimeOffset);
+      clip.SetCurve(string.Empty, typeof(Animator), "RootQ.x", SliceCurve(curves[0], start, end));
+      clip.SetCurve(string.Empty, typeof(Animator), "RootQ.y", SliceCurve(curves[1], start, end));
+      clip.SetCurve(string.Empty, typeof(Animator), "RootQ.z", SliceCurve(curves[2], start, end));
+      clip.SetCurve(string.Empty, typeof(Animator), "RootQ.w", SliceCurve(curves[3], start, end));
+      added = true;
+    }
+    return added;
+  }
+
+  private static void AddHumanoidResidualRotationCurves(
+    AnimationClip clip,
+    string path,
+    NativeModelDecoder.QuaternionKey[] keys,
+    float start,
+    float end,
+    ModelImporterAnimationCompression compression,
+    float error,
+    float sampleRate,
+    float reductionTimeOffset)
+  {
+    if (keys.Length == 0) return;
+    var residual = keys.Select(key =>
+    {
+      var source = new Quaternion(key.x, key.y, key.z, key.w).normalized;
+      var twistLength = MathF.Sqrt(source.y * source.y + source.w * source.w);
+      var twist = twistLength > 1e-6f
+        ? new Quaternion(0f, source.y / twistLength, 0f, source.w / twistLength)
+        : Quaternion.identity;
+      var swing = (Quaternion.Inverse(twist) * source).normalized;
+      return new NativeModelDecoder.QuaternionKey
+      {
+        time = key.time,
+        x = swing.x,
+        y = swing.y,
+        z = swing.z,
+        w = swing.w,
+      };
+    }).ToArray();
+    AddQuaternionCurves(clip, path, residual, start, end, compression, error, sampleRate, reductionTimeOffset);
   }
 
   private static bool AddRootMotionCurves(

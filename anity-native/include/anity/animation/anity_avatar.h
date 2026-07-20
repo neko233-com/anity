@@ -42,6 +42,7 @@ typedef struct AnityAvatarBuildResult {
     int32_t rootIndex;
     int32_t errorIndex;
     int32_t mappedBoneCount;
+    float humanScale;
 } AnityAvatarBuildResult;
 
 /* Validates the transform hierarchy, rest pose and Unity humanoid mapping. */

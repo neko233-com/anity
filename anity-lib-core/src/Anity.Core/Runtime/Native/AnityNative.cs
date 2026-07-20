@@ -79,6 +79,7 @@ public static class AnityNative
         public int rootIndex;
         public int errorIndex;
         public int mappedBoneCount;
+        public float humanScale;
     }
 
     [Flags]

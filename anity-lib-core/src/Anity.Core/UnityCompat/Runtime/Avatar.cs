@@ -12,6 +12,7 @@ public class Avatar : Object
   private bool _isValid;
   private bool _isHuman;
   private HumanDescription _humanDescription;
+  private float _humanScale = 1f;
 
   internal Avatar()
   {
@@ -25,17 +26,21 @@ public class Avatar : Object
 
   internal AnityNative.AvatarValidationFlags ValidationFlags { get; private set; }
 
+  internal float HumanScale => _humanScale;
+
   internal static Avatar Create(
     bool isValid,
     bool isHuman,
     HumanDescription humanDescription,
-    AnityNative.AvatarValidationFlags validationFlags = AnityNative.AvatarValidationFlags.Valid)
+    AnityNative.AvatarValidationFlags validationFlags = AnityNative.AvatarValidationFlags.Valid,
+    float humanScale = 1f)
   {
     return new Avatar
     {
       _isValid = isValid,
       _isHuman = isHuman,
       _humanDescription = humanDescription,
+      _humanScale = float.IsFinite(humanScale) && humanScale > 0f ? humanScale : 1f,
       ValidationFlags = validationFlags,
     };
   }
@@ -90,7 +95,8 @@ public class AvatarBuilder
       nativeCallSucceeded && result.flags == AnityNative.AvatarValidationFlags.Valid,
       true,
       humanDescription,
-      nativeCallSucceeded ? result.flags : AnityNative.AvatarValidationFlags.InvalidParent);
+      nativeCallSucceeded ? result.flags : AnityNative.AvatarValidationFlags.InvalidParent,
+      nativeCallSucceeded ? result.humanScale : 1f);
   }
 
   private static AnityNative.AvatarSkeletonBoneDesc[] BuildHumanSkeleton(
@@ -111,13 +117,22 @@ public class AvatarBuilder
       indices.Add(index);
     }
 
+    int rootSkeletonIndex = sourceSkeleton.Length == 0 ? -1 : 0;
+    string sceneRootName = root.gameObject?.name ?? string.Empty;
+    if (skeletonIndices.TryGetValue(sceneRootName, out List<int> rootNameMatches) && rootNameMatches.Count == 1)
+      rootSkeletonIndex = rootNameMatches[0];
+
     var result = new AnityNative.AvatarSkeletonBoneDesc[sourceSkeleton.Length];
     for (int index = 0; index < sourceSkeleton.Length; ++index)
     {
       SkeletonBone bone = sourceSkeleton[index];
       string name = bone.name ?? string.Empty;
       int parentIndex = -2;
-      if (transformsByName.TryGetValue(name, out List<Transform> matches) && matches.Count == 1)
+      if (index == rootSkeletonIndex)
+      {
+        parentIndex = -1;
+      }
+      else if (transformsByName.TryGetValue(name, out List<Transform> matches) && matches.Count == 1)
       {
         Transform transform = matches[0];
         if (ReferenceEquals(transform, root))
@@ -126,9 +141,14 @@ public class AvatarBuilder
         }
         else
         {
-          string parentName = transform.parent?.gameObject?.name ?? string.Empty;
-          if (skeletonIndices.TryGetValue(parentName, out List<int> parentMatches) && parentMatches.Count == 1)
-            parentIndex = parentMatches[0];
+          if (ReferenceEquals(transform.parent, root) && rootSkeletonIndex >= 0)
+            parentIndex = rootSkeletonIndex;
+          else
+          {
+            string parentName = transform.parent?.gameObject?.name ?? string.Empty;
+            if (skeletonIndices.TryGetValue(parentName, out List<int> parentMatches) && parentMatches.Count == 1)
+              parentIndex = parentMatches[0];
+          }
         }
       }
       result[index] = ToNativeSkeletonBone(name, parentIndex, bone.position, bone.rotation, bone.scale);

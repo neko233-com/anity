@@ -1,5 +1,27 @@
 # PLAN
 
+## 2026-07-20 — Imported Humanoid Avatar humanScale 与 RootT/RootQ 主链
+
+### 已完成
+- 在上一轮完整 Human FBX 权威 fixture 上追加 Unity 2022.3.51f1 `AvatarBuilder` T-pose 尺度探针。分别改变 Hips、Spine/Chest/Neck/Head、Shoulder/UpperArm/LowerArm/Hand、UpperLeg/LowerLeg/Foot 的局部高度后，确认 `Animator.humanScale` 是以 Avatar root 为原点、由 Mecanim 固定人体质量权重计算的 T-pose 质心高度；基准为 **1.12227261**，全骨架缩放 2 倍严格变为 **2.24454522**。
+- `anity-native` Avatar C ABI 现在在校验 hierarchy/rest-pose/human mapping 后建立完整 world T-pose，并以 Unity 探针恢复出的 18 骨骼固定权重计算 `humanScale`；结果随 Avatar 保存，`Animator.avatar` 赋值/切换时自动同步，Generic 或无效尺度回退 1。该计算不再由测试或托管常量伪造。
+- Human ModelImporter 现在从 `HumanDescription` 的 `Hips` mapping 选择 decoded FBX track，生成空 path 的 `Animator.RootT.x/y/z` 与 `RootQ.x/y/z/w`，metadata 为 `isHumanMotion=true / hasRootCurves=true / hasMotionCurves=false / hasMotionFloatCurves=false`；不再经过 Generic `motionNodeName` 或生成 `MotionT/MotionQ`。导入 prefab 会自动带 `Animator` 并引用同一 Avatar sub-asset。
+- Hips 原始位移由 Human body root 消费并按 imported `humanScale` 归一化；Hips rotation 的 Y twist 进入 RootQ，剩余 swing 写回 Hips local rotation，避免 root 与 Hips 重复应用 yaw。运行时再由既有 native Humanoid root-motion 管线乘回尺度并提取 Y twist。
+- 新增 Unity FBX Exporter 产生的完整 Humanoid/SkinnedMesh fixture 与 `ImportedHumanoidModelTests` **12/12**，覆盖 prefab Animator/Avatar、valid/isHuman、权威 humanScale、Root/非 Motion metadata 和 bindings、RootQ、normalized RootT、Hips position 消费、swing residual、runtime scale 及 Avatar 切换；相关 Avatar/Humanoid/Generic root-motion 回归 **81/81**。
+- native-required Release 全量门禁 **4,453/4,453**（Core **3,431/3,431**），0 失败、0 跳过；`bash _scripts/build-all.sh Release` 全产品 0 编译错误。`/Applications/Anity.app` 已从本轮最终源码重装，Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，Avatar native 符号、deep/strict codesign 以及 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁均通过。
+- legacy/obsolete/deprecated 审计覆盖 tracked 文件名、公开 API、C ABI/PInvoke、import/runtime 分支、serialized upgrader、测试与备份后缀。仓库无 tracked backup；仅 5 个文件名含 Legacy，分别承载 Unity 2022 removed networking 兼容面、obsolete AssetBundle 行为门禁或 Shader Graph 旧资产升级及测试，均有反向引用或 Unity 2022 兼容职责，未发现可安全删除的零调用废弃实现，故未误删仍在使用的兼容代码。
+- 最终门禁后逐项确认 Git ignored 且内部零 tracked，将 **39 个 / 385,268 KiB** repo-local `bin/obj/build` 安装与构建缓存，以及 **3 个 / 92,360 KiB** 本轮 Humanoid Unity probe 工程/日志移入可恢复废纸篓 `/Users/solarisneko/.Trash/anity-humanoid-import-final.QmxpLg`，合计 **477,628 KiB（约 466.4 MiB）**；两类目标最终复扫均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 本轮 RootT translation 是以 mapped Hips delta、T-pose reference 与 imported humanScale 构建的可执行 Human 主链；Unity 精确 `HumanPose.bodyPosition` 还会消费完整 muscle solve/retarget 后的动态 body mass center。当前权威 fixture 在中间帧仍不能逐值复现 Unity 的 RootT（例如 0.5s Unity 为 `0.9550417/1.56091273/0.44900468`），不得将本轮表述为完整 Humanoid retarget。
+- 当前非 Hips mapped bones 仍以 Transform curve 运行，尚未生成 Unity muscle stream，也未闭环 translation DoF、finger/IK、AvatarMask body part、T-pose orientation normalization、feet stabilization 与 `heightFromFeet`；这些是下一步实际实现，不允许只改 binding 名称冒充完成。
+- 权威行为仍来自本机可用的 Unity 2022.3.51f1；目标 2022.3.61f1 Pro 未安装。Windows/WebGL/Android Vulkan Player、完整 Editor/IL2CPP/官方包与全引擎 parity 仍保持 🟡。
+
+### 下一优先项
+1. 在 `anity-native` 建立完整 Human muscle table、T-pose axes 与 retarget solver，用逐帧 sampled mapped-bone pose 生成精确 `HumanPose.bodyPosition/bodyRotation`、RootT/Q 和 muscle stream。
+2. 构造非标准 source orientation/height、translation DoF 与 foot trajectory fixture，闭环 keep-original、heightFromFeet、feet pivot/stabilization 及 body/root trajectory。
+3. 将 imported Humanoid stream 接入 AvatarMask body/finger/IK、layer/additive/BlendTree/transition/倒放，并在 2022.3.61f1 Pro 与 Windows/WebGL/Android Vulkan Player 复跑。
+
 ## 2026-07-20 — Humanoid RootT/RootQ、humanScale 与 root-lock runtime
 
 ### 已完成

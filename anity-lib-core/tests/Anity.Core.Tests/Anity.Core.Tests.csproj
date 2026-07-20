@@ -49,6 +49,9 @@
     <None Update="Fixtures\Models\LodVisibility.fbx"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+    <None Update="Fixtures\Models\HumanoidRootMotion.fbx"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(AnityRequireNative)' == 'true'">
