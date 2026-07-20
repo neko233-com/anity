@@ -1,5 +1,27 @@
 # PLAN
 
+## 2026-07-20 — HumanTrait / MuscleHandle 原生 Mecanim 数据表
+
+### 已完成
+- 通过本机 Unity 2022.3.51f1 的公开 native-backed API 完整提取并验证 Mecanim **95 个 muscle / 55 个 human bone / 15 个 required bone** 数据，包括 muscle 名称、骨骼映射、默认角度范围、HumanPartDof/dof、MuscleHandle 名称、骨骼父级、默认 hierarchy mass 与三轴 muscle 映射；同时探明数组副本、越界 sentinel、短/长数组和 null/非法构造异常语义。
+- `anity-native` animation 模块新增唯一权威 HumanTrait 表和 C ABI，C# 层只负责 Unity 公开 API、native 数据生命周期与 P/Invoke，不再用托管常量表替代 Unity 的 C++ Mecanim 职责。安装后的 `libanity_native.dylib` 已确认导出 `GetMuscleCount`、`GetBoneInfo`、`FindMuscleHandle` 等新符号。
+- 新增 `HumanPose`、`HumanTrait`、`UnityEngine.Animations.MuscleHandle` 及 `BodyDof` / `HeadDof` / `HumanPartDof` / `ArmDof` / `LegDof` / `FingerDof`。这 9 个类型的公开签名、枚举值、特性、异常文本和行为与当前 Unity 探针一致；完整 muscle、bone、handle 表分别用 SHA-256 指纹锁定，新增定向测试 **19/19**，Avatar/Humanoid 相关回归 **101/101**。
+- 当前探索反射面提升为：类型存在 **1,001/4,117**、类型契约精确 **476**；成员存在 **9,393/37,164**、成员契约精确 **7,134**。本轮新增的 9 个类型在差异报告中为 0；`HumanPoseHandler` 仍是明确缺失类型，没有用空壳吞掉差异。现有 parity reviewed baseline 生成于 7 月 16 日，运行门禁会报告 **173 个历史 regression id** 与 **330 个已移除/变化项**，因此本轮没有未经复核地覆盖基线。
+- native-required Release 八工程全量门禁 **4,472/4,472**（Core **3,450/3,450**），0 失败、0 跳过；`bash _scripts/build-all.sh Release` 全产品 0 编译错误。`/Applications/Anity.app` 已从最终源码安装，Host、CLI、native dylib 均为 ARM64，deep/strict codesign、新 native 符号及 Host/CLI 两条 `-batchmode -quit -nographics -logFile -` 真实进程门禁全部通过。
+- `.gitignore` 已复核并补充安装器缓存目录与 macOS/Windows/Linux 常见本地安装包后缀；仓库没有 tracked/untracked 安装包，构建、安装 staging、Unity、NuGet、Gradle、Node 与平台发布缓存均不会进入正常 Git 提交。
+- legacy/obsolete/deprecated 反向引用复审覆盖 tracked 文件名、公开反射面、运行调用、C ABI/PInvoke、资产升级器、测试与备份后缀。5 个带 Legacy 文件名的 tracked 文件分别承担 Unity 2022 removed networking 公开兼容、obsolete AssetBundle 行为门禁或 Shader Graph 旧资产升级及测试；native ABI-stable 入口仍有 P/Invoke/运行调用。仓库无 tracked backup、`ANITY_STUB` 或 `NotImplementedException`，未发现可安全删除的零引用废弃内部实现，因此没有误删仍在使用的 Unity 兼容代码。
+- 最终门禁后逐项确认 Git ignored 且内部零 tracked，将 **39 个 / 376,432 KiB** repo-local `bin/obj/build` 构建与安装 staging 缓存，以及 **6 个 / 14,484 KiB** 本轮 HumanTrait Unity probe/API 临时目标移入可恢复废纸篓 `/Users/solarisneko/.Trash/anity-human-trait-final.fnCgOa`，合计 **390,916 KiB（约 381.8 MiB）**；两类目标最终复扫均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- `HumanPoseHandler` 尚未实现；`HumanPose` 当前只是 Unity 精确公开数据结构，尚不能对 Avatar/Transform hierarchy 执行 `GetHumanPose` / `SetHumanPose`。本轮不能表述为完整 Humanoid pose/retarget 已完成。
+- 95-muscle 权威表已进入 native，但完整 T-pose muscle axes、source-to-human retarget solver、dynamic body COM、translation DoF、finger/IK、feet stabilization、AvatarMask body part 以及 imported muscle stream 仍未闭环；非 Hips mapped bone 当前仍走 Transform 曲线。
+- 权威行为仍来自本机可用的 Unity 2022.3.51f1；目标 2022.3.61f1 Pro 未安装。Windows/WebGL/Android Vulkan Player、完整 Editor/IL2CPP/官方包与全引擎 parity 继续保持 🟡。
+
+### 下一优先项
+1. 在 `anity-native` 实现 `HumanPoseHandler` 的 native handle、标准 hierarchy 与 arbitrary T-pose axes，闭环 `GetHumanPose` / `SetHumanPose` 的 body pose 与 95-muscle 解算。
+2. 让 imported Humanoid sampled mapped-bone pose 生成精确 muscle stream、dynamic body COM 与 RootT/Q，并对齐 translation DoF、finger/IK 和 feet stabilization。
+3. 把 muscle stream 接入 AvatarMask、layer/additive、BlendTree、transition 与倒放，再在 2022.3.61f1 Pro、Windows、WebGL 和 Android Vulkan Player 复跑。
+
 ## 2026-07-20 — Imported Humanoid Avatar humanScale 与 RootT/RootQ 主链
 
 ### 已完成

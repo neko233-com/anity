@@ -52,9 +52,29 @@ TestResults/
 [Tt]est[Rr]esult*/
 *.xcresult/
 DerivedData/
+install-cache/
+installer-cache/
+.installer-cache/
 *.il
 *.ilk
 *.meta.bak
+
+# ----- Local installers / release packages -----
+*.dmg
+*.pkg
+*.mpkg
+*.msi
+*.msix
+*.msixbundle
+*.appinstaller
+*.deb
+*.rpm
+*.AppImage
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
 
 # Keep explicit lowercase patterns used by tools / docs
 bin/

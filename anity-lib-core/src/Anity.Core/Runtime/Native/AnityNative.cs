@@ -82,6 +82,30 @@ public static class AnityNative
         public float humanScale;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HumanTraitMuscleInfo
+    {
+        public IntPtr muscleName;
+        public IntPtr handleName;
+        public int boneIndex;
+        public float defaultMin;
+        public float defaultMax;
+        public int humanPartDof;
+        public int dof;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HumanTraitBoneInfo
+    {
+        public IntPtr boneName;
+        public int parentBoneIndex;
+        public int required;
+        public float defaultHierarchyMass;
+        public int muscleX;
+        public int muscleY;
+        public int muscleZ;
+    }
+
     [Flags]
     public enum AnimationPoseFlags : uint
     {
@@ -260,6 +284,78 @@ public static class AnityNative
         _avatarNativeAvailable = false;
         if (NativeTransformRequired)
             throw new DllNotFoundException("anity-native AvatarBuilder entry points are required but unavailable.");
+        return false;
+    }
+
+    private static bool _humanTraitNativeAvailable = true;
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHumanTrait_GetMuscleCount")]
+    private static extern int HumanTrait_GetMuscleCount();
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHumanTrait_GetBoneCount")]
+    private static extern int HumanTrait_GetBoneCount();
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHumanTrait_GetRequiredBoneCount")]
+    private static extern int HumanTrait_GetRequiredBoneCount();
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHumanTrait_GetMuscleInfo")]
+    private static extern Result HumanTrait_GetMuscleInfo(int muscleIndex, out HumanTraitMuscleInfo info);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHumanTrait_GetBoneInfo")]
+    private static extern Result HumanTrait_GetBoneInfo(int boneIndex, out HumanTraitBoneInfo info);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "AnityHumanTrait_FindMuscleHandle")]
+    private static extern Result HumanTrait_FindMuscleHandle(int humanPartDof, int dof, out int muscleIndex);
+
+    public static bool TryGetHumanTraitCounts(out int muscleCount, out int boneCount, out int requiredBoneCount)
+    {
+        muscleCount = 0;
+        boneCount = 0;
+        requiredBoneCount = 0;
+        if (!_humanTraitNativeAvailable) return false;
+        try
+        {
+            muscleCount = HumanTrait_GetMuscleCount();
+            boneCount = HumanTrait_GetBoneCount();
+            requiredBoneCount = HumanTrait_GetRequiredBoneCount();
+            return muscleCount > 0 && boneCount > 0 && requiredBoneCount > 0;
+        }
+        catch (DllNotFoundException) { return HandleMissingHumanTraitNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingHumanTraitNative(); }
+    }
+
+    public static bool TryGetHumanTraitMuscleInfo(int muscleIndex, out HumanTraitMuscleInfo info)
+    {
+        info = default;
+        if (!_humanTraitNativeAvailable) return false;
+        try { return HumanTrait_GetMuscleInfo(muscleIndex, out info) == Result.Ok; }
+        catch (DllNotFoundException) { return HandleMissingHumanTraitNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingHumanTraitNative(); }
+    }
+
+    public static bool TryGetHumanTraitBoneInfo(int boneIndex, out HumanTraitBoneInfo info)
+    {
+        info = default;
+        if (!_humanTraitNativeAvailable) return false;
+        try { return HumanTrait_GetBoneInfo(boneIndex, out info) == Result.Ok; }
+        catch (DllNotFoundException) { return HandleMissingHumanTraitNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingHumanTraitNative(); }
+    }
+
+    public static bool TryFindHumanTraitMuscleHandle(int humanPartDof, int dof, out int muscleIndex)
+    {
+        muscleIndex = -1;
+        if (!_humanTraitNativeAvailable) return false;
+        try { return HumanTrait_FindMuscleHandle(humanPartDof, dof, out muscleIndex) == Result.Ok; }
+        catch (DllNotFoundException) { return HandleMissingHumanTraitNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingHumanTraitNative(); }
+    }
+
+    private static bool HandleMissingHumanTraitNative()
+    {
+        _humanTraitNativeAvailable = false;
+        if (NativeTransformRequired)
+            throw new DllNotFoundException("anity-native HumanTrait entry points are required but unavailable.");
         return false;
     }
 
