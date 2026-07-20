@@ -31,6 +31,12 @@ typedef struct AnityAnimationRootMotionDelta {
     float angularVelocityX, angularVelocityY, angularVelocityZ;
 } AnityAnimationRootMotionDelta;
 
+typedef enum AnityAnimationHumanoidRootMotionFlags {
+    ANITY_ANIMATION_HUMANOID_LOCK_ROTATION = 1u << 0,
+    ANITY_ANIMATION_HUMANOID_LOCK_HEIGHT_Y = 1u << 1,
+    ANITY_ANIMATION_HUMANOID_LOCK_POSITION_XZ = 1u << 2
+} AnityAnimationHumanoidRootMotionFlags;
+
 /* Unity Mecanim transform-layer composition. Additive mode requires referencePose. */
 ANITY_API AnityResult ANITY_CALL AnityAnimation_BlendTransformPose(
     const AnityAnimationTransformPose* basePose,
@@ -46,6 +52,14 @@ ANITY_API AnityResult ANITY_CALL AnityAnimation_ResolveRootMotion(
     const AnityAnimationRootMotionPose* endPose,
     const AnityAnimationRootMotionPose* samplePose,
     int64_t completedLoops,
+    AnityAnimationRootMotionPose* outPose);
+
+/* Converts Humanoid RootT/RootQ to Mecanim root motion before loop resolution. */
+ANITY_API AnityResult ANITY_CALL AnityAnimation_PrepareHumanoidRootMotion(
+    const AnityAnimationRootMotionPose* referencePose,
+    const AnityAnimationRootMotionPose* samplePose,
+    float humanScale,
+    uint32_t flags,
     AnityAnimationRootMotionPose* outPose);
 
 /* Mecanim transition/blend-tree root-motion interpolation. */

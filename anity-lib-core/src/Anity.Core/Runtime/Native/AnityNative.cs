@@ -105,6 +105,15 @@ public static class AnityNative
         public float rotationX, rotationY, rotationZ, rotationW;
     }
 
+    [Flags]
+    public enum AnimationHumanoidRootMotionFlags : uint
+    {
+        None = 0,
+        LockRotation = 1u << 0,
+        LockHeightY = 1u << 1,
+        LockPositionXZ = 1u << 2
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct AnimationRootMotionDelta
     {
@@ -502,6 +511,15 @@ public static class AnityNative
         out AnimationRootMotionPose outPose);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl,
+        EntryPoint = "AnityAnimation_PrepareHumanoidRootMotion")]
+    private static extern Result Animation_PrepareHumanoidRootMotion(
+        in AnimationRootMotionPose referencePose,
+        in AnimationRootMotionPose samplePose,
+        float humanScale,
+        AnimationHumanoidRootMotionFlags flags,
+        out AnimationRootMotionPose outPose);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl,
         EntryPoint = "AnityAnimation_BlendRootMotion")]
     private static extern Result Animation_BlendRootMotion(
         in AnimationRootMotionPose basePose,
@@ -544,6 +562,24 @@ public static class AnityNative
         {
             return Animation_ResolveRootMotion(
                 in startPose, in endPose, in samplePose, completedLoops, out result) == Result.Ok;
+        }
+        catch (DllNotFoundException) { return HandleMissingAnimationPoseNative(); }
+        catch (EntryPointNotFoundException) { return HandleMissingAnimationPoseNative(); }
+    }
+
+    public static bool TryPrepareHumanoidAnimationRootMotion(
+        in AnimationRootMotionPose referencePose,
+        in AnimationRootMotionPose samplePose,
+        float humanScale,
+        AnimationHumanoidRootMotionFlags flags,
+        out AnimationRootMotionPose result)
+    {
+        result = default;
+        if (!_animationPoseNativeAvailable) return false;
+        try
+        {
+            return Animation_PrepareHumanoidRootMotion(
+                in referencePose, in samplePose, humanScale, flags, out result) == Result.Ok;
         }
         catch (DllNotFoundException) { return HandleMissingAnimationPoseNative(); }
         catch (EntryPointNotFoundException) { return HandleMissingAnimationPoseNative(); }

@@ -1,5 +1,28 @@
 # PLAN
 
+## 2026-07-20 — Humanoid RootT/RootQ、humanScale 与 root-lock runtime
+
+### 已完成
+- 用本机 Unity 2022.3.51f1 + 官方 `com.unity.formats.fbx` 4.2.1 构造完整 Human Avatar、SkinnedMesh 与 Hips 位移/三轴旋转动画，确认导入 clip 为 `isHumanMotion=true`、`hasRootCurves=true`、`hasMotionCurves=false`，根 binding 是空 path `Animator.RootT.x/y/z` 与 `RootQ.x/y/z/w`；该 fixture 的 `Animator.humanScale=1.12227261`，即使 `hasRootMotion=false`，`applyRootMotion=true` 仍会应用 Humanoid 根运动。
+- `anity-native` animation 模块新增 `AnityAnimation_PrepareHumanoidRootMotion` C ABI。RootT 在 C++ 乘 `humanScale`；RootQ 不是普通 forward-yaw，而是按 Unity 实测提取 Y-axis twist `normalize(0, q.y, 0, q.w)`，再进入既有 native loop/anchor/delta 刚体管线。quarter world pose、delta 与 rotation 已对齐 Unity 探针。
+- Rotation、Height Y、Position XZ 三种 Bake Into Pose/root-lock 在 native 独立过滤并可组合；7 种非空组合均与 Unity quarter 结果一致，all-lock 跨 loop 仍保持静止。Generic `MotionT/MotionQ` 明确不受这些 Humanoid filter 与 humanScale 影响。
+- `AnimationClip` 现在优先识别 Humanoid `RootT/RootQ`，把 `AnimationUtility.SetAnimationClipSettings` 的三个 lock 标志接入运行时；`Animator.isHuman` 改为由 Avatar 决定的 getter-only，`humanScale` 改为 getter-only，消除本机 2022.3.51f1 探索审计中的这两个 property mismatch。连同当前 `Avatar.humanDescription`，精确成员由 7,035 增至 **7,038**。
+- 新增 `HumanoidRootMotionRuntimeTests` **16/16**：公开只读面、Avatar-backed isHuman、Root metadata、权威 quarter world pose/delta、Y twist、7 种 lock 组合、standard-aligned keep-original、humanScale、loop、apply off 与 Generic 隔离。关联 Humanoid/Generic/loop/Avatar 回归 **94/94**；`build-all` 全产品 0 编译错误，native-required 八工程 **4,441/4,441**（Core **3,419/3,419**），0 失败、0 跳过。
+- `/Applications/Anity.app` 已从最终源码重装；Host、内置 CLI 与 `libanity_native.dylib` 均为 ARM64，新 Humanoid C ABI 符号存在，deep/strict codesign 与 Host/CLI `-batchmode -quit -nographics -logFile -` 真实进程均通过。
+- legacy/obsolete/deprecated 再审覆盖 tracked 文件名、公开反射、C ABI/PInvoke、运行调用与资产迁移。仅 5 个 tracked 文件名含 Legacy，均属于 Unity 2022 removed networking、obsolete AssetBundle 行为门禁或 Shader Graph 旧资产升级及测试；未发现新的零调用内部实现或 tracked backup，故没有误删仍在使用的兼容代码。
+- 最终门禁后确认 Git ignored 且内部零 tracked，将 **41 个 / 376,080 KiB** repo-local `bin/obj/build` 目标与 **7 个 / 110,648 KiB** Humanoid probe/API 临时目标移入可恢复废纸篓 `/Users/solarisneko/.Trash/anity-humanoid-root-final.qGwy9d`，合计 **486,728 KiB（约 475.3 MiB）**；两类目标复扫均为 0。全机共享 NuGet/Homebrew/Unity/.NET 缓存未越界删除。
+
+### 尚未完成
+- 权威证据仍来自当前可用的 Unity 2022.3.51f1；目标 Unity 2022.3.61f1 Pro 未安装，不能表述为 61f1 已实测。
+- 本轮闭环的是对已存在 `RootT/RootQ` clip 的 runtime 消费与 lock；ModelImporter 尚未生成真实 Humanoid retarget/root curves，也尚未从 imported Avatar 自动计算 `humanScale`。不得把程序化 clip 门禁冒充完整 Humanoid importer。
+- `keepOriginalOrientation/PositionY/PositionXZ` 在本轮 standard-aligned rig 上与 baseline 相同，但非标准 source orientation/height fixture 尚缺；`heightFromFeet=true` 在 Unity 探针中明确改变 Y 轨迹，本轮未实现。Humanoid body/muscle/finger/IK retarget、foot stabilization、layer/mask/additive/transition 与 Player 平台 A/B 仍未闭环。
+- 整体 Unity 2022.3 Pro、Editor GUI、IL2CPP 与官方包仍未完成，继续保持 🟡。
+
+### 下一优先项
+1. 让 ModelImporter 从 Human Avatar/T-pose 真正生成 RootT/RootQ、body/muscle 与 imported humanScale，不用 Generic 曲线改名伪装。
+2. 构造非标准 source orientation/height 与 foot trajectory fixture，闭环 keep-original、heightFromFeet、feet pivot 和 root/body retarget。
+3. 扩展 Humanoid root motion 到 layer/mask/additive/BlendTree/transition/倒放，并在 2022.3.61f1 Pro、Windows、WebGL 与 Android Vulkan Player 复跑。
+
 ## 2026-07-20 — Animator.OnAnimatorMove / builtin root motion callback parity
 
 ### 已完成

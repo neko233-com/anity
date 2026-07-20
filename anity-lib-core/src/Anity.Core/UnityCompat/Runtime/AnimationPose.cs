@@ -108,6 +108,21 @@ internal readonly struct AnimationRootMotionPose
         return FromNative(in result);
     }
 
+    internal static AnimationRootMotionPose PrepareHumanoid(
+        AnimationRootMotionPose reference,
+        AnimationRootMotionPose sample,
+        float humanScale,
+        AnityNative.AnimationHumanoidRootMotionFlags flags)
+    {
+        AnityNative.AnimationRootMotionPose nativeReference = reference.ToNative();
+        AnityNative.AnimationRootMotionPose nativeSample = sample.ToNative();
+        if (!AnityNative.TryPrepareHumanoidAnimationRootMotion(
+                in nativeReference, in nativeSample, humanScale, flags,
+                out AnityNative.AnimationRootMotionPose result))
+            throw new InvalidOperationException("anity-native humanoid root-motion preparation failed.");
+        return FromNative(in result);
+    }
+
     internal static AnimationRootMotionPose Blend(
         AnimationRootMotionPose lower,
         AnimationRootMotionPose upper,

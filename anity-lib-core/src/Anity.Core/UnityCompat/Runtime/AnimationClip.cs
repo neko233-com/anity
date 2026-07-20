@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Anity.Core.Runtime.Native;
 
 namespace UnityEngine;
 
@@ -117,6 +118,9 @@ public class AnimationClip : Motion
     private bool _hasMotionCurves;
     private bool _hasMotionFloatCurves;
     private bool _hasRootCurves;
+    private bool _lockRootRotation;
+    private bool _lockRootHeightY;
+    private bool _lockRootPositionXZ;
 
     public static AnimationClip Empty => new AnimationClip { name = "Empty" };
 
@@ -194,11 +198,20 @@ public class AnimationClip : Motion
         _hasRootCurves = hasRoot;
     }
 
-    internal void ApplyMecanimSettings(bool loopTime, bool loopBlend, float cycleOffset)
+    internal void ApplyMecanimSettings(
+        bool loopTime,
+        bool loopBlend,
+        float cycleOffset,
+        bool lockRootRotation,
+        bool lockRootHeightY,
+        bool lockRootPositionXZ)
     {
         _isLooping = loopTime;
         _loopBlend = loopBlend;
         _cycleOffset = float.IsFinite(cycleOffset) ? cycleOffset : 0f;
+        _lockRootRotation = lockRootRotation;
+        _lockRootHeightY = lockRootHeightY;
+        _lockRootPositionXZ = lockRootPositionXZ;
     }
 
     public void SampleAnimation(GameObject go, float time)
@@ -315,12 +328,13 @@ public class AnimationClip : Motion
         return true;
     }
 
-    internal bool TryEvaluateRootMotion(float time, out AnimationRootMotionPose pose)
+    internal bool TryEvaluateRootMotion(float time, float humanScale, out AnimationRootMotionPose pose)
     {
         if (!TryGetRootMotionCurves(
                 out AnimationCurve? tx, out AnimationCurve? ty, out AnimationCurve? tz,
                 out AnimationCurve? qx, out AnimationCurve? qy,
-                out AnimationCurve? qz, out AnimationCurve? qw))
+                out AnimationCurve? qz, out AnimationCurve? qw,
+                out bool humanoid))
         {
             pose = AnimationRootMotionPose.Identity;
             return false;
@@ -348,6 +362,18 @@ public class AnimationClip : Motion
             duration, tx, ty, tz, qx, qy, qz, qw);
         AnimationRootMotionPose sample = EvaluateRawRootMotion(
             sampleTime, tx, ty, tz, qx, qy, qz, qw);
+        if (humanoid)
+        {
+            AnityNative.AnimationHumanoidRootMotionFlags flags =
+                (_lockRootRotation ? AnityNative.AnimationHumanoidRootMotionFlags.LockRotation : 0) |
+                (_lockRootHeightY ? AnityNative.AnimationHumanoidRootMotionFlags.LockHeightY : 0) |
+                (_lockRootPositionXZ ? AnityNative.AnimationHumanoidRootMotionFlags.LockPositionXZ : 0);
+            float scale = float.IsFinite(humanScale) && humanScale > 0f ? humanScale : 1f;
+            AnimationRootMotionPose reference = start;
+            start = AnimationRootMotionPose.PrepareHumanoid(reference, start, scale, flags);
+            end = AnimationRootMotionPose.PrepareHumanoid(reference, end, scale, flags);
+            sample = AnimationRootMotionPose.PrepareHumanoid(reference, sample, scale, flags);
+        }
         pose = AnimationRootMotionPose.ResolveLooped(
             start, end, sample, _isLooping ? completedLoops : 0);
         return true;
@@ -356,8 +382,24 @@ public class AnimationClip : Motion
     private bool TryGetRootMotionCurves(
         out AnimationCurve? tx, out AnimationCurve? ty, out AnimationCurve? tz,
         out AnimationCurve? qx, out AnimationCurve? qy,
-        out AnimationCurve? qz, out AnimationCurve? qw)
+        out AnimationCurve? qz, out AnimationCurve? qw,
+        out bool humanoid)
     {
+        tx = GetCurve(string.Empty, typeof(Animator), "RootT.x");
+        ty = GetCurve(string.Empty, typeof(Animator), "RootT.y");
+        tz = GetCurve(string.Empty, typeof(Animator), "RootT.z");
+        qx = GetCurve(string.Empty, typeof(Animator), "RootQ.x");
+        qy = GetCurve(string.Empty, typeof(Animator), "RootQ.y");
+        qz = GetCurve(string.Empty, typeof(Animator), "RootQ.z");
+        qw = GetCurve(string.Empty, typeof(Animator), "RootQ.w");
+        bool hasPosition = tx is not null && ty is not null && tz is not null;
+        bool hasRotation = qx is not null && qy is not null && qz is not null && qw is not null;
+        if (hasPosition || hasRotation)
+        {
+            humanoid = true;
+            return true;
+        }
+
         tx = GetCurve(string.Empty, typeof(Animator), "MotionT.x");
         ty = GetCurve(string.Empty, typeof(Animator), "MotionT.y");
         tz = GetCurve(string.Empty, typeof(Animator), "MotionT.z");
@@ -365,8 +407,9 @@ public class AnimationClip : Motion
         qy = GetCurve(string.Empty, typeof(Animator), "MotionQ.y");
         qz = GetCurve(string.Empty, typeof(Animator), "MotionQ.z");
         qw = GetCurve(string.Empty, typeof(Animator), "MotionQ.w");
-        bool hasPosition = tx is not null && ty is not null && tz is not null;
-        bool hasRotation = qx is not null && qy is not null && qz is not null && qw is not null;
+        hasPosition = tx is not null && ty is not null && tz is not null;
+        hasRotation = qx is not null && qy is not null && qz is not null && qw is not null;
+        humanoid = false;
         return hasPosition || hasRotation;
     }
 

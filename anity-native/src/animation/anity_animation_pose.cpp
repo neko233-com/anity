@@ -109,6 +109,15 @@ RootMotionPose IdentityRootMotion() {
     return {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
 }
 
+Quaternion ExtractYAxisTwist(Quaternion value) {
+    value = Normalize(value);
+    const float twistLengthSquared = value.y * value.y + value.w * value.w;
+    if (!std::isfinite(twistLengthSquared) || twistLengthSquared <= 1.0e-12f)
+        return {0.0f, 0.0f, 0.0f, 1.0f};
+    const float inverseLength = 1.0f / std::sqrt(twistLengthSquared);
+    return {0.0f, value.y * inverseLength, 0.0f, value.w * inverseLength};
+}
+
 RootMotionPose Power(RootMotionPose value, int64_t exponent) {
     RootMotionPose factor = exponent < 0 ? Inverse(value) : Normalize(value);
     uint64_t remaining = exponent < 0
@@ -251,6 +260,43 @@ AnityResult ANITY_CALL AnityAnimation_ResolveRootMotion(
     const RootMotionPose cycle = Compose(inverseStart, end);
     const RootMotionPose partial = Compose(inverseStart, sample);
     WriteRootMotion(*outPose, Compose(Power(cycle, completedLoops), partial));
+    return ANITY_OK;
+}
+
+AnityResult ANITY_CALL AnityAnimation_PrepareHumanoidRootMotion(
+    const AnityAnimationRootMotionPose* referencePose,
+    const AnityAnimationRootMotionPose* samplePose,
+    float humanScale,
+    uint32_t flags,
+    AnityAnimationRootMotionPose* outPose) {
+    constexpr uint32_t supportedFlags =
+        ANITY_ANIMATION_HUMANOID_LOCK_ROTATION |
+        ANITY_ANIMATION_HUMANOID_LOCK_HEIGHT_Y |
+        ANITY_ANIMATION_HUMANOID_LOCK_POSITION_XZ;
+    if (!referencePose || !samplePose || !outPose ||
+        !std::isfinite(humanScale) || humanScale <= 0.0f ||
+        (flags & ~supportedFlags) != 0u)
+        return ANITY_ERR_INVALID_ARG;
+
+    RootMotionPose reference = ReadRootMotion(*referencePose);
+    RootMotionPose sample = ReadRootMotion(*samplePose);
+    if (!IsFinite(reference) || !IsFinite(sample)) return ANITY_ERR_INVALID_ARG;
+
+    reference.position = Multiply(reference.position, humanScale);
+    sample.position = Multiply(sample.position, humanScale);
+    reference.rotation = ExtractYAxisTwist(reference.rotation);
+    sample.rotation = ExtractYAxisTwist(sample.rotation);
+
+    if ((flags & ANITY_ANIMATION_HUMANOID_LOCK_ROTATION) != 0u)
+        sample.rotation = reference.rotation;
+    if ((flags & ANITY_ANIMATION_HUMANOID_LOCK_HEIGHT_Y) != 0u)
+        sample.position.y = reference.position.y;
+    if ((flags & ANITY_ANIMATION_HUMANOID_LOCK_POSITION_XZ) != 0u) {
+        sample.position.x = reference.position.x;
+        sample.position.z = reference.position.z;
+    }
+
+    WriteRootMotion(*outPose, sample);
     return ANITY_OK;
 }
 

@@ -8,6 +8,8 @@ namespace UnityEngine;
 public class Animator : Behaviour
 {
     private RuntimeAnimatorController _controller;
+    private Avatar _avatar;
+    private float _humanScale = 1f;
     private bool _applyRootMotion;
     private float _speed = 1.0f;
     private readonly Dictionary<int, float> _floatValues = new();
@@ -87,7 +89,16 @@ public class Animator : Behaviour
         set => controller = value;
     }
 
-    public Avatar avatar { get; set; }
+    public Avatar avatar
+    {
+        get => _avatar;
+        set
+        {
+            if (ReferenceEquals(_avatar, value)) return;
+            _avatar = value;
+            ResetRootMotionRuntime();
+        }
+    }
 
     public bool applyRootMotion
     {
@@ -106,11 +117,11 @@ public class Animator : Behaviour
         set => _speed = value;
     }
 
-    public bool isHuman { get; set; }
+    public bool isHuman => _avatar?.isHuman == true;
     public bool isOptimizable { get; set; }
     public bool keepAnimatorControllerStateOnDisable { get; set; }
     public bool hasRootMotion => HasHumanoidRootMotion();
-    public float humanScale { get; set; } = 1f;
+    public float humanScale => _humanScale;
     public bool isInitialized => _initialized;
     public bool hasAvatarMask { get; set; }
     public bool hasTransformHierarchy { get; } = true;
@@ -137,6 +148,12 @@ public class Animator : Behaviour
     public float recorderStopTime { get; private set; }
     public float recorderDeltaTime { get; private set; }
     public int layerCount => _controller is AnimatorController ac ? ac.layerCount : 1;
+
+    internal void SetHumanScale(float value)
+    {
+        _humanScale = float.IsFinite(value) && value > 0f ? value : 1f;
+        ResetRootMotionRuntime();
+    }
 
     public AnimatorCullingMode cullingMode { get; set; }
     public AnimatorUpdateMode updateMode { get; set; }
@@ -631,7 +648,8 @@ public class Animator : Behaviour
             AnimationFloatPose properties = clip.EvaluateFloatProperties(gameObject, time, true);
             clip.TryEvaluateAdditiveReferencePose(gameObject, out AnimationPose referencePose);
             clip.TryEvaluateAdditiveReferenceFloatProperties(gameObject, out AnimationFloatPose referenceProperties);
-            AnimationRootMotionPose? rootMotion = clip.TryEvaluateRootMotion(time, out AnimationRootMotionPose sampledRoot)
+            AnimationRootMotionPose? rootMotion = clip.TryEvaluateRootMotion(
+                time, humanScale, out AnimationRootMotionPose sampledRoot)
                 ? sampledRoot : null;
             return new SampledAnimationPose(pose, properties, referencePose.Count > 0 ? referencePose : null,
                 referenceProperties.Count > 0 ? referenceProperties : null, rootMotion);

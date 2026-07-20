@@ -223,7 +223,13 @@ public class AnimationUtility
         settings.hasAdditiveReferencePose = valid;
         settings.additiveReferencePoseClip = valid ? reference : null;
         clip.SetAdditiveReferencePose(reference, settings.additiveReferencePoseTime);
-        clip.ApplyMecanimSettings(settings.loopTime, settings.loopBlend, settings.cycleOffset);
+        clip.ApplyMecanimSettings(
+            settings.loopTime,
+            settings.loopBlend,
+            settings.cycleOffset,
+            settings.loopBlendOrientation,
+            settings.loopBlendPositionY,
+            settings.loopBlendPositionXZ);
     }
     [Bindings.NativeThrows]
     public static void SetAnimationEvents([Bindings.NotNull("ArgumentNullException")] AnimationClip clip, [Bindings.NotNull("ArgumentNullException"), Bindings.Unmarshalled] AnimationEvent[] events) { if (clip == null) throw new ArgumentNullException(nameof(clip)); clip.events = events ?? Array.Empty<AnimationEvent>(); Notify(clip, default, CurveModifiedType.ClipModified); }
